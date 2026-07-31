@@ -1,0 +1,32 @@
+{#
+  One artist's live numbers: monitoring state, the wanted/downloaded split and
+  when the indexer last looked. Polled on the detail page so a download landing
+  moves these counters without a reload.
+  Context: artist (ArtistOut with counts), settings (app.config.Settings)
+#}
+<div class="tag-row">
+  {% if artist.monitored %}
+  <span class="tag tag--ok">monitored · {{ artist.monitor_mode | enum_value }}</span>
+  {% else %}
+  <span class="tag tag--skipped">not monitored</span>
+  {% endif %}
+  <span class="tag">{{ artist.quality_profile }}</span>
+  {% for rt in artist.accepted_release_types %}<span class="tag tag--type">{{ rt }}</span>{% endfor %}
+</div>
+
+<div class="entity__blurb">
+  {{ artist.wanted_count }} release(s) wanted, {{ artist.downloaded_count }} downloaded.
+  {% if settings.auto_download %}
+    New releases are queued automatically as the indexer finds them.
+  {% else %}
+    Downloads are opt-in: the indexer marks releases wanted and waits for you.
+  {% endif %}
+</div>
+
+<dl class="kv kv--inline">
+  <dt>Qobuz id</dt><dd class="mono">{{ artist.id }}</dd>
+  <dt>Followed</dt><dd class="mono">{{ artist.added_at | dt }} UTC</dd>
+  <dt>Last checked</dt><dd class="mono">{{ artist.last_checked_at | ago }}</dd>
+  <dt>Known / wanted / on disk</dt>
+  <dd class="mono">{{ artist.album_count }} · {{ artist.wanted_count }} · {{ artist.downloaded_count }}</dd>
+</dl>

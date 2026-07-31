@@ -1,0 +1,41 @@
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Secrets / local config
+.env
+data/secret.cache
+
+# Application state (SQLite db, logs, caches, covers)
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+
+# Downloaded music library
+music/
+library/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

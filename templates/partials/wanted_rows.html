@@ -1,0 +1,80 @@
+{#
+  The backlog table on the Wanted page.
+  Context: albums (list[AlbumOut]), total (int), scope (str — the active
+           filters as a query string, so a row action re-renders this same view)
+#}
+{% from "partials/macros.html" import cover, monitor_toggle %}
+{% set scope = scope | default('', true) %}
+{% set tail = '&' ~ scope if scope else '' %}
+{% if albums %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th class="num"><span class="visually-hidden">Monitored</span></th>
+      <th>Release</th>
+      <th>Artist</th>
+      <th>Wanted since</th>
+      <th>Why it is not on disk</th>
+      <th>Best offered</th>
+      <th class="num">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for album in albums %}
+    {% set state = album.status | enum_value %}
+    <tr class="{% if not album.monitored %}row--muted{% endif %}">
+      <td class="num">
+        {{ monitor_toggle(album.monitored, album.title,
+                          '/ui/albums/' ~ album.id ~ '/monitor?view=wanted' ~ tail,
+                          '#wanted-rows',
+                          'Ignoring a wanted release also marks it skipped, so it leaves this list.') }}
+      </td>
+      <td>
+        <div class="cell-media">
+          {{ cover(album.image_url) }}
+          <div class="cell-media__body">
+            <div class="table__title">{{ album.title }}</div>
+            <div class="table__sub">
+              {{ album.release_type }}{% if album.year %} · {{ album.year }}{% endif %}
+              {%- if album.label %} · {{ album.label }}{% endif %}
+            </div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <a href="/artists/{{ album.artist_id }}">{{ album.artist_name or album.artist_id }}</a>
+      </td>
+      <td class="mono small muted nowrap">{{ album.added_at | ago }}</td>
+      <td class="small">
+        {% if not album.monitored %}
+        <span class="muted">Ignored — nothing will fetch it</span>
+        {% elif state == 'failed' %}
+        <span style="color:var(--bad)">Last download attempt failed</span>
+        {% else %}
+        <span class="muted">Waiting for you to start it</span>
+        {% endif %}
+      </td>
+      <td class="nowrap">
+        {% if album.hires %}
+        <span class="qual qual--hires">{{ album | quality }}</span>
+        {% elif album.max_bit_depth %}
+        <span class="qual">{{ album | quality }}</span>
+        {% else %}
+        <span class="qual qual--none">unknown</span>
+        {% endif %}
+      </td>
+      <td class="num nowrap">
+        <button class="btn btn--sm btn--primary"
+                hx-post="/ui/wanted/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
+                hx-target="#wanted-rows" hx-swap="innerHTML">Download</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="table-note">{{ albums | length }} of {{ total }} missing release(s) shown.</p>
+{% else %}
+<p class="empty">Nothing is waiting. Every monitored release is either on disk or in the queue.</p>
+{% endif %}

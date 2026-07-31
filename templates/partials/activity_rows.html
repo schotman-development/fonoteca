@@ -1,0 +1,20 @@
+{#
+  Activity feed rendered as the design's monospace live log.
+  Context: items (list[app.schemas.ActivityOut]), compact (bool, optional)
+#}
+{% if items %}
+<div class="log">
+  {% for entry in items %}
+  {% set level = entry.level | enum_value %}
+  <div class="log__line log__line--{{ level }}">
+    <span class="log__time" title="{{ entry.created_at | dt('%Y-%m-%d %H:%M:%S') }} UTC">{{ entry.created_at | dt('%H:%M:%S') }}</span>
+    <span class="log__event">{{ entry.event }}</span>
+    <span class="log__msg">{{ entry.message }}{% if entry.artist_id and not compact %}
+      <a href="/artists/{{ entry.artist_id }}">{{ entry.artist_name or entry.artist_id }}</a>
+    {%- endif %}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">Nothing has happened yet.</p>
+{% endif %}

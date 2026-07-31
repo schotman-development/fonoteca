@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}{{ artist.name }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ artist.name }}{% endblock %}
+{% block subtitle %}
+  {{ artist.album_count }} release{{ '' if artist.album_count == 1 else 's' }} known ·
+  {{ artist.downloaded_count }} on disk ·
+  checked {{ artist.last_checked_at | ago }}
+{% endblock %}
+
+{% block actions %}
+  <button class="btn" hx-post="/ui/artists/{{ artist.id }}/scan"
+          hx-target="#artist-msg" hx-swap="innerHTML">Search now</button>
+  {% if artist.wanted_count %}
+  <button class="btn btn--primary" hx-post="/ui/artists/{{ artist.id }}/download-wanted"
+          hx-target="#album-rows" hx-swap="innerHTML"
+          hx-confirm="Download all {{ artist.wanted_count }} wanted release(s) for {{ artist.name }}?">
+    Download wanted ({{ artist.wanted_count }})
+  </button>
+  {% endif %}
+  {# Library maintenance scoped to this artist. Re-filing previews first; see
+     /library/tidy for the same two operations over everything. #}
+  {% if artist.downloaded_count %}
+  <a class="btn" href="/library/tidy?artist_id={{ artist.id }}">Tidy files</a>
+  {% endif %}
+  <button class="btn btn--danger" hx-post="/ui/artists/{{ artist.id }}/delete"
+          hx-confirm="Unfollow {{ artist.name }}? Album, track and queue records for this artist are deleted (files on disk are kept).">
+    Unfollow
+  </button>
+{% endblock %}
+
+{% block content %}
+<div id="artist-msg"></div>
+
+<div class="entity">
+  <div class="entity__art">
+    {% if artist.image_url %}
+    <img src="{{ artist.image_url }}" alt="" referrerpolicy="no-referrer">
+    {% else %}
+    <span class="entity__initial" aria-hidden="true">{{ artist.name[:1] | upper }}</span>
+    {% endif %}
+  </div>
+
+  <div class="entity__body" id="artist-stats"
+       hx-get="/partials/artists/{{ artist.id }}/stats" hx-swap="innerHTML"
+       hx-trigger="every 15s, qobuzarr:refresh from:body">
+    {% include "partials/artist_stats.html" %}
+  </div>
+</div>
+
+<div class="grid grid--split">
+
+  <section class="card">
+    <header class="card__head">
+      <h2>Releases <span class="count">{{ album_total }}</span></h2>
+      {#
+        A plain GET form, so the filter state stays in the URL and still works
+        without JavaScript. The search box additionally swaps the table body
+        live as you type — reloading the whole page on every keystroke would be
+        unusable on a discography of any size.
+      #}
+      <form class="filters filters--inline push" id="artist-filters"
+            method="get" action="/artists/{{ artist.id }}">
+        <input class="input input--sm" type="search" name="q" value="{{ filter_q }}"
+               placeholder="Find a release…" aria-label="Search this artist's releases"
+               style="width:168px"
+               hx-get="/partials/albums/{{ artist.id }}"
+               hx-target="#album-rows" hx-swap="innerHTML"
+               hx-trigger="keyup changed delay:300ms">
+        <select class="input input--sm" name="status" onchange="this.form.submit()">
+          <option value="">all statuses</option>
+          {% for name in album_statuses %}
+          <option value="{{ name }}" {% if filter_status == name %}selected{% endif %}>{{ name }} ({{ counts.get(name, 0) }})</option>
+          {% endfor %}
+        </select>
+        <select class="input input--sm" name="release_type" onchange="this.form.submit()">
+          <option value="">all types</option>
+          {% for rt in release_types %}
+          <option value="{{ rt }}" {% if filter_type == rt %}selected{% endif %}>{{ rt }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </header>
+    <div class="card__body card__body--flush">
+      {#
+        Polled through `hx-include` on the filter form rather than a fixed URL,
+        so a refresh keeps whatever the user has typed or selected instead of
+        snapping the table back to the unfiltered view.
+      #}
+      <div id="album-rows"
+           hx-get="/partials/albums/{{ artist.id }}" hx-swap="innerHTML"
+           hx-include="#artist-filters"
+           hx-trigger="every 15s, qobuzarr:refresh from:body">
+        {% include "partials/album_rows.html" %}
+      </div>
+    </div>
+  </section>
+
+  <div class="stack">
+    <section class="card">
+      <header class="card__head"><h2>Monitoring</h2></header>
+      <div class="card__body">
+        <form hx-post="/ui/artists/{{ artist.id }}/settings" hx-target="#artist-settings-msg" hx-swap="innerHTML">
+          <label class="switch" style="margin-bottom:16px">
+            <input type="checkbox" name="monitored" value="true" {% if artist.monitored %}checked{% endif %}>
+            <span class="switch__track"><span class="switch__knob"></span></span>
+            <span class="switch__text">
+              <div>Monitor this artist</div>
+              <div>Off means the indexer skips them entirely.</div>
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="field__label">Monitor mode</span>
+            <select class="input" name="monitor_mode">
+              {% for mode in monitor_modes %}
+              <option value="{{ mode }}" {% if artist.monitor_mode | enum_value == mode %}selected{% endif %}>{{ mode }}</option>
+              {% endfor %}
+            </select>
+            <span class="field__hint">
+              <b>all</b> pursues the back catalogue, <b>future</b> only new releases,
+              <b>none</b> tracks without wanting anything.
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="field__label">Quality profile</span>
+            <input class="input" type="text" name="quality_profile" value="{{ artist.quality_profile }}">
+          </label>
+
+          <fieldset class="field">
+            <legend class="field__label">Accepted release types</legend>
+            {% for rt in release_types %}
+            <label class="check">
+              <input type="checkbox" name="release_types" value="{{ rt }}"
+                     {% if rt in artist.accepted_release_types %}checked{% endif %}>
+              <span class="check__box" aria-hidden="true"></span>
+              <span class="check__text">{{ rt }}</span>
+            </label>
+            {% endfor %}
+            <span class="field__hint">
+              Widening this does not re-evaluate releases already marked
+              <span class="mono">skipped</span> — only future scans see the change.
+            </span>
+          </fieldset>
+
+          <button class="btn btn--primary btn--block" type="submit">Save settings</button>
+          <div id="artist-settings-msg"></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <header class="card__head"><h2>Activity</h2></header>
+      <div class="card__body card__body--flush">
+        {% with items = activity, compact = true %}{% include "partials/activity_rows.html" %}{% endwith %}
+      </div>
+    </section>
+  </div>
+
+</div>
+{% endblock %}

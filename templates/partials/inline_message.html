@@ -1,0 +1,5 @@
+{#
+  Small inline acknowledgement returned by form posts.
+  Context: message (str), level (info|success|warning|error)
+#}
+<p class="inline-msg inline-msg--{{ level | default('info') }}">{{ message }}</p>

@@ -1,0 +1,118 @@
+{#
+  Album table for the artist-detail page.
+  Context: albums (list[AlbumOut]), album_total (int), artist_id (str),
+           filter_q (str, optional — what the search box currently holds),
+           scope (str — the active filters as a query string, carried by every
+           row action so the refreshed table keeps the same filtering)
+#}
+{% from "partials/macros.html" import cover, monitor_toggle %}
+{% set scope = scope | default('', true) %}
+{% set tail = '&' ~ scope if scope else '' %}
+{% if albums %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Release</th>
+      <th>Type</th>
+      <th class="num">Year</th>
+      <th class="num">Tracks</th>
+      <th>Quality</th>
+      <th>Status</th>
+      <th class="num">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for album in albums %}
+    {% set state = album.status | enum_value %}
+    <tr class="{% if not album.monitored %}row--muted{% endif %}">
+      <td>
+        <div class="cell-media">
+          {{ cover(album.image_url) }}
+          <div class="cell-media__body">
+            <div class="table__title">
+              {{ album.title }}{% if album.version %} <span class="muted">· {{ album.version }}</span>{% endif %}
+            </div>
+            {% if album.label or album.genre %}
+            <div class="table__sub">{{ album.label }}{% if album.label and album.genre %} · {% endif %}{{ album.genre }}</div>
+            {% endif %}
+            {% if album.path %}<div class="table__sub mono">{{ album.path }}</div>{% endif %}
+          </div>
+        </div>
+      </td>
+      <td><span class="tag tag--type">{{ album.release_type }}</span></td>
+      <td class="num mono small">{{ album.year or '—' }}</td>
+      <td class="num mono small">
+        {{ album.tracks_count or '—' }}{% if album.media_count and album.media_count > 1 %}<span class="muted"> / {{ album.media_count }}d</span>{% endif %}
+      </td>
+      {#
+        Quality: what is on disk once there *is* something on disk, not what
+        Qobuz offers. For a downloaded release the catalogue maximum is the one
+        number that cannot tell you whether the files are any good.
+      #}
+      <td class="nowrap">
+        {% if state == 'downloaded' and album.owned_format_id %}
+        <span class="qual {% if album.owned_format_id > 6 %}qual--hires{% endif %}">{{ album.owned_format_id | format_label }}</span>
+        {% if album.upgrade_format_id %}
+        <span class="qual__to" title="A better copy is available from Qobuz">→ {{ album.upgrade_format_id | format_label }}</span>
+        {% endif %}
+        {% else %}
+        <span class="qual {% if album.hires %}qual--hires{% elif not album.max_bit_depth %}qual--none{% endif %}">{{ album | quality }}</span>
+        {% endif %}
+      </td>
+      <td><span class="tag {{ album.status | status_class }}">{{ state }}</span></td>
+      {#
+        One action per row, and only ever one:
+          in the queue                     -> a link to it (a downloaded album
+                                              keeps its status while an upgrade
+                                              is queued, hence queue_state);
+          downloaded, better copy on offer -> Upgrade;
+          downloaded, nothing better       -> nothing at all. There is no honest
+                                              button here: re-fetching would
+                                              land the same files;
+          anything else                    -> Download.
+        ``upgrade_format_id`` is set by app.core.quality, which is also what the
+        download loop consults before it reuses a file — so Upgrade cannot
+        promise something the worker would decline to do.
+      #}
+      <td class="num nowrap">
+        {{ monitor_toggle(album.monitored, album.title,
+                          '/ui/albums/' ~ album.id ~ '/monitor?view=artist' ~ tail,
+                          '#album-rows') }}
+        {% if state in ('queued', 'downloading') or album.queue_state %}
+        <a class="btn btn--sm btn--quiet" href="/queue">In queue</a>
+        {% elif album.upgrade_format_id %}
+        <button class="btn btn--sm btn--primary"
+                hx-post="/ui/albums/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
+                hx-target="#album-rows" hx-swap="innerHTML"
+                hx-confirm="Re-download “{{ album.title }}” at {{ album.upgrade_format_id | format_label }}? Qobuzarr never deletes from your library, so if the new files land in a differently named folder the {{ album.owned_format_id | format_label }} copy is left behind for you to remove."
+                title="On disk: {{ album.owned_format_id | format_label }} · available: {{ album.upgrade_format_id | format_label }}">Upgrade</button>
+        {% elif state != 'downloaded' %}
+        <button class="btn btn--sm btn--primary"
+                hx-post="/ui/albums/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
+                hx-target="#album-rows" hx-swap="innerHTML">Download</button>
+        {% endif %}
+        {#
+          Delete moves the folder to the trash, never unlinks it, and never
+          queues a replacement — so the confirmation can say plainly what it
+          does and where the files go.
+        #}
+        {% if album.path and not album.queue_state and state not in ('queued', 'downloading') %}
+        <button class="btn btn--sm btn--danger"
+                hx-post="/ui/albums/{{ album.id }}/delete{{ '?' ~ scope if scope else '' }}"
+                hx-target="#album-rows" hx-swap="innerHTML"
+                hx-confirm="Delete the files for “{{ album.title }}”? They move to the trash and can be restored from the Library tidy page. The release goes back to {{ 'wanted' if album.monitored else 'skipped' }} and nothing is re-downloaded."
+                title="Move this release's files to the trash">Delete</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="table-note">{{ albums | length }} of {{ album_total }} releases shown.</p>
+{% elif filter_q %}
+<p class="empty">No release matches “{{ filter_q }}”.</p>
+{% else %}
+<p class="empty">No releases recorded yet. The indexer will fill this in, or use “Search now”.</p>
+{% endif %}

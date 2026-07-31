@@ -1,0 +1,173 @@
+{#
+  Bulk artist import: the controls when idle, the progress bar while running,
+  and the review list of names Qobuzarr would not guess at.
+  Context: import_status (dict from app.api.deps.library_import_status)
+
+  While a run is in flight this fragment re-fetches itself every 4s. The poll
+  attribute is only emitted when running, so an idle page makes no requests.
+#}
+{% set job = import_status %}
+
+<section class="card" id="import-panel"
+         {% if job.running %}hx-get="/partials/library-import" hx-target="#import-panel"
+         hx-swap="outerHTML" hx-trigger="every 4s"{% endif %}>
+  <div class="card__head">
+    <h2>Import artists from disk</h2>
+    <span class="muted">
+      one Qobuz search each, through the same rate limiter as everything else
+    </span>
+    {% if job.running %}
+    <span class="tag tag--active push">running</span>
+    {% endif %}
+  </div>
+
+  <div class="card__body">
+    {% if job.running %}
+    <div class="readout">
+      <strong>{{ job.processed }}</strong> of <strong>{{ job.total }}</strong> searched
+      {%- if job.current %} · looking up <span class="mono">{{ job.current }}</span>{% endif %}
+    </div>
+    <span class="meter" style="margin:10px 0" role="img"
+          aria-label="{{ job.percent }}% complete">
+      <span class="meter__fill" style="width: {{ job.percent }}%"></span>
+    </span>
+    <div class="mono tiny faint">
+      {{ job.followed }} followed · {{ job.needs_review }} need a decision ·
+      {{ job.not_found }} not on Qobuz
+      {%- if job.failed %} · {{ job.failed }} failed{% endif %}
+      {%- if job.eta_seconds %} · about {{ job.eta_seconds | span }} left{% endif %}
+    </div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn btn--danger btn--sm" hx-post="/ui/library/import/cancel"
+              hx-target="#import-panel" hx-swap="outerHTML">
+        Stop after this artist
+      </button>
+    </div>
+
+    {% else %}
+
+    {% if job.started_at %}
+    <div class="readout">
+      Last run: {{ job.summary }}
+    </div>
+    <div class="mono tiny faint" style="margin-top:4px">
+      finished {{ job.finished_at | ago }}
+    </div>
+    {% if job.followed %}
+    <p class="note" style="margin-top:10px">
+      Those {{ job.followed }} artist(s) are followed but their catalogues are not
+      imported yet — the indexer works through new artists one per tick, so releases
+      appear over the next few hours. Until then the disk scan below will list their
+      albums as “not in the catalogue”, which is expected. Press
+      <strong>Scan now</strong> again once the indexer has caught up.
+    </p>
+    {% endif %}
+    {% else %}
+    <p class="note">
+      Searches Qobuz for every artist in the library folder that you do not follow
+      yet and follows the ones whose name matches exactly. Names it cannot resolve
+      are listed below for one click each — nothing is guessed at.
+    </p>
+    {% endif %}
+
+    {% if job.aborted_reason %}
+    <div class="inline-msg inline-msg--warning" style="margin-top:10px">
+      Import {{ job.aborted_reason }}.
+    </div>
+    {% endif %}
+
+    <form class="toolbar" style="margin-top:14px" hx-post="/ui/library/import"
+          hx-target="#import-panel" hx-swap="outerHTML"
+          hx-confirm="Search Qobuz for every unfollowed artist in the library folder? One call each at the configured rate — this can take a while, and you can stop it at any point.">
+      <label class="check check--inline">
+        <input class="check__box" type="checkbox" name="monitored" value="true" checked>
+        <span class="check__text">monitor the new artists</span>
+      </label>
+      <label class="check check--inline">
+        <input class="check__box" type="checkbox" name="index_now" value="true">
+        <span class="check__text">index each catalogue immediately</span>
+      </label>
+      <label class="field">
+        <span class="field__label">limit</span>
+        <input class="input input--sm" type="number" name="limit" min="1" max="10000"
+               placeholder="all" style="width:90px">
+      </label>
+      <button class="btn btn--primary" type="submit">Import artists</button>
+      <span class="toolbar__end tiny faint" style="max-width:420px">
+        Leaving <em>index each catalogue immediately</em> off is strongly
+        recommended: the indexer picks new artists up one per tick on its own
+        schedule, which is thousands of API calls fewer in the first hour.
+      </span>
+    </form>
+    {% endif %}
+
+    {% if job.errors %}
+    <div class="log" style="margin-top:14px">
+      {% for error in job.errors[:10] %}
+      <div class="log__line log__line--error">
+        <span class="log__msg mono break">{{ error }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if job.review %}
+  <div class="card__body card__body--flush">
+    <div class="card__head card__head--plain">
+      <h2>Needs a decision <span class="count">{{ job.needs_review }}</span></h2>
+      <span class="muted">
+        no Qobuz artist matched the folder name exactly — pick the right one, or none
+      </span>
+    </div>
+    <div class="table-wrap">
+    <table class="table table--compact">
+      <thead>
+        <tr>
+          <th>On disk</th>
+          <th class="num">Releases</th>
+          <th>Qobuz suggests</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in job.review %}
+        <tr>
+          <td>
+            <div class="table__title">{{ row.name }}</div>
+            <div class="table__sub mono tiny">{{ row.files }} file(s)</div>
+          </td>
+          <td class="num mono">{{ row.albums }}</td>
+          <td>
+            {% if row.candidates %}
+            <div class="btn-row">
+              {% for option in row.candidates %}
+              <span id="follow-{{ option.id }}">
+                <button class="btn btn--sm" hx-post="/ui/library/import/follow/{{ option.id }}"
+                        hx-target="#follow-{{ option.id }}" hx-swap="innerHTML"
+                        hx-confirm="Follow “{{ option.name }}” ({{ option.albums_count }} releases) for the folder “{{ row.name }}”?">
+                  {{ option.name }}
+                  <span class="mono tiny faint">{{ option.albums_count }}</span>
+                </button>
+              </span>
+              {% endfor %}
+              <a class="btn btn--sm btn--quiet" href="/add?q={{ row.name | urlencode }}">Search…</a>
+            </div>
+            {% else %}
+            <span class="muted small">Nothing on Qobuz for this name.</span>
+            <a class="btn btn--sm btn--quiet" href="/add?q={{ row.name | urlencode }}">Search…</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if job.truncated_review %}
+    <p class="table-note">
+      … and {{ job.truncated_review }} more, not listed. Run the import again once
+      you have worked through these.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>

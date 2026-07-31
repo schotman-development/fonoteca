@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%2314161A'/><text x='16' y='23' font-family='monospace' font-size='20' font-weight='600' fill='%23fff' text-anchor='middle'>q</text></svg>">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="shell">
+
+  <header class="shell__top">
+    <a class="brand" href="/">
+      <span class="brand__mark" aria-hidden="true">q</span>
+      <span class="brand__name">{{ app_name | lower }}</span>
+    </a>
+
+    <form class="omnisearch" method="get" action="/add" role="search">
+      <div class="omnisearch__field">
+        <span class="omnisearch__hint" aria-hidden="true">⌘K</span>
+        <input class="omnisearch__input" id="omnisearch" type="search" name="q"
+               value="{{ omnisearch_q | default('', true) }}"
+               placeholder="Search the Qobuz catalogue…" aria-label="Search the Qobuz catalogue">
+      </div>
+    </form>
+
+    <div class="shell__top-right">
+      <a class="btn btn--primary" href="/add">Add artist</a>
+    </div>
+  </header>
+
+  <div class="shell__body">
+
+    <aside class="sidebar">
+      <nav class="sidebar__nav" aria-label="Primary"
+           hx-get="/partials/nav?active={{ active }}" hx-swap="innerHTML"
+           hx-trigger="every 20s, qobuzarr:refresh from:body">
+        {% include "partials/nav.html" %}
+      </nav>
+    </aside>
+
+    <div class="shell__main">
+
+      <div class="titlebar">
+        <div class="titlebar__text">
+          <h1 class="titlebar__title">{% block heading %}{{ self.title() }}{% endblock %}</h1>
+          {% set page_subtitle %}{% block subtitle %}{% endblock %}{% endset %}
+          {% if page_subtitle | trim %}
+          <div class="titlebar__sub">{{ page_subtitle | trim }}</div>
+          {% endif %}
+        </div>
+        {% set page_actions %}{% block actions %}{% endblock %}{% endset %}
+        {% if page_actions | trim %}
+        <div class="titlebar__actions">{{ page_actions }}</div>
+        {% endif %}
+      </div>
+
+      <main id="main" class="content">
+        {% if banners %}
+        <div class="banners">
+          {% for banner in banners %}
+          <div class="banner banner--{{ banner.level }}" role="status">
+            <span class="banner__dot" aria-hidden="true"></span>
+            <div>
+              <div class="banner__title">{{ banner.title }}</div>
+              <div class="banner__msg">{{ banner.message }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+      </main>
+
+    </div>
+  </div>
+
+  <footer class="shell__foot" id="status-bar"
+          hx-get="/partials/status-bar" hx-swap="innerHTML"
+          hx-trigger="load, every 10s, qobuzarr:refresh from:body">
+    <span class="muted">loading…</span>
+  </footer>
+
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script>
+/* ---------------------------------------------------------------------------
+ * Minimal HTMX-compatible behaviour, written by hand so that Qobuzarr has zero
+ * CDN or build-step dependencies and works on a strictly offline machine.
+ *
+ * Supported attributes (the subset the templates actually use):
+ *   hx-get / hx-post / hx-delete   request method + URL
+ *   hx-target                      CSS selector, or "this" (default: the element)
+ *   hx-swap                        innerHTML (default) | outerHTML | beforeend | none
+ *   hx-trigger                     click | submit | load | "every 5s" |
+ *                                  "keyup changed delay:400ms" | "change" |
+ *                                  "qobuzarr:refresh from:body"
+ *   hx-confirm                     window.confirm() text before firing
+ *   hx-include                     extra CSS selector of inputs to serialise
+ *   hx-indicator                   selector that gets .is-busy while in flight
+ *
+ * Response headers honoured: HX-Redirect, HX-Trigger (JSON object of events).
+ * Requests always carry the HX-Request: true header.
+ * ------------------------------------------------------------------------- */
+(function () {
+  "use strict";
+
+  var METHODS = ["get", "post", "delete", "put", "patch"];
+
+  function attr(el, name) { return el.getAttribute(name); }
+
+  function requestSpec(el) {
+    for (var i = 0; i < METHODS.length; i++) {
+      var url = attr(el, "hx-" + METHODS[i]);
+      if (url !== null) { return { method: METHODS[i].toUpperCase(), url: url }; }
+    }
+    return null;
+  }
+
+  function targetOf(el) {
+    var sel = attr(el, "hx-target");
+    if (!sel || sel === "this") { return el; }
+    if (sel === "body") { return document.body; }
+    return document.querySelector(sel);
+  }
+
+  function collectParams(el) {
+    var params = new URLSearchParams();
+    var form = el.tagName === "FORM" ? el : el.closest("form");
+    var scopes = [];
+    if (form) { scopes.push(form); }
+    var include = attr(el, "hx-include");
+    if (include) {
+      document.querySelectorAll(include).forEach(function (node) { scopes.push(node); });
+    }
+    if (!form && el.name && typeof el.value !== "undefined") {
+      params.append(el.name, el.value);
+    }
+    scopes.forEach(function (scope) {
+      var fields = scope.matches("input, select, textarea")
+        ? [scope]
+        : scope.querySelectorAll("input, select, textarea");
+      Array.prototype.forEach.call(fields, function (field) {
+        if (!field.name || field.disabled) { return; }
+        if ((field.type === "checkbox" || field.type === "radio") && !field.checked) { return; }
+        params.append(field.name, field.value);
+      });
+    });
+    return params;
+  }
+
+  function swap(target, mode, html) {
+    if (!target || mode === "none") { return; }
+    if (mode === "outerHTML") {
+      target.outerHTML = html;
+    } else if (mode === "beforeend") {
+      target.insertAdjacentHTML("beforeend", html);
+    } else if (mode === "afterbegin") {
+      target.insertAdjacentHTML("afterbegin", html);
+    } else {
+      target.innerHTML = html;
+    }
+  }
+
+  function handleTriggerHeader(raw) {
+    if (!raw) { return; }
+    var payload;
+    try { payload = JSON.parse(raw); } catch (err) { payload = null; }
+    if (!payload || typeof payload !== "object") { return; }
+    Object.keys(payload).forEach(function (name) {
+      if (name === "qobuzarr:toast") {
+        var detail = payload[name] || {};
+        toast(detail.message || "", detail.level || "info");
+      } else {
+        document.body.dispatchEvent(new CustomEvent(name, { detail: payload[name] }));
+      }
+    });
+  }
+
+  function issue(el, evt) {
+    var spec = requestSpec(el);
+    if (!spec) { return; }
+    if (evt && (el.tagName === "FORM" || el.tagName === "A")) { evt.preventDefault(); }
+
+    var confirmText = attr(el, "hx-confirm");
+    if (confirmText && !window.confirm(confirmText)) { return; }
+
+    var target = targetOf(el);
+    var mode = attr(el, "hx-swap") || "innerHTML";
+    var indicatorSel = attr(el, "hx-indicator");
+    var indicator = indicatorSel ? document.querySelector(indicatorSel) : el;
+    if (indicator) { indicator.classList.add("is-busy"); }
+    el.__qbInFlight = true;
+
+    var params = collectParams(el);
+    var url = spec.url;
+    var options = {
+      method: spec.method,
+      headers: { "HX-Request": "true", "Accept": "text/html" },
+      credentials: "same-origin"
+    };
+    if (spec.method === "GET" || spec.method === "DELETE") {
+      var qs = params.toString();
+      if (qs) { url += (url.indexOf("?") === -1 ? "?" : "&") + qs; }
+    } else {
+      options.headers["Content-Type"] = "application/x-www-form-urlencoded";
+      options.body = params.toString();
+    }
+
+    fetch(url, options).then(function (response) {
+      var redirect = response.headers.get("HX-Redirect");
+      handleTriggerHeader(response.headers.get("HX-Trigger"));
+      if (redirect) { window.location.assign(redirect); return null; }
+      if (response.status === 204) { return null; }
+      return response.text().then(function (text) {
+        if (!response.ok) {
+          toast("Request failed (" + response.status + ")", "error");
+          return;
+        }
+        swap(target, mode, text);
+        process(target && target.parentNode ? target.parentNode : document);
+      });
+    }).catch(function (err) {
+      toast("Network error: " + err, "error");
+    }).finally(function () {
+      el.__qbInFlight = false;
+      if (indicator) { indicator.classList.remove("is-busy"); }
+    });
+  }
+
+  /* ---- polling -------------------------------------------------------------
+   * One ticker drives every "every Ns" element. A setInterval per element got
+   * three things wrong that matter once most of the UI polls:
+   *
+   *   - an element replaced by an outerHTML swap kept its interval running
+   *     forever while its replacement registered another, so a 4s poller
+   *     doubled its request rate every 4 seconds until the tab was closed;
+   *   - polling carried on at full rate in a background tab;
+   *   - a slow endpoint let requests pile up on top of each other.
+   *
+   * Registering here fixes all three: a poller dies with its element, ticks are
+   * skipped while the tab is hidden, and an element with a request in flight is
+   * passed over. Nothing is caught up while hidden — one refresh on return is
+   * what you want, not a burst of the ten you missed.
+   */
+  var pollers = [];
+
+  function registerPoll(el, ms) {
+    pollers.push({ el: el, ms: ms, due: Date.now() + ms });
+  }
+
+  function tick() {
+    /* Prune first, then iterate a snapshot: a swap during this loop registers a
+       new poller, and rebuilding the list afterwards would discard it. */
+    pollers = pollers.filter(function (poll) { return poll.el.isConnected; });
+    if (document.hidden) { return; }
+    var now = Date.now();
+    pollers.slice().forEach(function (poll) {
+      if (poll.el.__qbInFlight || now < poll.due) { return; }
+      poll.due = now + poll.ms;
+      issue(poll.el, null);
+    });
+  }
+
+  window.setInterval(tick, 500);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) { tick(); }
+  });
+
+  function parseTrigger(el) {
+    var raw = attr(el, "hx-trigger");
+    if (!raw) {
+      if (el.tagName === "FORM") { return [{ event: "submit" }]; }
+      return [{ event: "click" }];
+    }
+    return raw.split(",").map(function (part) {
+      var tokens = part.trim().split(/\s+/);
+      var spec = { event: tokens[0], delay: 0, changed: false, every: 0, from: null };
+      if (tokens[0] === "every") {
+        spec.event = "every";
+        spec.every = parseDuration(tokens[1]);
+        return spec;
+      }
+      tokens.slice(1).forEach(function (token) {
+        if (token === "changed") { spec.changed = true; }
+        else if (token.indexOf("delay:") === 0) { spec.delay = parseDuration(token.slice(6)); }
+        else if (token === "from:body") { spec.from = document.body; }
+      });
+      return spec;
+    });
+  }
+
+  function parseDuration(text) {
+    if (!text) { return 0; }
+    var value = parseFloat(text);
+    if (isNaN(value)) { return 0; }
+    return text.indexOf("ms") !== -1 ? value : value * 1000;
+  }
+
+  function bind(el) {
+    if (el.__qbBound) { return; }
+    el.__qbBound = true;
+    parseTrigger(el).forEach(function (spec) {
+      if (spec.event === "load") {
+        issue(el, null);
+      } else if (spec.event === "every") {
+        if (spec.every > 0) { registerPoll(el, spec.every); }
+      } else if (spec.from) {
+        /* A mutation anywhere refreshes the live regions immediately, so the
+           counters do not sit wrong for the rest of the polling interval. The
+           listener lives on the source element, so it has to unsubscribe itself
+           once the element it feeds has been swapped away. */
+        var relay = function () {
+          if (!el.isConnected) {
+            spec.from.removeEventListener(spec.event, relay);
+          } else if (!el.__qbInFlight) {
+            issue(el, null);
+          }
+        };
+        spec.from.addEventListener(spec.event, relay);
+      } else {
+        var timer = null;
+        var lastValue = el.value;
+        el.addEventListener(spec.event, function (evt) {
+          if (spec.changed && el.value === lastValue) { return; }
+          lastValue = el.value;
+          if (spec.delay > 0) {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(function () { issue(el, evt); }, spec.delay);
+            if (el.tagName === "FORM") { evt.preventDefault(); }
+          } else {
+            issue(el, evt);
+          }
+        });
+      }
+    });
+  }
+
+  function process(root) {
+    var scope = root || document;
+    var nodes = scope.querySelectorAll(
+      "[hx-get], [hx-post], [hx-delete], [hx-put], [hx-patch]"
+    );
+    Array.prototype.forEach.call(nodes, bind);
+  }
+
+  function toast(message, level) {
+    if (!message) { return; }
+    var host = document.getElementById("toasts");
+    if (!host) { return; }
+    var node = document.createElement("div");
+    node.className = "toast toast--" + (level || "info");
+    node.textContent = message;
+    host.appendChild(node);
+    window.setTimeout(function () {
+      node.classList.add("toast--out");
+      window.setTimeout(function () { node.remove(); }, 400);
+    }, 5000);
+  }
+
+  window.qobuzarr = { process: process, toast: toast };
+  document.addEventListener("DOMContentLoaded", function () { process(document); });
+})();
+
+/* The ⌘K / Ctrl-K affordance the design's header advertises. */
+(function () {
+  "use strict";
+  document.addEventListener("keydown", function (evt) {
+    if (evt.key !== "k" || !(evt.metaKey || evt.ctrlKey)) { return; }
+    var box = document.getElementById("omnisearch");
+    if (!box) { return; }
+    evt.preventDefault();
+    box.focus();
+    box.select();
+  });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

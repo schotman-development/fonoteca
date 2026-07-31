@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Activity · {{ app_name }}{% endblock %}
+{% block heading %}Activity <span class="count">{{ total }}</span>{% endblock %}
+{% block subtitle %}
+  Append-only history of everything the indexer, queue and downloader have done
+  {%- if filter_level %} · {{ filter_level }} only{% endif %}
+  {%- if filter_event %} · event “{{ filter_event }}”{% endif %}
+{% endblock %}
+
+{% block content %}
+<form class="toolbar filters--inline" id="activity-filters" method="get" action="/activity">
+  <select class="input input--sm" name="level" onchange="this.form.submit()">
+    <option value="">all levels</option>
+    {% for name in activity_levels %}
+    <option value="{{ name }}" {% if filter_level == name %}selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+
+  <input class="input input--sm" type="text" name="event" value="{{ filter_event }}"
+         placeholder="event, e.g. queue.add" style="width:190px">
+
+  <input class="input input--sm" type="number" name="limit" min="1" max="1000" value="{{ limit }}"
+         aria-label="Maximum rows" style="width:90px">
+
+  <button class="btn btn--sm" type="submit">Apply</button>
+  <a class="btn btn--sm btn--quiet" href="/activity">Reset</a>
+
+  <span class="toolbar__end mono tiny faint">newest first</span>
+</form>
+
+<section class="card">
+  <div class="card__body card__body--flush">
+    {# The log grows while you watch it, so it tails itself. #}
+    <div id="activity-rows"
+         hx-get="/partials/activity" hx-swap="innerHTML"
+         hx-include="#activity-filters"
+         hx-trigger="every 15s, qobuzarr:refresh from:body">
+      {% include "partials/activity_rows.html" %}
+    </div>
+  </div>
+</section>
+{% endblock %}

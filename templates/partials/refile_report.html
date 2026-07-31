@@ -1,0 +1,55 @@
+{#
+  Result of a re-file preview or run.
+  Context: refile (LibraryTidyOut | None), scope (str)
+
+  ``refile`` is None until something has been pressed, which is what makes the
+  panel say "nothing has been checked yet" rather than "0 albums are misfiled".
+  Those are different claims and only one of them is true on a fresh page.
+#}
+{% if refile is none %}
+<p class="empty">
+  Press <b class="strong">Preview</b> to see which releases are not where
+  <span class="mono">NAMING_TEMPLATE</span> says they belong. Nothing moves until you apply it.
+</p>
+{% elif not refile.plans %}
+<p class="empty">
+  Every release on disk is already where the template says it belongs
+  ({{ refile.considered }} checked).
+</p>
+{% else %}
+<p class="small muted" style="margin:0 0 12px">
+  {{ refile.summary }}{% if refile.dry_run %} — nothing has been moved{% endif %}.
+</p>
+<div class="table-wrap">
+<table class="table table--compact">
+  <thead>
+    <tr><th>Release</th><th>Now</th><th>Should be</th><th class="num">Files</th></tr>
+  </thead>
+  <tbody>
+    {% for plan in refile.plans %}
+    <tr class="{% if plan.blocked %}row--muted{% endif %}">
+      <td>
+        <div class="table__title">{{ plan.album_title }}</div>
+        <div class="table__sub">{{ plan.artist_name }}</div>
+        {% if plan.blocked %}
+        <div class="table__sub"><span class="tag tag--bad">blocked</span> {{ plan.blocked }}</div>
+        {% endif %}
+      </td>
+      <td class="mono tiny break">{{ plan.current_dir }}</td>
+      <td class="mono tiny break">
+        {% if plan.moves_directory %}{{ plan.target_dir }}{% else %}<span class="muted">unchanged</span>{% endif %}
+      </td>
+      <td class="num mono small">
+        {% if plan.renames %}{{ plan.renames | length }} renamed{% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if refile.errors %}
+<ul class="small" style="margin-top:10px">
+  {% for error in refile.errors %}<li class="bad">{{ error }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endif %}

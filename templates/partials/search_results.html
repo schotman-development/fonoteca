@@ -1,0 +1,106 @@
+{#
+  Qobuz catalogue search results.
+  Context: q (str), result (SearchResultOut | None), search_error (str | None)
+#}
+{% if search_error %}
+<div class="banner banner--warning" role="status">
+  <span class="banner__dot" aria-hidden="true"></span>
+  <div>
+    <div class="banner__title">Search unavailable</div>
+    <div class="banner__msg">{{ search_error }}</div>
+  </div>
+</div>
+
+{% elif result is none or not q %}
+<p class="empty">Type an artist or album name to search the Qobuz catalogue.</p>
+
+{% else %}
+
+<div class="toolbar filters--inline" style="border-bottom:0;padding-top:0">
+  <span class="readout">Qobuz <b>{{ result.total_artists }} artists</b></span>
+  <span class="readout">Albums <b>{{ result.total_albums }}</b></span>
+  <span class="toolbar__end mono tiny faint">rate-limited live search</span>
+</div>
+
+<section class="card">
+  <header class="card__head">
+    <h2>Artists</h2>
+    <span class="muted">{{ result.artists | length }} of {{ result.total_artists }}</span>
+  </header>
+  <div class="card__body card__body--flush">
+    {% if result.artists %}
+    <ul class="result-list">
+      {% for artist in result.artists %}
+      <li class="media">
+        <span class="media__art media__art--lg">
+          {% if artist.image_url %}
+          <img src="{{ artist.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+          {% else %}
+          <span class="media__initial" aria-hidden="true">{{ artist.name[:1] | upper }}</span>
+          {% endif %}
+        </span>
+        <div class="media__body">
+          <div class="media__title">{{ artist.name }}</div>
+          <div class="media__sub">
+            {{ artist.albums_count }} release{{ '' if artist.albums_count == 1 else 's' }} on Qobuz ·
+            <span class="mono">{{ artist.id }}</span>
+          </div>
+        </div>
+        <div class="media__end">
+          {% with artist_id = artist.id, followed = artist.followed, name = artist.name %}
+            {% include "partials/follow_button.html" %}
+          {% endwith %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No artists matched “{{ q }}”.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if result.albums %}
+<section class="card">
+  <header class="card__head">
+    <h2>Releases</h2>
+    <span class="muted">{{ result.albums | length }} of {{ result.total_albums }} — follow the artist to track these</span>
+  </header>
+  <div class="card__body card__body--flush">
+    <ul class="result-list">
+      {% for album in result.albums %}
+      <li class="media">
+        <span class="media__art">
+          {% if album.image_url %}
+          <img src="{{ album.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+          {% else %}
+          <span class="media__initial" aria-hidden="true">♪</span>
+          {% endif %}
+        </span>
+        <div class="media__body">
+          <div class="media__title">
+            {{ album.title }}{% if album.version %} <span class="muted">· {{ album.version }}</span>{% endif %}
+          </div>
+          <div class="media__sub">
+            {{ album.artist_name or 'Unknown artist' }}
+            {%- if album.year %} · {{ album.year }}{% endif %}
+            {%- if album.tracks_count %} · {{ album.tracks_count }} tracks{% endif %}
+          </div>
+        </div>
+        <div class="media__end">
+          {% if album.hires %}<span class="qual qual--hires">Hi-Res</span>{% endif %}
+          {% if album.in_library %}<span class="tag tag--ok">in library</span>{% endif %}
+          {% if album.artist_id %}
+          {% with artist_id = album.artist_id, followed = false, name = album.artist_name or '' %}
+            {% include "partials/follow_button.html" %}
+          {% endwith %}
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endif %}
+
+{% endif %}

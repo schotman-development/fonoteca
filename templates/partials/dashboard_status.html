@@ -1,0 +1,93 @@
+{#
+  The dashboard's right-hand column: what the indexer is doing right now, how
+  much of the hourly API budget is left, and the shape of the library. All three
+  move on their own, so they are polled together as one region.
+  Context: status (app.schemas.StatusOut), albums_by_status (dict[str, int])
+#}
+<section class="card">
+  <header class="card__head">
+    <h2>Indexer</h2>
+    <span class="tag {% if status.indexer.enabled %}tag--ok{% else %}tag--bad{% endif %} push">
+      {{ 'enabled' if status.indexer.enabled else 'disabled' }}
+    </span>
+  </header>
+  <div class="card__body">
+    <dl class="kv">
+      <dt>Next check</dt>
+      <dd class="mono">
+        {% if status.indexer.seconds_until_next_run is not none %}
+          in {{ status.indexer.seconds_until_next_run | span }}
+        {% else %}—{% endif %}
+      </dd>
+      <dt>Checking now</dt>
+      <dd>
+        {% if status.indexer.current_artist_id %}
+        <a href="/artists/{{ status.indexer.current_artist_id }}">{{ status.indexer.current_artist_name or status.indexer.current_artist_id }}</a>
+        {% else %}<span class="muted">nothing</span>{% endif %}
+      </dd>
+      <dt>Interval</dt>
+      <dd class="mono">{{ status.indexer.artist_interval_seconds }}s
+        <span class="muted">· sweep {{ status.indexer.full_sweep_hours }}h</span></dd>
+      <dt>Never checked</dt>
+      <dd class="mono">{{ status.indexer.artists_never_checked }} of {{ status.indexer.monitored_artists }}</dd>
+      <dt>Last check</dt>
+      <dd class="mono">{{ status.indexer.last_run_at | ago }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="card">
+  <header class="card__head">
+    <h2>Rate limiter</h2>
+    {% if status.rate_limit and status.rate_limit.circuit_open %}
+    <span class="tag tag--bad push">breaker open</span>
+    {% else %}
+    <span class="tag tag--ok push">closed</span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {% if status.rate_limit %}
+    {% set rl = status.rate_limit %}
+    <div class="meter" role="img"
+         aria-label="{{ rl.requests_last_hour }} of {{ rl.max_requests_per_hour }} hourly requests used">
+      <div class="meter__fill {% if rl.budget_used_percent > 80 %}meter__fill--warn{% endif %}"
+           style="width: {{ [rl.budget_used_percent, 100] | min | round(1) }}%"></div>
+    </div>
+    <p class="small muted" style="margin:10px 0 14px">
+      <b class="strong">{{ rl.requests_last_hour }}</b> / {{ rl.max_requests_per_hour }} calls this hour
+      — {{ rl.budget_remaining }} left
+    </p>
+    <dl class="kv">
+      <dt>Min interval</dt><dd class="mono">{{ rl.min_request_interval }}s</dd>
+      <dt>Next slot</dt><dd class="mono">{{ rl.seconds_until_next_slot | round(1) }}s</dd>
+      <dt>Last call</dt><dd class="mono">{{ rl.last_request_at | ago }}</dd>
+      <dt>Recent 429s</dt><dd class="mono">{{ rl.recent_429s }}</dd>
+      {% if rl.circuit_open_until %}
+      <dt>Paused until</dt><dd class="mono">{{ rl.circuit_open_until | dt }} UTC</dd>
+      {% endif %}
+    </dl>
+    {% else %}
+    <p class="muted">The rate limiter is not running.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <header class="card__head"><h2>Albums by status</h2></header>
+  <div class="card__body">
+    <ul class="bars">
+      {% set total = albums_by_status.values() | sum %}
+      {% for name in album_statuses %}
+      {% set count = albums_by_status.get(name, 0) %}
+      <li class="bar">
+        <span class="mono tiny faint">{{ name }}</span>
+        <span class="bar__track">
+          <span class="bar__fill bar__fill--{{ name }}"
+                style="width: {{ (100 * count / total) | round(1) if total else 0 }}%"></span>
+        </span>
+        <span class="bar__value">{{ count }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>

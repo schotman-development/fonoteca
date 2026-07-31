@@ -1,0 +1,44 @@
+{#
+  Shared render helpers. Import at the top of a template:
+      {% from "partials/macros.html" import cover, monitor_toggle %}
+#}
+
+{% macro cover(url, size='') -%}
+{#
+  Album/artist artwork thumbnail for table rows.
+
+  Covers are hotlinked from Qobuz's CDN, so they are lazy-loaded and sent with
+  no referrer. When there is no artwork — the indexer records releases long
+  before anyone downloads them — the placeholder keeps the row height stable
+  instead of collapsing.
+#}
+<span class="{{ 'art art--' ~ size if size else 'art' }}">
+  {%- if url %}
+  <img src="{{ url }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+  {%- else %}
+  <span class="art__fallback" aria-hidden="true">♪</span>
+  {%- endif %}
+</span>
+{%- endmacro %}
+
+{% macro monitor_toggle(monitored, title, url, target, note='') -%}
+{#
+  The per-release monitor switch, used by every table that lists albums.
+
+  It POSTs to /ui/albums/<id>/monitor, which *toggles* — the button never
+  submits a value, so a stale page cannot write the wrong state. The caller
+  supplies the URL (carrying its ``view`` and the screen's active filters) and
+  the element to swap, because each screen re-renders a different table.
+
+  Takes the flag and the title rather than an album object: the queue page has
+  a QueueItemOut, not an AlbumOut, and denormalises them as ``album_monitored``
+  and ``album_title``. ``note`` is where a screen adds a consequence of its own.
+#}
+<button class="btn btn--sm btn--icon {{ 'is-on' if monitored else 'is-off' }}"
+        hx-post="{{ url }}" hx-target="{{ target }}" hx-swap="innerHTML"
+        aria-pressed="{{ 'true' if monitored else 'false' }}"
+        aria-label="{{ 'Stop monitoring' if monitored else 'Start monitoring' }} {{ title }}"
+        title="{{ 'Monitored — press to ignore this release' if monitored else 'Ignored — press to monitor this release' }}{{ ' ' ~ note if note else '' }}">
+  <span aria-hidden="true">{{ '●' if monitored else '○' }}</span>
+</button>
+{%- endmacro %}

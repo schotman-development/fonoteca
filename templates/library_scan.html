@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Disk scan · {{ app_name }}{% endblock %}
+{% block heading %}Disk scan{% endblock %}
+{% block subtitle %}
+  Read <span class="mono">{{ scan.library_path }}</span> and match what is already there
+  against your followed artists, so Qobuzarr stops wanting music you own.
+  The scan itself never renames, moves or modifies a file — that is
+  <a href="/library/tidy">Library tidy</a>.
+{% endblock %}
+
+{% block actions %}
+  <button class="btn"
+          hx-post="/ui/library/scan?dry_run=true" hx-target="#scan-report" hx-swap="innerHTML"
+          hx-indicator="#scan-report">
+    Preview
+  </button>
+  <button class="btn btn--primary"
+          hx-post="/ui/library/scan" hx-target="#scan-report" hx-swap="innerHTML"
+          hx-indicator="#scan-report"
+          hx-confirm="Scan {{ scan.library_path }} and mark complete albums as downloaded? No files are changed.">
+    Scan now
+  </button>
+{% endblock %}
+
+{% block content %}
+<dl class="kv kv--inline" style="margin-bottom:18px">
+  <dt>Library root</dt>
+  <dt>Nightly scan</dt>
+  <dt>Complete at</dt>
+  <dt>Qobuz API calls</dt>
+  <dd class="mono break">{{ scan.library_path }}</dd>
+  <dd>{% if scan.nightly %}on, with housekeeping{% else %}off{% endif %}</dd>
+  <dd>{{ (scan.complete_ratio * 100) | round(0) | int }}% of the Qobuz track count</dd>
+  <dd>none — the scan is entirely local</dd>
+</dl>
+
+{% include "partials/library_import_progress.html" %}
+
+<div id="scan-report">
+  {% include "partials/library_scan_report.html" %}
+</div>
+{% endblock %}
