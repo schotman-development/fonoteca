@@ -119,7 +119,7 @@ __all__ = [
 logger = get_logger(__name__)
 
 #: Product name shown in the navbar and page titles.
-APP_NAME = "Qobuzarr"
+APP_NAME = "Fonoteca"
 
 #: Repository root; templates and static assets live beside ``app/``.
 BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -333,7 +333,7 @@ def banner_context(settings: Settings | None = None) -> list[dict[str, str]]:
                 "level": "warning",
                 "title": "App secret unresolved",
                 "message": (
-                    "Qobuzarr has not yet derived a working app secret. It will "
+                    "Fonoteca has not yet derived a working app secret. It will "
                     "try again on the next signed request; set QOBUZ_APP_SECRET "
                     "in .env to skip derivation entirely."
                 ),
@@ -1215,7 +1215,7 @@ async def indexer_status(session: AsyncSession) -> IndexerStatusOut:
         scheduler = get_scheduler()
         job = None
         if scheduler is not None:
-            for job_id in ("indexer_tick", "indexer", "qobuzarr-indexer"):
+            for job_id in ("indexer_tick", "indexer", "fonoteca-indexer"):
                 try:
                     job = scheduler.get_job(job_id)
                 except Exception as exc:  # noqa: BLE001

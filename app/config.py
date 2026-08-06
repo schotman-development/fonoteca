@@ -1,6 +1,6 @@
 """Application configuration.
 
-Every knob Qobuzarr exposes lives here as a field on :class:`Settings`, which is
+Every knob Fonoteca exposes lives here as a field on :class:`Settings`, which is
 populated from environment variables and from the project ``.env`` file via
 ``pydantic-settings``.  Nothing else in the codebase should read ``os.environ``
 directly; call :func:`get_settings` instead (it is cached, so it is cheap to
@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     library_path: Path = BASE_DIR / "music"
     data_path: Path = BASE_DIR / "data"
 
-    # Where deleted and superseded files are moved to. Nothing in Qobuzarr
+    # Where deleted and superseded files are moved to. Nothing in Fonoteca
     # unlinks from ``library_path``: it moves here, and stays until you empty
     # the trash. Put this on the same filesystem as ``library_path`` if you can
     # — then a delete is a rename rather than a copy of the whole album.
@@ -148,7 +148,7 @@ class Settings(BaseSettings):
 
     # -------------------------------------------------------- Library scanning
     # The disk scan reads ``library_path`` and marks albums it finds there as
-    # downloaded, so Qobuzarr stops wanting music the user already owns. It is
+    # downloaded, so Fonoteca stops wanting music the user already owns. It is
     # purely local — no Qobuz API calls — and never writes to the filesystem,
     # which is why it is safe to leave on the nightly job.
     library_scan_nightly: bool = True
@@ -185,7 +185,7 @@ class Settings(BaseSettings):
 
     # --------------------------------------------------------------- Logging
     log_level: LogLevel = LogLevel.INFO
-    log_file_name: str = "qobuzarr.log"
+    log_file_name: str = "fonoteca.log"
     log_max_bytes: int = 5 * 1024 * 1024
     log_backup_count: int = 5
     log_redact_secrets: bool = True
@@ -242,7 +242,7 @@ class Settings(BaseSettings):
     @property
     def db_path(self) -> Path:
         """Absolute path of the SQLite database file."""
-        return self.data_path / "qobuzarr.db"
+        return self.data_path / "fonoteca.db"
 
     @property
     def database_url(self) -> str:
@@ -313,7 +313,7 @@ class Settings(BaseSettings):
         if not self.has_credentials:
             raise RuntimeError(
                 "QOBUZ_APP_ID and QOBUZ_USER_AUTH_TOKEN must be set in .env "
-                "before Qobuzarr can talk to the Qobuz API."
+                "before Fonoteca can talk to the Qobuz API."
             )
 
 

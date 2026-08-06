@@ -1,6 +1,6 @@
 """Global outbound rate limiting for every Qobuz API call.
 
-Qobuzarr is deliberately, aggressively slow: a single :class:`RateLimiter`
+Fonoteca is deliberately, aggressively slow: a single :class:`RateLimiter`
 instance gates *all* traffic — the indexer, UI searches and downloads alike —
 so the account never looks like a scraper.
 

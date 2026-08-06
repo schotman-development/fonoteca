@@ -124,7 +124,7 @@ DASHBOARD_ARTISTS = 7
 
 #: Fired on the body by every mutating fragment; the live regions listen for it
 #: so a press updates the counters immediately rather than at the next poll.
-LIVE_REFRESH_EVENT = "qobuzarr:refresh"
+LIVE_REFRESH_EVENT = "fonoteca:refresh"
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ def _fragment(
 ) -> Response:
     """Render an HTMX fragment, optionally attaching a toast and a refresh event.
 
-    Every fragment fires ``qobuzarr:refresh`` on the body. Only ``/ui/*`` — the
+    Every fragment fires ``fonoteca:refresh`` on the body. Only ``/ui/*`` — the
     mutating half of the HTML surface — renders through here, so that event
     means "something changed"; the live regions listen for it and re-fetch at
     once instead of showing a stale count until their next poll.
@@ -152,12 +152,12 @@ def _fragment(
         context: Template variables.
         toast: Message for the client-side toast strip.
         level: Toast severity (``info``/``success``/``warning``/``error``).
-        refresh: A further HTMX event name to fire (e.g. ``qobuzarr:import``).
+        refresh: A further HTMX event name to fire (e.g. ``fonoteca:import``).
     """
     response = templates.TemplateResponse(request, template_name, context)
     triggers: dict[str, Any] = {LIVE_REFRESH_EVENT: True}
     if toast:
-        triggers["qobuzarr:toast"] = {"message": toast, "level": level}
+        triggers["fonoteca:toast"] = {"message": toast, "level": level}
     if refresh:
         triggers[refresh] = True
     response.headers["HX-Trigger"] = json.dumps(triggers)
@@ -171,7 +171,7 @@ def _redirect(target: str, request: Request, *, toast: str | None = None) -> Res
         response.headers["HX-Redirect"] = target
         if toast:
             response.headers["HX-Trigger"] = json.dumps(
-                {"qobuzarr:toast": {"message": toast, "level": "info"}}
+                {"fonoteca:toast": {"message": toast, "level": "info"}}
             )
         return response
     return RedirectResponse(target, status_code=303)
@@ -585,7 +585,7 @@ async def page_library_tidy(
     """Re-file, re-tag and the trash — everything that changes files on disk.
 
     Deliberately one page away from the rest of the UI: these are the only
-    actions in Qobuzarr that modify or remove music you already have, and the
+    actions in Fonoteca that modify or remove music you already have, and the
     re-file panel previews before it moves anything.
     """
     return render(
@@ -944,7 +944,7 @@ async def ui_bulk_update_artists(
             if detail.get("updated")
             else "info"
         ),
-        refresh="qobuzarr:selection",
+        refresh="fonoteca:selection",
     )
 
 
@@ -1459,7 +1459,7 @@ async def ui_library_import(
             f"Looking up {snapshot['total']} artist(s) on Qobuz — "
             f"about {int(snapshot['eta_seconds'] // 60)} minute(s)."
         ),
-        refresh="qobuzarr:import",
+        refresh="fonoteca:import",
     )
 
 

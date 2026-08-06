@@ -19,7 +19,7 @@
   Every counter on this page is polled. The regions are split by how fast the
   thing behind them actually moves — a progress meter every 5s, artist tiles
   every minute — so the page is not re-fetched wholesale five times a minute.
-  They also all listen for `qobuzarr:refresh`, which every mutating /ui/* action
+  They also all listen for `fonoteca:refresh`, which every mutating /ui/* action
   fires, so pressing Download updates the numbers at once instead of leaving
   them wrong until the next tick.
 #}
@@ -27,13 +27,13 @@
 
 <div class="metrics" id="dash-metrics"
      hx-get="/partials/dashboard/metrics" hx-swap="innerHTML"
-     hx-trigger="every 10s, qobuzarr:refresh from:body">
+     hx-trigger="every 10s, fonoteca:refresh from:body">
   {% include "partials/dashboard_metrics.html" %}
 </div>
 
 <div id="dash-artists"
      hx-get="/partials/dashboard/artists" hx-swap="innerHTML"
-     hx-trigger="every 60s, qobuzarr:refresh from:body">
+     hx-trigger="every 60s, fonoteca:refresh from:body">
   {% include "partials/dashboard_artists.html" %}
 </div>
 
@@ -49,7 +49,7 @@
       <div class="card__body card__body--flush">
         <div id="dash-wanted"
              hx-get="/partials/dashboard-wanted" hx-swap="innerHTML"
-             hx-trigger="every 15s, qobuzarr:refresh from:body">
+             hx-trigger="every 15s, fonoteca:refresh from:body">
           {% include "partials/dashboard_wanted.html" %}
         </div>
       </div>
@@ -64,7 +64,7 @@
       <div class="card__body card__body--flush">
         <div id="dash-queue"
              hx-get="/partials/dashboard/queue" hx-swap="innerHTML"
-             hx-trigger="every 5s, qobuzarr:refresh from:body">
+             hx-trigger="every 5s, fonoteca:refresh from:body">
           {% include "partials/dashboard_queue.html" %}
         </div>
       </div>
@@ -73,7 +73,7 @@
 
   <div class="stack" id="dash-status"
        hx-get="/partials/dashboard/status" hx-swap="innerHTML"
-       hx-trigger="every 10s, qobuzarr:refresh from:body">
+       hx-trigger="every 10s, fonoteca:refresh from:body">
     {% include "partials/dashboard_status.html" %}
   </div>
 
@@ -86,7 +86,7 @@
   </header>
   <div class="card__body card__body--flush">
     <div id="dash-activity" hx-get="/partials/activity?limit=12" hx-swap="innerHTML"
-         hx-trigger="every 20s, qobuzarr:refresh from:body">
+         hx-trigger="every 20s, fonoteca:refresh from:body">
       {% with items = status.recent_activity %}{% include "partials/activity_rows.html" %}{% endwith %}
     </div>
   </div>

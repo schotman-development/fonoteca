@@ -292,7 +292,7 @@ async def init_state(
         elif login:
             message = (
                 "QOBUZ_APP_ID / QOBUZ_USER_AUTH_TOKEN are not set; "
-                "Qobuzarr will start read-only"
+                "Fonoteca will start read-only"
             )
             logger.warning(message)
             state.startup_errors.append(message)

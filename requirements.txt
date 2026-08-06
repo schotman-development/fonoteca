@@ -1,4 +1,4 @@
-# Qobuzarr runtime dependencies.
+# Fonoteca runtime dependencies.
 # Nothing is pinned tighter than ">=" so the environment can float forward.
 
 fastapi>=0.110

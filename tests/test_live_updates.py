@@ -1,6 +1,6 @@
 """Tests for the live-updating UI: polled fragments and the refresh event.
 
-Every counter and status readout in Qobuzarr now re-fetches itself instead of
+Every counter and status readout in Fonoteca now re-fetches itself instead of
 going stale until someone reloads the page. Two mechanisms carry that, and both
 are easy to break silently:
 
@@ -10,7 +10,7 @@ are easy to break silently:
   or a poll would visibly change the page a few seconds after it loaded. The
   tests below fetch both halves and compare.
 
-* **``qobuzarr:refresh``.** Every ``/ui/*`` response fires it on the body so a
+* **``fonoteca:refresh``.** Every ``/ui/*`` response fires it on the body so a
   press updates the counters immediately rather than at the next tick. It is
   emitted by ``_fragment``, which is the single funnel for those responses — so
   the test is that *every* mutating action carries it, not a sampled few.
@@ -149,7 +149,7 @@ def test_every_live_region_reacts_to_a_change_at_once(
     client: TestClient, page: str, region_id: str, url: str
 ) -> None:
     """Waiting out the poll interval is a fallback, not the only path."""
-    assert "qobuzarr:refresh from:body" in region(client.get(page).text, region_id)
+    assert "fonoteca:refresh from:body" in region(client.get(page).text, region_id)
 
 
 @pytest.mark.parametrize(("page", "region_id", "url"), LIVE_REGIONS)
@@ -304,7 +304,7 @@ def test_every_mutation_asks_the_live_regions_to_refresh(
     """``_fragment`` is the funnel, so this holds for actions added later too."""
     response = client.post(path, data=body, headers={"HX-Request": "true"})
     assert response.status_code == 200
-    assert triggers(response).get("qobuzarr:refresh") is True
+    assert triggers(response).get("fonoteca:refresh") is True
 
 
 def test_a_refresh_does_not_displace_the_toast(client: TestClient) -> None:
@@ -313,8 +313,8 @@ def test_a_refresh_does_not_displace_the_toast(client: TestClient) -> None:
         "/ui/albums/uyej1o165e870/monitor", headers={"HX-Request": "true"}
     )
     fired = triggers(response)
-    assert fired.get("qobuzarr:refresh") is True
-    assert "qobuzarr:toast" in fired
+    assert fired.get("fonoteca:refresh") is True
+    assert "fonoteca:toast" in fired
 
 
 def test_read_only_fragments_do_not_claim_something_changed(
@@ -322,4 +322,4 @@ def test_read_only_fragments_do_not_claim_something_changed(
 ) -> None:
     """A poll response firing the event would make every region refresh forever."""
     for url in ("/partials/dashboard/metrics", "/partials/nav", "/partials/status-bar"):
-        assert "qobuzarr:refresh" not in client.get(url).headers.get("HX-Trigger", "")
+        assert "fonoteca:refresh" not in client.get(url).headers.get("HX-Trigger", "")

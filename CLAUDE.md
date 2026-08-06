@@ -1,4 +1,4 @@
-# CLAUDE.md — architecture map for Qobuzarr
+# CLAUDE.md — architecture map for Fonoteca
 
 Read this before touching anything. It is short on purpose; the details live in module
 docstrings, which are accurate.
@@ -92,7 +92,7 @@ pulled 1.7 GB unprompted.
 **The disk scan only moves one way.** `app/core/scanner.py` may promote an album to
 `DOWNLOADED`; it may never mark one `WANTED`, `QUEUED`, or enqueue anything. That is what
 makes it safe on the nightly job and safe to run unattended — a scan can only ever *reduce*
-the work Qobuzarr would do. It also never writes to the filesystem (no rename, move, tag
+the work Fonoteca would do. It also never writes to the filesystem (no rename, move, tag
 repair or delete) and never calls Qobuz. Demoting an album whose files vanished is the
 *other* job, `scheduler._verify_library()`; housekeeping runs the scan first and the verify
 pass second, and swapping that order would let verify mark an album wanted a moment before
@@ -159,7 +159,7 @@ it deliberately leaves `QUEUED`/`DOWNLOADING` alone, because the worker owns tho
 
 **A live region renders from the same template AND the same context as its page.** Every
 counter and status readout polls itself: the page renders the first frame with
-`{% include %}`, and a wrapper with `hx-trigger="every Ns, qobuzarr:refresh from:body"`
+`{% include %}`, and a wrapper with `hx-trigger="every Ns, fonoteca:refresh from:body"`
 re-fetches the identical partial. Sharing the template is only half of it — the fragment
 route has to build the same context too. Give `/partials/dashboard/queue` a different row
 limit from `page_dashboard` and the page silently rearranges itself five seconds after it
@@ -170,7 +170,7 @@ Two further rules. **A filterable region polls through `hx-include`**, not a fix
 `#album-rows` includes `#artist-filters`, `#wanted-rows` includes `#wanted-filters`,
 `#activity-rows` includes `#activity-filters` — because a poll that dropped the filters
 would wipe out whatever the user had typed. And **only `/ui/*` may claim something
-changed**: `_fragment()` fires `qobuzarr:refresh` on every mutating response and that is
+changed**: `_fragment()` fires `fonoteca:refresh` on every mutating response and that is
 what makes the regions update on a press instead of at the next tick. A `GET /partials/*`
 that fired it would make every region refresh every other region, forever.
 
@@ -227,7 +227,7 @@ the truth. Sessions use `expire_on_commit=False`; a commit will not do it for yo
 compare `album.status is AlbumStatus.WANTED`, and write enum members, not strings.
 
 **No migrations.** `init_db()` only does `create_all`. A new column means a manual
-`ALTER TABLE` or deleting `data/qobuzarr.db`.
+`ALTER TABLE` or deleting `data/fonoteca.db`.
 
 ## Where to add things
 
@@ -249,7 +249,7 @@ renders no container at all — do not add your own title-bar markup.
 
 **A new HTMX fragment** → `GET /partials/...` in `routes_ui.py` + `templates/partials/*.html`.
 Mutating actions live under `POST /ui/...`, return a fragment, and set an `HX-Trigger`
-`qobuzarr:toast` header. Only the attribute subset the shim in `base.html` implements is
+`fonoteca:toast` header. Only the attribute subset the shim in `base.html` implements is
 available (`hx-get/post/delete`, `hx-target`, `hx-swap`, `hx-trigger` with `every Ns` /
 `keyup changed delay:Nms` / `<event> from:body`, `hx-confirm`, `hx-include`,
 `hx-indicator`). Extend the shim, or drop a real `htmx.min.js` into `static/` and delete
@@ -257,7 +257,7 @@ the shim — the markup is stock htmx.
 
 **A new live region** (anything showing a count, a state or a progress meter) → a wrapper
 with an id, `hx-get` at the partial, `hx-swap="innerHTML"`, and
-`hx-trigger="every Ns, qobuzarr:refresh from:body"`. See the live-region invariant below
+`hx-trigger="every Ns, fonoteca:refresh from:body"`. See the live-region invariant below
 for the two rules that keep one honest.
 
 **A new Qobuz call** → a method on `QobuzClient` (it handles limiter, retries, backoff,

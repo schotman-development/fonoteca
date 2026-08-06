@@ -42,7 +42,7 @@
 
   <div class="entity__body" id="artist-stats"
        hx-get="/partials/artists/{{ artist.id }}/stats" hx-swap="innerHTML"
-       hx-trigger="every 15s, qobuzarr:refresh from:body">
+       hx-trigger="every 15s, fonoteca:refresh from:body">
     {% include "partials/artist_stats.html" %}
   </div>
 </div>
@@ -89,7 +89,7 @@
       <div id="album-rows"
            hx-get="/partials/albums/{{ artist.id }}" hx-swap="innerHTML"
            hx-include="#artist-filters"
-           hx-trigger="every 15s, qobuzarr:refresh from:body">
+           hx-trigger="every 15s, fonoteca:refresh from:body">
         {% include "partials/album_rows.html" %}
       </div>
     </div>

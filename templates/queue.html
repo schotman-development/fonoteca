@@ -29,7 +29,7 @@
   <div class="card__body card__body--flush">
     <div id="queue-table"
          hx-get="/partials/queue-table{% if filter_state %}?state={{ filter_state }}{% endif %}"
-         hx-trigger="every 5s, qobuzarr:refresh from:body" hx-swap="innerHTML">
+         hx-trigger="every 5s, fonoteca:refresh from:body" hx-swap="innerHTML">
       {% include "partials/queue_table.html" %}
     </div>
   </div>

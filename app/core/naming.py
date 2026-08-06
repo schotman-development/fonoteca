@@ -70,7 +70,7 @@ __all__ = [
     "track_values",
 ]
 
-#: File extensions Qobuzarr may have written for a track, best first. Used when
+#: File extensions Fonoteca may have written for a track, best first. Used when
 #: looking for an already-downloaded file whose format is not yet known.
 AUDIO_EXTENSIONS: tuple[str, ...] = ("flac", "mp3")
 

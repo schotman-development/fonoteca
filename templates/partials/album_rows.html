@@ -85,7 +85,7 @@
         <button class="btn btn--sm btn--primary"
                 hx-post="/ui/albums/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
                 hx-target="#album-rows" hx-swap="innerHTML"
-                hx-confirm="Re-download “{{ album.title }}” at {{ album.upgrade_format_id | format_label }}? Qobuzarr never deletes from your library, so if the new files land in a differently named folder the {{ album.owned_format_id | format_label }} copy is left behind for you to remove."
+                hx-confirm="Re-download “{{ album.title }}” at {{ album.upgrade_format_id | format_label }}? Fonoteca never deletes from your library, so if the new files land in a differently named folder the {{ album.owned_format_id | format_label }} copy is left behind for you to remove."
                 title="On disk: {{ album.owned_format_id | format_label }} · available: {{ album.upgrade_format_id | format_label }}">Upgrade</button>
         {% elif state != 'downloaded' %}
         <button class="btn btn--sm btn--primary"

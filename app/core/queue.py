@@ -236,7 +236,7 @@ class QueueWorker:
 
         self._stopping = False
         self._wakeup.set()
-        self._task = asyncio.create_task(self._run(), name="qobuzarr-queue-worker")
+        self._task = asyncio.create_task(self._run(), name="fonoteca-queue-worker")
         logger.info("Download queue worker started")
 
     async def stop(self, timeout: float = 30.0) -> None:
