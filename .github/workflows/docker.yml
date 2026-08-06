@@ -13,14 +13,19 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       # The image is the release artifact — do not ship one that fails its own
       # test suite. The repo root being cwd is what puts `app` on sys.path.
       #
-      # A venv off the runner's own python, matching how the README develops
-      # this: no setup-python action to keep pinned, and it does not walk into
-      # PEP 668 ("externally-managed-environment") on the runner's system pip.
-      - run: python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-      - run: ./.venv/bin/python -m pytest tests -q
+      # setup-python rather than the runner's system python: its interpreter is
+      # not externally-managed, so plain `pip install` works (no PEP 668), and
+      # it needs no venv — `python3 -m venv` is exactly what Ubuntu breaks when
+      # python3-venv is absent, which is the ensurepip failure the README
+      # already documents.
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
       - name: Build and push image
         env:
           GH_TOKEN: ${{ github.token }}
