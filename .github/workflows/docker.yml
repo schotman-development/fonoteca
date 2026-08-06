@@ -1,0 +1,39 @@
+name: docker-image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The image is the release artifact — do not ship one that fails its own
+      # test suite. The repo root being cwd is what puts `app` on sys.path.
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
+      - name: Build and push image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # No `set -x`: xtrace would expand $GH_TOKEN into the log.
+        run: |
+          set -eu
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -t "$IMAGE:$GITHUB_REF_NAME" .
+          docker push "$IMAGE:$GITHUB_REF_NAME"
+          # :latest only for a real, non-pre release — otherwise a manual
+          # workflow_dispatch off main would quietly move it to an untagged build.
+          if [ "${{ github.event_name }}" = "release" ] && \
+             [ "${{ github.event.release.prerelease }}" != "true" ]; then
+            docker tag "$IMAGE:$GITHUB_REF_NAME" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi
