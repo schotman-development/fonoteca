@@ -151,7 +151,7 @@ def track_format_id(track: Any) -> int | None:
 
     Prefers the ``format_id`` the downloader recorded from ``getFileUrl``. Falls
     back to deriving it from the bit depth and sampling rate, which is all the
-    library scanner can supply for a file Qobuzarr did not fetch itself.
+    library scanner can supply for a file Fonoteca did not fetch itself.
     """
     recorded = _int(getattr(track, "format_id", None))
     if recorded is not None:

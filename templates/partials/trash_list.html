@@ -1,5 +1,5 @@
 {#
-  What Qobuzarr has taken out of the library and not yet destroyed.
+  What Fonoteca has taken out of the library and not yet destroyed.
   Context: trash (TrashOut), scope (str), trash_path (str)
 
   Restore puts a batch back at its original path and refuses if something is
@@ -40,7 +40,7 @@
         <button class="btn btn--sm"
                 hx-post="/ui/library/trash/{{ entry.id }}/restore{{ tail }}"
                 hx-target="#trash-list" hx-swap="innerHTML"
-                hx-confirm="Restore these files to {{ entry.original_path }}? Run a disk scan afterwards so Qobuzarr adopts them again.">
+                hx-confirm="Restore these files to {{ entry.original_path }}? Run a disk scan afterwards so Fonoteca adopts them again.">
           Restore
         </button>
         <button class="btn btn--sm btn--danger"

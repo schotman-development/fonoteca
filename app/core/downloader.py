@@ -786,7 +786,7 @@ class AlbumDownloader:
                 f"{result.tracks_unstreamable} unstreamable track(s): {result.summary}"
             )
         elif result.status is AlbumStatus.DOWNLOADED and result.tracks_upgraded:
-            # Say where the old copy went. Nothing in Qobuzarr deletes from the
+            # Say where the old copy went. Nothing in Fonoteca deletes from the
             # library, so an upgrade that landed in a differently-named folder
             # leaves the previous one behind for the user to remove.
             level, event = ActivityLevel.WARNING, "download.upgraded"

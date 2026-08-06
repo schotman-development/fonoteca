@@ -1,4 +1,4 @@
-"""Logging setup for Qobuzarr.
+"""Logging setup for Fonoteca.
 
 Call :func:`setup_logging` exactly once, as early as possible during startup.
 It configures the root logger with two handlers — stdout and a rotating file in
@@ -149,7 +149,7 @@ def setup_logging(
 
     Args:
         level: Override for the configured ``LOG_LEVEL``.
-        log_file: Override for ``data/qobuzarr.log``.
+        log_file: Override for ``data/fonoteca.log``.
         settings: Injected settings (defaults to :func:`get_settings`).
         quiet_loggers: Chatty third-party loggers pinned to WARNING.
 

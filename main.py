@@ -1,4 +1,4 @@
-"""Qobuzarr application entrypoint.
+"""Fonoteca application entrypoint.
 
 Builds the FastAPI application, wires the lifespan to
 :func:`app.core.state.init_state` / :func:`app.core.state.shutdown_state`,
@@ -37,10 +37,10 @@ from app.logging_conf import get_logger, setup_logging
 
 __all__ = ["app", "create_app", "lifespan", "main"]
 
-logger = get_logger("qobuzarr.main")
+logger = get_logger("fonoteca.main")
 
 DESCRIPTION = """
-Qobuzarr follows artists on Qobuz and downloads their new releases, the way
+Fonoteca follows artists on Qobuz and downloads their new releases, the way
 Lidarr follows artists on indexers.  Everything is fetched from the official
 Qobuz API with your own paid account, gated behind a single global rate limiter.
 """
@@ -60,7 +60,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """
     settings = get_settings()
     setup_logging(settings=settings)
-    logger.info("Starting Qobuzarr %s", __version__)
+    logger.info("Starting Fonoteca %s", __version__)
 
     settings.ensure_directories()
     await init_db()
@@ -89,7 +89,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        logger.info("Shutting down Qobuzarr")
+        logger.info("Shutting down Fonoteca")
         try:
             await shutdown_state()
         except Exception as exc:  # noqa: BLE001 - shutdown must not raise
@@ -203,7 +203,7 @@ def register_exception_handlers(application: FastAPI) -> None:
         return _error_page(
             request,
             500,
-            "Qobuzarr hit an unexpected error. The details are in data/qobuzarr.log.",
+            "Fonoteca hit an unexpected error. The details are in data/fonoteca.log.",
             detail=f"{type(exc).__name__}: {exc}",
         )
 
@@ -221,7 +221,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_logging(settings=settings)
 
     application = FastAPI(
-        title="Qobuzarr",
+        title="Fonoteca",
         description=DESCRIPTION,
         version=__version__,
         lifespan=lifespan,

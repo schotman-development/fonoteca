@@ -124,7 +124,7 @@
   <div class="card__head">
     <h2>Not in the catalogue <span class="count">{{ last.unmatched | length }}</span></h2>
     <span class="muted">
-      the artist is followed but Qobuzarr has no release with this title — most often
+      the artist is followed but Fonoteca has no release with this title — most often
       because the indexer has not imported that catalogue yet, sometimes because the
       edition on disk differs from the one Qobuz lists
     </span>
@@ -179,7 +179,7 @@
   <div class="card__head">
     <h2>Artists you do not follow <span class="count">{{ last.unknown_artists | length }}</span></h2>
     <span class="muted">
-      music in the library folder with no matching artist in Qobuzarr
+      music in the library folder with no matching artist in Fonoteca
     </span>
     {% set unknown_total = (last.unknown_artists | length) + last.truncated.get('unknown_artists', 0) %}
     {% if not job.get('running') %}

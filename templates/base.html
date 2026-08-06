@@ -38,7 +38,7 @@
     <aside class="sidebar">
       <nav class="sidebar__nav" aria-label="Primary"
            hx-get="/partials/nav?active={{ active }}" hx-swap="innerHTML"
-           hx-trigger="every 20s, qobuzarr:refresh from:body">
+           hx-trigger="every 20s, fonoteca:refresh from:body">
         {% include "partials/nav.html" %}
       </nav>
     </aside>
@@ -82,7 +82,7 @@
 
   <footer class="shell__foot" id="status-bar"
           hx-get="/partials/status-bar" hx-swap="innerHTML"
-          hx-trigger="load, every 10s, qobuzarr:refresh from:body">
+          hx-trigger="load, every 10s, fonoteca:refresh from:body">
     <span class="muted">loading…</span>
   </footer>
 
@@ -92,7 +92,7 @@
 
 <script>
 /* ---------------------------------------------------------------------------
- * Minimal HTMX-compatible behaviour, written by hand so that Qobuzarr has zero
+ * Minimal HTMX-compatible behaviour, written by hand so that Fonoteca has zero
  * CDN or build-step dependencies and works on a strictly offline machine.
  *
  * Supported attributes (the subset the templates actually use):
@@ -101,7 +101,7 @@
  *   hx-swap                        innerHTML (default) | outerHTML | beforeend | none
  *   hx-trigger                     click | submit | load | "every 5s" |
  *                                  "keyup changed delay:400ms" | "change" |
- *                                  "qobuzarr:refresh from:body"
+ *                                  "fonoteca:refresh from:body"
  *   hx-confirm                     window.confirm() text before firing
  *   hx-include                     extra CSS selector of inputs to serialise
  *   hx-indicator                   selector that gets .is-busy while in flight
@@ -175,7 +175,7 @@
     try { payload = JSON.parse(raw); } catch (err) { payload = null; }
     if (!payload || typeof payload !== "object") { return; }
     Object.keys(payload).forEach(function (name) {
-      if (name === "qobuzarr:toast") {
+      if (name === "fonoteca:toast") {
         var detail = payload[name] || {};
         toast(detail.message || "", detail.level || "info");
       } else {
@@ -365,7 +365,7 @@
     }, 5000);
   }
 
-  window.qobuzarr = { process: process, toast: toast };
+  window.fonoteca = { process: process, toast: toast };
   document.addEventListener("DOMContentLoaded", function () { process(document); });
 })();
 

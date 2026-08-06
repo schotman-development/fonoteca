@@ -1,6 +1,6 @@
 """Writing to and deleting from the music library.
 
-Everything else in Qobuzarr either reads the library (``scanner``) or only ever
+Everything else in Fonoteca either reads the library (``scanner``) or only ever
 adds to it (``downloader``). This module is the single place allowed to *change*
 what is already there — move it, rename it, re-tag it, take it away — which is
 why the rules live here rather than being spread across four callers.
@@ -431,7 +431,7 @@ def empty_trash(
 ) -> tuple[int, int]:
     """Delete trashed batches for real. **Synchronous.**
 
-    The only place in Qobuzarr that removes files permanently, and it only ever
+    The only place in Fonoteca that removes files permanently, and it only ever
     runs inside ``Settings.trash_dir`` on an explicit request. Pass *entry_id*
     for one batch, omit it for all of them.
 

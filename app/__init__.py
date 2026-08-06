@@ -1,4 +1,4 @@
-"""Qobuzarr — a Lidarr-style release monitor and downloader backed by the Qobuz API.
+"""Fonoteca — a Lidarr-style release monitor and downloader backed by the Qobuz API.
 
 The package is laid out as:
 

@@ -1,4 +1,4 @@
-"""Library scanning: reconcile what is already on disk with what Qobuzarr knows.
+"""Library scanning: reconcile what is already on disk with what Fonoteca knows.
 
 This is the Lidarr "rescan folder" / "import library" equivalent.  It walks
 ``Settings.library_path``, reads tags out of every audio file it finds, groups
@@ -15,7 +15,7 @@ hand is left exactly as it was found.
 **It never marks anything wanted.**  Adoption only ever moves an album
 *towards* "we have this" — ``wanted``/``skipped``/``failed`` may become
 ``downloaded``, never the other way round.  A scan can therefore only ever
-reduce the amount of downloading Qobuzarr would do, which is what makes it safe
+reduce the amount of downloading Fonoteca would do, which is what makes it safe
 to run unattended (see the opt-in rule in ``CLAUDE.md``).  Demoting an album
 when its files vanish is a different job and lives in
 :func:`app.core.scheduler.housekeeping`.
@@ -31,7 +31,7 @@ adopt a library it did not create:
 * Any directory containing audio files is a candidate album.
 * A directory called ``CD 01``, ``Disc 2``, ``Disk3``, ``Vol. 2`` … is folded
   into its parent, so ``Album (2015)/CD 02/`` is one album with two discs
-  rather than two albums.  ``{disc_prefix}`` folders written by Qobuzarr's own
+  rather than two albums.  ``{disc_prefix}`` folders written by Fonoteca's own
   downloader are folded by the same rule.
 * The album title comes from the ``album`` tag when the files carry one, and
   otherwise from the directory name with a trailing ``(2015)`` year and a
@@ -191,7 +191,7 @@ _DISC_DIRECTORY_RE = re.compile(
 #: A trailing ``(2015)`` / ``[2015]`` year marker on a directory name.
 _YEAR_SUFFIX_RE = re.compile(r"[\s._\-]*[\(\[\{](\d{4})[\)\]\}][\s._\-]*$")
 
-#: A trailing ``[FLAC 24-96]``-style quality tag, which Qobuzarr's own naming
+#: A trailing ``[FLAC 24-96]``-style quality tag, which Fonoteca's own naming
 #: template appends and which is never part of the title.
 _QUALITY_SUFFIX_RE = re.compile(r"\s*\[[^\[\]]*\]\s*$")
 
@@ -269,7 +269,7 @@ def album_directory_title(name: str) -> tuple[str, int | None]:
     """Split a directory name into ``(title, year)``.
 
     Handles both the shapes a library actually contains: ``"All Melody (2018)"``
-    and Qobuzarr's own ``"All Melody (2018) [FLAC 24-96]"``. The quality tag is
+    and Fonoteca's own ``"All Melody (2018) [FLAC 24-96]"``. The quality tag is
     removed first because it sits *after* the year.
 
     Returns the name unchanged and ``None`` when there is no year to find.
@@ -927,7 +927,7 @@ class LibraryScanner:
     def _root_for(self, artist: Artist | None) -> Path:
         """Narrow the walk to one artist's folder when it can be found.
 
-        The folder is the one Qobuzarr's naming template would produce. When it
+        The folder is the one Fonoteca's naming template would produce. When it
         does not exist — a library laid out by something else, or an artist
         whose name was sanitised differently — the whole library is walked and
         the caller's ``artist_id`` filter does the narrowing instead.
@@ -1163,7 +1163,7 @@ class LibraryScanner:
         Only rows that already exist are touched. Track rows carry the Qobuz
         track id as their primary key, so a file the database has never heard of
         cannot be turned into one — the album-level match above is what covers
-        a release that was never downloaded through Qobuzarr.
+        a release that was never downloaded through Fonoteca.
 
         Matching is by ``(disc, track)`` first and by normalised title second,
         which rescues an album whose files were numbered by a different ripper.
@@ -1190,7 +1190,7 @@ class LibraryScanner:
             track.status = TrackStatus.DOWNLOADED
             track.file_size = scanned_track.file_size or track.file_size
             # Never overwrite what Qobuz told us the delivered file was; only
-            # fill the gaps for a file Qobuzarr did not download itself.
+            # fill the gaps for a file Fonoteca did not download itself.
             if track.bit_depth is None:
                 track.bit_depth = scanned_track.bit_depth
             if track.sampling_rate is None:

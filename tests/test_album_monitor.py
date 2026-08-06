@@ -14,7 +14,7 @@ Two things are worth guarding and both are here:
   onto whatever row you pressed. That is the album-level twin of the
   ``set_monitored`` trap in the bulk artist editor.
 * Ignoring a release must not queue, cancel or download anything. It only ever
-  reduces what Qobuzarr will do.
+  reduces what Fonoteca will do.
 
 A scratch SQLite file under ``tmp_path`` is injected through
 ``dependency_overrides``; no queue worker runs and nothing touches the network.

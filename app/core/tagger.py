@@ -1,7 +1,7 @@
 """Metadata tagging for downloaded audio files.
 
 Qobuz delivers ready-to-play FLAC and MP3, so all that is left is writing the
-tags Qobuzarr knows about and embedding the cover art.  Two containers are
+tags Fonoteca knows about and embedding the cover art.  Two containers are
 supported:
 
 * **FLAC** — Vorbis comments plus a ``METADATA_BLOCK_PICTURE``.
@@ -210,7 +210,7 @@ def _tag_flac(
     if audio.tags is None:
         audio.add_tags()
     else:
-        # Drop whatever Qobuz shipped; Qobuzarr is authoritative. Clearing in
+        # Drop whatever Qobuz shipped; Fonoteca is authoritative. Clearing in
         # memory (rather than FLAC.delete()) avoids a second full-file rewrite.
         audio.tags.clear()
 

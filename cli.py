@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qobuzarr command-line interface (stdlib :mod:`argparse` only).
+"""Fonoteca command-line interface (stdlib :mod:`argparse` only).
 
 Everything the web UI can do that is useful from a terminal, plus the one thing
 it cannot: proving that the Qobuz handshake works end to end.
@@ -603,7 +603,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     host = args.host or settings.host
     port = args.port or settings.port
     reload = bool(args.reload or settings.reload)
-    out(f"Qobuzarr {__version__} -> http://{host}:{port}")
+    out(f"Fonoteca {__version__} -> http://{host}:{port}")
     uvicorn.run(
         "main:app",
         host=host,
@@ -621,7 +621,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the argparse command tree."""
     parser = argparse.ArgumentParser(
         prog="cli.py",
-        description="Qobuzarr command line — follow artists and drive the indexer.",
+        description="Fonoteca command line — follow artists and drive the indexer.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
@@ -633,7 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  cli.py serve --port 8000\n"
         ),
     )
-    parser.add_argument("--version", action="version", version=f"Qobuzarr {__version__}")
+    parser.add_argument("--version", action="version", version=f"Fonoteca {__version__}")
     parser.add_argument(
         "--log-level",
         default=None,
@@ -754,7 +754,7 @@ def build_parser() -> argparse.ArgumentParser:
     queue.add_argument("--all", action="store_true", help="Include finished/failed items.")
     queue.set_defaults(func=cmd_queue_status, needs_async=True)
 
-    serve = subparsers.add_parser("serve", help="Run the Qobuzarr web server.")
+    serve = subparsers.add_parser("serve", help="Run the Fonoteca web server.")
     serve.add_argument("--host", default=None, help="Bind address (default: HOST).")
     serve.add_argument("--port", type=int, default=None, help="Bind port (default: PORT).")
     serve.add_argument("--reload", action="store_true", help="Auto-reload on code changes.")

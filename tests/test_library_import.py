@@ -649,7 +649,7 @@ def test_the_ui_start_returns_the_progress_panel(client: TestClient) -> None:
     response = client.post("/ui/library/import", headers={"HX-Request": "true"})
     assert response.status_code == 200
     trigger = json.loads(response.headers["HX-Trigger"])
-    assert "Looking up" in trigger["qobuzarr:toast"]["message"]
+    assert "Looking up" in trigger["fonoteca:toast"]["message"]
 
 
 def test_the_progress_panel_polls_only_while_running(

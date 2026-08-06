@@ -1,4 +1,4 @@
-# Qobuzarr
+# Fonoteca
 
 A Lidarr-style release monitor for [Qobuz](https://www.qobuz.com/). You follow artists;
 a deliberately slow background indexer re-checks each one for new releases, records them,
@@ -18,7 +18,7 @@ CLI (cli.py)           ─┘
 
 ## How it differs from Lidarr
 
-| | Lidarr | Qobuzarr |
+| | Lidarr | Fonoteca |
 |---|---|---|
 | Source of files | Torrent/usenet indexers + download clients | Qobuz's own API, using **your** paid subscription |
 | Metadata | MusicBrainz + Lidarr's metadata proxy | Qobuz catalogue only (one source of truth) |
@@ -29,14 +29,14 @@ CLI (cli.py)           ─┘
 | Deployment | Mono/.NET, Docker | Plain Python 3.12, one process, SQLite, no build step |
 | Legality | Depends entirely on where the files come from | Streams you are already entitled to, for personal use |
 
-The design bias throughout is **be slow and be boring**. A single unattended Qobuzarr should
+The design bias throughout is **be slow and be boring**. A single unattended Fonoteca should
 look, from Qobuz's side, like a person browsing the catalogue occasionally.
 
 ---
 
 ## Downloading is opt-in
 
-**Qobuzarr never downloads anything on its own unless you tell it to.** This is the one place it
+**Fonoteca never downloads anything on its own unless you tell it to.** This is the one place it
 deliberately departs from Lidarr's hands-off default, because "follow an artist" can otherwise mean
 "start fetching a 50-album discography in lossless" — hundreds of gigabytes — from one click.
 
@@ -96,7 +96,7 @@ subscription (`getFileUrl` silently downgrades what your plan does not cover), t
 for hi-res. `app/core/quality.py` applies all three, and both the button and the download
 loop consult it, so *Upgrade* can never queue a download that then skips every track.
 
-Anything unknown counts as "no upgrade". A release whose files Qobuzarr cannot measure —
+Anything unknown counts as "no upgrade". A release whose files Fonoteca cannot measure —
 adopted from disk with unreadable tags, say — shows no button rather than a guess. Queue it
 through `POST /api/albums/{album_id}/queue` if you want to force a re-fetch.
 
@@ -120,14 +120,14 @@ one artist from their page).
 **Nothing is ever unlinked from `LIBRARY_PATH`.** Deleting moves files to `TRASH_PATH`
 (`data/trash` by default) under a timestamped folder with a manifest saying where they came
 from, and there they stay until you empty the trash. Emptying it is the one action in
-Qobuzarr that cannot be undone, and it only ever touches the trash directory.
+Fonoteca that cannot be undone, and it only ever touches the trash directory.
 
 | Action | Where | What it does |
 |---|---|---|
 | **Delete** | Any release on the artist page | Folder to the trash; the release goes back to `wanted` (or `skipped` if it is not monitored). Nothing is re-queued — deleting is not a request to fetch it again. |
 | **Re-file** | Library tidy | Moves album folders, and the files inside them, to wherever `NAMING_TEMPLATE` renders today. Previews first, always. |
 | **Re-tag** | Library tidy | Rewrites tags and embedded cover art in place from the catalogue metadata already in the database. No Qobuz calls, no re-downloading, audio untouched. |
-| **Restore** | Library tidy → Trash | Puts a batch back where it came from. Run a disk scan afterwards so Qobuzarr adopts it again. |
+| **Restore** | Library tidy → Trash | Puts a batch back where it came from. Run a disk scan afterwards so Fonoteca adopts it again. |
 | **Empty trash** | Library tidy → Trash | Permanent. |
 
 Three rules hold across all of them, and `app/core/librarian.py` is the only module allowed
@@ -171,8 +171,8 @@ Two related safety notes:
 Python 3.12, no system packages beyond Python itself.
 
 ```bash
-git clone <this repo> qobuz-downloader
-cd qobuz-downloader
+git clone <this repo> fonoteca
+cd fonoteca
 
 python3 -m venv .venv                # see the note below if this fails
 ./.venv/bin/pip install -r requirements.txt
@@ -226,7 +226,7 @@ Then open <http://127.0.0.1:8000>.
 | Automation | `/wanted` | The backlog — everything discovered but not on disk, across all artists, with a per-release monitor toggle |
 | Automation | `/queue` | The sequential download queue, polled live |
 | Automation | `/activity` | Append-only history of every index, queue and download event |
-| System | `/library/scan` | Disk scan — what is already in the library folder, and what Qobuzarr made of it |
+| System | `/library/scan` | Disk scan — what is already in the library folder, and what Fonoteca made of it |
 | System | `/settings` | The effective configuration, read-only |
 
 Everything the UI does is also available as JSON under `/api/*` (interactive docs at
@@ -288,7 +288,7 @@ ever changes monitoring — it never queues a download.
 ### Scanning music you already have
 
 Point `LIBRARY_PATH` at a folder that already contains music and press **Scan now**
-on the Disk scan page. Qobuzarr reads the tags off every audio file, groups them into
+on the Disk scan page. Fonoteca reads the tags off every audio file, groups them into
 albums, matches each one against the artists you follow, and marks the complete ones
 `downloaded` — so a release you already own stops sitting on the Wanted page.
 
@@ -296,10 +296,10 @@ Three things it will not do:
 
 * **It never writes to the library.** No renaming, no moving, no tag repair, no
   deleting. Whatever laid out that folder — Beets, Picard, Lidarr, you — keeps
-  owning it. Qobuzarr only writes to its own database.
+  owning it. Fonoteca only writes to its own database.
 * **It never marks anything wanted.** Adoption is one-directional: `wanted` may
   become `downloaded`, never the reverse. A scan can only ever *reduce* the amount
-  of downloading Qobuzarr would do, which is why it is safe on the nightly job.
+  of downloading Fonoteca would do, which is why it is safe on the nightly job.
 * **It makes no Qobuz API call.** The scan is entirely local, so it costs nothing
   against the rate limit and takes about a second per thousand files.
 
@@ -309,10 +309,10 @@ What it finds, it reports in three groups:
 | --- | --- | --- |
 | Incomplete on disk | Matched a followed release, but fewer files than Qobuz lists | Left `wanted` on purpose — download it, or lower `LIBRARY_SCAN_COMPLETE_RATIO` |
 | Not in the catalogue | The artist is followed; this particular release is not in the database | Usually a different edition, or the indexer has not reached it yet |
-| Artists you do not follow | Music by someone Qobuzarr has never heard of | **Find on Qobuz** searches for them — one live API call, only when you press it |
+| Artists you do not follow | Music by someone Fonoteca has never heard of | **Find on Qobuz** searches for them — one live API call, only when you press it |
 
 Matching is forgiving about layout on purpose, because the point is to adopt a folder
-Qobuzarr did not create: `CD 01`/`Disc 2` sub-folders fold into their parent, a trailing
+Fonoteca did not create: `CD 01`/`Disc 2` sub-folders fold into their parent, a trailing
 `(2018)` or `[FLAC 24-96]` is stripped off the folder name, artist names are compared with
 accents and articles folded (`Thorbjørn` matches `Thorbjorn`, `The Beatles` matches
 `Beatles`), and album titles go through the same edition-collapsing normaliser the indexer
@@ -482,7 +482,7 @@ Copy one block into `.env`. They are all present (commented) in `.env.example`.
 | `PORT` | `8000` | Bind port. |
 | `RELOAD` | `false` | uvicorn auto-reload (development only). |
 | `LOG_LEVEL` | `INFO` | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`. |
-| `LOG_FILE_NAME` | `qobuzarr.log` | Rotating log inside `DATA_PATH`. |
+| `LOG_FILE_NAME` | `fonoteca.log` | Rotating log inside `DATA_PATH`. |
 | `LOG_MAX_BYTES` | `5242880` | Rotation size. |
 | `LOG_BACKUP_COUNT` | `5` | Rotated files kept. |
 | `LOG_REDACT_SECRETS` | `true` | Mask tokens, secrets, signatures and signed URLs in every log line. |
@@ -564,7 +564,7 @@ music/
 ## The app secret
 
 Qobuz signs `track/getFileUrl` with an `app_secret` that the official web player embeds in
-its JavaScript bundle. Qobuzarr reproduces exactly what the player does, so that your own
+its JavaScript bundle. Fonoteca reproduces exactly what the player does, so that your own
 paid account can use the official API:
 
 1. If `QOBUZ_APP_SECRET` is set, it is used verbatim.
@@ -581,7 +581,7 @@ rejected by the API — the winner is one of the seed-derived candidates, which 
 candidate is validated rather than trusted. And the bundle path contains letters
 (`.../resources/8.2.0-b034/bundle.js`), so a digits-only version regex will not match.
 
-If nothing validates, Qobuzarr raises an actionable error asking you to set
+If nothing validates, Fonoteca raises an actionable error asking you to set
 `QOBUZ_APP_SECRET` manually. If Qobuz ever rejects a signature at runtime, the client
 re-derives once and retries automatically.
 
@@ -630,12 +630,12 @@ download worker then takes one album at a time.
 
 ## Running as a service (systemd)
 
-`/etc/systemd/system/qobuzarr.service` — replace `YOUR_USER` and the two paths with
+`/etc/systemd/system/fonoteca.service` — replace `YOUR_USER` and the two paths with
 your own:
 
 ```ini
 [Unit]
-Description=Qobuzarr — Qobuz release monitor
+Description=Fonoteca — Qobuz release monitor
 After=network-online.target
 Wants=network-online.target
 
@@ -643,9 +643,9 @@ Wants=network-online.target
 Type=simple
 User=YOUR_USER
 Group=YOUR_USER
-WorkingDirectory=/path/to/qobuzarr
+WorkingDirectory=/path/to/fonoteca
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/path/to/qobuzarr/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=/path/to/fonoteca/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=60
@@ -655,7 +655,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/path/to/qobuzarr/data /path/to/music/library
+ReadWritePaths=/path/to/fonoteca/data /path/to/music/library
 
 [Install]
 WantedBy=multi-user.target
@@ -663,8 +663,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now qobuzarr
-journalctl -u qobuzarr -f
+sudo systemctl enable --now fonoteca
+journalctl -u fonoteca -f
 ```
 
 `TimeoutStopSec=60` matters: on shutdown the worker finishes the file it is streaming and
@@ -681,7 +681,7 @@ leaves the album queued, so a restart resumes cleanly instead of leaving debris.
 ```
 
 There is no Alembic and no migration story: `init_db()` only runs `create_all`. Adding a
-column means either a manual `ALTER TABLE` or deleting `data/qobuzarr.db`.
+column means either a manual `ALTER TABLE` or deleting `data/fonoteca.db`.
 
 Architecture notes for future work live in `CLAUDE.md`.
 
@@ -689,13 +689,13 @@ Architecture notes for future work live in `CLAUDE.md`.
 
 ## Legal / terms of service
 
-Qobuzarr is a personal-use tool that drives the **official Qobuz API with your own
+Fonoteca is a personal-use tool that drives the **official Qobuz API with your own
 credentials**. It does not circumvent DRM, does not share files, contains no accounts or
 keys of its own, and gives you nothing your subscription does not already entitle you to.
 
-* You need your **own paid Qobuz subscription**. Qobuzarr is useless without one.
+* You need your **own paid Qobuz subscription**. Fonoteca is useless without one.
 * Downloading is limited to what your subscription lets you stream. The API silently
-  downgrades anything above your entitlement, and Qobuzarr records what it actually got.
+  downgrades anything above your entitlement, and Fonoteca records what it actually got.
 * Redistributing the downloaded files, or using them commercially, is on you and is almost
   certainly a breach of Qobuz's terms and of copyright law.
 * Automated access may not be something Qobuz's terms of service contemplate. That is why

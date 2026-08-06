@@ -34,7 +34,7 @@
     <div id="activity-rows"
          hx-get="/partials/activity" hx-swap="innerHTML"
          hx-include="#activity-filters"
-         hx-trigger="every 15s, qobuzarr:refresh from:body">
+         hx-trigger="every 15s, fonoteca:refresh from:body">
       {% include "partials/activity_rows.html" %}
     </div>
   </div>

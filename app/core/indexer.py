@@ -1,7 +1,7 @@
-"""The slow background indexer: the headline feature of Qobuzarr.
+"""The slow background indexer: the headline feature of Fonoteca.
 
 The indexer walks the followed artists **one at a time**, at a deliberately
-sedate pace, looking for releases Qobuzarr has not seen yet.  Everything it
+sedate pace, looking for releases Fonoteca has not seen yet.  Everything it
 does goes through :class:`app.qobuz.client.QobuzClient`, which in turn is gated
 by the single global :class:`~app.qobuz.ratelimit.RateLimiter`, so the indexer
 can never outrun the configured request budget.
@@ -130,7 +130,7 @@ def utc(value: datetime | None) -> datetime | None:
 
     SQLite hands back naive datetimes even for ``DateTime(timezone=True)``
     columns, and comparing those to :func:`app.models.utcnow` would raise
-    ``TypeError``.  Everything Qobuzarr writes is UTC, so a missing tzinfo is
+    ``TypeError``.  Everything Fonoteca writes is UTC, so a missing tzinfo is
     simply stamped as UTC.
     """
     if value is None:
@@ -162,7 +162,7 @@ def dedupe_key(title: str | None) -> str:
 
 
 def edition_rank(album: Album) -> tuple[Any, ...]:
-    """Sort key deciding which edition of a release Qobuzarr keeps.
+    """Sort key deciding which edition of a release Fonoteca keeps.
 
     **Track count first**, then hi-res, then bit depth / sampling rate / disc
     count, then the newest release date.  The album id is the final tie-break so
@@ -832,7 +832,7 @@ class Indexer:
             if len(members) < 2 or not key:
                 continue
 
-            # Only an edition Qobuzarr actually wants may win.  Ranking over
+            # Only an edition Fonoteca actually wants may win.  Ranking over
             # *every* member let an album that was already skipped (wrong
             # release type, or filtered out by the monitor mode) beat the one
             # genuinely wanted edition and demote it to `skipped` too, so the

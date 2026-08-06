@@ -43,7 +43,7 @@ def make_request(path: str, accept: str = "") -> Request:
 
 # ---------------------------------------------------------------------- app
 def test_app_metadata() -> None:
-    assert main.app.title == "Qobuzarr"
+    assert main.app.title == "Fonoteca"
     assert main.app.router.lifespan_context is not None
 
 

@@ -233,7 +233,7 @@ def require_client() -> Any:
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 "The Qobuz client is not available. Check QOBUZ_APP_ID / "
-                "QOBUZ_USER_AUTH_TOKEN in .env and restart Qobuzarr."
+                "QOBUZ_USER_AUTH_TOKEN in .env and restart Fonoteca."
             ),
         )
     return client
@@ -759,7 +759,7 @@ async def delete_album_files(
     Nothing is unlinked: the folder goes to ``Settings.trash_dir`` and stays
     there until the trash is emptied. The album returns to ``WANTED`` when it is
     still monitored and ``SKIPPED`` when it is not, and — like every other path
-    in Qobuzarr — **nothing is queued**. Deleting is not a request to fetch it
+    in Fonoteca — **nothing is queued**. Deleting is not a request to fetch it
     again.
     """
     try:
@@ -922,7 +922,7 @@ async def restore_trash_entry(entry_id: str, settings: Settings | None = None) -
 async def empty_trash(
     entry_id: str | None = None, settings: Settings | None = None
 ) -> tuple[int, int]:
-    """Delete trashed batches for real. The one irreversible action in Qobuzarr."""
+    """Delete trashed batches for real. The one irreversible action in Fonoteca."""
     conf = settings or get_settings()
     try:
         return await asyncio.to_thread(librarian.empty_trash, conf, entry_id)
@@ -1484,7 +1484,7 @@ async def api_get_artist(
     artist_id: str,
     album_limit: int = Query(500, ge=1, le=2000),
 ) -> ArtistDetailOut:
-    """Return one followed artist plus every release Qobuzarr knows about."""
+    """Return one followed artist plus every release Fonoteca knows about."""
     artist = await get_artist_or_404(session, artist_id)
     albums, total = await list_albums_for_artist(session, artist.id, limit=album_limit)
     counts = await artist_album_counts(session, [artist.id])
@@ -1690,7 +1690,7 @@ async def api_retag_library(
 
 @router.get("/library/trash", response_model=TrashOut, summary="What is recoverable")
 async def api_trash(settings: SettingsDep) -> TrashOut:
-    """Everything Qobuzarr has taken out of the library and not yet destroyed."""
+    """Everything Fonoteca has taken out of the library and not yet destroyed."""
     return await trash_contents(settings)
 
 

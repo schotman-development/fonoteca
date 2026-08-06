@@ -1,6 +1,6 @@
 """Writing to and deleting from the music library.
 
-Everything else in Qobuzarr either reads the library or only adds to it. This is
+Everything else in Fonoteca either reads the library or only adds to it. This is
 the module that can destroy data, so the tests are weighted towards the refusals
 rather than the happy paths:
 

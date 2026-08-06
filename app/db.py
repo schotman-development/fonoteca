@@ -75,7 +75,7 @@ AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 def _set_sqlite_pragmas(
     dbapi_connection: DBAPIConnection, _record: ConnectionPoolEntry
 ) -> None:
-    """Apply the per-connection SQLite pragmas Qobuzarr relies on."""
+    """Apply the per-connection SQLite pragmas Fonoteca relies on."""
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")

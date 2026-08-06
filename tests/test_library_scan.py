@@ -867,7 +867,7 @@ def test_the_ui_action_returns_a_fragment_with_a_toast(client: TestClient) -> No
     assert response.status_code == 200
     assert "<html" not in response.text.lower()
     trigger = json.loads(response.headers["HX-Trigger"])
-    assert "matched" in trigger["qobuzarr:toast"]["message"]
+    assert "matched" in trigger["fonoteca:toast"]["message"]
 
 
 def test_the_ui_preview_button_really_previews(client: TestClient) -> None:

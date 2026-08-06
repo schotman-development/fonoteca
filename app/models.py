@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 ORM models for Qobuzarr.
+"""SQLAlchemy 2.0 ORM models for Fonoteca.
 
 Key data-model rule, confirmed against the live API: **Qobuz album ids are not
 integers** (e.g. ``"uyej1o165e870"``, ``"0884977859300"``).  They are stored as
@@ -61,7 +61,7 @@ def utcnow() -> datetime:
 
 
 class Base(DeclarativeBase):
-    """Declarative base for every Qobuzarr table."""
+    """Declarative base for every Fonoteca table."""
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ class MonitorMode(str, enum.Enum):
 
 
 class AlbumStatus(str, enum.Enum):
-    """Lifecycle of an album inside Qobuzarr."""
+    """Lifecycle of an album inside Fonoteca."""
 
     SKIPPED = "skipped"
     WANTED = "wanted"
@@ -121,7 +121,7 @@ class ActivityLevel(str, enum.Enum):
 
 
 class ReleaseType(str, enum.Enum):
-    """Normalised release types Qobuzarr filters on."""
+    """Normalised release types Fonoteca filters on."""
 
     ALBUM = "album"
     EP = "ep"
