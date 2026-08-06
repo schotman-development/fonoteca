@@ -186,7 +186,7 @@ unit, so systemd runs it and `podman auto-update` updates it. No wrapper service
 to write, no Docker socket to expose.
 
 ```bash
-mkdir -p ~/.config/containers/systemd ~/.config/fonoteca ~/music
+mkdir -p ~/.config/containers/systemd ~/.config/fonoteca ~/music ~/.local/share/fonoteca
 
 curl -fsSL -o ~/.config/containers/systemd/fonoteca.container \
   https://raw.githubusercontent.com/schotman-development/fonoteca/main/deploy/fonoteca.container
@@ -228,12 +228,17 @@ cd fonoteca
 cp .env.example .env
 $EDITOR .env                          # credentials, plus MUSIC_DIR/DATA_DIR/PUID if needed
 
+mkdir -p music data                   # create these BEFORE the first up — see below
 docker compose up -d
 ```
 
+`MUSIC_DIR` and `DATA_DIR` default to `./music` and `./data`; point them at real
+paths. **Create them yourself first.** Docker creates a missing bind-mount source
+directory owned by `root`, and the container is not root, so the first start
+fails on a permission error that reads like a bug in Fonoteca.
+
 The image runs as uid 1000. If `id -u` says otherwise, put `PUID`/`PGID` in
-`.env` rather than chowning your music library. `MUSIC_DIR` and `DATA_DIR`
-default to `./music` and `./data`; point them at real paths.
+`.env` rather than chowning your music library.
 
 Update with `docker compose pull && docker compose up -d`. There is no
 watchtower service on purpose — it needs the Docker socket, which is

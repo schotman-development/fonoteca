@@ -25,12 +25,8 @@ services:
     # host uid differs, set PUID/PGID in .env (`id -u`, `id -g`) rather than
     # chowning your music library.
     user: "${PUID:-1000}:${PGID:-1000}"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    # No healthcheck block: the image's HEALTHCHECK is inherited as-is, and a
+    # copy here would just be a second place to forget to update.
 
 # Updating is `docker compose pull && docker compose up -d`. There is
 # deliberately no watchtower service: it wants /var/run/docker.sock, which is
