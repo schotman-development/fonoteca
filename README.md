@@ -1,9 +1,14 @@
 # Fonoteca
 
-A Lidarr-style release monitor for [Qobuz](https://www.qobuz.com/). You follow artists;
-a deliberately slow background indexer re-checks each one for new releases, records them,
-and queues the ones you want; a sequential worker downloads them straight from Qobuz,
-tags them and files them into your library.
+A Lidarr-style music library manager backed by [Qobuz](https://www.qobuz.com/). You follow
+artists; a deliberately slow background indexer re-checks each one for new releases and
+records them; a sequential worker downloads the ones you want straight from Qobuz, tags
+them and files them into your library.
+
+It looks after the library you already have, too: it adopts what is on disk instead of
+fetching it again, re-files and re-tags albums to your naming template, replaces a copy
+when Qobuz can serve a better one, and moves whatever it removes to a recoverable trash
+rather than unlinking it.
 
 No torrents. No usenet. No indexers to configure. No transcoding — Qobuz already serves
 ready-to-use FLAC and MP3, so nothing is re-encoded and `ffmpeg` is not required.
