@@ -5,8 +5,9 @@ docstrings, which are accurate.
 
 ## What this is
 
-A Lidarr-alternative that monitors artists on Qobuz and downloads their releases through the
-official API with the user's own paid account. Python 3.12, FastAPI, SQLAlchemy 2.0 async,
+A Lidarr-alternative that manages a music library: it monitors artists on Qobuz and downloads
+their releases through the official API with the user's own paid account, and it owns what is
+already on disk — adoption, re-file, re-tag, upgrades, trash. Python 3.12, FastAPI, SQLAlchemy 2.0 async,
 SQLite, APScheduler, Jinja2 + HTMX, httpx, mutagen. No Docker, no ffmpeg, no transcoding.
 
 Run everything with the venv interpreter: `./.venv/bin/python`.
