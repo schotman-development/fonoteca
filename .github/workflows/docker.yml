@@ -1,0 +1,85 @@
+name: docker-image
+
+on:
+  release:
+    types: [published]
+  # Build and smoke-test on every PR that touches the container files. The
+  # image is the release artifact; a Dockerfile that stopped building should
+  # fail the PR, not the release. Nothing is pushed except on a release.
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - compose.yaml
+      - requirements.txt
+      - .github/workflows/docker.yml
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      # The image is the release artifact — do not ship one that fails its own
+      # test suite. The repo root being cwd is what puts `app` on sys.path.
+      #
+      # setup-python rather than the runner's system python: its interpreter is
+      # not externally-managed, so plain `pip install` works (no PEP 668), and
+      # it needs no venv — `python3 -m venv` is exactly what Ubuntu breaks when
+      # python3-venv is absent, which is the ensurepip failure the README
+      # already documents.
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
+
+      - name: Build image
+        run: docker build -t fonoteca:ci .
+
+      # Proves the things a build alone does not: that it boots as uid 1000,
+      # that it can write to bind mounts owned by someone else, that the paths
+      # really land in /music and /data, and that /health answers.
+      - name: Smoke test
+        run: |
+          set -eu
+          mkdir -p /tmp/smoke/music /tmp/smoke/data
+          chmod 777 /tmp/smoke/music /tmp/smoke/data
+          # Credentials are deliberately junk: the lifespan is documented as
+          # forgiving so the UI can report the problem, so boot must survive it.
+          docker run -d --name fonoteca-ci -p 8000:8000 \
+            -e QOBUZ_APP_ID=0 -e QOBUZ_USER_AUTH_TOKEN=not-a-real-token \
+            -v /tmp/smoke/music:/music -v /tmp/smoke/data:/data \
+            fonoteca:ci
+          for _ in $(seq 40); do
+            if curl -fsS http://127.0.0.1:8000/health; then healthy=1; break; fi
+            sleep 2
+          done
+          echo
+          echo "--- container logs ---"
+          docker logs fonoteca-ci
+          echo "--- uid and mount writability ---"
+          docker exec fonoteca-ci id
+          test -f /tmp/smoke/data/fonoteca.db && echo "database written to the mount"
+          [ "${healthy:-0}" = 1 ]
+
+      - name: Push to GHCR
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # No `set -x`: xtrace would expand $GH_TOKEN into the log.
+        run: |
+          set -eu
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag fonoteca:ci "$IMAGE:$GITHUB_REF_NAME"
+          docker push "$IMAGE:$GITHUB_REF_NAME"
+          # :latest only for a real, non-pre release, so a pre-release cannot
+          # move the tag everything else follows.
+          if [ "${{ github.event.release.prerelease }}" != "true" ]; then
+            docker tag fonoteca:ci "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi

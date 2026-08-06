@@ -8,7 +8,11 @@ docstrings, which are accurate.
 A Lidarr-alternative that manages a music library: it monitors artists on Qobuz and downloads
 their releases through the official API with the user's own paid account, and it owns what is
 already on disk — adoption, re-file, re-tag, upgrades, trash. Python 3.12, FastAPI, SQLAlchemy 2.0 async,
-SQLite, APScheduler, Jinja2 + HTMX, httpx, mutagen. No Docker, no ffmpeg, no transcoding.
+SQLite, APScheduler, Jinja2 + HTMX, httpx, mutagen. No ffmpeg, no transcoding.
+
+Ships as a container (`Dockerfile`, `compose.yaml`, `deploy/fonoteca.container` for
+Podman Quadlet) as well as a source install — see `specs/docker.md`. Development
+still happens in the venv, not in a container.
 
 Run everything with the venv interpreter: `./.venv/bin/python`.
 Tests: `./.venv/bin/python -m pytest tests -q` from the repo root (no conftest; the root

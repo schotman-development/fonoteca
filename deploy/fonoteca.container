@@ -1,0 +1,69 @@
+# Podman Quadlet unit — the recommended way to run Fonoteca on a Linux host.
+#
+#   mkdir -p ~/.config/containers/systemd ~/.config/fonoteca ~/music \
+#            ~/.local/share/fonoteca
+#   cp deploy/fonoteca.container ~/.config/containers/systemd/
+#   cp .env.example ~/.config/fonoteca/env   # then add your Qobuz credentials
+#
+# EnvironmentFile is systemd's parser, not dotenv: plain KEY=VALUE only, and do
+# NOT uncomment LIBRARY_PATH/DATA_PATH in it — they would override the /music
+# and /data the image sets, sending everything back inside the container.
+#   systemctl --user daemon-reload
+#   systemctl --user start fonoteca
+#
+# Rootless units die at logout unless the user lingers:
+#   loginctl enable-linger $USER
+#
+# Unattended updates, no extra service and no Docker socket:
+#   systemctl --user enable --now podman-auto-update.timer
+#   podman auto-update --dry-run          # what would move, without moving it
+#
+# This file IS the unit; systemd generates the service from it. That is the
+# whole reason Quadlet beats compose here — `podman auto-update` restarts
+# systemd units, so a compose deployment needs a hand-written wrapper unit
+# just to give it something to restart.
+
+[Unit]
+Description=Fonoteca — Qobuz library manager
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# AutoUpdate=registry needs a fully-qualified reference, which this is.
+Image=ghcr.io/schotman-development/fonoteca:latest
+AutoUpdate=registry
+# Without this the container is named systemd-fonoteca, and every `podman exec
+# fonoteca ...` in the README misses.
+ContainerName=fonoteca
+PublishPort=8000:8000
+
+# The library is a bind mount so it stays yours: browsable, addable-to and
+# backup-able from the host. It cannot be read-only — Fonoteca downloads into
+# it, and re-files, re-tags and trashes what is already there.
+Volume=%h/music:/music:z
+# Database, logs, secret.cache, trash, partial downloads. Persistent by virtue
+# of being a host path; nothing here is recreatable.
+Volume=%h/.local/share/fonoteca:/data:z
+
+EnvironmentFile=%h/.config/fonoteca/env
+
+# Maps YOUR host uid — whatever it happens to be — to uid 1000 inside, which is
+# what the image runs as. Without this, rootless Podman maps you to uid 0 in the
+# container and both bind mounts above end up unwritable.
+UserNS=keep-id:uid=1000,gid=1000
+
+# No HealthCmd here: Podman already applies the image's HEALTHCHECK. This only
+# says what to do when it trips — stop, so a container that comes up broken
+# after an update ends up inactive rather than quietly serving errors.
+HealthOnFailure=stop
+
+[Service]
+# ponytail: on-failure, deliberately not always. `Restart=always` would resurrect
+# a container that came up broken after an update, hiding the failure from
+# auto-update's rollback check and leaving you on a bad :latest.
+# The exact stop-to-rollback handoff is the one thing here worth watching on
+# your first real auto-update; `podman auto-update --dry-run` first.
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

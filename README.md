@@ -173,6 +173,81 @@ Two related safety notes:
 
 ## Install
 
+Two ways: a container (Podman or Docker), or from source in a virtualenv.
+Either way you need Qobuz credentials first — see
+[Getting the credentials](#getting-the-credentials).
+
+---
+
+### A. Container — Podman (recommended)
+
+Fonoteca ships a [Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html)
+unit, so systemd runs it and `podman auto-update` updates it. No wrapper service
+to write, no Docker socket to expose.
+
+```bash
+mkdir -p ~/.config/containers/systemd ~/.config/fonoteca ~/music ~/.local/share/fonoteca
+
+curl -fsSL -o ~/.config/containers/systemd/fonoteca.container \
+  https://raw.githubusercontent.com/schotman-development/fonoteca/main/deploy/fonoteca.container
+curl -fsSL -o ~/.config/fonoteca/env \
+  https://raw.githubusercontent.com/schotman-development/fonoteca/main/.env.example
+
+$EDITOR ~/.config/fonoteca/env        # add QOBUZ_APP_ID and QOBUZ_USER_AUTH_TOKEN
+
+systemctl --user daemon-reload
+systemctl --user start fonoteca
+loginctl enable-linger $USER          # keep it running after you log out
+```
+
+Then open <http://127.0.0.1:8000>. Logs: `journalctl --user -u fonoteca -f`.
+
+Your library lives at `~/music` and the database at `~/.local/share/fonoteca`,
+both plain host directories — add music to the first by hand whenever you like,
+back up the second. Edit the `Volume=` lines in the unit to point elsewhere.
+
+**Updates**
+
+```bash
+systemctl --user enable --now podman-auto-update.timer   # unattended, weekly
+podman auto-update --dry-run                             # what would move
+podman auto-update                                       # now
+```
+
+Podman pulls `:latest`, restarts the unit, and rolls back to the previous image
+if the new one fails to come up healthy.
+
+---
+
+### B. Container — Docker
+
+```bash
+git clone https://github.com/schotman-development/fonoteca.git
+cd fonoteca
+
+cp .env.example .env
+$EDITOR .env                          # credentials, plus MUSIC_DIR/DATA_DIR/PUID if needed
+
+mkdir -p music data                   # create these BEFORE the first up — see below
+docker compose up -d
+```
+
+`MUSIC_DIR` and `DATA_DIR` default to `./music` and `./data`; point them at real
+paths. **Create them yourself first.** Docker creates a missing bind-mount source
+directory owned by `root`, and the container is not root, so the first start
+fails on a permission error that reads like a bug in Fonoteca.
+
+The image runs as uid 1000. If `id -u` says otherwise, put `PUID`/`PGID` in
+`.env` rather than chowning your music library.
+
+Update with `docker compose pull && docker compose up -d`. There is no
+watchtower service on purpose — it needs the Docker socket, which is
+root-equivalent on the host, and it cannot roll back a bad image.
+
+---
+
+### C. From source
+
 Python 3.12, no system packages beyond Python itself.
 
 ```bash
@@ -199,7 +274,8 @@ $EDITOR .env                         # add QOBUZ_APP_ID and QOBUZ_USER_AUTH_TOKE
 `verify-credentials` is the acid test: it logs in, prints your subscription entitlements
 and the `format_id`s your account may stream, derives and validates the app secret, and
 performs one real signed `track/getFileUrl` call. If that command is green, everything
-else works.
+else works. In a container it is `podman exec fonoteca python cli.py verify-credentials`
+(or `docker compose exec fonoteca python cli.py verify-credentials`).
 
 ### Getting the credentials
 
@@ -211,6 +287,8 @@ out of version control (`.env` is gitignored, and the logger redacts both).
 ---
 
 ## Running
+
+A container install is already running — skip to the tour below. From source:
 
 ```bash
 ./.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
@@ -634,6 +712,10 @@ download worker then takes one album at a time.
 ---
 
 ## Running as a service (systemd)
+
+For a **source** install. A container install already has one: the Quadlet unit in
+[Install A](#a-container--podman-recommended) is a systemd service, and Docker's
+`restart: unless-stopped` covers the compose path.
 
 `/etc/systemd/system/fonoteca.service` — replace `YOUR_USER` and the two paths with
 your own:
