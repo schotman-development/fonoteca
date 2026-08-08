@@ -1,10 +1,9 @@
-import { Badge, Stack, Text } from '@fonoteca/ui'
+import { Badge, Stack, Text, ThemeSwitch } from '@fonoteca/ui'
 import type { ReactNode } from 'react'
 
 import styles from './AppShell.module.css'
 import { HealthPanel } from './components/HealthPanel.tsx'
 import { JobsPanel } from './components/JobsPanel.tsx'
-import { ThemeToggle } from './components/ThemeToggle.tsx'
 
 export function AppShell() {
   return (
@@ -18,7 +17,7 @@ export function AppShell() {
             scaffold
           </Badge>
         </div>
-        <ThemeToggle />
+        <ThemeSwitch size="sm" />
       </header>
 
       {/*

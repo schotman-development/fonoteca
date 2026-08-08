@@ -1,0 +1,154 @@
+/*
+ * The geometry is DERIVED rather than measured. Only three numbers are given —
+ * track height, track width and glyph size — and the thumb's diameter and travel
+ * fall out of them:
+ *
+ *   thumb  = height - 2 * (inset + border)
+ *   travel = width  - 2 * (inset + border) - thumb
+ *
+ * which is what keeps a "make it a bit bigger" edit from leaving the thumb
+ * hanging over the end of the track. The one constraint to respect when adding a
+ * size: width must be at least 2 * thumb + 2 * (inset + border), because the two
+ * glyph slots are each a thumb wide and sit flush at either end. At exactly that
+ * width there is no slack, so each glyph is centred over one of the thumb's two
+ * resting positions — the alignment is structural, not nudged.
+ *
+ * Everything is expressed in logical properties, so in RTL the flex row puts the
+ * sun on the right, `inset-inline-start` parks the thumb under it, and the only
+ * thing needing a hand is the sign of the travel.
+ */
+
+/* Sizes match Button's heights, so a switch and a button sit on one line. */
+
+.track[data-size="sm"] {
+  --switch-height: var(--density-row-compact);
+  --switch-width: 48px;
+  --switch-glyph: 14px;
+}
+
+.track[data-size="md"] {
+  --switch-height: var(--density-row-cozy);
+  --switch-width: 64px;
+  --switch-glyph: 17px;
+}
+
+.track {
+  --switch-inset: 3px;
+  --switch-edge: calc(var(--switch-inset) + var(--border-width-thin));
+  --switch-thumb: calc(var(--switch-height) - 2 * var(--switch-edge));
+  --switch-travel: calc(var(--switch-width) - 2 * var(--switch-edge) - var(--switch-thumb));
+  --switch-sign: 1;
+
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+
+  width: var(--switch-width);
+  height: var(--switch-height);
+  padding: var(--switch-inset);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-inset);
+  cursor: pointer;
+
+  transition:
+    background-color var(--duration-fast) var(--easing-standard),
+    border-color var(--duration-fast) var(--easing-standard);
+}
+
+.track:dir(rtl) {
+  --switch-sign: -1;
+}
+
+/*
+ * The thumb is out of flow and BELOW the glyphs in the stacking order, so the
+ * glyph it has slid to appears to ride on it.
+ */
+.thumb {
+  position: absolute;
+  inset-inline-start: var(--switch-inset);
+  inset-block-start: 50%;
+  width: var(--switch-thumb);
+  height: var(--switch-thumb);
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+  translate: 0 -50%;
+
+  transition:
+    translate var(--duration-normal) var(--easing-standard),
+    background-color var(--duration-fast) var(--easing-standard);
+}
+
+/*
+ * `padding` on the SVG rather than a wrapper element: the viewBox scales into
+ * the content box, so one box both reserves a thumb-sized slot and insets the
+ * drawing within it.
+ */
+.glyph {
+  position: relative;
+  z-index: var(--z-index-raised);
+  flex: none;
+  width: var(--switch-thumb);
+  height: var(--switch-thumb);
+  padding: calc((var(--switch-thumb) - var(--switch-glyph)) / 2);
+  color: var(--color-text-tertiary);
+  transition: color var(--duration-normal) var(--easing-standard);
+}
+
+/* ---- states ---- */
+
+/*
+ * Selecting on `aria-checked` rather than a parallel `data-` attribute. It is
+ * the same rule the rest of the design system follows — one source of truth per
+ * variant, visible in the DOM — and here the ARIA state IS the variant, so
+ * duplicating it into a data attribute would create a second place to get wrong.
+ */
+
+.track:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* Must precede the lit rules below: equal specificity, so later wins. Only the
+   unlit glyph should brighten on hover; the lit one is already at full strength. */
+.track:hover .glyph {
+  color: var(--color-text-secondary);
+}
+
+.track[aria-checked="false"] .sun,
+.track[aria-checked="true"] .moon {
+  color: var(--color-text-primary);
+}
+
+.track[aria-checked="true"] .thumb {
+  translate: calc(var(--switch-sign) * var(--switch-travel)) -50%;
+}
+
+/*
+ * Windows High Contrast throws away background-color and box-shadow, which is
+ * everything distinguishing the thumb from its track. Give it back as a border,
+ * and keep the thumb on the system Canvas so the lit glyph stays legible on it —
+ * painting the thumb in ButtonText would hide the very glyph it carries.
+ */
+@media (forced-colors: active) {
+  .track {
+    border-color: ButtonText;
+    background-color: Canvas;
+  }
+
+  .thumb {
+    border: var(--border-width-thin) solid ButtonText;
+    background-color: Canvas;
+  }
+
+  .glyph {
+    color: GrayText;
+  }
+
+  .track[aria-checked="false"] .sun,
+  .track[aria-checked="true"] .moon {
+    color: ButtonText;
+  }
+}
