@@ -13,6 +13,7 @@ namespace Fonoteca.Api.Logging;
 /// EventId ranges, so a message's origin is obvious from its id alone:
 ///   1000-1099  startup and host lifecycle
 ///   1100-1199  realtime / SignalR
+///   1200-1299  library scanning
 /// </remarks>
 internal static partial class Log
 {
@@ -46,4 +47,54 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Heartbeat service started, interval {IntervalSeconds}s")]
     public static partial void HeartbeatStarted(ILogger logger, double intervalSeconds);
+
+    [LoggerMessage(
+        EventId = 1200,
+        Level = LogLevel.Information,
+        Message = "Library scan started at {LibraryRoot}")]
+    public static partial void ScanStarted(ILogger logger, string libraryRoot);
+
+    [LoggerMessage(
+        EventId = 1201,
+        Level = LogLevel.Information,
+        Message = "Library scan finished: {FilesSeen} files seen, {Added} added, {Updated} updated, "
+            + "{Unchanged} unchanged, {Removed} removed, in {ElapsedMs}ms")]
+    public static partial void ScanCompleted(
+        ILogger logger,
+        int filesSeen,
+        int added,
+        int updated,
+        int unchanged,
+        int removed,
+        long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1202,
+        Level = LogLevel.Warning,
+        Message = "Library scan refused: {LibraryRoot} does not exist. Nothing was changed.")]
+    public static partial void ScanRootMissing(ILogger logger, string libraryRoot);
+
+    [LoggerMessage(
+        EventId = 1203,
+        Level = LogLevel.Warning,
+        Message = "Library scan found no files under {LibraryRoot} while the catalogue holds "
+            + "{KnownFiles}. Treating this as an unmounted library and removing nothing.")]
+    public static partial void ScanFoundNothing(ILogger logger, string libraryRoot, int knownFiles);
+
+    [LoggerMessage(
+        EventId = 1205,
+        Level = LogLevel.Warning,
+        Message = "Library scan could not read {UnreadableDirectories} directories, so it saw an "
+            + "incomplete library. {MissingFiles} catalogued files were not found and none were "
+            + "removed; fix the permissions and scan again.")]
+    public static partial void ScanWalkIncomplete(
+        ILogger logger,
+        int unreadableDirectories,
+        int missingFiles);
+
+    [LoggerMessage(
+        EventId = 1204,
+        Level = LogLevel.Information,
+        Message = "Library scan requested while one is already running; the request was rejected.")]
+    public static partial void ScanAlreadyRunning(ILogger logger);
 }

@@ -1,5 +1,6 @@
 using Fonoteca.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Testcontainers.PostgreSql;
 
 namespace Fonoteca.Integration.Tests;
@@ -48,13 +49,48 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync() => await _container.DisposeAsync().ConfigureAwait(false);
 
-    public FonotecaDbContext CreateContext()
+    public FonotecaDbContext CreateContext() => CreateContext(ConnectionString);
+
+    public static FonotecaDbContext CreateContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<FonotecaDbContext>()
-            .UseNpgsql(ConnectionString)
+            .UseNpgsql(connectionString)
             .Options;
 
         return new FonotecaDbContext(options);
+    }
+
+    /// <summary>
+    /// A fresh, empty database in the same container, migrated by the caller.
+    /// </summary>
+    /// <remarks>
+    /// The container is shared for speed — starting PostgreSQL costs seconds and
+    /// creating a database costs milliseconds — but a shared <i>database</i>
+    /// would make tests read each other's rows. That is fatal for anything
+    /// testing the scanner: reconciliation deletes catalogue rows whose files
+    /// are not on disk, so another test's fixture data would be quietly wiped
+    /// and the counts under assertion would depend on execution order.
+    /// </remarks>
+    public async Task<string> CreateDatabaseAsync(CancellationToken cancellationToken = default)
+    {
+        // Hex from a Guid, so the identifier needs no quoting decisions and
+        // cannot collide with a parallel test class.
+        var name = $"fonoteca_{Guid.CreateVersion7():N}";
+
+        var connection = new NpgsqlConnection(ConnectionString);
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
+            await using (command.ConfigureAwait(false))
+            {
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return new NpgsqlConnectionStringBuilder(ConnectionString) { Database = name }
+            .ConnectionString;
     }
 
     /// <summary>

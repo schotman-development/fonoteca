@@ -10,10 +10,12 @@ Four pillars, none of them built yet:
 3. **Upgrade monitoring** — watch for better versions, *arr-style
 4. **Tag editor** — write corrected tags, artwork and MBIDs back to files
 
-> **Status: scaffold.** The structure exists and every seam is verified end to
-> end, but there are no product features. Nothing scans, hashes, fingerprints,
-> downloads or writes tags. `Fonoteca:AllowFileMutation` defaults to `false` and
-> no code path writes to an audio file.
+> **Status: scaffold, plus the first slice of pillar 1.** The library scan
+> exists: `POST /api/library/scan` walks the library root and reconciles the
+> catalogue's file list with what is on disk — path, size and modification time,
+> and nothing more. Nothing yet hashes, fingerprints, identifies, downloads or
+> writes tags. `Fonoteca:AllowFileMutation` defaults to `false` and no code path
+> writes to an audio file.
 
 ## Layout
 

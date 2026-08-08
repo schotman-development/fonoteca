@@ -1,11 +1,14 @@
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
+using Fonoteca.Api.Library;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Api.Startup;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
+using Fonoteca.Ingest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,6 +56,19 @@ builder.Services.AddDbContext<FonotecaDbContext>(options =>
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICallerContext, SingleUserCallerContext>();
 
+// The library root is configuration, so the store is built from it rather than
+// resolved by convention. Registered twice on purpose: as the interface for
+// anything that only needs to read bytes, and as itself for the scan service,
+// which has to ask whether the root is mounted at all — a question about this
+// particular backing store, not about file stores in general.
+builder.Services.AddSingleton(sp => new FileSystemAudioFileStore(
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.LibraryPath));
+builder.Services.AddSingleton<IAudioFileStore>(
+    sp => sp.GetRequiredService<FileSystemAudioFileStore>());
+
+builder.Services.AddSingleton<LibraryScanner>();
+builder.Services.AddSingleton<LibraryScanService>();
+
 // ---------------------------------------------------------------------------
 // Web
 // ---------------------------------------------------------------------------
@@ -99,6 +115,7 @@ app.UseCors(CorsPolicy);
 
 app.MapHealthChecks("/health");
 app.MapSystemEndpoints();
+app.MapLibraryEndpoints();
 app.MapHub<JobsHub>(JobsHub.Route);
 
 await app.RunAsync().ConfigureAwait(false);

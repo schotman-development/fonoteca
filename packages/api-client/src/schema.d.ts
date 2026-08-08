@@ -21,6 +21,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether a scan is running, and what the last one found. */
+        get: operations["GetLibraryScanStatus"];
+        put?: never;
+        /**
+         * Reconcile the catalogue's file list with the files on disk.
+         * @description Walks the library root, adding files that are new, updating those whose size or modification time changed, and removing rows for files that are gone. Reads no file contents and modifies no file.
+         */
+        post: operations["ScanLibrary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -34,6 +55,38 @@ export interface components {
             releases: number | string;
             /** Format: int32 */
             artists: number | string;
+        };
+        LibraryScanStatusResponse: {
+            running: boolean;
+            lastCompleted: null | components["schemas"]["LibraryScanSummary"];
+        };
+        LibraryScanSummary: {
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number | string;
+            /** Format: int32 */
+            filesSeen: number | string;
+            /** Format: int32 */
+            added: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            unchanged: number | string;
+            /** Format: int32 */
+            removed: number | string;
+            /** Format: int32 */
+            unreadableDirectories: number | string;
+        };
+        ProblemDetails: {
+            type?: null | string;
+            title?: null | string;
+            /** Format: int32 */
+            status?: null | number | string;
+            detail?: null | string;
+            instance?: null | string;
         };
         SystemInfoResponse: {
             version: string;
@@ -68,6 +121,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemInfoResponse"];
+                };
+            };
+        };
+    };
+    GetLibraryScanStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryScanStatusResponse"];
+                };
+            };
+        };
+    };
+    ScanLibrary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryScanSummary"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
