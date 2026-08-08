@@ -10,10 +10,12 @@ import '../src/styles/reset.css'
  * Themes the preview iframe's own root element rather than the toolbar's, so
  * the `data-theme` attribute lands where the token stylesheet is loaded.
  *
- * "system" is offered alongside light and dark because it is a genuinely
- * separate state — it removes the attribute and lets `prefers-color-scheme`
- * decide, which is the path most users are actually on and therefore the one
- * most worth being able to preview.
+ * The `theme` global is set from the toolbar by `ThemeSwitch` itself — see
+ * manager.tsx. It still accepts all three settings, including "system", which is
+ * a genuinely separate state: it removes the attribute and lets
+ * `prefers-color-scheme` decide. A two-position switch cannot select it, so
+ * reach it with `?globals=theme:system` or a story's own `globals` when the
+ * no-attribute path is what needs checking.
  */
 const isThemeSetting = (value: unknown): value is ThemeSetting =>
   value === 'light' || value === 'dark' || value === 'system'
@@ -37,19 +39,12 @@ const withTheme: Decorator = (Story, context) => {
 const preview: Preview = {
   decorators: [withTheme],
   initialGlobals: { theme: 'light' },
+  // Declared without a `toolbar` block on purpose: the toolbar control is the
+  // design system's own ThemeSwitch, registered as a tool in manager.tsx. A
+  // dropdown here as well would be a second control for one piece of state.
   globalTypes: {
     theme: {
-      description: 'Colour theme',
-      toolbar: {
-        title: 'Theme',
-        icon: 'circlehollow',
-        items: [
-          { value: 'light', title: 'Light', icon: 'sun' },
-          { value: 'dark', title: 'Dark', icon: 'moon' },
-          { value: 'system', title: 'System', icon: 'browser' },
-        ],
-        dynamicTitle: true,
-      },
+      description: 'Colour theme — light | dark | system',
     },
   },
   parameters: {
