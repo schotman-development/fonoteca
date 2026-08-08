@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Fonoteca Vite application",
+  "extends": "./react-library.json",
+  "compilerOptions": {
+    "types": ["vite/client"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "composite": false
+  }
+}

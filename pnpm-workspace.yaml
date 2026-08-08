@@ -1,0 +1,16 @@
+# apps/api is deliberately absent: it is a .NET solution with its own toolchain
+# and must not be pulled into the pnpm dependency graph. The only seam between
+# the two halves is packages/api-client, generated from the API's OpenAPI document.
+packages:
+  - apps/web
+  - packages/*
+  # Build-time tooling that must pin its own dependency versions, isolated so
+  # those pins never reach application code. See tools/openapi-codegen/README.md.
+  - tools/*
+# pnpm blocks dependency install scripts by default. Each entry here is an
+# explicit decision to let one package run code at install time, so the list
+# stays short and reviewable.
+allowBuilds:
+  # Vite's bundler. Its postinstall links the platform-specific native binary
+  # that ships in a sibling optional dependency; without it, Vite cannot start.
+  esbuild: true

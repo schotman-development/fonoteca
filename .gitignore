@@ -1,1 +1,30 @@
+# Secrets.
+#
+# Deny every .env variant and re-allow only the template, rather than listing
+# names one at a time. A backup called .env.old or .env.bak is exactly the file
+# most likely to be created in a hurry and least likely to be added here in
+# time, so the default has to be "ignored".
 .env
+.env.*
+!.env.example
+*.secret
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+storybook-static/
+
+# .NET
+bin/
+obj/
+artifacts/
+*.user
+
+# Tooling caches
+.turbo/
+coverage/
+
+# OS
+.DS_Store

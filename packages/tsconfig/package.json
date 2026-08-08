@@ -1,0 +1,11 @@
+{
+  "name": "@fonoteca/tsconfig",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared TypeScript base configurations. Not a build target — consumed via `extends`.",
+  "files": [
+    "base.json",
+    "react-library.json",
+    "vite-app.json"
+  ]
+}

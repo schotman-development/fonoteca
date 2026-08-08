@@ -1,0 +1,29 @@
+{
+  "name": "fonoteca",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted music library manager — catalogue, dedupe, acquisition, upgrade monitoring and tagging for very large libraries.",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24.18.1 <25"
+  },
+  "scripts": {
+    "dev": "./scripts/dev.sh",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "api:build": "dotnet build apps/api/Fonoteca.slnx",
+    "api:test": "dotnet test apps/api/Fonoteca.slnx",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "storybook": "pnpm --filter @fonoteca/ui storybook",
+    "gen:api": "pnpm --filter @fonoteca/openapi-codegen generate",
+    "gen:api:check": "pnpm --filter @fonoteca/api-client generate:check"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.7",
+    "typescript": "7.0.2"
+  }
+}
