@@ -382,6 +382,13 @@ Adding a component means adding stories, because that is what tests it.
 
 ## Gotchas already paid for
 
+- **A running `dotnet run` API stalls `dotnet test`.** The test build wants to
+  write `Fonoteca.Api.dll`, the running host holds it, and MSBuild waits rather
+  than failing — so the run sits at zero output for as long as you let it. Stop
+  the API first. If one has already wedged, the orphaned `dotnet test` keeps the
+  lock after the shell that started it is gone, and Testcontainers leaves its
+  PostgreSQL behind too (Ryuk is disabled here, so nothing reaps it): kill the
+  process by pid and `podman rm -f` the stray `postgres:18-alpine`.
 - PostgreSQL 18 wants a single mount at `/var/lib/postgresql`, not
   `/var/lib/postgresql/data`; the old path makes the container refuse to start.
 - Testcontainers over podman needs `DOCKER_HOST` pointed at the user socket and

@@ -103,6 +103,28 @@ public sealed class FonotecaOptions : IValidatableObject
     public double AcoustIdMinimumScore { get; init; } = 0.90;
 
     /// <summary>
+    /// How far clear of the runner-up the winning cluster must be.
+    /// </summary>
+    /// <remarks>
+    /// Guards against the failure a score threshold cannot see: two clusters that
+    /// both match well, which is AcoustID reporting candidates rather than an
+    /// answer. Taking the higher one there is a coin flip dressed as a decision.
+    ///
+    /// <b>0.05 is deliberately conservative, and measured evidence says it is on
+    /// the strict side.</b> Against a real 7,962-file library it left about one
+    /// file in eight unidentified, and the ones it caught looked like this:
+    /// 0.9894 against 0.9506, where the winner linked to three MusicBrainz
+    /// recordings and the runner-up to one — an established cluster beside a
+    /// poorly-merged duplicate of itself, not a track beside its remaster.
+    /// Lowering this to about 0.02 identifies those; it also narrows the gap that
+    /// protects an album version from being tagged as its single. Which risk
+    /// matters more depends on the library, which is why it is a setting and not
+    /// a constant.
+    /// </remarks>
+    [Range(0.0, 1.0)]
+    public double AcoustIdMinimumMargin { get; init; } = 0.05;
+
+    /// <summary>
     /// Whether finishing a scan starts an identification pass.
     /// </summary>
     /// <remarks>

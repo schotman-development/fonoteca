@@ -555,7 +555,8 @@ public sealed class IdentificationService(
             return;
         }
 
-        var choice = AcoustIdSelection.Choose(matches, config.AcoustIdMinimumScore);
+        var choice = AcoustIdSelection.Choose(
+            matches, config.AcoustIdMinimumScore, config.AcoustIdMinimumMargin);
 
         var outcome = choice.Reason switch
         {
