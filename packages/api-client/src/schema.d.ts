@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/musicbrainz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which MusicBrainz server is in use, and whether it is answering. */
+        get: operations["GetMusicBrainzHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/scan": {
         parameters: {
             query?: never;
@@ -48,13 +65,13 @@ export interface components {
     schemas: {
         CatalogueCounts: {
             /** Format: int32 */
-            files: number | string;
+            files: number;
             /** Format: int32 */
-            recordings: number | string;
+            recordings: number;
             /** Format: int32 */
-            releases: number | string;
+            releases: number;
             /** Format: int32 */
-            artists: number | string;
+            artists: number;
         };
         LibraryScanStatusResponse: {
             running: boolean;
@@ -66,25 +83,40 @@ export interface components {
             /** Format: date-time */
             completedAtUtc: string;
             /** Format: int64 */
-            durationMilliseconds: number | string;
+            durationMilliseconds: number;
             /** Format: int32 */
-            filesSeen: number | string;
+            filesSeen: number;
             /** Format: int32 */
-            added: number | string;
+            added: number;
             /** Format: int32 */
-            updated: number | string;
+            updated: number;
             /** Format: int32 */
-            unchanged: number | string;
+            unchanged: number;
             /** Format: int32 */
-            removed: number | string;
+            removed: number;
             /** Format: int32 */
-            unreadableDirectories: number | string;
+            unreadableDirectories: number;
         };
+        MusicBrainzHealthResponse: {
+            server: string;
+            isOfficialServer: boolean;
+            /** Format: int32 */
+            minimumRequestIntervalMs: number;
+            contactConfigured: boolean;
+            status: components["schemas"]["MusicBrainzReachability"];
+            /** Format: int32 */
+            latencyMs: null | number;
+            detail: null | string;
+            /** Format: date-time */
+            checkedAtUtc: string;
+        };
+        /** @enum {unknown} */
+        MusicBrainzReachability: "NotConfigured" | "Reachable" | "Unreachable" | "Rejected";
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
             /** Format: int32 */
-            status?: null | number | string;
+            status?: null | number;
             detail?: null | string;
             instance?: null | string;
         };
@@ -121,6 +153,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemInfoResponse"];
+                };
+            };
+        };
+    };
+    GetMusicBrainzHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBrainzHealthResponse"];
                 };
             };
         };

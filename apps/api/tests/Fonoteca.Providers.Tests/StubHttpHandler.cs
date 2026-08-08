@@ -15,10 +15,17 @@ namespace Fonoteca.Providers.Tests;
 /// worth more than a mocked client would be: the thing under test is the wiring
 /// as much as the code.
 /// </remarks>
-internal sealed class StubHttpHandler(Func<RecordedRequest, HttpResponseMessage> respond)
+internal sealed class StubHttpHandler(
+    Func<RecordedRequest, CancellationToken, Task<HttpResponseMessage>> respond)
     : HttpMessageHandler
 {
     private readonly ConcurrentQueue<RecordedRequest> _requests = new();
+
+    /// <summary>The common case: answer immediately, from the request alone.</summary>
+    public StubHttpHandler(Func<RecordedRequest, HttpResponseMessage> respond)
+        : this((request, _) => Task.FromResult(respond(request)))
+    {
+    }
 
     /// <summary>Every request that reached the wire, in order.</summary>
     public IReadOnlyList<RecordedRequest> Requests => [.. _requests];
@@ -46,7 +53,10 @@ internal sealed class StubHttpHandler(Func<RecordedRequest, HttpResponseMessage>
 
         _requests.Enqueue(recorded);
 
-        return respond(recorded);
+        // The token is passed on so a stub can model a server that never
+        // answers — the caller's timeout is then what ends the wait, which is
+        // the only way to test that there is one.
+        return await respond(recorded, cancellationToken);
     }
 
     /// <summary>Always answers with this status and body.</summary>

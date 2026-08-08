@@ -43,9 +43,12 @@ packages/
   tsconfig/             shared TypeScript bases
 tools/
   openapi-codegen/      pinned TS 5.9 for the generator; see ADR 0005
+infra/
+  musicbrainz/          compose override for the optional local mirror
 docs/
   adr/                  architecture decision records
   toolchain.md          Tier 0 setup
+  musicbrainz-mirror.md running a local MusicBrainz mirror
 ```
 
 ## Getting started
@@ -86,6 +89,14 @@ pnpm gen:api:check    # fail if the committed client has drifted
 pnpm storybook
 ```
 
+Optional, and nothing else depends on it:
+
+```sh
+./scripts/musicbrainz-mirror.sh setup     # a local MusicBrainz mirror (~100 GB)
+./scripts/musicbrainz-mirror.sh status    # replication position, /ws/2 probe
+./scripts/musicbrainz-mirror.sh help
+```
+
 ## How the two halves connect
 
 `apps/api` is deliberately outside the pnpm workspace. The single seam is the
@@ -107,6 +118,7 @@ rather than returning `undefined` in a browser.
 | [0003](docs/adr/0003-custom-design-system.md) | Custom design system, `react` + `react-dom` only — a11y is ours, and axe enforces it in CI |
 | [0004](docs/adr/0004-musicbrainz-shaped-entity-graph.md) | MusicBrainz-shaped entity graph, because it cannot be retrofitted |
 | [0005](docs/adr/0005-typescript-7.md) | TypeScript 7, with the OpenAPI generator isolated on 5.9 |
+| [0006](docs/adr/0006-musicbrainz-mirror.md) | Mirror MusicBrainz locally, without a search index — and don't try to mirror AcoustID |
 
 ## Credentials
 
@@ -123,6 +135,25 @@ locally with a message naming the setting.
 supported way to go faster than one request per second; lowering
 `Fonoteca:MusicBrainzRequestIntervalMs` against the public instance is refused
 at startup, because the unsupported way ends in a blocked address.
+
+## Running a MusicBrainz mirror
+
+Optional, and worth it once identification is doing real work: one request per
+second means a 100,000-track library takes more than a day per pass, and you pay
+it again on every re-scan.
+
+```sh
+./scripts/musicbrainz-mirror.sh setup
+```
+
+An 8 GB download that expands to ~100 GB of Postgres, a few hours (mostly the
+import, not the download), a free MetaBrainz access token, and it replicates
+itself daily. No *search* index — Fonoteca only ever looks things up by MBID,
+and Solr would be another 250 GB that replication does not maintain.
+
+Full runbook in [`docs/musicbrainz-mirror.md`](docs/musicbrainz-mirror.md);
+the reasoning, including why AcoustID does *not* get the same treatment, in
+[ADR 0006](docs/adr/0006-musicbrainz-mirror.md).
 
 ## Still open
 

@@ -1,0 +1,31 @@
+# Description: Fonoteca — serve the web service without a search index
+#
+# Installed into the musicbrainz-docker checkout as `local/fonoteca-mirror.yml`
+# by scripts/musicbrainz-mirror.sh. It layers on top of upstream's
+# `alt-db-only-mirror` base, which gives db + musicbrainz + valkey and no Solr.
+#
+# The base runs the musicbrainz container as `load-crontab-only.sh`: install
+# cron, then sleep forever. That is a database mirror with no way to query it.
+# Fonoteca talks WS/2 over HTTP, so the server has to actually run — hence this
+# file.
+#
+# There is deliberately no healthcheck here. Readiness is probed from the host
+# in scripts/musicbrainz-mirror.sh, against the published port, with the same
+# kind of request Fonoteca makes — which tests the port mapping too, and does
+# not depend on guessing which HTTP client the upstream image happens to ship.
+
+services:
+  musicbrainz:
+    # The image's own default CMD. It starts the Catalyst server on :5000 *and*
+    # installs /crons.conf, so swapping it back in keeps the replication cron
+    # that the base file was there to provide.
+    command: start.sh
+
+    ports:
+      - '${FONOTECA_MB_PORT:-5000}:5000'
+
+    environment:
+      # The image ships 10 Starlet workers, sized for a public mirror. This one
+      # serves a single client that is rate-limited by its own request gate, and
+      # every worker is a Perl interpreter with the schema loaded.
+      - MUSICBRAINZ_SERVER_PROCESSES=${FONOTECA_MB_PROCESSES:-4}

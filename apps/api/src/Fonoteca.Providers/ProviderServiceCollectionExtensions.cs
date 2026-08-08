@@ -4,6 +4,7 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Providers.AcoustId;
 using Fonoteca.Providers.MusicBrainz;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 
@@ -99,6 +100,15 @@ public static class ProviderServiceCollectionExtensions
         AddResilienceThenGate(client, MusicBrainzOptions.HttpClientName);
 
         services.AddSingleton<IMusicBrainzCatalogue, MusicBrainzCatalogue>();
+
+        // Singleton because the cache is the point — see MusicBrainzHealthProbe.
+        services.AddSingleton<MusicBrainzHealthProbe>();
+
+        // TryAdd, so a host that already registered its own clock keeps it. The
+        // probe needs one to expire its cache, and requiring the caller to
+        // supply a clock before they can ask whether a server is up would be a
+        // silly thing to make them discover at runtime.
+        services.TryAddSingleton<IClock, SystemClock>();
 
         return services;
     }

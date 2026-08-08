@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
@@ -106,6 +107,22 @@ builder.Services.AddMusicBrainz(options =>
 
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
+
+// Numbers are numbers.
+//
+// ASP.NET's web JSON defaults set NumberHandling to AllowReadingFromString, and
+// .NET 10's OpenAPI generator reports that honestly: every int in the document
+// comes out as `["integer", "string"]`, so the generated TypeScript types every
+// numeric field as `string | number`. Arithmetic on a count then fails to
+// compile, and the workaround everyone reaches for — hand-declaring the
+// response shape in the component — quietly abandons the generated contract
+// that the OpenAPI seam exists to enforce.
+//
+// Strict costs nothing here: no endpoint accepts a JSON request body, and the
+// responses were always going to be written as numbers. SignalR is unaffected;
+// it carries its own protocol options.
+builder.Services.ConfigureHttpJsonOptions(json =>
+    json.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
 
 // Migrations and configuration checks. In a hosted service rather than inline
 // after Build(), because tools that construct the host without running it —

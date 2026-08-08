@@ -9,6 +9,14 @@
 !.env.example
 *.secret
 
+# MusicBrainz mirror
+#
+# A pinned checkout of metabrainz/musicbrainz-docker, created by
+# scripts/musicbrainz-mirror.sh: upstream's tree, our override dropped into its
+# local/ directory, and the replication token. None of it ours to commit. The
+# mirror's ~100 GB lives in podman volumes, not in here.
+/.musicbrainz-docker/
+
 # Node
 node_modules/
 dist/

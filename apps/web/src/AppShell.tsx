@@ -5,6 +5,7 @@ import styles from './AppShell.module.css'
 import { HealthPanel } from './components/HealthPanel.tsx'
 import { JobsPanel } from './components/JobsPanel.tsx'
 import { LibraryScanPanel } from './components/LibraryScanPanel.tsx'
+import { MusicBrainzPanel } from './components/MusicBrainzPanel.tsx'
 
 export function AppShell() {
   // The one piece of cross-panel state: a scan changes the catalogue, and the
@@ -50,6 +51,10 @@ export function AppShell() {
 
             <Card title="API — via generated client">
               <HealthPanel refreshKey={catalogueVersion} />
+            </Card>
+
+            <Card title="MusicBrainz — identification seam">
+              <MusicBrainzPanel />
             </Card>
 
             <Card title="Realtime — SignalR">

@@ -26,6 +26,27 @@
         }
       }
     },
+    "/api/system/musicbrainz": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Which MusicBrainz server is in use, and whether it is answering.",
+        "operationId": "GetMusicBrainzHealth",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicBrainzHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/library/scan": {
       "post": {
         "tags": [
@@ -100,35 +121,19 @@
         "type": "object",
         "properties": {
           "files": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "recordings": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "releases": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "artists": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           }
         }
@@ -178,62 +183,90 @@
             "format": "date-time"
           },
           "durationMilliseconds": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int64"
           },
           "filesSeen": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "added": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "updated": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "unchanged": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "removed": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "unreadableDirectories": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
+            "type": "integer",
             "format": "int32"
           }
         }
+      },
+      "MusicBrainzHealthResponse": {
+        "required": [
+          "server",
+          "isOfficialServer",
+          "minimumRequestIntervalMs",
+          "contactConfigured",
+          "status",
+          "latencyMs",
+          "detail",
+          "checkedAtUtc"
+        ],
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "isOfficialServer": {
+            "type": "boolean"
+          },
+          "minimumRequestIntervalMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "contactConfigured": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MusicBrainzReachability"
+          },
+          "latencyMs": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "checkedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MusicBrainzReachability": {
+        "enum": [
+          "NotConfigured",
+          "Reachable",
+          "Unreachable",
+          "Rejected"
+        ]
       },
       "ProblemDetails": {
         "type": "object",
@@ -251,11 +284,9 @@
             ]
           },
           "status": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",
-              "integer",
-              "string"
+              "integer"
             ],
             "format": "int32"
           },

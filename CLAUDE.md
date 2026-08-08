@@ -44,6 +44,8 @@ pnpm api:build        # also regenerates openapi.json at the repo root
 pnpm api:test         # xUnit; integration tests start a real PostgreSQL 18
 pnpm gen:api          # openapi.json -> packages/api-client/src/schema.d.ts
 pnpm gen:api:check    # fail if the committed client has drifted
+
+./scripts/musicbrainz-mirror.sh help   # optional local mirror; see below
 ```
 
 Single tests:
@@ -151,6 +153,7 @@ that gets replaced then, not the foundation it grows on.
 | `Providers/RequestGate.cs` | one request at a time, no faster than an interval. Both providers |
 | `Providers/AcoustId/AcoustIdClient.cs` | gzipped form POST, `meta=recordingids sources` |
 | `Providers/MusicBrainz/MusicBrainzCatalogue.cs` | `MetaBrainz.MusicBrainz`, with its rate limiting turned off |
+| `Providers/MusicBrainz/MusicBrainzHealthProbe.cs` | is that server up, and would a lookup even be sent? Cached |
 | `Providers/ProviderServiceCollectionExtensions.cs` | the wiring, which is where most of the correctness lives |
 
 The theme this time is *these are somebody else's production systems and they
@@ -193,10 +196,49 @@ or `Fonoteca:MusicBrainzContact` the app starts, logs one line each, and
 refuses lookups *locally* with a message naming the setting — rather than
 sending an unidentified request to find out.
 
+`GET /api/system/musicbrainz` is what the web client's MusicBrainz card reads.
+Two things about it are deliberate. It is **not** an `IHealthCheck` on
+`/health`: that endpoint answers "should this process keep serving traffic",
+and the answer does not change when MusicBrainz is down — scanning and browsing
+work fine without it, and wiring it in would turn their outage into our restart
+loop. And the reading is **cached for 30 seconds**, because the probe queues at
+the same gate as identification work: an uncached probe does not just cost a
+request, it costs a *turn*, and a browser tab left open on that card would
+otherwise halve a scan's throughput. `POLL_MS` in `MusicBrainzPanel.tsx` and
+`MusicBrainzHealthProbe.CacheDuration` are a pair; move one and move the other.
+
 `Fonoteca.Providers.Tests` builds the real service collection and replaces only
 the socket, so handler order, the gate and the User-Agent are the ones the
 application gets. The MusicBrainz fixtures under `Responses/` are verbatim WS/2
 documents; don't tidy them, the mess is the point.
+
+### The MusicBrainz mirror
+
+`./scripts/musicbrainz-mirror.sh` runs a local mirror — the web service, no
+search index, replicating daily. Optional; nothing in the build, the tests or
+`pnpm dev` touches it. See `docs/musicbrainz-mirror.md` and ADR 0006.
+
+- **It is a wrapper over `metabrainz/musicbrainz-docker`, pinned by tag, not a
+  compose file of our own.** Their repo is where the schema migrations live and
+  MusicBrainz change the schema about twice a year. `infra/musicbrainz/mirror.yml`
+  is the only part we own: it layers onto upstream's `alt-db-only-mirror` base
+  and restores the web server that base turns off.
+- **Its own compose project, `fonoteca-musicbrainz`, not a profile in
+  `compose.yaml`.** `podman compose down -v` while resetting the dev database
+  must not be able to delete 100 GB that took a day to build.
+- **No Solr, and that is load-bearing.** Replication does not cover search
+  indexes, so they would need a rebuild schedule forever. `IMusicBrainzCatalogue`
+  has no search method, so nothing would call it. If tag-based matching is ever
+  added as a fallback, revisit this *before* designing it.
+- **AcoustID gets no equivalent.** No full base dump exists — only daily
+  incrementals back to 2011, ~414 GB compressed — and its server is documented
+  as only meant to run on acoustid.org.
+- **Two declarations gate the first run, and both fail silently upstream.**
+  `fetch-dump.sh` asks a commercial-use question with `read -e`, which prints no
+  prompt at all when stdin is not a TTY and then dies under `set -e` — a
+  container that exits 1 in 40ms having printed nothing. `set-replication-token`
+  loops forever on EOF for the same reason. `accept-terms` and `set-token` exist
+  so both fail loudly and early instead. Neither answer is ours to guess.
 
 ### Two things that must stay in a hosted service
 
@@ -286,3 +328,12 @@ Adding a component means adding stories, because that is what tests it.
 - `Microsoft.Extensions.Diagnostics.HealthChecks` ships in the shared framework
   — referencing it explicitly trips NU1510. Only the EF Core integration is a
   real package.
+- **`ConfigureHttpJsonOptions` sets `NumberHandling = Strict`, and it has to
+  stay that way.** ASP.NET's web defaults allow reading numbers from strings,
+  and .NET 10's OpenAPI generator reports that faithfully: every `int` comes out
+  as `["integer", "string"]`, so the generated TypeScript types every count as
+  `string | number` and arithmetic on one fails to compile. The workaround that
+  suggests itself — hand-declaring the response shape in the component — throws
+  away the contract the OpenAPI seam exists to enforce, which is how
+  `HealthPanel` ended up with a local `SystemInfo` type and a cast.
+  `SystemEndpointTests` asserts the JSON is numbers.
