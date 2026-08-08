@@ -1,0 +1,30 @@
+{
+  "name": "@fonoteca/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fonoteca's web client.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "preview": "vite preview",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fonoteca/api-client": "workspace:*",
+    "@fonoteca/tokens": "workspace:*",
+    "@fonoteca/ui": "workspace:*",
+    "@microsoft/signalr": "10.0.11",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@fonoteca/tsconfig": "workspace:*",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "typescript": "7.0.2",
+    "vite": "8.2.1"
+  }
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fonoteca</title>
+    <!--
+      Paint the correct background before React mounts. Without this the page
+      flashes white on load in dark mode, which is unpleasant in an app people
+      leave open. Mirrors the token stylesheet's three-state logic.
+    -->
+    <style>
+      :root { color-scheme: light; background-color: #ffffff; }
+      :root[data-theme='dark'] { color-scheme: dark; background-color: #121416; }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) { color-scheme: dark; background-color: #121416; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

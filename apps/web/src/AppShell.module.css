@@ -1,0 +1,74 @@
+/*
+ * The application shell.
+ *
+ * Three rows: header, scrollable content, and a RESERVED transport row.
+ *
+ * The transport row is the cheap half of supporting playback later. A player
+ * has to persist across navigation, which means it must live outside whatever
+ * renders the current view — retrofitting that means re-nesting the route tree.
+ * Declaring the row now costs one grid track and nothing else; it collapses to
+ * zero height until something occupies it.
+ */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100dvh;
+  background-color: var(--color-surface-base);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  height: var(--density-toolbar-height);
+  padding-inline: var(--space-16);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-raised);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-index-sticky);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+
+.main {
+  padding: var(--space-24) var(--space-16);
+  overflow-y: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-16);
+  max-width: 1100px;
+}
+
+.card {
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.cardTitle {
+  margin-block-end: var(--space-12);
+  padding-block-end: var(--space-8);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+/*
+ * Reserved for the playback transport. Empty and zero-height today; when a
+ * player exists it renders here and every view keeps working unchanged.
+ */
+.transport:not(:empty) {
+  height: var(--density-transport-height);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-raised);
+}
