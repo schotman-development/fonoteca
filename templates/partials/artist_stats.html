@@ -3,16 +3,33 @@
   when the indexer last looked. Polled on the detail page so a download landing
   moves these counters without a reload.
   Context: artist (ArtistOut with counts), settings (app.config.Settings)
+
+  Everything stats-shaped has to stay in this file: the page renders the first
+  frame by including it and the poller re-fetches the same partial, so a line
+  that lived on the page instead would vanish fifteen seconds later.
 #}
-<div class="tag-row">
-  {% if artist.monitored %}
-  <span class="tag tag--ok">monitored · {{ artist.monitor_mode | enum_value }}</span>
-  {% else %}
-  <span class="tag tag--skipped">not monitored</span>
-  {% endif %}
-  <span class="tag">{{ artist.quality_profile }}</span>
-  {% for rt in artist.accepted_release_types %}<span class="tag tag--type">{{ rt }}</span>{% endfor %}
+{#
+  Monitoring reads first, in one line rather than nine chips. Monitored is the
+  normal state and gets no mark; *not* monitored is the notable one, so that is
+  the branch that spends a chip.
+#}
+{% if artist.monitored %}
+<div class="table__title">Monitored · {{ artist.monitor_mode | enum_value }}</div>
+{% else %}
+<div class="table__title"><span class="tag tag--skipped">not monitored</span></div>
+{% endif %}
+
+{# Configuration, not status: quiet text, one line, no chips. #}
+<div class="small muted">
+  {{ artist.quality_profile }}
+  {%- if artist.accepted_release_types %} · {{ artist.accepted_release_types | join(', ') }}{% endif %}
 </div>
+
+{% if artist.genres %}
+<div class="tag-row">
+  {% for genre in artist.genres %}<span class="tag tag--genre">{{ genre }}</span>{% endfor %}
+</div>
+{% endif %}
 
 <div class="entity__blurb">
   {{ artist.wanted_count }} release(s) wanted, {{ artist.downloaded_count }} downloaded.
@@ -23,10 +40,57 @@
   {% endif %}
 </div>
 
+{% if artist.bio %}
+{#
+  Wikipedia text is CC BY-SA, which is share-alike: republishing it without
+  crediting the source is a licence breach, not an omission. The link is written
+  with the text or the text is not shown.
+#}
+<details class="bio">
+  <summary>Biography</summary>
+  <p class="bio__text">{{ artist.bio }}</p>
+  {% if artist.bio_source_url %}
+  <p class="bio__credit small muted">
+    From <a href="{{ artist.bio_source_url }}" rel="noreferrer">{{ artist.bio_source_url }}</a>{% if artist.bio_licence %},
+    licensed {{ artist.bio_licence }}{% endif %}.
+  </p>
+  {% endif %}
+</details>
+{% endif %}
+
+{#
+  Identity, in reading order. The three counts and "last checked" are not here:
+  the blurb above states the split and the page subtitle states the freshness.
+  The Qobuz id is last — it is the handle for a support conversation or a URL
+  somebody is reconstructing, and nothing else on this page needs it.
+#}
 <dl class="kv kv--inline">
-  <dt>Qobuz id</dt><dd class="mono">{{ artist.id }}</dd>
+  {% if artist.artist_type %}<dt>Type</dt><dd>{{ artist.artist_type }}</dd>{% endif %}
+  {% if artist.country %}<dt>Country</dt><dd>{{ artist.country }}</dd>{% endif %}
+  {% if artist.isni %}
+  {# The artist's identifier in the wider world, stable across every catalogue. #}
+  <dt>ISNI</dt><dd class="mono">{{ artist.isni }}</dd>
+  {% endif %}
+  {% if artist.mb_artist_mbid %}
+  <dt>MusicBrainz</dt><dd class="mono small">{{ artist.mb_artist_mbid }}</dd>
+  {% endif %}
+  {% if artist.formed %}
+  <dt>{{ 'Born' if artist.artist_type == 'Person' else 'Formed' }}</dt>
+  <dd class="mono">{{ artist.formed }}{% if artist.disbanded %} – {{ artist.disbanded }}{% endif %}</dd>
+  {% endif %}
+  {% if artist.area %}<dt>From</dt><dd>{{ artist.area }}</dd>{% endif %}
   <dt>Followed</dt><dd class="mono">{{ artist.added_at | dt }} UTC</dd>
-  <dt>Last checked</dt><dd class="mono">{{ artist.last_checked_at | ago }}</dd>
-  <dt>Known / wanted / on disk</dt>
-  <dd class="mono">{{ artist.album_count }} · {{ artist.wanted_count }} · {{ artist.downloaded_count }}</dd>
+  <dt>Qobuz id</dt><dd class="mono">{{ artist.id }}</dd>
 </dl>
+
+{% if artist.external_links %}
+<div class="tag-row">
+  {% for link in artist.external_links %}
+  <a class="tag tag--link" href="{{ link.url }}" rel="noreferrer">{{ link.label }}</a>
+  {% endfor %}
+</div>
+{% elif not artist.enriched %}
+<p class="small muted">
+  Not yet identified on the open sources — see <a href="/enrichment">Enrichment</a>.
+</p>
+{% endif %}

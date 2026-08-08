@@ -1,16 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Library · {{ app_name }}{% endblock %}
 {% block heading %}Library <span class="count">{{ total }}</span>{% endblock %}
-{% block subtitle %}
-  {{ total }} artist{{ '' if total == 1 else 's' }} followed
-  {%- if q %} matching “{{ q }}”{% endif %}
-  {%- if monitored is true %} · monitored only{% elif monitored is false %} · unmonitored only{% endif %}
-  · tick artists to change what they monitor in bulk
-{% endblock %}
-
-{% block actions %}
-  <a class="btn btn--primary" href="/add">Add artist</a>
-{% endblock %}
+{#
+  No subtitle and no title-bar action. Every clause the subtitle carried was
+  restated by a control within a hundred pixels of it — the count is in the
+  heading, the filters are in the boxes below, and "tick artists to bulk edit"
+  is what the checkbox column and the bulk bar are. Add artist is in the shell
+  header, forty pixels above.
+#}
 
 {% block content %}
 {% set base_query = 'q=' ~ q ~ '&monitored=' ~ ('' if monitored is none else monitored | lower) ~ '&sort=' ~ sort ~ '&order=' ~ order %}
@@ -25,8 +22,9 @@
        href="/artists?{{ base_query }}&view=table">Table</a>
   </span>
 
+  {# Left cluster changes *what* is shown. #}
   <input class="input input--sm" type="search" name="q" value="{{ q }}"
-         placeholder="Filter by name…" style="width:200px">
+         placeholder="Filter by name…" style="width:260px">
 
   <select class="input input--sm" name="monitored" onchange="this.form.submit()">
     <option value="" {% if monitored is none %}selected{% endif %}>any monitoring</option>
@@ -34,19 +32,24 @@
     <option value="false" {% if monitored is false %}selected{% endif %}>unmonitored</option>
   </select>
 
-  <select class="input input--sm" name="sort" onchange="this.form.submit()">
-    {% for option in ['name', 'added_at', 'last_checked_at', 'albums_count'] %}
-    <option value="{{ option }}" {% if sort == option %}selected{% endif %}>by {{ option.replace('_', ' ') }}</option>
-    {% endfor %}
-  </select>
-
-  <select class="input input--sm" name="order" onchange="this.form.submit()">
-    <option value="asc" {% if order == 'asc' %}selected{% endif %}>ascending</option>
-    <option value="desc" {% if order == 'desc' %}selected{% endif %}>descending</option>
-  </select>
-
+  {# Apply is the only pointer-reachable submit for the free-text box; the
+     selects' onchange does not cover it. #}
   <button class="btn btn--sm" type="submit">Apply</button>
   <a class="btn btn--sm btn--quiet" href="/artists">Reset</a>
+
+  {# Right cluster changes only *how it is ordered*. #}
+  <span class="toolbar__end">
+    <select class="input input--sm" name="sort" onchange="this.form.submit()">
+      {% for option in ['name', 'added_at', 'last_checked_at', 'albums_count'] %}
+      <option value="{{ option }}" {% if sort == option %}selected{% endif %}>by {{ option.replace('_', ' ') }}</option>
+      {% endfor %}
+    </select>
+
+    <select class="input input--sm" name="order" onchange="this.form.submit()">
+      <option value="asc" {% if order == 'asc' %}selected{% endif %}>ascending</option>
+      <option value="desc" {% if order == 'desc' %}selected{% endif %}>descending</option>
+    </select>
+  </span>
 </form>
 
 <div id="artist-list">

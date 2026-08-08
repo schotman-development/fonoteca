@@ -1,0 +1,58 @@
+/* The failure panel. Not in the design either, and in the design's voice: a
+   hairline card, one glyph, one sentence, one action.
+
+   It composes `shared/surface.module.css` rather than declaring an edge of its
+   own, so a failure looks like the panels it replaces and not like a modal
+   somebody bolted on. The only colour is the glyph — `--c-bad` on a mono mark,
+   never a red panel: a request that failed is one block of the page being
+   unavailable, not the application being on fire, and a red fill makes every
+   transient 502 look like data loss.
+
+   The message comes from the server and is rendered verbatim (see PageError.tsx),
+   so it gets `text-wrap: pretty` and a readable measure and nothing else. */
+
+.root {
+  composes: surface from '../shared/surface.module.css';
+
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+}
+
+.glyph {
+  flex: none;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+  color: var(--c-bad);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-snug);
+  color: var(--c-ink);
+}
+
+.message {
+  max-width: var(--layout-measure);
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+.action {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  margin-top: var(--sp-4);
+}

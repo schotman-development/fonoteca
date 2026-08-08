@@ -2,6 +2,11 @@
   The backlog table on the Wanted page.
   Context: albums (list[AlbumOut]), total (int), scope (str — the active
            filters as a query string, so a row action re-renders this same view)
+
+  Five columns and one sub-line. The old "Why it is not on disk" column said
+  "Ignored" (the ○ toggle two cells to the left already says that) or "Waiting
+  for you to start it" (which is the whole premise of the page). Only the third
+  branch carried news, so that one became a state chip on the release itself.
 #}
 {% from "partials/macros.html" import cover, monitor_toggle %}
 {% set scope = scope | default('', true) %}
@@ -15,7 +20,6 @@
       <th>Release</th>
       <th>Artist</th>
       <th>Wanted since</th>
-      <th>Why it is not on disk</th>
       <th>Best offered</th>
       <th class="num">Action</th>
     </tr>
@@ -37,24 +41,17 @@
             <div class="table__title">{{ album.title }}</div>
             <div class="table__sub">
               {{ album.release_type }}{% if album.year %} · {{ album.year }}{% endif %}
-              {%- if album.label %} · {{ album.label }}{% endif %}
+              {%- if state == 'failed' %}
+              <span class="tag tag--failed" title="The last download attempt failed">failed</span>
+              {%- endif %}
             </div>
           </div>
         </div>
       </td>
-      <td>
+      <td class="small muted">
         <a href="/artists/{{ album.artist_id }}">{{ album.artist_name or album.artist_id }}</a>
       </td>
       <td class="mono small muted nowrap">{{ album.added_at | ago }}</td>
-      <td class="small">
-        {% if not album.monitored %}
-        <span class="muted">Ignored — nothing will fetch it</span>
-        {% elif state == 'failed' %}
-        <span style="color:var(--bad)">Last download attempt failed</span>
-        {% else %}
-        <span class="muted">Waiting for you to start it</span>
-        {% endif %}
-      </td>
       <td class="nowrap">
         {% if album.hires %}
         <span class="qual qual--hires">{{ album | quality }}</span>
@@ -65,7 +62,9 @@
         {% endif %}
       </td>
       <td class="num nowrap">
-        <button class="btn btn--sm btn--primary"
+        {# Plain, not primary: a filled button repeated down a list is not an
+           emphasis, it is a texture. The page's one primary is Download all. #}
+        <button class="btn btn--sm"
                 hx-post="/ui/wanted/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
                 hx-target="#wanted-rows" hx-swap="innerHTML">Download</button>
       </td>

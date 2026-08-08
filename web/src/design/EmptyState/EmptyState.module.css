@@ -1,0 +1,55 @@
+/* The empty state (design 607–613) — "Queue clear ✓".
+
+   `padding: 60px 0; text-align: center; border-top: 1px solid #DFD9CE`, a mono
+   22px `#00857A` glyph with 8px under it, a 15px/600 title, and a 12.5px
+   `#57534A` note 4px below.
+
+   The snap: 60px → `--sp-8` (56px), 8px → `--sp-2`, 4px → `--sp-1`, 12.5px →
+   `--fs-xs`, 15px → `--fs-md` (16px, the same step base.css gives an `<h2>`).
+   The 22px glyph takes `--fs-figure` (24px), the one token in the ladder that
+   is defined as "a mono thing that is not the heading scale" — which is exactly
+   what this is, and the alternative is a fifteenth font size.
+
+   The border is `border-top` alone, per the design: an empty state closes a
+   section that has already been headed, so it needs a top rule and nothing
+   round it. The green tick is the ONLY colour on the block, and it is
+   `--c-accent` rather than `--c-ok` for the reason tokens.css gives — nothing
+   is wrong here, so nothing is painted with a status. */
+
+.root {
+  padding: var(--sp-8) 0;
+  border-top: var(--sp-px) solid var(--c-line);
+  text-align: center;
+}
+
+.glyph {
+  display: block;
+  margin-bottom: var(--sp-2);
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-figure);
+  line-height: var(--lh-tight);
+  color: var(--c-accent);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-snug);
+  color: var(--c-ink);
+}
+
+.note {
+  margin: var(--sp-1) auto 0;
+  max-width: var(--layout-measure);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+.action {
+  margin-top: var(--sp-4);
+}

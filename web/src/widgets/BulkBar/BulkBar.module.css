@@ -1,0 +1,96 @@
+/* The selection toolbar under the artist wall.
+
+   It is not in the design — nothing there draws a bulk edit — so it is built
+   out of the system's own parts rather than from a line number: the hairline
+   card edge every other container uses, paper over the canvas, and the filter
+   row's own 8px gap between controls.
+
+   THE SNAPS:
+     8px  → `--sp-2`  (between controls, as in the filter row)
+     10px → `--sp-2 + 2px` (the bar's padding — a chip's 6px would crowd it)
+     18px → `--sp-4 + 2px` (the height of the group rules)
+   `#6E6A61` is `--c-ink-mark`; `#DFD9CE` is `--c-line`.
+
+   `position: sticky; bottom: 0`, not `fixed`: the shell is a fixed frame around
+   one scroller, so the bar rides the content it belongs to and stops at the
+   foot of the well rather than floating over the whole application. It needs
+   `--z-sticky-th` for the same reason a sticky table header does — the grid
+   cells scroll under it. */
+
+.bar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky-th);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-4);
+  padding: calc(var(--sp-2) + var(--sp-px) * 2);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-paper);
+  box-shadow: var(--e-2);
+  animation: bulkBarIn var(--mo-base) var(--mo-ease-out) both;
+}
+
+/* It arrives under the cursor, so it rises the short distance it occupies
+   rather than fading in place — the same movement the toasts make. */
+@keyframes bulkBarIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--sp-2));
+  }
+}
+
+.count {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink);
+  white-space: nowrap;
+  /* Room for four digits, so the buttons beside it do not shuffle sideways on
+     every tick — the control somebody is aiming at must not move. */
+  min-width: 9ch;
+}
+
+/* One decision: its label and the buttons that make it. The gap inside a group
+   is one step tighter than the gap between groups, which is the whole grouping
+   mechanism — eight buttons at one spacing is a row of eight things, the same
+   eight at two spacings is three decisions. `align-items: center` and
+   `flex-wrap` so a narrow viewport breaks between groups before it breaks
+   inside one. */
+.group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+/* Nothing is selected (or a write is in flight), so this group is waiting
+   rather than broken. The buttons are already `disabled`; this is what stops a
+   row of greyed-out labels being the loudest thing in the bar. */
+.group[data-idle] {
+  opacity: 0.55;
+}
+
+/* The micro-label naming a group of actions (design's eyebrow, inline). */
+.groupLabel {
+  margin-right: calc(var(--sp-1) - var(--sp-px));
+  font-size: var(--fs-3xs);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--c-ink-mark);
+  white-space: nowrap;
+}
+
+/* A hairline between groups. Decoration: it is `aria-hidden`, and the group
+   labels are what actually separate the actions for a screen reader. */
+.rule {
+  width: 1px;
+  height: calc(var(--sp-4) + var(--sp-px) * 2);
+  background: var(--c-line);
+}
+
+.spacer {
+  flex: 1;
+}

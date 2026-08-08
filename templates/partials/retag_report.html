@@ -4,6 +4,11 @@
 
   There is no preview here: re-tagging writes the metadata already in the
   database, so a dry run would only ever list every album back at you.
+
+  The summary sentence IS the result, so it is rendered as the panel's one
+  promoted line and the errors sit under it. A <div> rather than a <p> because
+  the panel is nested inside the card body, where the paragraph reset does not
+  reach and an inline margin override would be the only alternative.
 #}
 {% if retag is none %}
 <p class="empty">
@@ -12,11 +17,9 @@
   audio itself is untouched — but there is no undo for the old tags.
 </p>
 {% else %}
-<p class="small" style="margin:0">
-  {{ retag.summary }}.
-</p>
+<div class="lede">{{ retag.summary }}.</div>
 {% if retag.errors %}
-<ul class="small" style="margin-top:10px">
+<ul class="small">
   {% for error in retag.errors %}<li class="bad">{{ error }}</li>{% endfor %}
 </ul>
 {% endif %}

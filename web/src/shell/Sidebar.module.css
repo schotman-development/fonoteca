@@ -1,0 +1,120 @@
+/* Design lines 58–74. A `flex: none` column that never scrolls on its own — the
+   single scroller in the frame is the screen's <section>, and a sidebar with its
+   own scrollbar would put the version footer somewhere other than the bottom of
+   the window.
+
+   `padding: 20px 12px 14px` (design 59): 20 and 14 are off the layout scale
+   (--sp-5 is 24, --sp-4 is 16) and, unlike a control's inner padding, they are
+   not a shape anything else in the app shares. They are named here as this
+   element's own measurement rather than added to tokens.css as two globals with
+   one user each. */
+
+.sidebar {
+  --sidebar-pad-top: 20px;
+  --sidebar-pad-bottom: 14px;
+
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--layout-sidebar-w);
+  padding: var(--sidebar-pad-top) var(--sp-3) var(--sidebar-pad-bottom);
+  background: var(--c-paper);
+  border-right: var(--sp-px) solid var(--c-line);
+}
+
+/* Design 60: `gap: 2px`. Half a step, and the smallest gap in the app. */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sp-1) / 2);
+}
+
+/* Design 62. 13.5px sits between --fs-xs (13) and --fs-sm (14) and must not join
+   the ladder for one row; `padding: 11px 12px` is the same story on the
+   vertical. Both are written once, here. */
+.item {
+  --nav-item-size: 13.5px;
+  --nav-item-pad-y: 11px;
+
+  display: flex;
+  gap: calc(var(--sp-2) + var(--sp-1) / 2);
+  align-items: center;
+  width: 100%;
+  padding: var(--nav-item-pad-y) var(--sp-3);
+  font-family: inherit;
+  font-size: var(--nav-item-size);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink-2);
+  text-align: left;
+  text-decoration: none;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  transition:
+    background var(--mo-fast) var(--mo-ease),
+    color var(--mo-fast) var(--mo-ease);
+}
+
+.item:hover {
+  background: var(--c-sunk);
+}
+
+/* Design 62: active is a filled row, ink text and one weight step. Nothing else
+   changes — no rail, no left border — because the fill is already unambiguous
+   and the design draws exactly one difference. */
+.itemActive {
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink);
+  background: var(--c-sunk);
+}
+
+/* Design 63: a mono 17px glyph in a 20px centred column, so six glyphs of six
+   different widths still leave their labels on one vertical line. */
+.glyph {
+  flex: none;
+  width: 20px;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--c-ink-faint);
+  text-align: center;
+}
+
+.itemActive .glyph {
+  color: var(--c-ink);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Design 66. --c-warn-solid is the design's own amber, and this is a MARK — a
+   count riding on a row whose label carries the meaning — rather than prose. */
+.badge {
+  flex: none;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  color: var(--c-warn-solid);
+}
+
+/* Design 71: the spacer that pushes the version to the bottom of the aside. */
+.spacer {
+  flex: 1;
+}
+
+/* Design 72. `padding: 12px 12px 2px` — the 2px bottom is deliberate: the
+   aside's own bottom padding supplies the rest, and doubling it would float the
+   version off the frame's edge. */
+.version {
+  padding: var(--sp-3) var(--sp-3) calc(var(--sp-1) / 2);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+  border-top: var(--sp-px) solid var(--c-line);
+}

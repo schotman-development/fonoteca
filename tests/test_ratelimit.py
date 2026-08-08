@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`app.qobuz.ratelimit`.
+"""Unit tests for :mod:`app.net.ratelimit`.
 
 Real waits would make these tests take hours, so both the clock and the sleep
 function are injected: :class:`FakeClock` advances virtual time by exactly the
@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from app.qobuz.ratelimit import HOUR_SECONDS, CircuitBreaker, RateLimiter
+from app.net.ratelimit import HOUR_SECONDS, CircuitBreaker, RateLimiter
 
 
 class FakeClock:

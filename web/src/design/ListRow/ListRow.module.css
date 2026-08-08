@@ -1,0 +1,68 @@
+/* The design's universal row.
+
+   `display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+   row-gap: 10px; padding: 13px 0; border-bottom: 1px solid #E9E5DC` is written
+   four times in the design and is the same rule every time: the dashboard's
+   missing-album rows (145), the artist screen's missing rows (327), the radar's
+   followed-artist rows (570) and — at the `dense` end — the release drawer's
+   track rows (493, `gap: 11px; padding: 11px 2px`).
+
+   THE SNAP. tokens.css keeps one space scale for the whole application and
+   forbids inventing a pixel gap, so the design's 14/10/13/11/2 land on it:
+   14 → `--sp-4`, 10 and 13 and 11 → `--sp-3`, 2 → `--sp-1`. Vertical padding is
+   therefore the same 12px in both variants, and what actually separates them is
+   the design's own other two differences — a tighter gap and a small horizontal
+   inset. That is a deliberate loss of one pixel of density, not an oversight;
+   the alternative is a fifth and sixth spacing token for one row.
+
+   The hover and the focus ring belong to `.hit`, the real <button> that a
+   clickable row lays over itself — see ListRow.tsx for why the row is not
+   itself a button. Element children are lifted above it so a row that carries
+   its own Download/Ignore buttons keeps them independently clickable. */
+
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  row-gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+}
+
+/* The track list (design 493): tighter gap, and inset from the panel edge. */
+.dense {
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-1);
+}
+
+.clickable {
+  position: relative;
+}
+
+/* Everything the caller put in the row sits ABOVE the hit layer, so a nested
+   control is reachable by pointer and by tab in its own right. `:not(.hit)`
+   rather than a z-index on `.hit`, because the hit layer has to stay
+   `position: absolute` and `.clickable > *` would otherwise re-point it. */
+.clickable > *:not(.hit) {
+  position: relative;
+  z-index: 1;
+}
+
+.hit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--mo-fast) var(--mo-ease);
+}
+
+.clickable:hover .hit {
+  background: var(--c-sunk);
+}

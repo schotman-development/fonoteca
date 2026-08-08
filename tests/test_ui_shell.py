@@ -96,7 +96,19 @@ def queued_ids(client: TestClient) -> set[str]:
 
 
 # --------------------------------------------------------------------- shell
-PAGES = ["/", "/artists", "/add", "/wanted", "/queue", "/activity", "/settings"]
+#: The server-rendered pages, now one prefix deeper: ``main.create_app`` mounts
+#: the old Jinja router under ``/legacy`` so the React shell can own ``/``.
+#: Transitional — this whole module is rewritten as JSON-contract tests when the
+#: old UI is deleted.
+PAGES = [
+    "/legacy/",
+    "/legacy/artists",
+    "/legacy/add",
+    "/legacy/wanted",
+    "/legacy/queue",
+    "/legacy/activity",
+    "/legacy/settings",
+]
 
 
 @pytest.mark.parametrize("path", PAGES)
@@ -123,9 +135,9 @@ def test_pages_have_a_single_h1(client: TestClient, path: str) -> None:
 
 @pytest.mark.parametrize(
     ("path", "label"),
-    [("/", "Dashboard"), ("/artists", "Library"), ("/add", "Add new"),
-     ("/wanted", "Wanted"), ("/queue", "Queue"), ("/activity", "Activity"),
-     ("/settings", "Settings")],
+    [("/legacy/", "Dashboard"), ("/legacy/artists", "Library"), ("/legacy/add", "Add new"),
+     ("/legacy/wanted", "Wanted"), ("/legacy/queue", "Queue"), ("/legacy/activity", "Activity"),
+     ("/legacy/settings", "Settings")],
 )
 def test_nav_marks_the_current_section(
     client: TestClient, path: str, label: str
@@ -142,15 +154,37 @@ def test_nav_marks_the_current_section(
 
 def test_nav_partial_carries_live_counts(client: TestClient) -> None:
     """The polled sidebar fragment reports the backlog and queue depth."""
-    body = client.get("/partials/nav?active=wanted").text
+    body = client.get("/legacy/partials/nav?active=wanted").text
     # Three monitored missing releases: two wanted, one failed.
     assert '<span class="nav__count nav__count--hot">3</span>' in body
     assert "is-active" in body
 
 
+def test_the_sidebar_carries_its_counts_on_the_first_paint(
+    client: TestClient,
+) -> None:
+    """The nav is a live region like any other, and the rule for those is that
+    the page's first frame matches what the poller re-fetches. Without the counts
+    in the page context the badges were simply absent for the first 20 seconds of
+    every page load, then appeared."""
+    page = client.get("/legacy/wanted").text
+    fragment = client.get("/legacy/partials/nav?active=wanted").text
+
+    assert _badges(page) == _badges(fragment) != []
+    assert '<span class="nav__count nav__count--hot">3</span>' in page
+
+
+def _badges(markup: str) -> list[str]:
+    """Every rendered count span, so the two renderings can be compared."""
+    return [
+        chunk.split("</span>")[0]
+        for chunk in markup.split('<span class="nav__count')[1:]
+    ]
+
+
 def test_status_footer_never_leaks_the_library_secret(client: TestClient) -> None:
     """The footer shows the library path and version, and no credentials."""
-    body = client.get("/partials/status-bar").text
+    body = client.get("/legacy/partials/status-bar").text
     assert "Qobuz" in body and "Indexer" in body and "Queue" in body
     assert "X-User-Auth-Token" not in body
 
@@ -158,7 +192,7 @@ def test_status_footer_never_leaks_the_library_secret(client: TestClient) -> Non
 # -------------------------------------------------------------------- wanted
 def test_wanted_lists_missing_monitored_releases(client: TestClient) -> None:
     """Wanted + failed and monitored; downloaded/skipped/ignored stay out."""
-    body = client.get("/wanted").text
+    body = client.get("/legacy/wanted").text
     assert "Release 0" in body and "Release 1" in body   # wanted
     assert "Release 3" in body                            # failed
     assert "Release 2" not in body                        # not monitored
@@ -167,32 +201,32 @@ def test_wanted_lists_missing_monitored_releases(client: TestClient) -> None:
 
 
 def test_wanted_status_filter_narrows_to_one_state(client: TestClient) -> None:
-    assert "Release 3" not in client.get("/wanted?status=wanted").text
-    assert "Release 0" not in client.get("/wanted?status=failed").text
+    assert "Release 3" not in client.get("/legacy/wanted?status=wanted").text
+    assert "Release 0" not in client.get("/legacy/wanted?status=failed").text
 
 
 def test_wanted_empty_status_means_all_states(client: TestClient) -> None:
     """``?status=`` is what the dropdown submits for "show everything"."""
-    response = client.get("/wanted?status=&monitored=")
+    response = client.get("/legacy/wanted?status=&monitored=")
     assert response.status_code == 200
     assert "Release 0" in response.text and "Release 3" in response.text
 
 
 def test_wanted_search_filters_by_artist_name(client: TestClient) -> None:
-    assert "Release 0" in client.get("/wanted?q=frahm").text
-    assert "Release 0" not in client.get("/wanted?q=zzzznope").text
+    assert "Release 0" in client.get("/legacy/wanted?q=frahm").text
+    assert "Release 0" not in client.get("/legacy/wanted?q=zzzznope").text
 
 
 def test_download_all_queues_only_monitored_wanted(client: TestClient) -> None:
     """The bulk button skips failed, skipped, downloaded and ignored rows."""
-    response = client.post("/ui/wanted/download-all", headers={"HX-Request": "true"})
+    response = client.post("/legacy/ui/wanted/download-all", headers={"HX-Request": "true"})
     assert response.status_code == 200
     assert queued_ids(client) == QUEUEABLE
 
 
 def test_download_all_is_idempotent(client: TestClient) -> None:
-    client.post("/ui/wanted/download-all", headers={"HX-Request": "true"})
-    second = client.post("/ui/wanted/download-all", headers={"HX-Request": "true"})
+    client.post("/legacy/ui/wanted/download-all", headers={"HX-Request": "true"})
+    second = client.post("/legacy/ui/wanted/download-all", headers={"HX-Request": "true"})
 
     assert second.status_code == 200
     assert client.get("/api/queue").json()["total"] == len(QUEUEABLE)
@@ -201,7 +235,7 @@ def test_download_all_is_idempotent(client: TestClient) -> None:
 def test_single_row_download_queues_just_that_album(client: TestClient) -> None:
     album_id = next(iter(QUEUEABLE))
     response = client.post(
-        f"/ui/wanted/{album_id}/queue", headers={"HX-Request": "true"}
+        f"/legacy/ui/wanted/{album_id}/queue", headers={"HX-Request": "true"}
     )
     assert response.status_code == 200
     assert queued_ids(client) == {album_id}
@@ -223,17 +257,17 @@ def test_wanted_json_download_is_explicit_only(client: TestClient) -> None:
 
 # ------------------------------------------------------------------- library
 def test_library_defaults_to_the_artwork_grid(client: TestClient) -> None:
-    body = client.get("/artists").text
+    body = client.get("/legacy/artists").text
     assert 'class="tiles"' in body
     assert 'class="seg__item is-active"' in body
 
 
 def test_library_table_view_is_reachable(client: TestClient) -> None:
-    body = client.get("/artists?view=table").text
+    body = client.get("/legacy/artists?view=table").text
     assert "<table" in body
     assert 'class="tiles"' not in body
 
 
 def test_unknown_view_falls_back_to_a_422_not_a_crash(client: TestClient) -> None:
     """``view`` is a Literal, so a junk value is a validation error, not a 500."""
-    assert client.get("/artists?view=nonsense").status_code == 422
+    assert client.get("/legacy/artists?view=nonsense").status_code == 422

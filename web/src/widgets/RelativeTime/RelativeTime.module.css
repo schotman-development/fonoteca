@@ -1,0 +1,13 @@
+/* A relative time carries no size and no colour of its own.
+
+   It appears at four different sizes in the design — 11.5px `#6E6A61` on a
+   shelf card (129), 11px mono in a log row (802), 12px in a queue sub-line
+   (549) and inside 12.5px prose (191) — so a font size declared here would be
+   a size fought over by four parents. What it does own is the one thing that
+   is true of it everywhere: `3m 12s ago` is a single token and must never be
+   broken across two lines, which would leave a row reading "3m" over "12s
+   ago". */
+
+.time {
+  white-space: nowrap;
+}

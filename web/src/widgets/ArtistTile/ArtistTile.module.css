@@ -1,0 +1,95 @@
+/* The artist grid cell, design 256–266.
+
+   Cell (256): `cursor: pointer; animation: cadFade 0.3s ease both` — the
+   keyframe is `fadeIn` in base.css, renamed off the design tool's prefix, and
+   0.3s is `--mo-slow` (320ms). The cell is a `<Link data-plain>`, so the
+   underline is already off; what is set here is that the name and the meta
+   line take the cell's own ink rather than the anchor colour from base.css.
+
+   Name (260): `margin-top: 9px; font-size: 12.5px; font-weight: 500;
+   line-height: 1.3; text-wrap: pretty`.
+   Meta (261): mono, `font-size: 11px; color: #6E6A61; margin-top: 3px`.
+
+   THE SNAPS: 12.5px → `--fs-xs`, 11px → `--fs-3xs` (the mono micro-label size,
+   which is exactly what this line is), 1.3 → `--lh-snug`, #6E6A61 →
+   `--c-ink-mark`. 9px is `--sp-2 + --sp-px` and 3px is `--sp-1 - --sp-px`;
+   neither is on the 4px scale, so neither is written as a literal.
+
+   The circle itself is `Artwork shape="circle" size="fill"` — the aspect
+   ratio, the radius and the initials size all live there (design 257–258), and
+   restating any of them here would fork the one thing that distinguishes this
+   grid from the album grid beside it.
+
+   ── WHY THE ROWS ARE RESERVED RATHER THAN AUTO ────────────────────────────
+
+   The same reservation `AlbumTile` makes, for the same two reasons and against
+   the same wall — read the note there first, it is the longer one. The circle
+   is the column's width and so identical in every cell; a flex column under it
+   is not. Names wrap (`AC/DC` against `The Bach Choir & Orchestra of the
+   Netherlands`, both real), and the meta line is dropped entirely when
+   `album_count` is null, which is the roll-up's *silence* and a state this
+   grid is in whenever the router did not populate it. Either one gives the
+   wall ragged bottoms and rows as tall as their worst cell.
+
+   So: explicit heights for the two text rows, each line placed by number, and
+   a name clamped to the two rows it is given — clipped visually only, since
+   the string is the link's accessible name. Heights are
+   `margin + lines × size × line-height` from the tokens the lines use.
+
+   TWO LINES, not one: `Thorbjørn Risager & The Black Tornado` and
+   `Royal Concertgebouw Orchestra` are ordinary in a real library, and one line
+   would clip a quarter of this user's artists at the first space. */
+
+.tile {
+  display: grid;
+  /* The circle, then the name and the meta line. See the note above. */
+  grid-template-rows:
+    auto
+    calc(var(--sp-2) + var(--sp-px) + var(--fs-xs) * var(--lh-snug) * 2)
+    calc(var(--sp-1) - var(--sp-px) + var(--fs-3xs) * var(--lh-snug));
+  /* Each line sits at the top of its own reserved row rather than stretching
+     to fill it. */
+  align-items: start;
+  color: inherit;
+  animation: fadeIn var(--mo-slow) var(--mo-ease-out) both;
+}
+
+.tile:hover {
+  color: inherit;
+}
+
+/* Placed explicitly rather than left to auto-flow — the two lines below take
+   named rows, and the circle landing in row 1 should be this file's statement
+   rather than a property of the placement algorithm. */
+.art {
+  grid-row: 1;
+}
+
+.name {
+  grid-row: 2;
+  /* Clamped to the two rows above. `-webkit-` prefixed and unprefixed
+     together: the unprefixed properties are the standard, the prefixed pair is
+     what the engines actually implement. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-top: calc(var(--sp-2) + var(--sp-px)); /* design 260: 9px */
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.meta {
+  grid-row: 3;
+  margin-top: calc(var(--sp-1) - var(--sp-px)); /* design 261: 3px */
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+  white-space: nowrap;
+}

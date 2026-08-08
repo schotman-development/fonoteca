@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ artist.name }} · {{ app_name }}{% endblock %}
 {% block heading %}{{ artist.name }}{% endblock %}
+{#
+  Identity and freshness only. The counts are two lines below in the stats
+  blurb, which is the polled region that keeps them true.
+#}
 {% block subtitle %}
-  {{ artist.album_count }} release{{ '' if artist.album_count == 1 else 's' }} known ·
-  {{ artist.downloaded_count }} on disk ·
-  checked {{ artist.last_checked_at | ago }}
+  {{ artist.monitor_mode | enum_value }} · checked {{ artist.last_checked_at | ago }}
 {% endblock %}
 
 {% block actions %}
@@ -22,10 +24,8 @@
   {% if artist.downloaded_count %}
   <a class="btn" href="/library/tidy?artist_id={{ artist.id }}">Tidy files</a>
   {% endif %}
-  <button class="btn btn--danger" hx-post="/ui/artists/{{ artist.id }}/delete"
-          hx-confirm="Unfollow {{ artist.name }}? Album, track and queue records for this artist are deleted (files on disk are kept).">
-    Unfollow
-  </button>
+  {# Unfollow is not a title-bar action: it is the destructive end of the
+     Monitoring card, and it lives in that card's foot. #}
 {% endblock %}
 
 {% block content %}
@@ -147,10 +147,21 @@
           <div id="artist-settings-msg"></div>
         </form>
       </div>
+      {#
+        Outside the form, deliberately. The shim only calls preventDefault for
+        FORM and A elements, so a <button> nested in the settings form would
+        submit it as well as firing its own hx-post.
+      #}
+      <div class="card__foot">
+        <button class="btn btn--sm btn--danger" hx-post="/ui/artists/{{ artist.id }}/delete"
+                hx-confirm="Unfollow {{ artist.name }}? Album, track and queue records for this artist are deleted (files on disk are kept).">
+          Unfollow
+        </button>
+      </div>
     </section>
 
     <section class="card">
-      <header class="card__head"><h2>Activity</h2></header>
+      <header class="card__head card__head--quiet"><h2>Activity</h2></header>
       <div class="card__body card__body--flush">
         {% with items = activity, compact = true %}{% include "partials/activity_rows.html" %}{% endwith %}
       </div>

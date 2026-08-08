@@ -1,0 +1,78 @@
+/* The frame — design lines 26, 56, 76–78.
+
+   One rule governs all of it: **the only scroller in the application is the
+   screen's own <section>**. Every band here is `flex: none`, every container in
+   the chain to that section is `min-height: 0` / `min-width: 0` and
+   `overflow: hidden`, and nothing is `position: sticky`. A sticky header over a
+   document scroller is the arrangement this replaces, and it is what put a
+   drawer's close button under the top bar and made the footer's counts scroll
+   away from the library they describe. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* 100dvh where the browser has it: on a phone the toolbar eats 100vh and the
+     footer sits under it, which is the one band that must never be off-screen. */
+  height: 100dvh;
+  overflow: hidden;
+  font-size: var(--fs-base);
+  background: var(--c-paper);
+}
+
+/* Design 56: the row that holds the sidebar and everything right of it.
+   `min-height: 0` is load-bearing — without it a flex child's default
+   `min-height: auto` lets the content set the row's height and the whole page
+   grows a second scrollbar. */
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Design 76. */
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Design 77: the outlet row. A ROW, not a column, because a screen's detail
+   Drawer is a flex sibling of its section rather than an overlay — that is what
+   lets the content column shrink beside an open drawer instead of being covered
+   by it. */
+.outlet {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Not in the design, and not optional: the sidebar puts six links between the
+   top of the document and the screen's content, on every screen, forever. The
+   link is in the tab order from the first Tab press and is invisible until it
+   takes focus. */
+.skipLink {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: var(--z-toast);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--c-on-ink);
+  text-decoration: none;
+  background: var(--c-ink);
+  border-radius: var(--r-sm);
+  box-shadow: var(--e-4);
+  transform: translateY(-200%);
+}
+
+/* `:focus`, not `:focus-visible`: the only way to reach this link is the
+   keyboard, and a browser that declines to call that "visible" focus would hide
+   the one control the person is currently on. */
+.skipLink:focus {
+  color: var(--c-on-ink);
+  transform: none;
+}

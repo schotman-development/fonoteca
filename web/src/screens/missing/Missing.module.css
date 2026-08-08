@@ -1,0 +1,69 @@
+/* Missing releases.
+
+   The frame, the header and the filter row are `screen.module.css`'s and are
+   composed rather than restated — see the note at the top of that file. What is
+   left is the list's own top rule (each `ListRow` rules itself off below, so the
+   list needs one above), the cap note, and the honest sentence under the rows.
+
+   `#DFD9CE` is `--c-line`; `#6E6A61` is `--c-ink-mark`; `#57534A` is
+   `--c-ink-3`. */
+
+.section {
+  composes: section from '../screen.module.css';
+}
+
+.header {
+  composes: header from '../screen.module.css';
+}
+
+.headerMain {
+  composes: headerMain from '../screen.module.css';
+}
+
+.headerActions {
+  composes: headerActions from '../screen.module.css';
+}
+
+.title {
+  composes: title from '../screen.module.css';
+}
+
+.lede {
+  composes: lede from '../screen.module.css';
+}
+
+.filters {
+  composes: filters from '../screen.module.css';
+}
+
+.filterSpacer {
+  composes: filterSpacer from '../screen.module.css';
+}
+
+.search {
+  composes: search from '../screen.module.css';
+}
+
+.shown {
+  composes: shown from '../screen.module.css';
+}
+
+/* Sits between the header and the filter row, so it is read before the press
+   it describes rather than after it. */
+.capNote {
+  margin: 0 0 var(--sp-5);
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+/* The list is ruled off at the top; each row rules itself off below. */
+.list {
+  border-top: var(--sp-px) solid var(--c-line);
+}
+
+.scope {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}

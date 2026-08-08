@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 import main
+from app.api import routes_api
 from app.db import get_session
 from app.models import Album, AlbumStatus, Artist, Base, QueueItem, QueueState
 
@@ -113,4 +114,44 @@ def test_a_real_filter_value_still_filters(client: TestClient) -> None:
 def test_a_genuinely_invalid_value_is_still_rejected(client: TestClient) -> None:
     """The fix must not turn every typo into a silent no-op."""
     assert client.get("/api/queue?state=banana").status_code == 422
-    assert client.get("/queue?state=banana").status_code == 422
+    assert client.get("/legacy/queue?state=banana").status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Search annotations
+# ---------------------------------------------------------------------------
+class SearchOnlyClient:
+    """Just enough Qobuz client for ``run_search``."""
+
+    def __init__(self, albums: list[dict[str, object]]) -> None:
+        self.albums = albums
+
+    async def search(self, query: str, **kwargs: object) -> dict[str, object]:
+        return {"albums": {"items": self.albums, "total": len(self.albums)}}
+
+
+def test_a_release_we_only_know_about_is_not_in_the_library(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The indexer writes a row for every release a followed artist has, so
+    "we have a row" marked the whole Wanted backlog as already owned."""
+    monkeypatch.setattr(
+        routes_api,
+        "require_client",
+        lambda: SearchOnlyClient(
+            [
+                # Seeded as WANTED — known, not owned.
+                {"id": "uyej1o165e870", "title": "Day", "tracks_count": 6},
+                # Not in the database at all.
+                {"id": "brandnew00001", "title": "Night", "tracks_count": 8},
+            ]
+        ),
+    )
+
+    albums = client.get("/api/search?q=frahm").json()["albums"]
+    by_id = {album["id"]: album for album in albums}
+
+    assert by_id["uyej1o165e870"]["in_library"] is False
+    assert by_id["uyej1o165e870"]["tracked"] is True, "known, and worth saying so"
+    assert by_id["brandnew00001"]["in_library"] is False
+    assert by_id["brandnew00001"]["tracked"] is False

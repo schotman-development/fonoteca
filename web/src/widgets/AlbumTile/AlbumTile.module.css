@@ -1,0 +1,141 @@
+/* The album grid cell, design 278–290.
+
+   Cell (278): `cursor: pointer; animation: cadFade 0.3s ease both` — `fadeIn`
+   in base.css, 0.3s is `--mo-slow`. It is a real `<button>`, so the reset that
+   makes a button look like a grid cell (no border, no background, inherited
+   font, left-aligned text) lives here; the focus ring is the global one.
+
+   Title (288): `margin-top: 8px; font-size: 12.5px; font-weight: 500;
+   line-height: 1.3; text-wrap: pretty`.
+   Credit (289): `font-size: 11.5px; color: #57534A; margin-top: 1px`.
+   Meta (290): mono, `font-size: 11px; color: #6E6A61; margin-top: 3px`.
+
+   THE SNAPS: 12.5px → `--fs-xs`, 11.5px → `--fs-2xs`, 11px → `--fs-3xs`;
+   1.3 → `--lh-snug`; #57534A → `--c-ink-3` and #6E6A61 → `--c-ink-mark`,
+   both exact. 8px is `--sp-2` exactly; 1px is `--sp-px`; 3px is
+   `--sp-1 - --sp-px`.
+
+   The square, its radius, the selection ring and the two badge positions all
+   belong to `Artwork` (design 279–286) and are deliberately not restated: the
+   ring in particular is `outline: 2px solid --c-accent; outline-offset: 2px`
+   plus the lifted `--e-3` shadow, and a second copy of it here would be a
+   selected state that drifts from every other selected tile in the app.
+
+   ── WHY THE ROWS ARE RESERVED RATHER THAN AUTO ────────────────────────────
+
+   The design draws this wall with short titles, so stacking the four parts in
+   a flex column looked right and was wrong: the square is the column's width
+   and therefore identical in every cell, but everything under it is
+   content-sized, so the CARD was a different height in each one. Two things
+   varied. Titles wrap — *Wild* is one line and *Live at Carnegie Hall - An
+   Acoustic Evening* is three in a ~150px column, so one artist's grid stepped
+   between 1 and 3 lines of title — and both lines below the title are dropped
+   when their value is unknown (`artist_name === null`, and a release with
+   neither a year nor a measured format, which is what an adopted folder of
+   MP3s is). Ragged bottoms, and a row as tall as its worst cell.
+
+   So the tile is a grid with the three text rows given an explicit height and
+   each line placed on its own row by number. A line that is not rendered
+   leaves its row empty instead of collapsing it, which is the only way to
+   reserve space for an element that is genuinely absent — the alternative,
+   rendering an empty one, would put a blank meta line in the DOM and break
+   the rule that this tile never shows `— · —`. Heights are
+   `margin + lines × size × line-height`, from the same tokens the lines
+   themselves use, so nothing here can drift from the type scale.
+
+   The title is clamped to those two reserved lines. It is clipped visually
+   only — the full string stays in the DOM, so the button's accessible name is
+   still the whole title, and `title=` puts it in reach of a pointer. */
+
+.tile {
+  /* THE CARD'S WIDTH IS THE CELL'S, and this line is the whole of what makes
+     that true. `width: auto` on a <button> is shrink-to-fit — the element
+     sizes to its own content and neither `display: grid` nor `display: flex`
+     changes it, because the sizing comes from the button being a form control
+     rather than from its inner layout. So every card was as wide as its own
+     widest text line and the square under `width: 100%` followed it: measured
+     in a 149px column, `Self Made Man` (meta `2020 · FLAC 16bit 44.1kHz`) drew
+     itself 165px wide and overflowed the cell, while `Spring` — same grid,
+     meta just `2010`, because no format could be measured off its files —
+     drew itself 59px. A wall of different-sized cards, and the artwork sizes
+     were the visible half of it.
+
+     `min-width: 0` beside it because a grid item's automatic minimum is its
+     content, which would let a long unbroken title push the column wider than
+     the track the grid computed. */
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  /* The square, then the three text lines. See the note above. */
+  grid-template-rows:
+    auto
+    calc(var(--sp-2) + var(--fs-xs) * var(--lh-snug) * 2)
+    calc(var(--sp-px) + var(--fs-2xs) * var(--lh-snug))
+    calc(var(--sp-1) - var(--sp-px) + var(--fs-3xs) * var(--lh-snug));
+  /* Each line sits at the top of its own reserved row; without this they
+     would stretch to fill it and the type would drift off the baseline. */
+  align-items: start;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  animation: fadeIn var(--mo-slow) var(--mo-ease-out) both;
+}
+
+/* Placed explicitly rather than left to auto-flow: the three lines below take
+   named rows, and an auto-placed first child landing in row 1 is a property of
+   the placement algorithm rather than something this file said. */
+.art {
+  grid-row: 1;
+}
+
+.title {
+  grid-row: 2;
+  /* The clamp. `-webkit-` prefixed and unprefixed together — the unprefixed
+     properties are the standard and the prefixed pair is what every current
+     engine actually implements. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-top: var(--sp-2); /* design 288: 8px */
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.credit {
+  grid-row: 3;
+  margin-top: var(--sp-px); /* design 289: 1px */
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+  /* One line, reserved: a long credit must not push the meta line out of the
+     row below it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  grid-row: 4;
+  margin-top: calc(var(--sp-1) - var(--sp-px)); /* design 290: 3px */
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+  /* One line, reserved. `FLAC 24bit 192kHz` next to a year is longer than a
+     narrow column, and this row has height for one line only — so it ellipses
+     rather than wrapping into a second line the row would clip mid-glyph. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

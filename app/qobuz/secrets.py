@@ -113,7 +113,7 @@ Validator = Callable[[str], Awaitable[bool]]
 
 
 class RateLimiterLike(Protocol):
-    """The slice of :class:`app.qobuz.ratelimit.RateLimiter` this module needs.
+    """The slice of :class:`app.net.ratelimit.RateLimiter` this module needs.
 
     Fetching ``play.qobuz.com/login`` and the multi-megabyte ``bundle.js`` is
     outbound Qobuz traffic like any other, so it must be paced by the same
@@ -474,7 +474,7 @@ async def fetch_bundle(
         http_client: A client used **only** for play.qobuz.com. It must not
             carry the Qobuz API auth headers.
         settings: Injected settings (defaults to :func:`get_settings`).
-        limiter: The shared :class:`~app.qobuz.ratelimit.RateLimiter`. Strongly
+        limiter: The shared :class:`~app.net.ratelimit.RateLimiter`. Strongly
             recommended: both GETs are real outbound Qobuz traffic and the
             bundle is several megabytes. ``None`` (tests only) skips pacing.
 

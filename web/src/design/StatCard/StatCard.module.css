@@ -1,0 +1,76 @@
+/* The health tile — design 104–108.
+
+   The edge, radius and paper come from `shared/surface.module.css` (`.hoverEdge`,
+   which adds the design's `border-color: #C3BDB0` on hover). The design's 11px
+   radius snaps to `--r-md`, which is what `.surface` already uses, so nothing
+   sets `--r-surface` here.
+
+   The design writes the figure at `font-weight: 700`. The ladder in tokens.css
+   is three weights and stops at 600 on purpose ("three, no more"), so the
+   figure is `--fw-semibold`. On a 24px mono numeral the difference is a
+   fraction of a stem width; a fourth weight in the system is not.
+
+   The label's 12px and the share line's 11.5px both snap to `--fs-2xs`. They
+   stay two lines rather than one because their colours differ — `--c-ink-2`
+   for what the number counts, `--c-ink-3` for the share it is of. */
+
+.card {
+  display: block;
+  width: 100%;
+  padding: var(--sp-4);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.value {
+  display: block;
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-figure);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  color: var(--c-ink);
+}
+
+.label {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-2);
+  text-wrap: pretty;
+}
+
+/* The design's 3px offset — the closest step on the one space scale is `--sp-1`. */
+.share {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+/* Tone paints the figure and nothing else. These are the TEXT ambers and reds:
+   `--c-warn` (5.0:1), never `--c-warn-solid` (3.2:1, marks only). */
+
+.toneNeutral {
+  color: var(--c-ink);
+}
+
+.toneAccent {
+  color: var(--c-accent);
+}
+
+.toneOk {
+  color: var(--c-ok);
+}
+
+.toneWarn {
+  color: var(--c-warn);
+}
+
+.toneBad {
+  color: var(--c-bad);
+}

@@ -1,0 +1,80 @@
+/* A switch with a label and a note beside it — design 387–395 (the artist
+   settings drawer), 397–405 (the drawer's other two), 506–515 (the per-album
+   pin/freeze/mute switches) and 780–788 (the structure switches on the Rules
+   screen).
+
+   The design draws it twice with a one-pixel difference — `gap: 12px` with the
+   switch lifted 2px in the drawers, `gap: 11px` lifted 1px on the Rules screen
+   — which is one shape written on two days, not two shapes. It snaps to
+   `--sp-3` and one lift.
+
+   The lift is a custom property rather than a literal `margin-top` for the same
+   reason `shared/switch.module.css` derives its knob position: it exists only
+   to sit the 19px track on the label's cap height, so if the label's size or
+   the track's height is ever retuned this is the one number that moves, and it
+   is named where it can be found. It is not on the `--sp-*` scale because that
+   scale measures the gaps BETWEEN blocks; this is optical alignment inside one
+   control, the same argument tokens.css makes for the chip's 6px padding.
+
+   The note is `text-wrap: pretty` because the design says so (393) and because
+   these notes are one-sentence explanations that read badly with a single word
+   on the last line. */
+
+.field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.switch {
+  --switchfield-lift: 2px;
+
+  margin-top: var(--switchfield-lift);
+}
+
+.text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 12.5px/500 (design 391). A real `<label>` pointed at the switch: clicking the
+   words works, which for a 34×19 target is not a nicety. */
+.label {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  cursor: pointer;
+}
+
+/* 11.5px --c-ink-3 (392). */
+.note {
+  display: block;
+  margin-top: var(--sp-px);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+/* The right-hand slot. Not in the design's switch rows — the Rules screen needs
+   it to say whether a value came from `.env` or from an override, which is a
+   fact about the SETTING and belongs beside it rather than inside the note. */
+.meta {
+  flex: none;
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+/* A switch nobody may press should not look like one that can. The label is
+   dimmed with it — a live-looking caption over a dead control is the same lie
+   in a smaller font. */
+.disabled .label,
+.disabled .note {
+  opacity: 0.5;
+}
+
+.disabled .label {
+  cursor: not-allowed;
+}

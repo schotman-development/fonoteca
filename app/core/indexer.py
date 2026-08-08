@@ -3,7 +3,7 @@
 The indexer walks the followed artists **one at a time**, at a deliberately
 sedate pace, looking for releases Qobuzarr has not seen yet.  Everything it
 does goes through :class:`app.qobuz.client.QobuzClient`, which in turn is gated
-by the single global :class:`~app.qobuz.ratelimit.RateLimiter`, so the indexer
+by the single global :class:`~app.net.ratelimit.RateLimiter`, so the indexer
 can never outrun the configured request budget.
 
 Pacing
@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -73,10 +73,13 @@ from app.qobuz.errors import QobuzError
 from app.qobuz.mapper import map_album, map_artist
 
 __all__ = [
+    "BacklogChange",
     "IndexResult",
     "Indexer",
     "UnknownArtistError",
+    "apply_monitoring_to_backlog",
     "dedupe_key",
+    "desired_status",
     "edition_rank",
     "ensure_queue_item",
     "utc",
@@ -180,6 +183,227 @@ def edition_rank(album: Album) -> tuple[Any, ...]:
         album.release_date or date.min,
         str(album.id),
     )
+
+
+def desired_status(artist: Artist, album: Album) -> tuple[AlbumStatus, str]:
+    """Whether *artist*'s settings want *album*, and the sentence saying why.
+
+    The single statement of "does this artist want this release?", with two
+    callers: the indexer, deciding what a newly discovered album starts as, and
+    :func:`apply_monitoring_to_backlog`, deciding what happens to the releases
+    already on file when somebody changes their mind about an artist. It was a
+    private method of :class:`Indexer` while it had one caller.
+
+    Pure — it reads the two rows and nothing else.
+    """
+    if not artist.monitored:
+        return AlbumStatus.SKIPPED, "artist is not monitored"
+    if artist.monitor_mode is MonitorMode.NONE:
+        return AlbumStatus.SKIPPED, "monitor mode is 'none'"
+    if not artist.accepts(album.release_type):
+        return (
+            AlbumStatus.SKIPPED,
+            f"release type '{album.release_type}' is not accepted",
+        )
+    if album.guest_appearance and not artist.include_guest_appearances:
+        return AlbumStatus.SKIPPED, "artist only guests on this release"
+    # `is None` and not the parsed list: the column's *null* is "nobody has
+    # looked", which must behave exactly as if the filter were off, while an
+    # analysed release whose every credit was the bare artist name stores `[]`
+    # and is a release the filter genuinely refuses. Collapsing the two would
+    # demote a whole catalogue the moment a filter was set, before anything had
+    # measured a single release.
+    accepted = artist.credit_filter_list
+    if accepted and album.credit_names is not None:
+        wanted = {name.casefold() for name in accepted}
+        if not any(name.casefold() in wanted for name in album.credit_names_list):
+            return AlbumStatus.SKIPPED, "not credited to an accepted artist"
+    if artist.monitor_mode is MonitorMode.FUTURE:
+        added = utc(artist.added_at) or _now()
+        if album.release_date is None:
+            return AlbumStatus.SKIPPED, "future-only mode and release date unknown"
+        if album.release_date < added.date():
+            return (
+                AlbumStatus.SKIPPED,
+                f"future-only mode and released {album.release_date.isoformat()}",
+            )
+    return AlbumStatus.WANTED, "wanted"
+
+
+def wants_nothing(artist: Artist) -> bool:
+    """Whether *artist*'s settings refuse every release, whatever it is.
+
+    The two clauses of :func:`desired_status` that never read the album, named
+    once so :func:`apply_monitoring_to_backlog` can demote a whole artist's
+    backlog in one UPDATE instead of loading every row to be told the same
+    thing four thousand times. It is an optimisation and must stay a faithful
+    one: this returning ``True`` has to mean ``desired_status`` would answer
+    ``SKIPPED`` for **every** album, so a new album-independent refusal belongs
+    here as well as there, and an album-*dependent* one belongs only there.
+
+    Pure — it reads the one row and nothing else.
+    """
+    return not artist.monitored or artist.monitor_mode is MonitorMode.NONE
+
+
+@dataclass(slots=True)
+class BacklogChange:
+    """How many releases a monitoring change moved, in each direction."""
+
+    demoted: int = 0
+    """Were wanted, are not any more: their artist's settings stopped wanting
+    them — unmonitored, switched to ``monitor_mode='none'`` or ``future``, or
+    narrowed to a set of release types this one is not in."""
+    restored: int = 0
+    """Were skipped, are wanted again: their artist's settings want them once
+    more, and no person had ignored the release itself."""
+
+    @property
+    def touched(self) -> int:
+        return self.demoted + self.restored
+
+
+async def apply_monitoring_to_backlog(
+    session: AsyncSession, artists: Sequence[Artist]
+) -> BacklogChange:
+    """Bring each artist's **existing** backlog into line with their settings.
+
+    Turning an artist's monitoring off used to leave every release it had
+    already marked ``wanted`` sitting in the backlog for good, and nothing else
+    would ever come along and clear them: :meth:`Indexer.claim_artist` only
+    visits *monitored* artists, and even a visit re-derives the status of new
+    albums only. So one real library sat at 4,000-odd wanted releases belonging
+    to artists it had been told to stop watching, with no way back short of
+    unfollowing them — which throws away the artist too.
+
+    Both directions are the same rule (:func:`desired_status`) applied to rows
+    that already exist rather than to ones just discovered:
+
+    * **Demote** — a ``wanted`` release the artist's settings no longer want
+      becomes ``skipped``. Nothing else moves: ``queued`` and ``downloading``
+      belong to the worker, ``downloaded`` is a fact about the disk, and
+      ``failed`` is a record of an attempt rather than an intention.
+    * **Restore** — a ``skipped`` release becomes ``wanted`` again when the
+      artist's settings want it. Two exclusions, and each is somebody's
+      decision being preserved rather than an optimisation:
+
+      1. ``Album.monitored`` false means a **person** ignored this one release
+         from a screen. That is not ours to reverse, and it is exactly what
+         distinguishes it from a release this cascade demoted, which is why the
+         demotion above leaves the flag alone.
+      2. A duplicate edition stays skipped. ``Indexer._dedupe_editions`` keeps
+         one edition per release, so promoting the whole group would put three
+         copies of one album back in the backlog and hand somebody three
+         chances to download the wrong one. The winner is chosen by the same
+         :func:`dedupe_key` / :func:`edition_rank` pair the deduper uses, and a
+         group with a release already held (or being fetched) promotes nothing.
+
+    **Demotion is keyed on :func:`desired_status`, not on ``monitored``.** It
+    was the flag for as long as unmonitoring was the only way to stop wanting
+    things, and that left the other two settings able to strand a backlog in
+    exactly the way this function exists to prevent: switching an artist to
+    ``monitor_mode='none'`` marked nothing new but demoted nothing old, and
+    narrowing ``accepted_release_types`` left every release of a dropped type
+    wanted for good. Both are silent, because the indexer re-derives the status
+    of *newly discovered* albums only — nothing revisits a row once it has one.
+    One real library reached 4,693 wanted releases that way, every one of them
+    under an artist whose mode was already ``none``.
+
+    Which of the two paths an artist takes is a performance decision and
+    nothing else. The first two clauses of :func:`desired_status` — not
+    monitored, and mode ``none`` — do not read the album at all, so every
+    ``wanted`` row goes, and that is one UPDATE. The other two are per-album, so
+    those artists have their rows loaded. Both answer what
+    :func:`desired_status` answers; the split only decides whether four thousand
+    ORM objects have to exist to hear it.
+
+    Flushes, never commits — the caller owns the transaction this rides out on.
+    """
+    change = BacklogChange()
+    # Artists whose settings reject *every* release whatever it is. Reading the
+    # first two clauses of `desired_status` rather than re-stating them: add a
+    # third album-independent refusal there and this keeps up on its own.
+    blanket = [str(a.id) for a in artists if wants_nothing(a)]
+    selective = {str(a.id): a for a in artists if not wants_nothing(a)}
+
+    if blanket:
+        # One statement, not one per release. The library that produced this
+        # feature had four thousand rows to move, and loading four thousand ORM
+        # objects to set one column on each of them is the difference between a
+        # press that lands and a press that looks broken. `synchronize_session`
+        # is what keeps any of those rows the caller is already holding from
+        # going stale behind the update.
+        result = await session.execute(
+            update(Album)
+            .where(Album.artist_id.in_(blanket), Album.status == AlbumStatus.WANTED)
+            .values(status=AlbumStatus.SKIPPED)
+            .execution_options(synchronize_session="fetch")
+        )
+        change.demoted = int(result.rowcount or 0)
+
+    if selective:
+        rows = (
+            (
+                await session.execute(
+                    select(Album).where(Album.artist_id.in_(list(selective)))
+                )
+            )
+            .unique()
+            .scalars()
+            .all()
+        )
+
+        # Demote before grouping, so the restore below reads post-demotion
+        # statuses. The other order is not merely untidy: a group holding one
+        # newly-unwanted `wanted` release looks "already represented" to the
+        # restore test, which skips the group, and only then does the demotion
+        # empty it — leaving a group of skipped releases that a *second* call
+        # would promote. Doing it this way makes one call idempotent, which is
+        # what stops a repeated bulk edit walking a backlog up and down.
+        for album in rows:
+            artist = selective.get(str(album.artist_id))
+            if artist is None or album.status is not AlbumStatus.WANTED:
+                continue
+            if desired_status(artist, album)[0] is AlbumStatus.SKIPPED:
+                album.status = AlbumStatus.SKIPPED
+                change.demoted += 1
+
+        # Grouped per artist first: two artists can hold releases that
+        # normalise to the same title, and they are not editions of each other.
+        groups: dict[tuple[str, str], list[Album]] = {}
+        for album in rows:
+            # A title that normalises to nothing is its own group: lumping
+            # every untitled release together would promote one and strand the
+            # rest, which is not what "duplicate edition" means.
+            key = dedupe_key(album.title) or f"\x00{album.id}"
+            groups.setdefault((str(album.artist_id), key), []).append(album)
+
+        for (artist_id, _key), members in groups.items():
+            artist = selective.get(artist_id)
+            if artist is None:
+                continue
+            # Anything but skipped means this release is already represented —
+            # held, being fetched, wanted, or a failure somebody can retry —
+            # and a second edition beside it is a second chance to download the
+            # wrong one.
+            if any(album.status is not AlbumStatus.SKIPPED for album in members):
+                continue
+            candidates = [
+                album
+                for album in members
+                if album.status is AlbumStatus.SKIPPED
+                and album.monitored
+                and desired_status(artist, album)[0] is AlbumStatus.WANTED
+            ]
+            if not candidates:
+                continue
+            winner = max(candidates, key=edition_rank)
+            winner.status = AlbumStatus.WANTED
+            change.restored += 1
+
+    if change.touched:
+        await session.flush()
+    return change
 
 
 async def ensure_queue_item(
@@ -303,10 +527,15 @@ class Indexer:
         *,
         settings: Settings | None = None,
         random_func: Callable[[], float] = random.random,
+        enricher: Any = None,
     ) -> None:
         self._client = client
         self._settings = settings or get_settings()
         self._random = random_func
+        # Optional and duck-typed: the indexer only ever calls ``mark_due`` on
+        # it, which is pure SQL. Enrichment must not make a request from inside
+        # the indexer's transaction — see ``Enricher.mark_due``.
+        self._enricher = enricher
         self._lock = asyncio.Lock()
         self._paused_until: datetime | None = None
         self._running = False
@@ -694,9 +923,17 @@ class Indexer:
             )
             await session.commit()
         except QobuzError as exc:
+            # Captured before the rollback. ``rollback()`` expires every instance
+            # in the session whatever ``expire_on_commit`` says, so reading
+            # ``artist.id`` afterwards fires a lazy reload on an async session
+            # and raises MissingGreenlet — from inside the handler whose job is
+            # to stamp ``last_checked_at``. Without the stamp ``_pick_due_artist``
+            # keeps choosing the same artist, so one unreachable artist stalls
+            # the whole sweep.
+            artist_id = result.artist_id or str(artist.id)
             await session.rollback()
             result.errors.append(str(exc))
-            artist = await session.get(Artist, str(artist.id)) or artist
+            artist = await session.get(Artist, artist_id) or artist
             artist.last_checked_at = _now()
             await self._log(
                 session,
@@ -743,6 +980,11 @@ class Indexer:
         # Albums created in this loop are not in the identity map until the
         # session is flushed, so a repeated id would otherwise be inserted twice.
         created_here: dict[str, Album] = {}
+        # Albums whose release type a consensus of open sources already
+        # corrected. Qobuz's own value is a guess for these — its mapper falls
+        # back to counting tracks — so re-applying it every tick would undo the
+        # correction and oscillate forever.
+        enriched = await _release_types_applied_for(session, str(artist.id))
 
         for raw in raw_albums:
             mapped = map_album(raw, str(artist.id))
@@ -782,7 +1024,10 @@ class Indexer:
                         )
                     )
             else:
-                if _apply_metadata(album, mapped):
+                protected = _PROTECTED_ALBUM_FIELDS
+                if str(album.id) in enriched:
+                    protected = protected | {"release_type"}
+                if _apply_metadata(album, mapped, protected=protected):
                     result.updated_albums += 1
             touched.append(album)
 
@@ -791,31 +1036,55 @@ class Indexer:
             await self._log(
                 session, level, event, message, artist_id=str(artist.id), album_id=album_id
             )
+        await self._mark_for_enrichment(session, artist, touched)
         return touched
+
+    async def _mark_for_enrichment(
+        self, session: AsyncSession, artist: Artist, albums: list[Album]
+    ) -> None:
+        """Queue the part of what we just wrote that is in the library.
+
+        Discovery is no longer what makes a release enrichable — being on disk
+        is. Following one prolific artist writes a thousand albums nobody owns,
+        and enriching those is the work that starved the thirty that mattered, so
+        ``Enricher.mark_due`` drops everything outside ``library_scope()`` and
+        this call is left with the releases this artist already has downloaded.
+        Which is still worth making: re-indexing is where a corrected UPC or a
+        changed track count arrives, and those are exactly the inputs a match is
+        derived from. What replaced the old behaviour is a mark at the moment an
+        album *lands* — see ``enricher.mark_library_due``.
+
+        What it does **not** do is fetch anything. The indexer holds a write
+        transaction here, SQLite has one writer, and a lookup made from inside it
+        would block the download worker's per-track commits until they timed out
+        and marked a live download failed. Queueing is SQL; fetching happens a
+        moment later from the enricher's own tick.
+
+        A failure is swallowed: enrichment is a nicety, and indexing must not
+        break because a side table is unhappy.
+        """
+        if self._enricher is None:
+            return
+        try:
+            from app.models import EnrichmentEntity  # noqa: PLC0415 - local to this hook
+
+            await self._enricher.mark_due(
+                session, EnrichmentEntity.ARTIST, [str(artist.id)]
+            )
+            if albums:
+                await self._enricher.mark_due(
+                    session,
+                    EnrichmentEntity.ALBUM,
+                    [str(album.id) for album in albums],
+                )
+        except Exception:  # noqa: BLE001 - never let enrichment break indexing
+            logger.exception("Could not queue %s for enrichment", artist.id)
 
     def _status_for_new_album(
         self, artist: Artist, album: Album
     ) -> tuple[AlbumStatus, str]:
         """Decide the initial status of a newly discovered album."""
-        if not artist.monitored:
-            return AlbumStatus.SKIPPED, "artist is not monitored"
-        if artist.monitor_mode is MonitorMode.NONE:
-            return AlbumStatus.SKIPPED, "monitor mode is 'none'"
-        if not artist.accepts(album.release_type):
-            return (
-                AlbumStatus.SKIPPED,
-                f"release type '{album.release_type}' is not accepted",
-            )
-        if artist.monitor_mode is MonitorMode.FUTURE:
-            added = utc(artist.added_at) or _now()
-            if album.release_date is None:
-                return AlbumStatus.SKIPPED, "future-only mode and release date unknown"
-            if album.release_date < added.date():
-                return (
-                    AlbumStatus.SKIPPED,
-                    f"future-only mode and released {album.release_date.isoformat()}",
-                )
-        return AlbumStatus.WANTED, "wanted"
+        return desired_status(artist, album)
 
     async def _dedupe_editions(
         self, session: AsyncSession, artist: Artist, result: IndexResult
@@ -1010,15 +1279,44 @@ def _coerce_monitor_mode(value: MonitorMode | str | None, default: str) -> Monit
         return MonitorMode.ALL
 
 
-def _apply_metadata(album: Album, mapped: dict[str, Any]) -> bool:
+async def _release_types_applied_for(session: AsyncSession, artist_id: str) -> set[str]:
+    """Album ids whose release type an enrichment consensus already corrected.
+
+    One statement per artist, and it returns an empty set when the enrichment
+    tables are empty — which is the normal case for anyone who has enrichment
+    switched off.
+    """
+    from app.models import AlbumMetadata  # noqa: PLC0415 - keeps the import graph flat
+
+    rows = await session.execute(
+        select(AlbumMetadata.album_id)
+        .join(Album, Album.id == AlbumMetadata.album_id)
+        .where(
+            Album.artist_id == artist_id,
+            AlbumMetadata.release_type_applied_at.is_not(None),
+        )
+    )
+    return {str(value) for value in rows.scalars().all()}
+
+
+def _apply_metadata(
+    album: Album,
+    mapped: dict[str, Any],
+    *,
+    protected: frozenset[str] | set[str] = _PROTECTED_ALBUM_FIELDS,
+) -> bool:
     """Copy refreshed Qobuz metadata onto an existing album row.
 
     Local state (``status``, ``path``, ``downloaded_at``, ...) is never touched.
+    *protected* widens that set: the caller adds ``release_type`` for albums an
+    enrichment consensus has corrected, so Qobuz's guess cannot overwrite it back
+    on the next tick.
+
     Returns ``True`` when anything actually changed.
     """
     changed = False
     for key, value in mapped.items():
-        if key in _PROTECTED_ALBUM_FIELDS or value is None:
+        if key in protected or value is None:
             continue
         if getattr(album, key, None) != value:
             setattr(album, key, value)

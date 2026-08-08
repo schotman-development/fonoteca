@@ -1,0 +1,54 @@
+/* Download queue.
+
+   The frame, the header and the filter row are `screen.module.css`'s and are
+   composed rather than restated. What is left is the list's own top rule (each
+   `ListRow` rules itself off below, so the list needs one above) and the
+   sentence under it.
+
+   `#DFD9CE` is `--c-line`; `#6E6A61` is `--c-ink-mark`. */
+
+.section {
+  composes: section from '../screen.module.css';
+}
+
+.header {
+  composes: header from '../screen.module.css';
+}
+
+.headerMain {
+  composes: headerMain from '../screen.module.css';
+}
+
+.headerActions {
+  composes: headerActions from '../screen.module.css';
+}
+
+.title {
+  composes: title from '../screen.module.css';
+}
+
+.lede {
+  composes: lede from '../screen.module.css';
+}
+
+.filters {
+  composes: filters from '../screen.module.css';
+}
+
+.filterSpacer {
+  composes: filterSpacer from '../screen.module.css';
+}
+
+.shown {
+  composes: shown from '../screen.module.css';
+}
+
+.list {
+  border-top: var(--sp-px) solid var(--c-line);
+}
+
+.scope {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}

@@ -1,0 +1,32 @@
+/* The metadata-source chip (design 470–475).
+
+   Its geometry IS `.chipSm` from shared/chip.module.css, byte for byte — the
+   design writes `display: inline-flex; align-items: center; gap: 6px;
+   padding: 4px 9px; border: 1px solid #DFD9CE; border-radius: 6px;
+   font-size: 11.5px; color: #33302A` here (471) and the identical rule for the
+   Rules screen's token buttons (725). So the recipe is composed, not copied,
+   and the only thing this file adds is the dot's colour hook and the trailing
+   detail.
+
+   The dot's colour arrives as a custom property rather than as a `color`
+   declaration so that the value a caller passes is a token reference
+   (`var(--c-src-musicbrainz)`) and never a literal. `.dot` in the shared recipe
+   paints itself `currentcolor`, which is why this sets `color` on the dot's own
+   span and not on the chip: the chip's text stays `--c-ink-2` while the marker
+   takes the source's hue.
+
+   Categorical, never status: `--c-src-*` says WHICH source, not how bad. */
+
+.chip {
+  composes: chipSm from '../shared/chip.module.css';
+}
+
+.marker {
+  composes: dot from '../shared/chip.module.css';
+  color: var(--source-dot, var(--c-ink-mark));
+}
+
+/* The field count that trails the name — mono, 11px, `--c-ink-mark` (473). */
+.detail {
+  composes: meta from '../shared/meta.module.css';
+}

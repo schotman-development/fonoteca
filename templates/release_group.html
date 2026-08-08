@@ -1,0 +1,54 @@
+{#
+  Every edition of one record.
+  Context: editions (list[AlbumOut], best first), group_title (str), group_key (str)
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ group_title }}{% endblock %}
+{% block heading %}{{ group_title }}{% endblock %}
+{% block subtitle %}
+  {% if editions %}<a href="/artists/{{ editions[0].artist_id }}">{{ editions[0].artist_name }}</a> · {% endif %}
+  {{ editions | length }} edition(s)
+{% endblock %}
+
+{% block content %}
+{#
+  No card head: the page heading is this record's title and the page holds
+  nothing but its editions, so a head reading "Editions · best first" labelled
+  the page with its own subject and restated the ordering note below it.
+#}
+<section class="card">
+  <div class="card__body">
+    {#
+      The ranking is the de-duplicator's, deliberately: track count before
+      audio quality, so a one-track hi-res promo single never outranks the
+      album it was cut from. Only the grouping key needs saying out loud.
+    #}
+    <p class="small muted">
+      Grouped by
+      {% if editions and editions[0].mb_release_group_mbid %}
+      <a href="https://musicbrainz.org/release-group/{{ editions[0].mb_release_group_mbid }}"
+         rel="noreferrer">MusicBrainz release group</a>
+      {%- else %}normalised title — nothing has identified this record yet{% endif %}.
+    </p>
+
+    <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Edition</th>
+          <th class="num">Tracks</th>
+          <th>On disk</th>
+          <th>Quality</th>
+          <th>Status</th>
+          <th class="num">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="edition-rows">
+        {% include "partials/release_group_rows.html" %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

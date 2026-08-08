@@ -1,0 +1,64 @@
+/* The missing-release row's own parts, design 147–157.
+
+   The row itself — `display: flex; align-items: center; gap: 14px;
+   flex-wrap: wrap; row-gap: 10px; padding: 13px 0; border-bottom` (145) — is
+   `ListRow` and is deliberately not restated here. What is left is the four
+   children:
+
+     identity (147)  `flex: 1 1 160px; min-width: 0`
+     title    (148)  `font-size: 13.5px; font-weight: 500`, ellipsised
+     sub      (149)  `font-size: 12px; color: #57534A; margin-top: 1px`
+     reason   (151)  `font-size: 12px; white-space: nowrap`, coloured
+     actions  (152)  `display: flex; gap: 7px; flex: none`
+
+   THE SNAPS: 13.5px → `--fs-sm` (14px, the body step — this is the row's
+   identity line and the ladder's own size for one); 12px → `--fs-2xs` exactly;
+   #57534A → `--c-ink-3` exactly. 1px is `--sp-px`; 7px is `--sp-2 - --sp-px`.
+
+   THE COLOUR. DCLogic 1124 gives the reason three inks: #DC2626 for a failed
+   download, #D97706 for "only 16-bit on Qobuz", #7D786D otherwise. Only the
+   first is reachable here — the second is a catalogue-ceiling sentence this
+   row does not make, and the third is `--c-ink-faint`, which is decoration-only
+   in this system (4.4:1) and would be a contrast failure as text. So there is
+   one reason and one colour: `--c-bad`, which is #DC2626 exactly.
+
+   The 160px basis is a named property on the class that uses it rather than a
+   token: it is this row's own shape, and no second module reads it. */
+
+.identity {
+  --missing-identity-basis: 160px; /* design 147 */
+
+  flex: 1 1 var(--missing-identity-basis);
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+}
+
+.sub {
+  margin-top: var(--sp-px); /* design 149: 1px */
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+}
+
+.reason {
+  flex: none;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  color: var(--c-bad);
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  /* No `margin-left: auto`: `.identity` is `flex: 1`, so it already pushes the
+     reason and the actions to the right edge, and an auto margin on top of it
+     would tear the two apart the moment the row wraps at `row-gap: 10px`. */
+  gap: calc(var(--sp-2) - var(--sp-px)); /* design 152: 7px */
+}

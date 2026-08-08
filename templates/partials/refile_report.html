@@ -5,6 +5,10 @@
   ``refile`` is None until something has been pressed, which is what makes the
   panel say "nothing has been checked yet" rather than "0 albums are misfiled".
   Those are different claims and only one of them is true on a fresh page.
+
+  Both path columns are truncated with the full string on ``title=``. They are
+  the point of the preview, but at full length two of them per row wrapped to
+  three lines each and buried the release the row is about.
 #}
 {% if refile is none %}
 <p class="empty">
@@ -17,9 +21,9 @@
   ({{ refile.considered }} checked).
 </p>
 {% else %}
-<p class="small muted" style="margin:0 0 12px">
-  {{ refile.summary }}{% if refile.dry_run %} — nothing has been moved{% endif %}.
-</p>
+<div class="lede">
+  {{ refile.summary }}{% if refile.dry_run %} <span class="muted small">nothing has been moved</span>{% endif %}
+</div>
 <div class="table-wrap">
 <table class="table table--compact">
   <thead>
@@ -30,13 +34,15 @@
     <tr class="{% if plan.blocked %}row--muted{% endif %}">
       <td>
         <div class="table__title">{{ plan.album_title }}</div>
-        <div class="table__sub">{{ plan.artist_name }}</div>
-        {% if plan.blocked %}
-        <div class="table__sub"><span class="tag tag--bad">blocked</span> {{ plan.blocked }}</div>
-        {% endif %}
+        <div class="table__sub">
+          {{ plan.artist_name }}
+          {%- if plan.blocked %} · <span class="tag tag--bad">blocked</span> {{ plan.blocked }}{% endif %}
+        </div>
       </td>
-      <td class="mono tiny break">{{ plan.current_dir }}</td>
-      <td class="mono tiny break">
+      <td class="mono tiny muted truncate" style="max-width:26ch"
+          title="{{ plan.current_dir }}">{{ plan.current_dir }}</td>
+      <td class="mono tiny truncate" style="max-width:26ch"
+          title="{{ plan.target_dir if plan.moves_directory else plan.current_dir }}">
         {% if plan.moves_directory %}{{ plan.target_dir }}{% else %}<span class="muted">unchanged</span>{% endif %}
       </td>
       <td class="num mono small">
@@ -48,7 +54,7 @@
 </table>
 </div>
 {% if refile.errors %}
-<ul class="small" style="margin-top:10px">
+<ul class="small">
   {% for error in refile.errors %}<li class="bad">{{ error }}</li>{% endfor %}
 </ul>
 {% endif %}

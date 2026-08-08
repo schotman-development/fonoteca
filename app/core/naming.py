@@ -67,6 +67,7 @@ __all__ = [
     "render_track_name",
     "render_track_path",
     "sanitise_component",
+    "template_uses_quality",
     "track_values",
 ]
 
@@ -589,10 +590,16 @@ def album_values(
     if not year and release_date is not None:
         year = getattr(release_date, "year", None)
 
-    if bit_depth is None:
-        bit_depth = _get(album, "max_bit_depth")
-    if sampling_rate is None:
-        sampling_rate = _get(album, "max_sampling_rate")
+    # The catalogue maximum stands in for a missing figure only when the format
+    # is known, because ``clamp_to_format`` then holds it down to what that
+    # format can actually carry. With no format either, it is a guess about
+    # files nobody has looked at — and a folder named after a guess is how a
+    # library of 128 kbps MP3s ends up labelled "[FLAC 24-44.1]".
+    if format_id is not None:
+        if bit_depth is None:
+            bit_depth = _get(album, "max_bit_depth")
+        if sampling_rate is None:
+            sampling_rate = _get(album, "max_sampling_rate")
 
     bit_depth, sampling_rate = clamp_to_format(format_id, bit_depth, sampling_rate)
     quality = quality_tag(format_id, bit_depth, sampling_rate)
@@ -669,6 +676,20 @@ def _split_template(template: str) -> tuple[list[str], str]:
     if not parts:
         return [], "{track:02d} - {title}.{ext}"
     return parts[:-1], parts[-1]
+
+
+def template_uses_quality(settings: Settings | None = None) -> bool:
+    """Does the album directory this template builds carry a quality tag?
+
+    Asked by :func:`app.core.librarian.plan_refile` before it refuses to re-file
+    a release whose quality it cannot determine. With ``{quality}`` in the folder
+    name an unknown quality means an unnameable folder; without it the same
+    unknown costs nothing, and refusing would be a rule with no purpose behind
+    it.
+    """
+    conf = settings or get_settings()
+    directory_part = "/".join(_split_template(conf.naming_template)[0])
+    return "{quality}" in directory_part or "{format}" in directory_part
 
 
 def render_album_dir(

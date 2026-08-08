@@ -1,0 +1,77 @@
+/* The ring — design 185 and 832.
+
+   Both are byte-identical apart from one pixel of diameter:
+   `border-radius: 50%; border: 2px solid #E4DFD5; border-top-color: #00857A;
+   animation: cadSpin 0.8s linear infinite; display: inline-block`.
+
+   `spin` is the project's name for `cadSpin` and lives in `base.css`, global on
+   purpose: a keyframe declared inside a CSS module is renamed by the bundler,
+   so the drawer's entrance and the shelf's would end up as two identical
+   animations under two mangled names. Only the duration and timing are set
+   here — 0.8s linear, the design's own.
+
+   THE DIAMETER AND THE RING WIDTH ARE THIS CONTROL'S OWN SHAPE, declared here
+   as custom properties, exactly as `shared/switch.module.css` declares its
+   34×19. They are not layout gaps and must not be snapped onto `--sp-*`: 10px
+   and 11px both round to `--sp-3` (12px), which would delete the design's two
+   sizes and leave one ring 20% too big beside an 11px line of mono. Nothing
+   else in the application is 10px across because a spinner is.
+
+   0.8s is likewise the design's, not a token: `--mo-slow` (320ms) is a
+   transition duration for something arriving, and a ring turning three times a
+   second reads as a stutter.
+
+   TWO TONES, ONE RING. `accent` is the design's — a `--c-fill` circle with a
+   `--c-accent` cap — and it is right everywhere the design draws one, because
+   every one of them sits on paper. `Button` needed a ring on an ink-filled
+   primary, where a `--c-fill` circle is a pale blob and the teal cap is very
+   nearly invisible, and so it grew a second spinner of its own inside
+   `Button.module.css`. That is the same control twice. `current` is that
+   answer folded back in: the ring is the control's own `currentcolor` at low
+   opacity with the cap knocked out, so it reads on ink, on teal and on paper
+   without the caller naming a colour. Nothing else changes — same diameters,
+   same cycle, same reduced-motion behaviour. */
+
+.spinner {
+  --spinner-d: 10px;
+  --spinner-ring: 2px;
+
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--spinner-d);
+  height: var(--spinner-d);
+  border: var(--spinner-ring) solid var(--c-fill);
+  border-top-color: var(--c-accent);
+  border-radius: var(--r-full);
+  animation: spin 0.8s linear infinite;
+}
+
+/* The inverse: the ring inherits, the cap is the hole. `opacity` is on the
+   border alone (via the colour), not on the element, so a `leading` glyph
+   beside it in the same button is not faded with it. */
+.toneCurrent {
+  border-color: color-mix(in srgb, currentcolor 55%, transparent);
+  border-top-color: transparent;
+}
+
+.sm {
+  --spinner-d: 10px;
+}
+
+.md {
+  --spinner-d: 11px;
+}
+
+/* Stops, and stays visible as a static arc — the teal quarter against the
+   `--c-fill` ring is still legible as a mark. Nothing is lost by it: this
+   component is `aria-hidden` precisely because the sentence beside it carries
+   the meaning, so the motion was never the message. Written out rather than
+   left to the global reduce block in tokens.css, which zeroes durations and
+   would park the ring mid-turn at an arbitrary angle instead. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    transform: rotate(-45deg);
+  }
+}

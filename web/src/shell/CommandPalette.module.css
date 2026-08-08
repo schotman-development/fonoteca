@@ -1,0 +1,156 @@
+/* The design draws the ⌘K *trigger* (28–41) and never the panel behind it, so
+   the panel is built out of the same vocabulary the design uses everywhere else:
+   paper, one hairline, --e-4 (the toast's shadow, the only other floating
+   surface in the app) and the Field input's geometry for the search box. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-10) var(--sp-5) var(--sp-5);
+  /* The one scrim in the app, and it is the ink token rather than a new colour:
+     mixed rather than written as rgba() so there is still no literal here. */
+  background: color-mix(in srgb, var(--c-ink) 28%, transparent);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 100%);
+  max-height: min(520px, 100%);
+  overflow: hidden;
+  background: var(--c-paper);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--e-4);
+  animation: fadeIn var(--mo-base) var(--mo-ease) both;
+}
+
+.searchRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: var(--sp-px) solid var(--c-line);
+}
+
+.searchGlyph {
+  flex: none;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  color: var(--c-ink-mark);
+}
+
+/* The Field input's shape without its border: the panel edge already draws one,
+   and two hairlines 12px apart read as a box inside a box. */
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--c-ink);
+  background: transparent;
+  border: 0;
+}
+
+.input::placeholder {
+  color: var(--c-ink-mark);
+}
+
+.input:focus {
+  outline: none; /* the panel is the focused surface; the ring would box the row */
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-2) 0 var(--sp-3);
+  overflow-y: auto;
+}
+
+.group {
+  padding: var(--sp-2) 0 0;
+}
+
+.groupLabel {
+  padding: var(--sp-2) var(--sp-4) var(--sp-1);
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink-mark);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-label);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.optionActive {
+  color: var(--c-ink);
+  background: var(--c-sunk);
+}
+
+.optionGlyph {
+  flex: none;
+  width: 20px;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--c-ink-faint);
+  text-align: center;
+}
+
+.optionActive .optionGlyph {
+  color: var(--c-ink);
+}
+
+.optionLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.optionHint {
+  flex: none;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+  white-space: nowrap;
+}
+
+.note {
+  padding: var(--sp-4);
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-3);
+  text-align: center;
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  gap: var(--sp-4);
+  justify-content: center;
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+  border-top: var(--sp-px) solid var(--c-line);
+}

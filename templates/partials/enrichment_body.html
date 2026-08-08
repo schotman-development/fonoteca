@@ -1,0 +1,189 @@
+{#
+  The review list first, then coverage.
+  Context: status (EnrichmentStatusOut), review (list[EnrichmentReviewOut]),
+           review_total (int), review_state (str), run_summary (str | None)
+
+  Rendered by the page's first frame and re-fetched by the wrapper, so both must
+  build the same context — see routes_ui.
+
+  Order is deliberate: the nav badge points at "Needs a human", and reading a
+  grid of em-dashes before reaching it put the one actionable thing on the
+  screen below the fold.
+#}
+{% if run_summary %}
+<p class="note">{{ run_summary }}</p>
+{% endif %}
+
+{% if not status.enabled %}
+<p class="empty">
+  Enrichment is switched off (<code>ENRICHMENT_ENABLED=false</code>). No request
+  to a third party is ever made.
+</p>
+{% else %}
+
+{% if status.paused_reason %}
+<p class="note note--warn">
+  Paused: {{ status.paused_reason }}. Press <b>Run now</b> to resume.
+</p>
+{% endif %}
+
+<section class="card">
+  <header class="card__head">
+    <h2>Needs a human</h2>
+    <span class="muted">{{ review_total }} unresolved</span>
+  </header>
+  <div class="card__body">
+    {#
+      This list is the other half of "exact or nothing". The matchers refuse to
+      guess — a wrong MusicBrainz id ends up in every file on disk, where other
+      tools believe it — so everything they refuse on arrives here instead of
+      being silently resolved to something plausible. What "ambiguous" and
+      "no key" mean hangs off each state chip rather than being restated as a
+      paragraph above every row that carries one.
+    #}
+    <p class="note">
+      Nothing here was guessed at — pick the right record and it is fetched on
+      the next pass.
+    </p>
+
+    {% if review %}
+    {% set why = {
+      'ambiguous': 'more than one upstream record matched and none is trusted',
+      'no_key': 'nothing to match on — no barcode, and no identified artist to browse'
+    } %}
+    <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Release / artist</th>
+          <th>Source</th>
+          <th>Why</th>
+          <th class="num">Identify as</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in review %}
+        <tr>
+          <td>
+            <div class="table__title">
+              {% if item.artist_id and item.entity_type == 'album' %}
+              <a href="/artists/{{ item.artist_id }}">{{ item.name }}</a>
+              {% elif item.entity_type == 'artist' %}
+              <a href="/artists/{{ item.entity_id }}">{{ item.name }}</a>
+              {% else %}{{ item.name }}{% endif %}
+            </div>
+            {% if item.artist_name and item.entity_type == 'album' %}
+            <div class="table__sub">{{ item.artist_name }}</div>
+            {% endif %}
+          </td>
+          <td><span class="small muted">{{ item.source }}</span></td>
+          <td>
+            <span class="tag {{ 'tag--skipped' if item.state == 'no_key' else '' }}"
+                  {%- if why.get(item.state) %} title="{{ why[item.state] }}"{% endif %}>{{ item.state }}</span>
+            {% if item.reason %}<div class="table__sub">{{ item.reason }}</div>{% endif %}
+          </td>
+          <td class="num nowrap">
+            {#
+              This was a text box asking for 984f8239-8fe1-4683-9c54-10ffb14439e9.
+              The only people who can answer that are the ones who did not need
+              the review list. Now it opens a picker that searches on their
+              behalf and shows the records to choose between.
+            #}
+            {% if item.is_actionable %}
+            <button class="btn btn--sm"
+                    hx-get="/partials/enrichment/{{ item.entity_type }}/{{ item.entity_id }}/candidates?source={{ item.source }}&name={{ item.name | urlencode }}"
+                    hx-target="#identify-panel" hx-swap="innerHTML"
+                    hx-indicator="#identify-panel"
+                    aria-label="Find {{ item.name }} on {{ item.source }}">
+              Find it…
+            </button>
+            {% else %}
+            <span class="muted small">waiting on the upstream</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="table-note">{{ review | length }} of {{ review_total }} shown.</p>
+    {% else %}
+    <p class="empty">Nothing is waiting on you.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <header class="card__head card__head--quiet">
+    <h2>Sources</h2>
+  </header>
+  <div class="card__body">
+    {#
+      A gated rung is not a broken one: it means the source needs a piece of
+      configuration Qobuzarr will not invent. Saying which one is the difference
+      between an actionable message and a shrug.
+    #}
+    {% if not status.gates.get('musicbrainz', true) %}
+    <p class="note">
+      MusicBrainz is <b>gated</b>: set <code>ENRICHMENT_CONTACT</code> to an
+      email or URL — it blocks generic browser strings. Everything else keeps
+      working meanwhile.
+    </p>
+    {% endif %}
+    {% if not status.gates.get('acoustid', true) %}
+    <p class="note">
+      Audio fingerprinting is <b>gated</b>: it needs <code>ACOUSTID_API_KEY</code>
+      and Chromaprint's <code>fpcalc</code> on <code>PATH</code>. Corrupt-file
+      detection is local and still runs.
+    </p>
+    {% endif %}
+
+    {% if status.states %}
+    <div class="table-wrap">
+    <table class="table table--compact">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th class="num">Identified</th>
+          <th class="num">Unresolved</th>
+          <th class="num">Gated</th>
+          <th class="num">Failed</th>
+          <th class="num">Waiting</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for source in status.sources %}
+        {% set counts = status.states.get(source, {}) %}
+        <tr>
+          <td class="table__title">{{ source }}</td>
+          <td class="num mono strong">{{ counts.get('ok', 0) }}</td>
+          {# ambiguous + no_key: both are enumerated row by row above, so one
+             column is the honest summary of them. #}
+          <td class="num mono tiny muted">{{ (counts.get('ambiguous', 0) + counts.get('no_key', 0)) or '—' }}</td>
+          <td class="num mono tiny muted">{{ counts.get('gated', 0) or '—' }}</td>
+          <td class="num mono tiny muted">{{ counts.get('failed', 0) or '—' }}</td>
+          <td class="num mono tiny muted">{{ counts.get('pending', 0) or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {#
+      Both numbers, not just the denominator. Enrichment is scoped to what is on
+      disk, so on a real library the figure is tiny — 32 against a followed
+      catalogue of 3313 — and "counted over 32 releases" alone reads as damage
+      rather than as scope. Saying what it is *out of* is what makes a small
+      number legible as deliberate.
+    #}
+    <p class="table-note">
+      Last run {{ status.last_run_at | ago }}{% if status.scope %},
+      counted over the {{ status.scope.albums }} release(s) on disk{% if
+      status.scope.catalogue_albums and status.scope.catalogue_albums > status.scope.albums %}
+      of {{ status.scope.catalogue_albums }} in the followed catalogue{% endif %}{% endif %}.
+    </p>
+    {% else %}
+    <p class="empty">Nothing enriched yet. The scheduled pass will start it, or press <b>Run now</b>.</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}

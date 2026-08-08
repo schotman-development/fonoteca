@@ -94,12 +94,12 @@ def client_fixture(tmp_path: Path) -> Iterator[TestClient]:
 
 
 def page(client: TestClient, query: str = "") -> str:
-    return client.get(f"/artists/{ARTIST_ID}{query}").text
+    return client.get(f"/legacy/artists/{ARTIST_ID}{query}").text
 
 
 def rows(client: TestClient, query: str = "") -> str:
     """The fragment the search box actually swaps in."""
-    return client.get(f"/partials/albums/{ARTIST_ID}{query}").text
+    return client.get(f"/legacy/partials/albums/{ARTIST_ID}{query}").text
 
 
 # --------------------------------------------------------------------- search
@@ -200,12 +200,12 @@ def test_every_album_row_has_exactly_one_thumbnail(client: TestClient) -> None:
 
 
 def test_queue_rows_show_cover_art(client: TestClient) -> None:
-    body = client.get("/partials/queue-table").text
+    body = client.get("/legacy/partials/queue-table").text
     assert f'<img src="{COVER}"' in body
 
 
 def test_wanted_rows_show_cover_art(client: TestClient) -> None:
-    body = client.get("/partials/wanted-rows").text
+    body = client.get("/legacy/partials/wanted-rows").text
     assert f'<img src="{COVER}"' in body
 
 

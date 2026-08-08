@@ -1,0 +1,65 @@
+/* The range control — design 601, the only one in the whole document.
+
+   The design's row is `display: flex; align-items: center; gap: 16px` with a
+   12.5px caption, the track at `flex: 1; max-width: 300px; accent-color:
+   #00857A`, and a mono figure beside it at `width: 52px`.
+
+   `accent-color` is the whole of the styling, deliberately. The alternative is
+   `appearance: none` plus a hand-drawn `::-webkit-slider-thumb` and
+   `::-moz-range-thumb`, which is three vendor trees to keep in step and throws
+   away the platform's own focus, hover and touch-target behaviour to arrive at
+   a control that looks the same. One property, painted `--c-accent`, is the
+   design's own answer and it is the right one.
+
+   Two numbers are this control's own shape rather than layout, so they are
+   custom properties here (the pattern `shared/switch.module.css` uses for its
+   34×19 track): the track's 300px ceiling, and the 52px reserved for the value
+   so a figure changing from `70%` to `100%` does not shove the track sideways
+   on every drag. Neither is on the `--sp-*` scale because neither is a gap. */
+
+.slider {
+  --slider-max-w: 300px;   /* design 601 */
+  --slider-value-w: 52px;  /* design 601 — reserved so the track cannot jump */
+
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+/* 12.5px --c-ink-2, nowrap (design 600). A real `<label>`: the words are a
+   focus-free way to reach a control whose thumb is small. */
+.label {
+  flex: none;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: var(--slider-max-w);
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+
+.input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* The figure beside the track (601): mono, 500, accent. The design writes 15px,
+   which is between `--fs-sm` (14) and `--fs-md` (16); it snaps down, because
+   this is a value read alongside 12.5px prose and the larger step is the size
+   of a section heading. */
+.value {
+  flex: none;
+  width: var(--slider-value-w);
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-accent);
+}

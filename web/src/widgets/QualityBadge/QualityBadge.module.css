@@ -1,0 +1,22 @@
+/* One declaration, and it is the difference between the design's figure and
+   the server's.
+
+   The design writes `24/96` into this corner (285) — five characters. The
+   label the API publishes is prose: `FLAC 24bit 96kHz`, from `FORMAT_LABELS`
+   in `app/config.py`. Shortening it here would be a second quality formatter,
+   which `@/format` exists to prevent, and inventing `24/96` from a bit depth
+   the badge was never handed would be worse. So the real string is drawn, and
+   the one thing this file does is stop it from pushing itself out past the
+   tile it is positioned inside: `SpecBadge` is `white-space: nowrap`, which
+   without a ceiling would overflow the artwork rather than sit in its corner.
+
+   `--r-xs` is not restated — the pill's own geometry stays in SpecBadge. */
+
+.badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* An inline-flex box does not ellipsise its own text; the block-level
+     overflow does, and the pill keeps its padding either way. */
+  display: inline-block;
+}

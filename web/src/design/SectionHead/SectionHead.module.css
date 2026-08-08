@@ -1,0 +1,46 @@
+/* The band head — design 95–101, 114–120, 140–143.
+
+   `align-items: flex-end` is the design's own (95, 114) and it is what keeps a
+   one-line action sitting on the subtitle's baseline rather than floating
+   level with the heading. The design's 20px gap snaps to `--sp-5`; its 16px
+   padding-bottom is `--sp-4` exactly, and its 7px subtitle offset is `--sp-2`.
+
+   The unruled variant (114) carries the same padding-bottom rather than the
+   design's `margin-bottom: 18px`: the two numbers are two pixels apart and one
+   geometry is worth more than that, so the space below the head is the same
+   whether or not a line is drawn in it. */
+
+.head {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-5);
+  padding-bottom: var(--sp-4);
+}
+
+.ruled {
+  border-bottom: var(--sp-px) solid var(--c-line);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Type comes from base.css's `h2` — 16px/600/−0.01em/--c-ink, the design's own.
+   The reset already zeroes the margin; this states it because the heading is
+   inside a flex column whose spacing is this file's business. */
+.title {
+  margin: 0;
+}
+
+.sub {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+.action {
+  flex: none;
+}

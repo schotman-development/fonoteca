@@ -1,0 +1,74 @@
+/* The switch — one track, one knob, one geometry for the whole application.
+
+   The design draws this control five times and every one is identical:
+   artist follow (388–390), artist settings (398–400), per-album settings
+   (507–509), followed artists on the radar (576–578) and the structure
+   switches on the Rules screen (781–783):
+
+     track  34 × 19, radius 11px, background #00857A on / #C3BDB0 off
+     knob   15 × 15, white, top 2px, left 17px on / 2px off,
+            box-shadow 0 1px 2px rgba(0,0,0,.2), transition left .15s
+
+   The four numbers are declared once, as custom properties on `.track`, and
+   the on-position is DERIVED (`--switch-w − --switch-knob − --switch-inset`)
+   rather than written as 17px. Writing both is how a switch retuned to a 36px
+   track ends up with a knob that stops 2px short of the end — the design's own
+   17px is only correct for 34/15/2.
+
+   These live here rather than in tokens.css because they are one control's
+   shape, not a shared measurement: nothing else in the app is 34px wide
+   because a switch is. The radius is `--r-pill`, not 11px, for the same
+   reason — half of 19 is what "pill" means at this height.
+
+   The knob is a `<span>` inside the control, never an `::after`, so the
+   primitive can hand it out and a test can find it. `.track` is meant for a
+   real `<button role="switch">`: the reset here (appearance, font, border)
+   assumes it is on a button, and the focus ring is the global one from
+   tokens.css. */
+
+.track {
+  --switch-w: 34px;
+  --switch-h: 19px;
+  --switch-knob: 15px;
+  --switch-inset: 2px;
+  --switch-travel: calc(var(--switch-w) - var(--switch-knob) - var(--switch-inset));
+
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--switch-w);
+  height: var(--switch-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--c-toggle-off);
+  appearance: none;
+  cursor: pointer;
+  transition: background var(--mo-fast) var(--mo-ease);
+}
+
+.trackOn {
+  background: var(--c-accent);
+}
+
+.track:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.knob {
+  position: absolute;
+  top: var(--switch-inset);
+  left: var(--switch-inset);
+  width: var(--switch-knob);
+  height: var(--switch-knob);
+  border-radius: var(--r-full);
+  background: var(--c-paper);
+  box-shadow: var(--e-knob);
+  transition: left var(--mo-fast) var(--mo-ease);
+  pointer-events: none;
+}
+
+.knobOn {
+  left: var(--switch-travel);
+}

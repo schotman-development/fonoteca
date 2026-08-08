@@ -1,0 +1,44 @@
+/* The card edge — a hairline, a radius and paper.
+
+   The design has no raised cards and no tinted panels: separation is one 1px
+   rule in `--c-line` over `--c-paper`, and the same three declarations appear
+   on the health StatCard (104, radius 11px), the identification queue card
+   (619, radius 10px), a metadata-source row on the Rules screen (762, radius
+   9px) and the ranked rows beside it. Three radii, one shape — they snap to
+   `--r-md`, per the same rule that snaps the design's fourteen font sizes onto
+   the nine-step ladder.
+
+   `--r-surface` is the escape hatch for a composer that genuinely needs another
+   step: set it to a `--r-*` token on the composing class, never to a literal.
+   It is a custom property rather than an override of `border-radius` because
+   `composes:` puts two class names on one element and the winner is then a
+   question of stylesheet order, which is not something a component should have
+   to reason about.
+
+   Hover belongs to `.hoverEdge` and not to `.surface`: the design darkens the
+   edge to `--c-line-mute` only where the card is a button (104), and a static
+   panel that lights up under the pointer is a promise of a click that is not
+   there. */
+
+.surface {
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-surface, var(--r-md));
+  background: var(--c-paper);
+}
+
+.hoverEdge {
+  composes: surface;
+  transition: border-color var(--mo-fast) var(--mo-ease);
+}
+
+.hoverEdge:hover {
+  border-color: var(--c-line-mute);
+}
+
+/* The inset variant: the same edge over `--c-canvas` rather than paper — the
+   command bar (32), the drawer's text inputs (363) and the neutral code block
+   (480). Same one definition, one token apart. */
+.surfaceInset {
+  composes: surface;
+  background: var(--c-canvas);
+}

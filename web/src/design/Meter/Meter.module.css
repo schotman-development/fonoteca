@@ -1,0 +1,124 @@
+/* The progress bar — design 192–194, 555–557 and 837–839.
+
+   The design: `height: 3px | 4px; border-radius: 2px | 3px; background:
+   #E4DFD5; overflow: hidden`, with a fill of `width: {{ pct }}; height: 100%;
+   background: <colour>; transition: width 0.3s`.
+
+   TWO THINGS THAT LOOK LIKE MAGIC NUMBERS AND ARE NOT.
+
+   The heights are declared here, as custom properties on `.track`, rather than
+   read from the space scale — the same call `shared/switch.module.css` makes
+   for its 34×19. A 3px bar is one control's own shape, not a layout gap;
+   snapping it to `--sp-1` (4px) would silently merge the design's two track
+   sizes into one, and nothing else in the application is 3px tall because a
+   meter is.
+
+   The radius is `--r-xs` (6px) rather than the design's literal 2–3px, and it
+   comes out identical: a border radius is clamped to half the shorter side, so
+   6px on a 3px-tall box paints 1.5px — which is what "2px on a 3px bar" was
+   drawing anyway. One token, both heights, no arithmetic.
+
+   ── the fill colours are MARKS, and they were measured ────────────────────
+
+   A meter fill is a graphical object, so what matters is its contrast against
+   the track it sits in (`--c-fill`, #E4DFD5), not against paper. Measured:
+
+     --c-ok / --c-accent  #00857A  3.4:1     --c-warn  #B45309  3.8:1
+     --c-bad              #DC2626  3.6:1     --c-ink-mark #6E6A61  4.1:1
+
+   All four clear the 3:1 floor for a non-text component. `--c-warn-solid`
+   (#D97706), which tokens.css nominates for "bars, dots and non-text marks",
+   does NOT — it is 2.4:1 against this track, because that token's 3.2:1 was
+   measured against white. So an amber meter is `--c-warn`, which is also the
+   colour the design paints this exact bar (DCLogic 1224). Where a mark sits on
+   paper rather than in a track, `--c-warn-solid` is still the right one; the
+   rule is per surface, not per token.
+
+   Tone sets `color` and the fill inherits it as `currentcolor`, so one map
+   serves both the determinate fill and the indeterminate sliver. */
+
+.track {
+  --meter-h: 4px;
+  --meter-sliver-w: 38%;
+
+  position: relative;
+  width: 100%;
+  height: var(--meter-h);
+  border-radius: var(--r-xs);
+  background: var(--c-fill);
+  overflow: hidden;
+}
+
+.thin {
+  --meter-h: 3px;
+}
+
+.thick {
+  --meter-h: 4px;
+}
+
+/* The width is set inline by the component, because the width is the datum. */
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: currentcolor;
+  transition: width var(--mo-slow) var(--mo-ease);
+}
+
+/* Running, with nothing to be a percentage of. `left` is animated rather than
+   `transform` so the travel is expressed against the TRACK's width (which is
+   what a containing-block percentage means) instead of against the sliver's
+   own — the version of this that animates `translateX` needs a hand-computed
+   300% that silently breaks the moment the sliver's width is retuned. */
+.sliver {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--meter-sliver-w);
+  border-radius: inherit;
+  background: currentcolor;
+  animation: sweep var(--mo-pulse) var(--mo-ease) infinite;
+}
+
+@keyframes sweep {
+  from {
+    left: calc(-1 * var(--meter-sliver-w));
+  }
+
+  to {
+    left: 100%;
+  }
+}
+
+/* Handled explicitly rather than left to the global block in tokens.css. That
+   block zeroes every animation duration, which for a sweep means parking the
+   sliver wherever 0ms lands — off the left edge, i.e. an EMPTY track, which is
+   the one reading this component exists to prevent. A static partial fill says
+   "something is happening and it has no percentage", which is the truth. */
+@media (prefers-reduced-motion: reduce) {
+  .sliver {
+    left: 0;
+    animation: none;
+  }
+}
+
+.toneNeutral {
+  color: var(--c-ink-mark);
+}
+
+.toneAccent {
+  color: var(--c-accent);
+}
+
+.toneOk {
+  color: var(--c-ok);
+}
+
+.toneWarn {
+  color: var(--c-warn);
+}
+
+.toneBad {
+  color: var(--c-bad);
+}

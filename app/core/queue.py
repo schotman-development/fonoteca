@@ -434,6 +434,10 @@ class QueueWorker:
             if album is not None and album.status is not AlbumStatus.DOWNLOADED:
                 album.status = AlbumStatus.DOWNLOADED
                 album.downloaded_at = album.downloaded_at or _now()
+                # Only on this branch: the download loop marks its own releases
+                # enrichable as it finalises them, and this is the other case —
+                # a callable that reported success without setting the status.
+                await _mark_enrichable(session, album_id)
             await session.flush()
             session.add(
                 Activity(
@@ -764,6 +768,22 @@ def _failure_message(outcome: Any) -> str | None:
     detail = "; ".join(str(error) for error in errors[:5])
     summary = getattr(outcome, "summary", None)
     return detail or (str(summary) if summary else "the downloader reported a failure")
+
+
+async def _mark_enrichable(session: AsyncSession, album_id: str) -> None:
+    """Queue an album this worker promoted to ``downloaded`` for enrichment.
+
+    Enrichment is scoped to the library, so the moment a release joins it is the
+    moment it becomes eligible. Swallowed on failure and cheap to lose:
+    ``Enricher._seed`` reaches the same album from its status alone on the next
+    tick, so this only ever buys the wait between the two.
+    """
+    from app.core.enricher import mark_library_due  # noqa: PLC0415 - avoids a cycle
+
+    try:
+        await mark_library_due(session, [str(album_id)])
+    except Exception:  # noqa: BLE001 - a side table must not fail a download
+        logger.exception("Could not queue %s for enrichment", album_id)
 
 
 def _album_label(album: Album | None) -> str:

@@ -1,0 +1,343 @@
+/* Identification review, design 589–707.
+
+   THE SNAPS:
+     20px → `--sp-4 + --sp-1`   (599, the band's vertical padding)
+     28px → `--sp-6 - --sp-1`   (599, the gap under it)
+     26px → `--sp-5 + 2px`      (616, the split gap and the detail's left pad)
+     14px → `--sp-3 + 2px`      (619, a queue card's padding)
+     18px → `--sp-4 + 2px`      (629, the gap under the candidate eyebrow)
+     32px → `--sp-6`            (675, the stack card's vertical padding)
+     660px → the stack's own measure (674)
+   `#DFD9CE` is `--c-line`; `#F2F0EB` is `--c-sunk`; `#6E6A61` is `--c-ink-mark`. */
+
+.section {
+  composes: section from '../screen.module.css';
+}
+
+.header {
+  composes: header from '../screen.module.css';
+}
+
+.headerMain {
+  composes: headerMain from '../screen.module.css';
+}
+
+.title {
+  composes: title from '../screen.module.css';
+}
+
+.lede {
+  composes: lede from '../screen.module.css';
+}
+
+/* 596: the review-mode switch, mono and quiet. */
+.modeButton {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-2xs);
+}
+
+/* 599–605: the band the auto-accept slider stood in. The geometry is the
+   design's — label, figure, then controls pushed right where the slider's own
+   value sat — and what stands in it is the autonomy split and the review-scope
+   filters. There is no threshold to slide, so there is nothing to slide. */
+.band {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: calc(var(--sp-4) + var(--sp-1)) 0;
+  border-top: var(--sp-px) solid var(--c-line);
+  border-bottom: var(--sp-px) solid var(--c-line);
+  margin-bottom: calc(var(--sp-6) - var(--sp-1));
+}
+
+.bandLabel {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+
+/* The share, where the slider's track ran (601). */
+.bandShare {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Raw figures on purpose, both of them: this is the design's own track width
+   (601), not a spacing step, and the percentage reserves three characters so
+   the caption beside it does not shuffle between 9% and 100%. Neither is a
+   value a token could express — see the other geometry snaps at the top. */
+.bandMeter {
+  width: 140px;
+}
+
+.bandPct {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+}
+
+.bandCaption {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+}
+
+/* The slider's value sat hard right (605); the filters take that place. */
+.bandSpacer {
+  flex: 1;
+}
+
+/* The input-wait, beside the filters rather than among them — nothing here is
+   pressable, so it must not look like a chip. */
+.bandWaiting {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+
+.bandFilters {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* 616 */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: calc(var(--sp-5) + var(--sp-px) * 2);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.queueList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* 619 */
+.queueCard {
+  display: flex;
+  gap: calc(var(--sp-3) - var(--sp-px));
+  width: 100%;
+  text-align: left;
+  padding: calc(var(--sp-3) + var(--sp-px) * 2);
+  background: none;
+  border: var(--sp-px) solid transparent;
+  border-radius: var(--r-md);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.queueCardCurrent {
+  background: var(--c-sunk);
+  border-color: var(--c-line);
+}
+
+.queueBody {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+
+.queueName {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queueMeta {
+  display: block;
+  margin-top: var(--sp-px);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+/* 628 */
+.detail {
+  border-left: var(--sp-px) solid var(--c-line);
+  padding-left: calc(var(--sp-5) + var(--sp-px) * 2);
+}
+
+@media (max-width: 900px) {
+  .detail {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: calc(var(--sp-4) + var(--sp-px) * 2);
+}
+
+.reason {
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+  margin-left: auto;
+}
+
+/* 635: the two diff panels. */
+.diff {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: calc(var(--sp-4) + var(--sp-px) * 2);
+  margin-bottom: calc(var(--sp-4) + var(--sp-1));
+}
+
+.panelLabel {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-mark);
+}
+
+.panelLabelProposed {
+  color: var(--c-accent);
+}
+
+/* 654 */
+.evidence {
+  margin-bottom: calc(var(--sp-5) - var(--sp-px) * 2);
+}
+
+/* 662 */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--sp-2) + var(--sp-px));
+  row-gap: calc(var(--sp-2) + var(--sp-px) * 2);
+}
+
+.actionsSpacer {
+  flex: 1 1 auto;
+}
+
+/* 674–704: the stack. */
+.stack {
+  max-width: 660px;
+  margin: 0 auto;
+}
+
+.stackCard {
+  border-top: var(--sp-px) solid var(--c-line);
+  border-bottom: var(--sp-px) solid var(--c-line);
+  padding: var(--sp-6) 0;
+  animation: fadeIn var(--mo-base) var(--mo-ease-out) both;
+}
+
+.stackHead {
+  display: flex;
+  gap: calc(var(--sp-4) + var(--sp-px) * 2);
+  align-items: center;
+  margin-bottom: calc(var(--sp-4) + var(--sp-1));
+}
+
+.stackIdentity {
+  flex: 1;
+  min-width: 0;
+}
+
+.stackFolder {
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-mark);
+}
+
+.stackTitle {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-snug);
+}
+
+.stackCredit {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}
+
+.stackActions {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: stretch;
+  margin-top: calc(var(--sp-4) + var(--sp-px) * 2);
+}
+
+.key {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  opacity: 0.6;
+}
+
+.pips {
+  margin-top: calc(var(--sp-4) + var(--sp-px) * 2);
+}
+
+/* The picker's own body. */
+.candidates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+.candidate {
+  display: flex;
+  gap: var(--sp-3);
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-3);
+  background: var(--c-paper);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-md);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.candidate:hover {
+  border-color: var(--c-line-mute);
+}
+
+.candidateBody {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+
+.candidateTitle {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.candidateSub {
+  display: block;
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-3);
+}
+
+.candidateDetail {
+  display: block;
+  margin-top: var(--sp-px);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+.empty {
+  padding: var(--sp-4) 0;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}

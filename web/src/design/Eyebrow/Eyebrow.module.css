@@ -1,0 +1,39 @@
+/* The eyebrow's layout, and nothing else — the type comes from
+   `shared/label.module.css`, composed on the label element in Eyebrow.tsx.
+
+   Only the row with an action needs any rules at all. Without one the
+   component renders the composed label on its own, exactly as the design does
+   at 275, 353, 448 and every other bare site.
+
+   The design's two row gaps are 12px at the far-edge sites (165, 319) and
+   9–10px at the inline ones (183, 299); they snap to `--sp-3` and `--sp-2`. */
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/* A spinner or a chip beside the words rather than across the panel: centred,
+   because the mark is a glyph rather than a line of text and a baseline puts a
+   10px disc's bottom edge on the label's descender line. */
+.rowInline {
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.text {
+  min-width: 0;
+}
+
+.action {
+  flex: none;
+}
+
+/* The design writes this as an empty `flex: 1` spacer div (167, 323). `auto`
+   margin is the same result without a node in the tree that a screen reader
+   has to walk past. */
+.actionEnd {
+  margin-left: auto;
+}

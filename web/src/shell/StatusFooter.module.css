@@ -1,0 +1,66 @@
+/* Design lines 829–845. `flex: none`, wrapping, and never sticky: it is a
+   sibling of the one scroller rather than a bar floating over it.
+
+   `padding: 11px 24px` and `gap: 14px 24px` (design 829) both use one value off
+   the 4px layout grid. They are this band's own measurement — named once here,
+   the same way TopBar names its 15.5px wordmark — rather than two new global
+   tokens with a single user each. */
+
+.footer {
+  --footer-pad-y: 11px;
+  --footer-gap-y: 14px;
+
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--footer-gap-y) var(--sp-5);
+  align-items: center;
+  padding: var(--footer-pad-y) var(--sp-5);
+  background: var(--c-paper);
+  border-top: var(--sp-px) solid var(--c-line);
+}
+
+/* Design 830: the spinner and the sentence travel together. */
+.state {
+  display: flex;
+  flex: none;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.stateText {
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-2);
+}
+
+/* Design 836: the capacity group's slot, at the design's exact flex. */
+.capacity {
+  display: flex;
+  flex: 1 1 200px;
+  gap: var(--sp-3);
+  align-items: center;
+  min-width: 140px;
+  max-width: 320px;
+}
+
+.capacityFill {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Design 842: everything after this is pushed to the right edge. */
+.spacer {
+  flex: 1;
+}
+
+/* Design 843–844. Both are mono micro-labels; the design paints the second one
+   #7D786D, which is decoration-only in this system, so both are --c-ink-mark
+   (tokens.css, deviation 1). */
+.counts,
+.capacityText,
+.address {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+  white-space: nowrap;
+}

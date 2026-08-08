@@ -27,14 +27,18 @@
     <tr>
       <td>
         <div class="table__title">{{ entry.album_title or entry.id }}</div>
-        {% if entry.artist_name %}<div class="table__sub">{{ entry.artist_name }}</div>{% endif %}
+        <div class="table__sub">
+          {%- if entry.artist_name %}{{ entry.artist_name }} · {% endif -%}
+          {{ entry.file_count }} file(s)
+        </div>
       </td>
-      <td class="mono tiny break">{{ entry.original_path }}</td>
+      {# The path is the only place this appears and it is what Restore
+         promises, so it stays reachable — but it stopped setting the row
+         height. #}
+      <td class="mono tiny muted truncate" style="max-width:22ch"
+          title="{{ entry.original_path }}">{{ entry.original_path }}</td>
       <td><span class="tag">{{ entry.reason }}</span></td>
-      <td class="num mono small nowrap">
-        {{ entry.size_bytes | size }}
-        <div class="table__sub">{{ entry.file_count }} file(s)</div>
-      </td>
+      <td class="num mono small nowrap">{{ entry.size_bytes | size }}</td>
       <td class="mono small muted nowrap">{{ entry.trashed_at | ago }}</td>
       <td class="num nowrap">
         <button class="btn btn--sm"
@@ -57,7 +61,7 @@
 </div>
 <p class="table-note">
   {{ trash.total }} item(s), {{ trash.size_bytes | size }} in
-  <span class="mono">{{ trash.path }}</span>. Nothing here counts against your library.
+  <span class="mono">{{ trash.path }}</span>.
 </p>
 {% else %}
 <p class="empty">

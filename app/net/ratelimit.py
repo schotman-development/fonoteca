@@ -1,8 +1,12 @@
-"""Global outbound rate limiting for every Qobuz API call.
+"""Outbound rate limiting, one limiter per upstream.
 
-Qobuzarr is deliberately, aggressively slow: a single :class:`RateLimiter`
-instance gates *all* traffic — the indexer, UI searches and downloads alike —
-so the account never looks like a scraper.
+Qobuzarr is deliberately, aggressively slow. **One** :class:`RateLimiter`
+instance gates *all* traffic to a given host — for Qobuz that means the indexer,
+UI searches and downloads alike, so the account never looks like a scraper.
+Each enrichment source gets its own instance with its own budget, because a
+public catalogue's published allowance has nothing to do with what a paid
+streaming account can safely spend. Never build a second limiter for a host that
+already has one: the hourly budget is only counted in one place.
 
 Two independent constraints are enforced at once:
 
@@ -370,6 +374,48 @@ class RateLimiter:
             breaker=breaker,
             time_func=time_func,
             sleep_func=sleep_func,
+            name="qobuz",
+        )
+
+    @classmethod
+    def for_source(
+        cls,
+        name: str,
+        *,
+        min_interval: float,
+        max_per_hour: int,
+        settings: Settings | None = None,
+        time_func: TimeFunc = time.monotonic,
+        sleep_func: SleepFunc | None = None,
+    ) -> "RateLimiter":
+        """Build a limiter for a non-Qobuz upstream with its own budget.
+
+        :meth:`from_settings` reads the ``QOBUZ_*`` fields by name and cannot
+        serve a second host. This takes the interval and hourly cap explicitly
+        while still sharing the circuit-breaker policy, so every upstream backs
+        off the same way even though they run at wildly different speeds —
+        MusicBrainz asks for ~1 req/s, Deezer tolerates forty times that.
+
+        Args:
+            name: Short upstream name; appears in log lines and ``stats()``.
+            min_interval: Minimum seconds between two requests to this host.
+            max_per_hour: Rolling one-hour request ceiling.
+        """
+        settings = settings or get_settings()
+        breaker = CircuitBreaker(
+            threshold=settings.circuit_breaker_threshold,
+            cooldown=float(settings.circuit_breaker_cooldown),
+            window=float(settings.circuit_breaker_window),
+            multiplier=settings.backoff_multiplier,
+            time_func=time_func,
+        )
+        return cls(
+            min_interval=max(0.0, float(min_interval)),
+            max_per_hour=max(1, int(max_per_hour)),
+            breaker=breaker,
+            time_func=time_func,
+            sleep_func=sleep_func,
+            name=name,
         )
 
     # --------------------------------------------------------------- internals

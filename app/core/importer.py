@@ -48,14 +48,16 @@ import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.indexer import Indexer
 from app.core.queue import SessionFactory
-from app.core.scanner import LibraryScanner, artist_key
+from app.core.scanner import LibraryScanner, artist_key, collect_albums
+from app.enrich.chromaprint import FpcalcMissing
 from app.db import session_scope
 from app.logging_conf import get_logger
 from app.models import Activity, ActivityLevel, Artist, MonitorMode, Setting, utcnow
@@ -87,6 +89,16 @@ CONSECUTIVE_FAILURE_LIMIT = 5
 
 #: Search hits kept per unresolved name, for the review list.
 CANDIDATES_PER_NAME = 3
+
+#: How many of an artist's releases the audio route may try before giving up.
+#: Each attempt is a fingerprint pass plus one Qobuz search, and one identified
+#: release is already a complete answer, so this bounds the cost of the folders
+#: that will never resolve rather than the ones that will.
+AUDIO_ATTEMPTS_PER_ARTIST = 2
+
+#: What :class:`LibraryImporter` calls to ask the audio who a folder is.
+#: :func:`app.core.discovery.identify_folder` with its collaborators bound.
+AudioIdentifier = Callable[[Any], Awaitable[Any]]
 
 
 def _now() -> datetime:
@@ -202,12 +214,21 @@ class LibraryImporter:
         *,
         settings: Settings | None = None,
         session_factory: SessionFactory = session_scope,
+        identify_by_audio: AudioIdentifier | None = None,
     ) -> None:
         self._client = client
         self._indexer = indexer
         self._scanner = scanner
         self._settings = settings or get_settings()
         self._session_factory = session_factory
+        #: The audio route into the catalogue, or ``None`` for name-only.
+        #:
+        #: Injected rather than constructed here, and optional, because it costs
+        #: an AcoustID key, a MusicBrainz contact and an installed ``fpcalc``:
+        #: an importer that built its own would fail to start on a machine that
+        #: has none of them, which is the machine the name route still works on.
+        #: See :mod:`app.core.discovery`.
+        self._identify_by_audio = identify_by_audio
         self._progress = ImportProgress()
         self._task: asyncio.Task[None] | None = None
         self._cancel = asyncio.Event()
@@ -431,11 +452,41 @@ class LibraryImporter:
         mapped = [map_artist(hit) for hit in hits]
         usable = [(hit, row) for hit, row in zip(hits, mapped) if row.get("id")]
 
+        exact = [(hit, row) for hit, row in usable if artist_key(row["name"]) == key]
+
+        if not exact:
+            # The name did not settle it, which is the *only* condition under
+            # which the audio route runs. Ordering it this way keeps both
+            # properties: a folder Qobuz already spells correctly still costs one
+            # search and nothing else, and the expensive route is spent only on
+            # the folders that would otherwise have gone to a human. Nothing here
+            # relaxes the exact-match rule — the audio answers with a barcode,
+            # which is a stricter key than the name ever was.
+            identity = await self._audio_identity(candidate)
+            if identity is not None and identity.followable:
+                followed = await self._follow(
+                    str(identity.qobuz_artist_id),
+                    name=identity.qobuz_artist_name or name,
+                    payload=None,
+                    monitored=monitored,
+                    monitor_mode=monitor_mode,
+                    quality_profile=quality_profile,
+                    release_types=release_types,
+                    index_now=index_now,
+                )
+                if followed is not None:
+                    logger.info(
+                        "Followed %s as %s via the audio (%s)",
+                        name,
+                        identity.qobuz_artist_name,
+                        identity.reason,
+                    )
+                    return followed
+
         if not usable:
             self._record_review(candidate, [], reason="not-found")
             return "missing"
 
-        exact = [(hit, row) for hit, row in usable if artist_key(row["name"]) == key]
         if not exact:
             self._record_review(
                 candidate,
@@ -448,8 +499,49 @@ class LibraryImporter:
         # label). The one with the most releases is the real discography.
         exact.sort(key=lambda pair: -int(pair[1].get("albums_count") or 0))
         payload, row = exact[0]
-        artist_id = str(row["id"])
 
+        followed = await self._follow(
+            str(row["id"]),
+            name=row["name"],
+            payload=payload,
+            monitored=monitored,
+            monitor_mode=monitor_mode,
+            quality_profile=quality_profile,
+            release_types=release_types,
+            index_now=index_now,
+        )
+        if followed == "followed":
+            logger.info(
+                "Imported %s (%s) from the library folder", row["name"], row["id"]
+            )
+        return followed or "review"
+
+    # ------------------------------------------------------------ the two routes
+    async def _follow(
+        self,
+        artist_id: str,
+        *,
+        name: str,
+        payload: Mapping[str, Any] | None,
+        monitored: bool,
+        monitor_mode: MonitorMode | str | None,
+        quality_profile: str | None,
+        release_types: Sequence[str] | None,
+        index_now: bool,
+    ) -> str | None:
+        """Follow one artist, whichever route identified them.
+
+        One writer for both routes, so the audio never acquires a second way of
+        creating an artist that could drift from the name route's — the same
+        reason :mod:`app.core.quality` has one comparison and two callers.
+
+        ``payload`` is the search hit when the name route found one, and ``None``
+        from the audio route, whose Qobuz album carries a credit rather than a
+        full artist object. That is what keeps the one-call-per-artist rule: a
+        ``None`` here means :meth:`Indexer.add_artist` fetches the artist itself
+        only when it actually needs to, instead of this method spending a call to
+        pre-empt it.
+        """
         async with self._session_factory() as session:
             existing = await session.get(Artist, artist_id)
             if existing is not None:
@@ -461,15 +553,64 @@ class LibraryImporter:
                 session,
                 artist_id,
                 monitored,
-                name=row["name"],
+                name=name,
                 monitor_mode=monitor_mode,
                 quality_profile=quality_profile,
                 accepted_release_types=release_types,
                 index_now=index_now,
                 payload=payload,
             )
-        logger.info("Imported %s (%s) from the library folder", row["name"], artist_id)
         return "followed"
+
+    async def _audio_identity(self, candidate: Mapping[str, Any]) -> Any | None:
+        """Ask the audio who this folder is, or ``None`` when it cannot be asked.
+
+        Bounded on purpose. The artist's folder can hold thirty releases and each
+        attempt costs a fingerprint pass plus one Qobuz search, so this stops at
+        the first release that identifies and gives up after
+        :data:`AUDIO_ATTEMPTS_PER_ARTIST` of them. One identified release is a
+        complete answer — a release group has one artist credit — so trying more
+        after a success would buy nothing, and trying every release after a
+        failure spends the run's whole budget on the folders least likely to
+        resolve.
+
+        Every failure is swallowed to a ``None``: this is a fallback, and a
+        fallback that can break the route it is backing up is worse than no
+        fallback. :class:`~app.enrich.chromaprint.FpcalcMissing` is the exception
+        and it is deliberately *not* caught here — it means the tool is absent,
+        the answer would be identical for every remaining folder, and the caller
+        turns the route off for the rest of the run rather than paying for it
+        once per artist.
+        """
+        if self._identify_by_audio is None:
+            return None
+        root = str(candidate.get("path") or "").strip()
+        if not root:
+            return None
+
+        try:
+            albums, _stats = await asyncio.to_thread(
+                collect_albums,
+                Path(root),
+                follow_symlinks=self._settings.library_scan_follow_symlinks,
+            )
+        except Exception:  # noqa: BLE001 - a folder that will not read is not fatal
+            logger.exception("Could not read %s for audio identification", root)
+            return None
+
+        for scanned in albums[:AUDIO_ATTEMPTS_PER_ARTIST]:
+            if self._cancel.is_set():
+                return None
+            try:
+                identity = await self._identify_by_audio(scanned)
+            except FpcalcMissing:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("Audio identification of %s failed", scanned.directory)
+                continue
+            if identity is not None and identity.followable:
+                return identity
+        return None
 
     # ------------------------------------------------------------- bookkeeping
     def _record_review(

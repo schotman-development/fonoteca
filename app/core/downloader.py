@@ -3,7 +3,7 @@
 :class:`AlbumDownloader` turns one row of the ``albums`` table into files on
 disk.  It is deliberately boring: **one track at a time, never in parallel**,
 with a configurable pause between tracks, everything gated by the shared
-:class:`~app.qobuz.ratelimit.RateLimiter` inside the client.
+:class:`~app.net.ratelimit.RateLimiter` inside the client.
 
 Resumability is the other design goal.  All progress lives in SQLite and on the
 filesystem, so a restart mid-album picks up where it left off:
@@ -49,6 +49,7 @@ from app.models import (
     QueueItem,
     QueueState,
     Track,
+    TrackOrigin,
     TrackStatus,
     utcnow,
 )
@@ -341,6 +342,12 @@ class AlbumDownloader:
 
         delay = max(0.0, float(settings.download_track_delay))
         network_used = False
+        # Resolved once per album, on the event loop, as plain strings. tag_file
+        # runs in a worker thread, where reading an ORM relationship would raise
+        # MissingGreenlet and fail the track. Usually album- and artist-level
+        # only: the track rows are being created by this very run, so nothing has
+        # had a chance to fingerprint or map them yet.
+        enrichment = await _enrichment_tags_for(session, album)
 
         for track in tracks:
             if should_stop is not None and should_stop():
@@ -364,6 +371,7 @@ class AlbumDownloader:
                 format_id=format_id,
                 obtainable_format_id=obtainable,
                 cover_bytes=cover_bytes,
+                extra_tags=enrichment,
             )
             network_used = hit_network
             self._record_track(result, track_result)
@@ -401,6 +409,7 @@ class AlbumDownloader:
         format_id: int,
         obtainable_format_id: int | None,
         cover_bytes: bytes | None,
+        extra_tags: Mapping[str, str] | None = None,
     ) -> tuple[TrackResult, bool]:
         """Download, tag and place one track.
 
@@ -539,6 +548,7 @@ class AlbumDownloader:
                     cover_bytes if settings.download_embed_cover else None,
                     artist_name=artist_name,
                     ext=ext,
+                    extra_tags=extra_tags,
                 )
                 # Atomic within a filesystem: readers never see a partial file.
                 await asyncio.to_thread(os.replace, part_path, final_path)
@@ -686,7 +696,20 @@ class AlbumDownloader:
 
         Existing rows keep their download state — :func:`map_track` only carries
         identity and metadata, never ``status``/``path``/``format_id``.
+
+        Rows the disk scan created are dropped first. Qobuz has just told us what
+        this release actually contains, keyed by real track ids, and the scan's
+        positional guesses are superseded by that. Keeping both would double the
+        album's track count, which is what completeness and the quality
+        comparison are computed from — an upgrade of an adopted album would
+        report half its tracks missing forever.
         """
+        scanned = [row for row in album.tracks if row.origin is TrackOrigin.SCAN]
+        for row in scanned:
+            # delete-orphan on Album.tracks: removing from the collection is the
+            # delete, and it takes the row's track_metadata with it.
+            album.tracks.remove(row)
+
         existing: dict[str, Track] = {row.id: row for row in album.tracks}
         ordered: list[Track] = []
 
@@ -762,6 +785,8 @@ class AlbumDownloader:
         if result.status is AlbumStatus.DOWNLOADED:
             album.downloaded_at = utcnow()
             await self._clear_superseded(album, result)
+            await self._write_nfo(session, album)
+            await self._mark_enrichable(session, album)
 
         if queue_item is not None:
             if result.cancelled:
@@ -824,6 +849,48 @@ class AlbumDownloader:
         )
         await session.commit()
         logger.info("%s", message)
+
+    async def _write_nfo(self, session: AsyncSession, album: Album) -> None:
+        """Drop ``album.nfo`` and ``artist.nfo`` beside a release that just landed.
+
+        Delegated to :mod:`app.core.librarian` rather than written here, because
+        that module owns every write into ``LIBRARY_PATH`` and is where the
+        containment and busy checks live.
+
+        Failures are swallowed: an NFO is a convenience for a media server, and a
+        successfully downloaded album must not be reported as failed because one
+        could not be written.
+        """
+        from app.core.librarian import write_nfo  # noqa: PLC0415 - avoids a cycle
+
+        if not self._settings.nfo_enabled:
+            return
+        try:
+            await write_nfo(session, album, settings=self._settings)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not write NFO files for %s", album.id)
+
+    async def _mark_enrichable(self, session: AsyncSession, album: Album) -> None:
+        """Queue a release that has just landed for enrichment, at the front.
+
+        Enrichment is scoped to what is on disk, so this is the moment an album
+        becomes its subject — and the moment somebody is looking at the page,
+        which is why it goes to the front rather than to the back of a backlog.
+        No request is made here: it is SQL against ``enrichment_state``, run on
+        the transaction that is already open, and the lookups happen on the
+        enricher's next tick.
+
+        Failures are swallowed for the same reason the NFO write's are, and the
+        cost of one is smaller still: ``Enricher._seed`` finds this album from
+        its status alone on the next tick, so a failure here delays enrichment
+        rather than losing it.
+        """
+        from app.core.enricher import mark_library_due  # noqa: PLC0415 - avoids a cycle
+
+        try:
+            await mark_library_due(session, [str(album.id)])
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not queue %s for enrichment", album.id)
 
     async def _clear_superseded(self, album: Album, result: DownloadResult) -> None:
         """Move the copy this upgrade replaced to the trash, if it may.
@@ -1010,3 +1077,35 @@ def _raw_image_url(raw: Mapping[str, Any]) -> str | None:
         if url:
             return url
     return None
+
+
+async def _enrichment_tags_for(session: AsyncSession, album: Album) -> dict[str, str]:
+    """Album- and artist-level enrichment tags, as plain strings.
+
+    Only the values every track of the release shares — the per-track ones
+    (recording id, AcoustID) cannot exist yet, because the track rows are being
+    written by the run that is calling this. A later re-tag fills those in.
+
+    Returns an empty dict when nothing has been enriched, which is the normal
+    case for a library that has just started.
+    """
+    from app.core.enricher import (  # noqa: PLC0415 - avoids an import cycle
+        load_album_metadata,
+        load_artist_metadata,
+    )
+    from app.core.nfo import tag_values  # noqa: PLC0415
+
+    try:
+        album_meta = (await load_album_metadata(session, [album.id])).get(str(album.id))
+        artist_meta = (
+            (await load_artist_metadata(session, [album.artist_id])).get(
+                str(album.artist_id)
+            )
+            if album.artist_id
+            else None
+        )
+    except Exception:  # noqa: BLE001 - enrichment must never fail a download
+        logger.exception("Could not load enrichment tags for %s", album.id)
+        return {}
+    return tag_values(artist_meta=artist_meta, album_meta=album_meta)
+

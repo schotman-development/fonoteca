@@ -5,28 +5,24 @@
   One album at a time, {{ settings.download_track_delay }}s between tracks — the slowness is the product, not a bug
 {% endblock %}
 
+{#
+  No Refresh button: #queue-table polls every 5s and on qobuzarr:refresh, so
+  the button only ever did what had already happened. And no primary — the
+  queue is a screen you watch, not one with a single obvious action.
+#}
 {% block actions %}
-  <button class="btn" hx-get="/partials/queue-table{% if filter_state %}?state={{ filter_state }}{% endif %}"
-          hx-target="#queue-table" hx-swap="innerHTML">Refresh</button>
-  <a class="btn btn--primary" href="/wanted">Wanted backlog</a>
+  <a class="btn" href="/wanted">Wanted backlog</a>
 {% endblock %}
 
 {% block content %}
-<div class="toolbar filters--inline">
-  <span class="seg">
-    <a class="seg__item {% if not filter_state %}is-active{% endif %}" href="/queue">All</a>
-    {% for name in queue_states %}
-    <a class="seg__item {% if filter_state == name %}is-active{% endif %}" href="/queue?state={{ name }}">{{ name }}</a>
-    {% endfor %}
-  </span>
-  <span class="toolbar__end">
-    <span class="readout">Concurrency <b>{{ settings.download_concurrency }}</b></span>
-    <span class="readout">Retries <b>{{ settings.download_max_attempts }}</b></span>
-  </span>
-</div>
-
 <section class="card">
   <div class="card__body card__body--flush">
+    {#
+      The state filter lives INSIDE the partial, so its counts poll with the
+      table instead of going stale under it. The poll URL therefore has to
+      carry the filter itself — there is no form here to hx-include, and a
+      fixed /partials/queue-table would reset the view to All every 5s.
+    #}
     <div id="queue-table"
          hx-get="/partials/queue-table{% if filter_state %}?state={{ filter_state }}{% endif %}"
          hx-trigger="every 5s, qobuzarr:refresh from:body" hx-swap="innerHTML">

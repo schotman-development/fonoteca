@@ -21,7 +21,8 @@
 
     <form class="omnisearch" method="get" action="/add" role="search">
       <div class="omnisearch__field">
-        <span class="omnisearch__hint" aria-hidden="true">⌘K</span>
+        {# The ⌘K handler finds this box by id; the printed hint was decoration
+           the shortcut does not need. #}
         <input class="omnisearch__input" id="omnisearch" type="search" name="q"
                value="{{ omnisearch_q | default('', true) }}"
                placeholder="Search the Qobuz catalogue…" aria-label="Search the Qobuz catalogue">
@@ -29,7 +30,8 @@
     </form>
 
     <div class="shell__top-right">
-      <a class="btn btn--primary" href="/add">Add artist</a>
+      {# Plain: the shell's own button must not out-rank the page's one primary. #}
+      <a class="btn" href="/add">Add artist</a>
     </div>
   </header>
 
@@ -63,8 +65,8 @@
         {% if banners %}
         <div class="banners">
           {% for banner in banners %}
+          {# The level is carried by the coloured left edge, as on a toast. #}
           <div class="banner banner--{{ banner.level }}" role="status">
-            <span class="banner__dot" aria-hidden="true"></span>
             <div>
               <div class="banner__title">{{ banner.title }}</div>
               <div class="banner__msg">{{ banner.message }}</div>

@@ -1,0 +1,30 @@
+/* The followed-artist row, design 570–579.
+
+   The row itself — `display: flex; align-items: center; padding: 13px 0;
+   border-bottom: 1px solid #E9E5DC` — is `ListRow`, which names 570 as one of
+   its four sites. Nothing about it is restated here; what is left is the two
+   text lines between the circle and the switch.
+
+   THE SNAPS:
+     13px → `--fs-xs`   (573, the name)
+     11px → `--fs-3xs`  (574, the mono meta line)
+     1.3  → `--lh-snug`
+   `#6E6A61` is `--c-ink-mark` exactly. */
+
+.identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+}
+
+.meta {
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}

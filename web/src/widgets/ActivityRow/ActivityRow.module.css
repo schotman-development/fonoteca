@@ -1,0 +1,116 @@
+/* The activity row, design 815–822.
+
+   `display: grid; grid-template-columns: 86px 122px minmax(0, 1fr) auto;
+   gap: 16px; align-items: center; padding: 17px 22px;
+   border-bottom: 1px solid #E9E5DC` (815). The two fixed columns are this
+   table's own measurements — a clock is always eight characters wide and a
+   kind is always one word — so they are named locals here rather than tokens,
+   the same way `--shelf-card-w` is.
+
+   THE SNAPS:
+     16px  → `--sp-4`                          (815, the column gap)
+     17px  → `--sp-4 + --sp-px`                (815, vertical padding)
+     22px  → `--sp-4 + --sp-1 + --sp-px * 2`   (815, horizontal padding)
+     2px   → `--sp-px * 2`                     (819, the detail line's lift)
+     12.5  → `--fs-xs`            (818, the message)
+     11px  → `--fs-3xs`           (815, 816, 819, the three mono cells)
+     0.04em letter-spacing (816) → `--ls-nav` (0.06em), the token nearest it;
+             tokens.css keeps two label spacings and adding a third for one
+             cell is how a scale stops being one.
+   `#E9E5DC` is `--c-line-soft`; `#1B1A17` is `--c-ink`; `#6E6A61` is
+   `--c-ink-mark`.
+
+   The kind colours are the design's `KIND_STYLE` (1022–1026) mapped onto the
+   categorical tokens: `#2563EB` is `--c-cat-blue`, `#7C3AED` is
+   `--c-cat-violet`, `#B45309` is `--c-cat-amber`, `#DC2626` is `--c-bad`,
+   `#00857A` is `--c-ok`, `#57534A` is `--c-ink-3`. Amber and `--c-warn` share
+   a hex and are still two names — see the header of activityKind.ts. */
+
+.row {
+  --activity-time-w: 86px; /* design 815 */
+  --activity-kind-w: 122px; /* design 815 */
+
+  display: grid;
+  grid-template-columns:
+    var(--activity-time-w)
+    var(--activity-kind-w)
+    minmax(0, 1fr)
+    auto;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: calc(var(--sp-4) + var(--sp-px))
+    calc(var(--sp-4) + var(--sp-1) + var(--sp-px) * 2);
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+}
+
+.time {
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}
+
+.kind {
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-nav);
+  white-space: nowrap;
+}
+
+.kindNeutral {
+  color: var(--c-ink-3);
+}
+
+.kindAccent {
+  color: var(--c-accent);
+}
+
+.kindOk {
+  color: var(--c-ok);
+}
+
+.kindWarn {
+  color: var(--c-warn);
+}
+
+.kindBad {
+  color: var(--c-bad);
+}
+
+.kindBlue {
+  color: var(--c-cat-blue);
+}
+
+.kindViolet {
+  color: var(--c-cat-violet);
+}
+
+.kindAmber {
+  color: var(--c-cat-amber);
+}
+
+.body {
+  min-width: 0;
+}
+
+.message {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+/* design 819: `word-break: break-all` — this line carries paths and ids, and a
+   path never owns a column. */
+.detail {
+  margin-top: calc(var(--sp-px) * 2);
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+  word-break: break-all;
+}
+
+.result {
+  justify-self: end;
+  white-space: nowrap;
+}

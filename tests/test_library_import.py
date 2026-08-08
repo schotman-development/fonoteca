@@ -639,14 +639,14 @@ def test_cancelling_when_nothing_runs_is_not_an_error(client: TestClient) -> Non
 
 
 def test_the_page_offers_the_import_controls(client: TestClient) -> None:
-    body = client.get("/library/scan").text
+    body = client.get("/legacy/library/scan").text
     assert 'hx-post="/ui/library/import"' in body
     assert "index each catalogue immediately" in body
     assert 'id="import-panel"' in body
 
 
 def test_the_ui_start_returns_the_progress_panel(client: TestClient) -> None:
-    response = client.post("/ui/library/import", headers={"HX-Request": "true"})
+    response = client.post("/legacy/ui/library/import", headers={"HX-Request": "true"})
     assert response.status_code == 200
     trigger = json.loads(response.headers["HX-Trigger"])
     assert "Looking up" in trigger["qobuzarr:toast"]["message"]
@@ -656,13 +656,13 @@ def test_the_progress_panel_polls_only_while_running(
     client: TestClient, importer: LibraryImporter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An idle page must not poll; a running one must, or progress freezes."""
-    assert "hx-trigger" not in client.get("/partials/library-import").text
+    assert "hx-trigger" not in client.get("/legacy/partials/library-import").text
 
     running = dict(importer.snapshot())
     running.update({"running": True, "total": 40, "processed": 7, "current": "Somebody"})
     monkeypatch.setattr(importer, "snapshot", lambda: running)
 
-    body = client.get("/partials/library-import").text
+    body = client.get("/legacy/partials/library-import").text
     assert 'hx-trigger="every 4s"' in body
     assert "Somebody" in body
     assert "Stop after this artist" in body
@@ -672,7 +672,7 @@ def test_the_review_list_renders_with_follow_buttons(
     client: TestClient, importer: LibraryImporter
 ) -> None:
     run_import(importer)
-    body = client.get("/partials/library-import").text
+    body = client.get("/legacy/partials/library-import").text
 
     assert "Needs a decision" in body
     assert "Some Local Bands" in body
@@ -684,9 +684,174 @@ def test_following_from_the_review_list_works(
 ) -> None:
     run_import(importer)
     response = client.post(
-        "/ui/library/import/follow/5000",
+        "/legacy/ui/library/import/follow/5000",
         data={"name": "Some Local Bands"},
         headers={"HX-Request": "true"},
     )
     assert response.status_code == 200
     assert "5000" in followed(session_maker)
+
+
+# ---------------------------------------------------------------------------
+# The audio route: AcoustID -> MusicBrainz -> universal code -> Qobuz
+#
+# The name route is exact-or-nothing, which is right and which leaves every
+# artist whose folder is not spelled the way Qobuz spells it. The audio route is
+# the fallback for exactly those, and it is stricter rather than looser: it
+# matches on a barcode, and a name is only ever a search query.
+
+
+class FakeIdentity:
+    """What ``app.core.discovery.identify_folder`` hands back."""
+
+    def __init__(self, artist_id=None, artist_name=None, reason="matched on barcode"):
+        self.qobuz_artist_id = artist_id
+        self.qobuz_artist_name = artist_name
+        self.reason = reason
+
+    @property
+    def followable(self) -> bool:
+        return bool(self.qobuz_artist_id)
+
+
+def audio_importer(client_stub, settings, factory, identity, *, calls=None):
+    async def identify(scanned):
+        if calls is not None:
+            calls.append(str(scanned.directory))
+        return identity
+
+    return LibraryImporter(
+        client_stub,  # type: ignore[arg-type]
+        Indexer(client_stub, settings=settings),  # type: ignore[arg-type]
+        LibraryScanner(settings=settings),
+        settings=settings,
+        session_factory=factory,
+        identify_by_audio=identify,
+    )
+
+
+def test_the_audio_follows_an_artist_the_name_could_not(
+    client_stub: FakeClient, settings: Settings, factory: Any, session_maker: Any
+) -> None:
+    """``Some Local Band`` has only near misses on Qobuz — the name gives up."""
+    importer = audio_importer(
+        client_stub,
+        settings,
+        factory,
+        FakeIdentity("9001", "Some Local Band"),
+    )
+    outcome = asyncio.run(
+        importer._import_one(
+            {"name": "Some Local Band", "path": str(settings.library_path / "Some Local Band")},
+            monitored=True,
+            monitor_mode=None,
+            quality_profile=None,
+            release_types=None,
+            index_now=False,
+        )
+    )
+    assert outcome == "followed"
+
+    async def stored():
+        async with session_maker() as session:
+            return await session.get(Artist, "9001")
+
+    artist = asyncio.run(stored())
+    assert artist is not None and artist.monitored is True
+
+
+def test_the_audio_is_not_consulted_when_the_name_was_exact(
+    client_stub: FakeClient, settings: Settings, factory: Any
+) -> None:
+    """A folder Qobuz already spells right must still cost one search, no more."""
+    calls: list[str] = []
+    importer = audio_importer(
+        client_stub, settings, factory, FakeIdentity("9001", "Wrong"), calls=calls
+    )
+    outcome = asyncio.run(
+        importer._import_one(
+            {"name": "Joanne Shaw Taylor", "path": str(settings.library_path / "Joanne Shaw Taylor")},
+            monitored=True,
+            monitor_mode=None,
+            quality_profile=None,
+            release_types=None,
+            index_now=False,
+        )
+    )
+    assert outcome == "followed"
+    assert calls == [], "the expensive route ran on a folder the name settled"
+
+
+def test_an_audio_route_that_identifies_nobody_still_goes_to_review(
+    client_stub: FakeClient, settings: Settings, factory: Any
+) -> None:
+    importer = audio_importer(client_stub, settings, factory, FakeIdentity())
+    outcome = asyncio.run(
+        importer._import_one(
+            {"name": "Some Local Band", "path": str(settings.library_path / "Some Local Band")},
+            monitored=True,
+            monitor_mode=None,
+            quality_profile=None,
+            release_types=None,
+            index_now=False,
+        )
+    )
+    assert outcome == "review"
+
+
+def test_a_broken_audio_route_never_breaks_the_name_route(
+    client_stub: FakeClient, settings: Settings, factory: Any
+) -> None:
+    """A fallback that can take down the thing it backs up is worse than none."""
+
+    async def explode(scanned):
+        raise RuntimeError("AcoustID is down")
+
+    importer = LibraryImporter(
+        client_stub,  # type: ignore[arg-type]
+        Indexer(client_stub, settings=settings),  # type: ignore[arg-type]
+        LibraryScanner(settings=settings),
+        settings=settings,
+        session_factory=factory,
+        identify_by_audio=explode,
+    )
+    outcome = asyncio.run(
+        importer._import_one(
+            {"name": "Not On Qobuz", "path": str(settings.library_path / "Not On Qobuz")},
+            monitored=True,
+            monitor_mode=None,
+            quality_profile=None,
+            release_types=None,
+            index_now=False,
+        )
+    )
+    assert outcome == "missing"
+
+
+def test_a_missing_fpcalc_stops_the_route_rather_than_costing_one_per_artist(
+    client_stub: FakeClient, settings: Settings, factory: Any
+) -> None:
+    from app.enrich.chromaprint import FpcalcMissing
+
+    async def gated(scanned):
+        raise FpcalcMissing("fpcalc is not installed")
+
+    importer = LibraryImporter(
+        client_stub,  # type: ignore[arg-type]
+        Indexer(client_stub, settings=settings),  # type: ignore[arg-type]
+        LibraryScanner(settings=settings),
+        settings=settings,
+        session_factory=factory,
+        identify_by_audio=gated,
+    )
+    with pytest.raises(FpcalcMissing):
+        asyncio.run(
+            importer._import_one(
+                {"name": "Some Local Band", "path": str(settings.library_path / "Some Local Band")},
+                monitored=True,
+                monitor_mode=None,
+                quality_profile=None,
+                release_types=None,
+                index_now=False,
+            )
+        )

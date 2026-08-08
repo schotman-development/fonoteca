@@ -1,9 +1,13 @@
 {#
-  The disk-scan report: counters, then the three things that need a human.
+  The disk-scan report: one headline number, then the three things that need a
+  human.
   Context: scan (dict from app.api.deps.library_scan_status)
 
   `scan.last` is None until a scan has ever run, and is the *fresh* result
   straight after one — including a dry run, which is never stored.
+
+  Folder paths are opaque strings that set the row height and answer nothing;
+  each one hangs off the title cell's `title=` instead of owning a column.
 #}
 {% set last = scan.last %}
 {% set job = import_status | default({}, true) %}
@@ -17,17 +21,14 @@
 {% else %}
 
 <div class="metrics">
+  {# The one thing a scan is run to find out. Everything else it counted is a
+     supporting line under it. #}
   <div class="metric">
-    <span class="metric__value">{{ last.audio_files }}</span> audio files
-  </div>
-  <div class="metric">
-    <span class="metric__value">{{ last.albums_found }}</span> album folders
-  </div>
-  <div class="metric">
-    <span class="metric__value metric__value--ok">{{ last.albums_adopted }}</span> newly marked downloaded
-  </div>
-  <div class="metric">
-    <span class="metric__value">{{ last.albums_already }}</span> already known
+    <span class="metric__value metric__value--lead">{{ last.albums_adopted }}</span> newly marked downloaded
+    <div class="small muted">
+      {{ last.audio_files }} audio files · {{ last.albums_found }} album folders ·
+      {{ last.albums_already }} already known
+    </div>
   </div>
   {% if last.albums_partial %}
   <div class="metric">
@@ -39,9 +40,21 @@
     <span class="metric__value">{{ last.queue_items_cancelled }}</span> queue items cancelled
   </div>
   {% endif %}
-  <div class="mono tiny faint push">
+  {# The scan re-baselines whatever it hashed, so this is the only place the
+     verdict is ever visible: by the time the nightly re-verification reaches the
+     file, the row agrees with it again. #}
+  {% if last.files_replaced %}
+  <div class="metric">
+    <span class="metric__value metric__value--warn">{{ last.files_replaced }}</span>
+    file(s) replaced
+    <div class="small muted">
+      different audio under the same name — {{ last.albums_reopened }} release(s)
+      queued for re-identification
+    </div>
+  </div>
+  {% endif %}
+  <div class="mono tiny muted push">
     {{ last.started_at | ago }} · {{ '%.1f' | format(last.duration_seconds) }}s
-    {%- if not last.applied %} · dry run{% endif %}
   </div>
 </div>
 
@@ -52,10 +65,12 @@
 {% endif %}
 
 {% if last.errors %}
-<section class="card" style="margin-bottom:16px">
+<section class="card">
   <div class="card__head">
-    <h2>Could not be read <span class="count">{{ last.errors | length }}</span></h2>
-    <span class="muted">these files were skipped; everything else still scanned</span>
+    <h2 title="These files could not be read and were skipped; every other folder was still scanned.">
+      Could not be read <span class="count">{{ last.errors | length }}</span>
+    </h2>
+    <span class="muted">skipped; everything else still scanned</span>
   </div>
   <div class="card__body">
     <div class="log">
@@ -70,12 +85,12 @@
 {% endif %}
 
 {% if last.partial %}
-<section class="card" style="margin-bottom:16px">
+<section class="card">
   <div class="card__head">
-    <h2>Incomplete on disk <span class="count">{{ last.albums_partial }}</span></h2>
-    <span class="muted">
-      matched a followed release but has fewer files than Qobuz lists, so it stays wanted
-    </span>
+    <h2 title="Matched a followed release but holds fewer files than Qobuz lists, so it stays wanted.">
+      Incomplete on disk <span class="count">{{ last.albums_partial }}</span>
+    </h2>
+    <span class="muted">fewer files than Qobuz lists, so it stays wanted</span>
   </div>
   <div class="card__body card__body--flush">
     <div class="table-wrap">
@@ -86,7 +101,6 @@
           <th>Artist</th>
           <th class="num">On disk</th>
           <th>Status</th>
-          <th>Folder</th>
         </tr>
       </thead>
       <tbody>
@@ -94,9 +108,9 @@
         <tr>
           <td>
             {% if row.album_id %}
-            <a class="table__title" href="/artists/{{ row.artist_id }}">{{ row.title }}</a>
+            <a class="table__title" href="/artists/{{ row.artist_id }}" title="{{ row.path }}">{{ row.title }}</a>
             {% else %}
-            <span class="table__title">{{ row.title }}</span>
+            <span class="table__title" title="{{ row.path }}">{{ row.title }}</span>
             {% endif %}
           </td>
           <td>{{ row.artist }}</td>
@@ -104,7 +118,6 @@
             <span class="tile__stat tile__stat--warn">{{ row.files }}/{{ row.expected }}</span>
           </td>
           <td><span class="tag tag--{{ row.status }}">{{ row.status }}</span></td>
-          <td class="mono tiny muted break">{{ row.path }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -120,14 +133,12 @@
 {% endif %}
 
 {% if last.unmatched %}
-<section class="card" style="margin-bottom:16px">
+<section class="card">
   <div class="card__head">
-    <h2>Not in the catalogue <span class="count">{{ last.unmatched | length }}</span></h2>
-    <span class="muted">
-      the artist is followed but Qobuzarr has no release with this title — most often
-      because the indexer has not imported that catalogue yet, sometimes because the
-      edition on disk differs from the one Qobuz lists
-    </span>
+    <h2 title="The artist is followed but Qobuzarr holds no release with this title — most often because the indexer has not imported that catalogue yet, sometimes because the edition on disk differs from the one Qobuz lists.">
+      Not in the catalogue <span class="count">{{ last.unmatched | length }}</span>
+    </h2>
+    <span class="muted">followed artist, no release with this title</span>
   </div>
   <div class="card__body card__body--flush">
     <div class="table-wrap">
@@ -137,7 +148,6 @@
           <th>Folder title</th>
           <th>Artist</th>
           <th class="num">Files</th>
-          <th>Path</th>
           <th class="num">Action</th>
         </tr>
       </thead>
@@ -145,7 +155,7 @@
         {% for row in last.unmatched %}
         <tr>
           <td>
-            <div class="table__title">{{ row.title }}</div>
+            <div class="table__title" title="{{ row.path }}">{{ row.title }}</div>
             {% if row.year %}<div class="table__sub">{{ row.year }}</div>{% endif %}
           </td>
           <td>
@@ -154,7 +164,6 @@
             {% else %}{{ row.artist }}{% endif %}
           </td>
           <td class="num mono">{{ row.files }}</td>
-          <td class="mono tiny muted break">{{ row.path }}</td>
           <td class="num nowrap">
             {% if row.artist_id %}
             <a class="btn btn--sm" href="/artists/{{ row.artist_id }}?q={{ row.title }}">Open artist</a>
@@ -175,12 +184,12 @@
 {% endif %}
 
 {% if last.unknown_artists %}
-<section class="card" style="margin-bottom:16px">
+<section class="card">
   <div class="card__head">
-    <h2>Artists you do not follow <span class="count">{{ last.unknown_artists | length }}</span></h2>
-    <span class="muted">
-      music in the library folder with no matching artist in Qobuzarr
-    </span>
+    <h2 title="Music in the library folder with no matching artist in Qobuzarr.">
+      Artists you do not follow <span class="count">{{ last.unknown_artists | length }}</span>
+    </h2>
+    <span class="muted">no matching artist in Qobuzarr</span>
     {% set unknown_total = (last.unknown_artists | length) + last.truncated.get('unknown_artists', 0) %}
     {% if not job.get('running') %}
     <button class="btn btn--primary btn--sm push" hx-post="/ui/library/import"
@@ -198,21 +207,15 @@
           <th>Artist on disk</th>
           <th class="num">Releases</th>
           <th class="num">Files</th>
-          <th>For example</th>
-          <th>Path</th>
           <th class="num">Action</th>
         </tr>
       </thead>
       <tbody>
         {% for row in last.unknown_artists %}
         <tr>
-          <td class="table__title">{{ row.name }}</td>
+          <td class="table__title" title="{{ row.path }}">{{ row.name }}</td>
           <td class="num mono">{{ row.albums }}</td>
           <td class="num mono">{{ row.files }}</td>
-          <td class="small muted truncate">
-            {{ row.title }}{% if row.year %} ({{ row.year }}){% endif %}
-          </td>
-          <td class="mono tiny muted break">{{ row.path }}</td>
           <td class="num nowrap">
             <a class="btn btn--sm" href="/add?q={{ row.name | urlencode }}">Find on Qobuz</a>
           </td>

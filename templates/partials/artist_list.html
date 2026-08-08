@@ -84,12 +84,11 @@
         Apply
       </button>
     </span>
-
-    <p class="bulkbar__hint">
-      Only the dropdowns you change are applied — everything left on
-      <span class="mono">no change</span> is untouched. Release types affect what
-      <em>future</em> scans mark wanted; releases already recorded keep the status they have.
-    </p>
+    {#
+      The paragraph that used to sit here described the literal text of the first
+      option in all three dropdowns ("no change"), and then restated what the
+      artist page says about release types. Both were on screen already.
+    #}
   </div>
 
   {% if view == 'grid' %}
@@ -110,10 +109,11 @@
           {% endif %}
         </span>
         <span class="tile__name">{{ artist.name }}</span>
+        {# Monitored is the normal state and says nothing; only the exception does. #}
         <span class="tile__meta">
           {{ artist.album_count if artist.album_count is not none else artist.albums_count }} release{{ '' if artist.album_count == 1 else 's' }}
           {%- if artist.wanted_count %} · {{ artist.wanted_count }} wanted{% endif %}
-          {%- if artist.monitored %} · {{ artist.monitor_mode | enum_value }}{% else %} · not monitored{% endif %}
+          {%- if not artist.monitored %} · not monitored{% endif %}
         </span>
       </a>
     </div>
@@ -124,23 +124,27 @@
   <div class="card">
     <div class="card__body card__body--flush">
       <div class="table-wrap">
+      {#
+        Seven columns including the selector, which is the ceiling. The release
+        types left the table — up to five outlined chips a row, and they are
+        per-artist configuration, editable in the bulk bar directly above and on
+        the artist's own page. So did the Qobuz id, which was the row's href.
+      #}
       <table class="table">
         <thead>
           <tr>
             <th class="col-select"><span class="visually-hidden">Select</span></th>
             <th>Artist</th>
             <th>Monitor</th>
-            <th>Release types</th>
             <th class="num">Releases</th>
             <th class="num">Wanted</th>
-            <th class="num">On disk</th>
             <th>Last checked</th>
             <th class="num">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for artist in artists %}
-          <tr>
+          <tr class="{% if not artist.monitored %}row--muted{% endif %}">
             <td>
               <label class="check" title="Select {{ artist.name }}">
                 <input type="checkbox" name="artist_ids" value="{{ artist.id }}">
@@ -150,25 +154,26 @@
             </td>
             <td>
               <a class="table__title" href="/artists/{{ artist.id }}">{{ artist.name }}</a>
-              <div class="table__sub mono">{{ artist.id }}</div>
             </td>
+            {# Monitored is the normal state, so it is plain; off is the mark. #}
             <td>
               {% if artist.monitored %}
-              <span class="tag tag--live">{{ artist.monitor_mode | enum_value }}</span>
+              <span class="tiny muted">{{ artist.monitor_mode | enum_value }}</span>
               {% else %}
               <span class="tag tag--skipped">off</span>
               {% endif %}
             </td>
-            <td>
-              <span class="tag-row">
-                {% for rt in artist.accepted_release_types %}<span class="tag tag--type">{{ rt }}</span>
-                {% else %}<span class="muted small">none</span>{% endfor %}
-              </span>
+            {% set known = artist.album_count if artist.album_count is not none else artist.albums_count %}
+            <td class="num mono nowrap"
+                title="{{ artist.downloaded_count if artist.downloaded_count is not none else 0 }} of {{ known }} release(s) on disk">
+              <span class="tiny muted">{{ artist.downloaded_count if artist.downloaded_count is not none else '—' }} /</span> {{ known }}
             </td>
-            <td class="num mono">{{ artist.album_count if artist.album_count is not none else artist.albums_count }}</td>
-            <td class="num mono">{{ artist.wanted_count if artist.wanted_count is not none else '—' }}</td>
-            <td class="num mono">{{ artist.downloaded_count if artist.downloaded_count is not none else '—' }}</td>
-            <td class="mono small muted nowrap" title="{{ artist.last_checked_at | dt('%Y-%m-%d %H:%M:%S') }} UTC">{{ artist.last_checked_at | ago }}</td>
+            {# The one promoted number: it is what makes you open this artist. #}
+            <td class="num mono">
+              {% if artist.wanted_count %}<span class="strong">{{ artist.wanted_count }}</span>
+              {%- else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td class="mono tiny muted nowrap" title="{{ artist.last_checked_at | dt('%Y-%m-%d %H:%M:%S') }} UTC">{{ artist.last_checked_at | ago }}</td>
             <td class="num nowrap">
               <button class="btn btn--sm" type="button"
                       hx-post="/ui/artists/{{ artist.id }}/scan"
@@ -180,7 +185,11 @@
         </tbody>
       </table>
       </div>
+      {# The list is fetched with limit=1000; for a real library the two numbers
+         are the same, and a note restating the count is noise. #}
+      {% if artists | length < total %}
       <p class="table-note">{{ artists | length }} of {{ total }} artists shown.</p>
+      {% endif %}
     </div>
   </div>
   {% endif %}

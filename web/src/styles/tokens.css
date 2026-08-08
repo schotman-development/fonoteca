@@ -1,0 +1,220 @@
+/* Design tokens — the Claude Design "qobuzarr" system, transcribed.
+
+   The token NAMES are unchanged from the previous pass on purpose: every one of
+   the 37 primitives reads this file through var(--…), so re-pointing the values
+   re-skins the whole application in one edit and nothing has to be touched twice.
+   What changed is every value, plus one small family of additions (--c-accent-*,
+   --c-src-*, --fs-figure) that the new design needs and the old one had no word
+   for.
+
+   Three things are carried unchanged from the previous stylesheet because they
+   are its real intellectual content, not its appearance:
+
+     - the 9-level ink hierarchy, and the rule that colour marks an exception;
+     - the measured contrast ratios (annotated below, all against --c-paper);
+     - one spacing scale for the whole app — nothing may invent a pixel gap.
+
+   TWO PLACES THE DESIGN WAS DELIBERATELY NOT COPIED, both for contrast:
+
+     1. The design paints small text in #7D786D (4.4:1 against white — below the
+        4.5:1 floor for body text). That value is kept, as --c-ink-faint, and is
+        DECORATION ONLY, exactly as before. Text the design drew in #7D786D is
+        drawn in --c-ink-mark (#6E6A61, 5.4:1) instead. The two are one shade
+        apart and the difference is invisible; the audit result is not.
+     2. The design's amber, #D97706, is 3.2:1 — fine as a bar fill or a dot,
+        not as a number. It is --c-warn-solid (a non-text mark). Amber TEXT uses
+        --c-warn (#B45309, 5.0:1). The design uses both already, so this is
+        picking the right one of its own two ambers per context.
+
+   Light only. A dark theme is a separate task with its own contrast audit. */
+
+:root {
+  /* ---- surfaces -------------------------------------------------------
+     The new design is opaque white paper with hairline rules; there is no
+     tinted backdrop behind the shell any more, so --c-backdrop is white and
+     separation comes from --c-line rather than from a change of surface. */
+  --c-backdrop:  #FFFFFF;   /* behind the shell */
+  --c-paper:     #FFFFFF;   /* shell, cards, controls  (all ratios are vs this) */
+  --c-canvas:    #FAF9F7;   /* inset panels, code blocks, the search box */
+  --c-sunk:      #F2F0EB;   /* active nav, hover, neutral chip, active row */
+  --c-fill:      #E4DFD5;   /* artwork placeholder, meter/bar track, tag base */
+
+  /* ---- lines ---------------------------------------------------------- */
+  --c-line:      #DFD9CE;   /* card edges, section rules, header/footer borders */
+  --c-line-soft: #E9E5DC;   /* row dividers inside a list */
+  --c-line-mute: #C3BDB0;   /* control outlines — must stay visible */
+  --c-toggle-off:#C3BDB0;   /* the off half of a switch */
+
+  /* ---- ink ramp (ratios vs --c-paper, measured) ------------------------ */
+  --c-ink:       #1B1A17;   /* 17.4:1  identity, values, headings, primary fill */
+  --c-ink-2:     #33302A;   /* 13.1:1  body copy, table cells, chip text        */
+  --c-ink-3:     #57534A;   /*  7.7:1  secondary lines, subtitles, hints        */
+  --c-ink-mark:  #6E6A61;   /*  5.4:1  eyebrows, mono micro-labels, quiet meta  */
+  --c-ink-faint: #7D786D;   /*  4.4:1  DECORATION ONLY — never text             */
+  --c-on-ink:    #FFFFFF;   /* text on inverted surfaces */
+  --c-ink-hover: #33302A;   /* primary button hover */
+  --c-link-hover:#00695F;   /* links deepen into the accent — see below */
+
+  /* ---- accent ---------------------------------------------------------
+     NEW FAMILY. The old system had no accent at all: its only colour was
+     status, and links were ink. This design has one — a teal that carries
+     identity (links, focus, the "proposed" half of a diff, an on switch) and
+     is NOT a status colour. #00857A is 4.5:1 and clears AA for text by a
+     hair; --c-accent-hover is the safe one and is what hover/focus uses. */
+  --c-accent:      #00857A;  /* 4.5:1 */
+  --c-accent-hover:#00695F;  /* 6.4:1 */
+  --c-accent-bg:   #F4FBF8;  /* the tinted "proposed / symlink / agreed" panel */
+  --c-accent-line: #C9E6DC;  /* its border */
+  --c-accent-sel:  #BFE3D8;  /* ::selection */
+
+  /* ---- status (a screen where nothing is wrong shows none of these) ----
+     --c-ok is the accent by design: in this system a verified checksum and a
+     link are the same green-teal, because "correct" is the resting state and
+     does not get a second colour. */
+  --c-ok:        #00857A;  --c-ok-bg:   #F4FBF8;
+  --c-warn:      #B45309;  --c-warn-bg: #FBF3E2;  --c-warn-solid: #D97706;
+  --c-bad:       #DC2626;  --c-bad-bg:  #FBEDE5;
+
+  /* ---- categorical (NEVER status; identity of a metadata source or a log
+     kind, where the hue means "which one", not "how bad") ---------------- */
+  --c-cat-blue:   #2563EB;  /* 5.2:1 — downloads/grabs */
+  --c-cat-violet: #7C3AED;  /* 5.7:1 — enrichment */
+  --c-cat-amber:  #B45309;  /* 5.0:1 — scans */
+  --c-src-musicbrainz:  #B5533F;
+  --c-src-qobuz:        #00857A;
+  --c-src-acoustid:     #6B4A3E;
+  --c-src-deezer:       #8A4A8C;
+  --c-src-coverartarchive: #B45309;
+  --c-src-wikidata:     #5C7A6B;
+
+  /* ---- artwork placeholder ramp ---------------------------------------
+     Twelve two-stop gradients, indexed by a stable hash of the title, so a
+     release with no cover still has a constant identity between renders.
+     Values are the design's ART table, verbatim. */
+  --art-0:  linear-gradient(150deg, #2F4858, #5C7A6B);
+  --art-1:  linear-gradient(150deg, #6B4A3E, #A8785C);
+  --art-2:  linear-gradient(150deg, #2563EB, #7789A8);
+  --art-3:  linear-gradient(150deg, #4A3E52, #8A6E8C);
+  --art-4:  linear-gradient(150deg, #55492E, #9A8A5C);
+  --art-5:  linear-gradient(150deg, #2E4A46, #5F8A7B);
+  --art-6:  linear-gradient(150deg, #6E3A42, #A86A6C);
+  --art-7:  linear-gradient(150deg, #33465A, #6B8296);
+  --art-8:  linear-gradient(150deg, #4E3B2C, #93765A);
+  --art-9:  linear-gradient(150deg, #3A4A38, #748A6A);
+  --art-10: linear-gradient(150deg, #5A4048, #96707E);
+  --art-11: linear-gradient(150deg, #2C4550, #63838F);
+  --art-ink: rgba(255, 255, 255, 0.94);   /* the initials sitting on one */
+
+  /* ---- type -----------------------------------------------------------
+     IBM Plex, named and then fallen through to system faces — never fetched.
+     The ladder stays nine steps and stays monotonic; the design's fourteen
+     sizes snap onto it. Body is 14px here (it was 15px): this design is
+     denser, and that is the design. */
+  --ff-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+             Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ff-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+             "DejaVu Sans Mono", monospace;
+
+  --fs-3xs:  0.6875rem;  /* 11px — mono micro-labels ONLY */
+  --fs-2xs:  0.75rem;    /* 12px — footer, log detail, sub-lines */
+  --fs-xs:   0.8125rem;  /* 13px — controls, secondary prose, most row text */
+  --fs-sm:   0.875rem;   /* 14px — BODY, table cells, row identity */
+  --fs-base: 0.875rem;   /* 14px — alias of sm; body-sized, kept for callers */
+  --fs-md:   1rem;       /* 16px — section titles */
+  --fs-lg:   1.0625rem;  /* 17px — panel titles, the lede */
+  --fs-xl:   1.625rem;   /* 26px — the page h1, exactly one per screen */
+  --fs-2xl:  2rem;       /* 32px — reserved; nothing on a screen yet */
+
+  /* The one lead figure in a stat tile. Sits between --fs-lg and --fs-xl and
+     is separate from both because it is a NUMBER, always mono, and must not
+     move when the heading ladder is retuned. */
+  --fs-figure: 1.5rem;   /* 24px */
+
+  --lh-tight: 1.15;  --lh-snug: 1.3;  --lh-normal: 1.6;
+  --lh-relaxed: 1.75; --lh-log: 1.9;
+
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600;   /* three, no more */
+  --ls-tight: -0.02em; --ls-snug: -0.01em; --ls-normal: 0;
+  --ls-label: 0.07em;  --ls-nav: 0.06em;
+
+  /* ---- space (one scale, whole app — unchanged) ----------------------- */
+  --sp-0: 0;      --sp-px: 1px;
+  --sp-1: 4px;    --sp-2: 8px;    --sp-3: 12px;   --sp-4: 16px;
+  --sp-5: 24px;   --sp-6: 32px;   --sp-7: 40px;   --sp-8: 56px;
+  --sp-9: 72px;   --sp-10: 96px;
+
+  /* ---- control padding (APPENDED for this design) ----------------------
+     The scale above is for LAYOUT — the gaps between blocks — and it stays
+     a 4px grid. A control's inner padding is a different measurement, and
+     the design's controls sit on a finer one: the filter chip is padded
+     6px/12px (design 247 and 807) and the source chip 4px/9px (471).
+     Snapping 6px to 4 or to 8 moves the height of every chip in the app by
+     4px, so the two values that fall between the steps are named here once
+     rather than written literally in the five modules that need them.
+     Nothing but a control's own padding may read these. */
+  --pad-chip-y:    6px;   /* filter chip (247, 807) */
+  --pad-chip-x:    12px;  /* = --sp-3, named so the pair reads as one shape */
+  --pad-chip-sm-y: 4px;   /* source chip (471), token button (725) */
+  --pad-chip-sm-x: 9px;
+  --gap-chip:      6px;   /* dot → name → count inside a chip (471) */
+
+  /* ---- layout --------------------------------------------------------- */
+  --layout-topbar-h:   62px;
+  --layout-footer-h:   44px;   /* the toast host reads this — keep them in step */
+  --layout-sidebar-w:  228px;
+  --layout-gutter:     40px;   /* 24px ≤900px */
+  --layout-measure:    72ch;   /* prose and subtitles */
+  --layout-content-max:1160px; /* extra viewport becomes margin, not line length */
+  /* The dashboard's well (template lines 82 and 90). Narrower than the library's
+     because its content is two columns of prose and lists rather than an artwork
+     wall — a wall gets wider and gains a column, a paragraph just gets longer. */
+  --layout-content-narrow:1056px;
+  --layout-drawer-w:   408px;  /* the detail/edit side sheet */
+
+  /* ---- radius (scales with padding, never with importance) ------------- */
+  --r-none: 0; --r-xs: 6px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px;
+  --r-pill: 999px; --r-full: 50%;
+
+  /* ---- elevation ------------------------------------------------------
+     The design's shadows are all deep-negative-spread, so they read as a
+     contact shadow under artwork rather than as a raised card. The default
+     card is still e-0 plus a line. */
+  --e-0: none;
+  --e-1: 0 1px 2px rgba(27, 26, 23, .05);
+  --e-2: 0 4px 12px -10px rgba(27, 26, 23, .5);    /* artwork at rest */
+  --e-3: 0 8px 20px -12px rgba(27, 26, 23, .5);    /* artwork selected, drawer */
+  --e-4: 0 10px 26px -14px rgba(27, 26, 23, .5);   /* toasts */
+  --e-rail: inset 2px 0 0 var(--c-ink);            /* active nav, "you are here" */
+  /* APPENDED: the switch knob, design 389 / 399 / 508 / 577 / 782, which draws
+     `0 1px 2px rgba(0,0,0,.2)`. It is --e-1's geometry at four times the alpha
+     because it is the one shadow that has to read against a saturated fill
+     (--c-accent) rather than against paper. */
+  --e-knob: 0 1px 2px rgba(27, 26, 23, .2);
+
+  /* ---- motion --------------------------------------------------------- */
+  --mo-instant: 80ms; --mo-fast: 120ms; --mo-base: 200ms; --mo-slow: 320ms;
+  --mo-pulse: 1.6s;
+  --mo-ease: cubic-bezier(.2, 0, 0, 1);
+  --mo-ease-out: cubic-bezier(0, 0, .2, 1);
+  --mo-ease-spring: cubic-bezier(.2, .8, .2, 1);
+
+  /* ---- z ---------------------------------------------------------------
+     Three, not five. `--z-sidebar` and `--z-topbar` went with the scroll model:
+     the shell is a fixed frame whose bands are `flex: none` siblings of the one
+     scroller, so nothing has to be lifted over content that slides under it.
+     They are deleted rather than left at 20/30 because an unused stacking token
+     is an invitation to restore the `position: sticky` it was invented for. */
+  --z-sticky-th: 1; --z-drawer: 50; --z-toast: 60;
+}
+
+@media (max-width: 1100px) { :root { --layout-content-max: 100%; } }
+@media (max-width: 900px)  { :root { --layout-gutter: 24px; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important; scroll-behavior: auto !important;
+  }
+}
+
+/* One focus treatment for the whole app. */
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }

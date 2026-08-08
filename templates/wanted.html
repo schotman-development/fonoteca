@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Wanted · {{ app_name }}{% endblock %}
 {% block heading %}Wanted <span class="count">{{ total }}</span>{% endblock %}
+{#
+  The AUTO_DOWNLOAD sentence that used to sit here is on /settings, and the
+  per-row Download button already says "nothing moves until you say so".
+#}
 {% block subtitle %}
   Releases the indexer found but nobody has downloaded yet.
-  {% if settings.auto_download %}AUTO_DOWNLOAD is on, so these are queued automatically.
-  {% else %}AUTO_DOWNLOAD is off — nothing here moves until you say so.{% endif %}
 {% endblock %}
 
 {% block actions %}
@@ -27,7 +29,7 @@
 {% block content %}
 <form class="toolbar filters--inline" id="wanted-filters" method="get" action="/wanted">
   <input class="input input--sm" type="search" name="q" value="{{ q }}"
-         placeholder="Filter by album or artist…" style="width:240px">
+         placeholder="Filter by album or artist…" style="width:260px">
 
   <select class="input input--sm" name="status" onchange="this.form.submit()">
     <option value="">wanted and failed</option>
@@ -45,9 +47,11 @@
   <button class="btn btn--sm" type="submit">Apply</button>
   <a class="btn btn--sm btn--quiet" href="/wanted">Reset</a>
 
-  <span class="toolbar__end mono tiny faint">
-    oldest first · one download at a time · ● monitored, ○ ignored
-  </span>
+  {#
+    "one download at a time" is in the Download-all confirm, and the ●/○ legend
+    is on every toggle's own title and aria-label. Only the sort order is left.
+  #}
+  <span class="toolbar__end mono tiny muted">oldest first</span>
 </form>
 
 <section class="card">

@@ -49,6 +49,7 @@ __all__ = [
     "format_for_profile",
     "format_for_quality",
     "format_label",
+    "is_hires",
     "obtainable_format_id",
     "owned_format_id",
     "release_ceiling_format_id",
@@ -144,6 +145,29 @@ def format_label(format_id: int | None) -> str:
     if ceiling is None:
         return "FLAC"
     return naming.quality_tag(fid, ceiling[0], ceiling[1])
+
+
+def is_hires(format_id: int | None) -> bool | None:
+    """Is a file stored in *format_id* hi-res? ``None`` when the id is unknown.
+
+    Hi-res is a fact about **a file**, and the only honest source for it is the
+    format that file is actually in. ``Album.hires`` is a different claim — the
+    catalogue's *availability* flag, "Qobuz would sell you a hi-res copy of this"
+    — so reading it as the quality of the copy on disk marks a 16/44.1 download
+    of a hi-res listing as hi-res, in a column headed with what you hold.
+
+    The arithmetic lives here rather than in a template or a browser for the
+    reason the whole module exists: one comparison, whoever is asking.
+    """
+    fid = _int(format_id)
+    if fid is None:
+        return None
+    ceiling = naming.FORMAT_CEILINGS.get(fid)
+    if ceiling is None:
+        # MP3 (5) has no entry and is decidedly not hi-res; an id we do not know
+        # at all is unknown, and unknown means no.
+        return False if fid < 6 else None
+    return ceiling[0] > 16
 
 
 def track_format_id(track: Any) -> int | None:

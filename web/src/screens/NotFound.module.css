@@ -1,0 +1,32 @@
+/* The design draws no 404, so this is the frame's own geometry and nothing
+   else: the screen `<section>` of build spec §5 — `flex: 1`, the only scroller,
+   the standard gutter — holding one heading, one sentence and one link. */
+
+.section {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-7) var(--layout-gutter) var(--sp-9);
+  overflow-y: auto;
+}
+
+.well {
+  max-width: var(--layout-measure);
+}
+
+.note {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}
+
+.path {
+  font-family: var(--ff-mono);
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.home {
+  display: inline-block;
+  margin-top: var(--sp-5);
+  font-size: var(--fs-xs);
+}

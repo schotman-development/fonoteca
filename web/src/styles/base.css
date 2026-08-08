@@ -1,0 +1,191 @@
+/* Element defaults and the three global utilities. Loaded last of the three
+   stylesheets, so a component module always wins over anything here.
+
+   EXACTLY THREE global class names exist in the whole app — `.visuallyHidden`,
+   `.truncate` and `.mono` (spec section 3: "no global class names except the
+   token layer and three utilities"). They are here rather than in a module
+   because a screen occasionally needs one on markup that owns no module.
+
+   This file used to carry a fourth and a fifth, `.label` and `.chipBase`, which
+   were verbatim copies of `src/design/shared/label.module.css` and
+   `chip.module.css` — the exact five-copies-that-drift failure those shared
+   modules exist to prevent, reintroduced one layer up. They are deleted. The
+   label recipe lives in `design/shared/label.module.css` and the chip geometry
+   in `design/shared/chip.module.css`, each `composes:`d by the primitives that
+   need it, and there is one definition of each. */
+
+body {
+  font-family: var(--ff-sans);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  color: var(--c-ink-2);
+  background: var(--c-backdrop);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- headings -------------------------------------------------------------
+   The page h1 is --fs-xl and there is exactly one per screen, rendered by
+   TitleBar. Everything below it is a section heading, and the ladder is short
+   on purpose: hierarchy comes from space and weight, not from six sizes. */
+
+h1 {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--c-ink);
+}
+
+/* A band title. 16px/600 — the design's own (lines 97, 116, 141), and the same
+   values `Section` sets on its `.heading`; the two must not disagree, or a bare
+   <h2> in a drawer or a dialog is a different size from every section head on
+   the page. */
+h2 {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-snug);
+  color: var(--c-ink);
+}
+
+h3 {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+}
+
+h4,
+h5,
+h6 {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+}
+
+/* Prose keeps a readable measure; tables and grids opt out by setting their own. */
+p {
+  max-width: var(--layout-measure);
+}
+
+/* ---- links ----------------------------------------------------------------
+   Ink, not blue. --c-link-hover is the only blue in the system and it appears
+   on hover/focus alone, so a table of forty linked titles reads as text rather
+   than as forty pieces of emphasis. */
+
+a {
+  color: var(--c-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--c-line-mute);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+  transition: color var(--mo-fast) var(--mo-ease),
+              text-decoration-color var(--mo-fast) var(--mo-ease);
+}
+
+a:hover {
+  color: var(--c-link-hover);
+  text-decoration-color: currentColor;
+}
+
+/* Navigation, buttons and row actions are links that must not look like prose. */
+a[data-plain] {
+  text-decoration: none;
+}
+
+a[data-plain]:hover {
+  text-decoration: none;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--ff-mono);
+  font-size: 0.9em;
+}
+
+small {
+  font-size: var(--fs-2xs);
+}
+
+strong,
+b {
+  font-weight: var(--fw-medium);
+  color: var(--c-ink);
+}
+
+::selection {
+  background: var(--c-sunk);
+  color: var(--c-ink);
+}
+
+/* ---- utilities ------------------------------------------------------------ */
+
+/* Text that is read by a screen reader and not by an eye: the <th> of a checkbox
+   or monitor-toggle column, the name of an icon-only button when its icon is the
+   only visible thing. It stays in the tab and reading order — display:none would
+   remove it from both. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Paths and error strings are truncated with the full text in a tooltip; a path
+   never owns a column. */
+.truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+}
+
+/* ---- keyframes ------------------------------------------------------------
+   The design defines exactly two (`cadFade` and `cadSpin`, lines 21–22) and
+   the app needs both, so they are global rather than per-module: a keyframe
+   name inside a CSS module is rewritten by the bundler, which means the
+   drawer's entrance and the shelf's would be two identical animations under
+   two mangled names, and neither could be referenced from a sibling module.
+   Renamed to `fadeIn` and `spin` because `cad` was the design tool's prefix.
+
+   Not guarded here: the `prefers-reduced-motion` block in tokens.css already
+   zeroes every animation duration and iteration count in the document, so a
+   second guard would be a second place to keep in step. */
+
+/* Drawer entrance (350, 377, 426), grid cells (256, 278, 305), the stack card
+   (675) and the toast (851). 6px of travel, not 12: the design's rise is short
+   enough to read as the element settling rather than as it flying in. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The spinner (185, 832). One turn; the caller sets `.8s linear infinite`. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

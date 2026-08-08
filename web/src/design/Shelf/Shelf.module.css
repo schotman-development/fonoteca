@@ -1,0 +1,58 @@
+/* The horizontal scroller and its two arrows, design 121–136.
+
+   Scroller (121): `display: flex; gap: 20px; overflow-x: auto;
+   scroll-snap-type: x mandatory; padding: 4px 2px 6px`.
+   Controls (133): `display: flex; justify-content: flex-end; gap: 8px;
+   margin-top: 4px`. The two arrows themselves are NOT here — that shape is
+   `Button`'s `iconRound` variant (design 134–135), and this file used to hold
+   a declaration-for-declaration copy of it. One circle in the design is one
+   circle in the layer; `Shelf.tsx` renders `<Button variant="iconRound">`.
+
+   THE GAPS ARE BUILT OUT OF THE SPACE SCALE, NOT WRITTEN. tokens.css keeps one
+   4px scale for the whole app and forbids inventing a pixel gap, and the
+   design's 20px, 2px and 6px fall between its steps — so each is an expression
+   over `--sp-*` rather than a literal, and every one of them moves if the
+   scale ever does. 20px is `--sp-4 + --sp-1`; 2px is two hairlines; 6px is
+   `--sp-1` plus two.
+
+   The padding exists so nothing is clipped: a card carries `--e-2`, a selected
+   one carries a 2px outline at a 2px offset, and a focused one carries the
+   global focus ring. Without the inset the scroller's own `overflow` would cut
+   all three off at the top and the sides. */
+
+.shelf {
+  min-width: 0;
+}
+
+.scroller {
+  --shelf-gap: calc(var(--sp-4) + var(--sp-1)); /* design 121: 20px */
+  --shelf-pad-x: calc(var(--sp-px) * 2); /* design 121: 2px */
+  --shelf-pad-bottom: calc(var(--sp-1) + var(--sp-px) * 2); /* design 121: 6px */
+
+  display: flex;
+  gap: var(--shelf-gap);
+  padding: var(--sp-1) var(--shelf-pad-x) var(--shelf-pad-bottom);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+}
+
+/* Every card is a snap point and none of them shrinks — a shelf whose cards
+   compress to fit is a grid, and the whole point of this control is that the
+   row runs off the edge. */
+.scroller > * {
+  flex: none;
+  scroll-snap-align: start;
+}
+
+.controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+/* The arrows are disabled rather than hidden — an arrow that disappears at the
+   end of the row moves the one beside it, and a control that jumps under the
+   pointer is worse than one that is visibly spent. `Button` already fades a
+   disabled control, so that is `Shelf.tsx`'s `disabled` prop and no CSS. */

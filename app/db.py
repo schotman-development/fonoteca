@@ -30,7 +30,12 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from app.config import Settings, get_settings
-from app.models import Base
+from app.models import (
+    ENRICHMENT_SCHEMA_KEY,
+    ENRICHMENT_SCHEMA_VERSION,
+    ENRICHMENT_TABLES,
+    Base,
+)
 
 __all__ = [
     "AsyncSessionLocal",
@@ -97,17 +102,85 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return AsyncSessionLocal
 
 
+def _rebuild_enrichment_tables(connection: Any) -> None:
+    """Drop and recreate the enrichment side tables (synchronous, run via ``run_sync``)."""
+    tables = [
+        Base.metadata.tables[name]
+        for name in ENRICHMENT_TABLES
+        if name in Base.metadata.tables
+    ]
+    # ENRICHMENT_TABLES is ordered children-first, so dropping in order never
+    # trips a foreign key.
+    Base.metadata.drop_all(connection, tables=tables, checkfirst=True)
+    Base.metadata.create_all(connection, tables=list(reversed(tables)), checkfirst=True)
+
+
+async def _reconcile_enrichment_schema(conn: Any) -> bool:
+    """Rebuild the enrichment tables when their recorded version is stale.
+
+    ``create_all`` uses ``checkfirst``, which asks whether a table *exists* — not
+    whether it has the columns the code expects. So the first time a column is
+    added to one of the side tables, an existing database would sail through
+    startup and then fail with ``no such column`` on the first query.
+
+    Everything in those tables is derived, re-fetchable data, so the honest fix
+    is also the cheapest one: drop them and let the enricher repopulate. The
+    Qobuz-owned tables are never touched.
+
+    Returns:
+        True when a rebuild happened.
+    """
+    stored = (
+        await conn.execute(
+            text("SELECT value FROM settings WHERE key = :key"),
+            {"key": ENRICHMENT_SCHEMA_KEY},
+        )
+    ).scalar_one_or_none()
+
+    try:
+        current = int(stored) if stored is not None else None
+    except (TypeError, ValueError):
+        current = None
+
+    if current == ENRICHMENT_SCHEMA_VERSION:
+        return False
+
+    rebuilt = current is not None
+    if rebuilt:
+        logger.warning(
+            "Enrichment schema is v%s but the code expects v%s — rebuilding %s. "
+            "All of it is re-fetchable; nothing Qobuz owns is touched.",
+            current,
+            ENRICHMENT_SCHEMA_VERSION,
+            ", ".join(ENRICHMENT_TABLES),
+        )
+        await conn.run_sync(_rebuild_enrichment_tables)
+
+    await conn.execute(
+        text(
+            "INSERT INTO settings (key, value, updated_at) "
+            "VALUES (:key, :value, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value = :value, updated_at = CURRENT_TIMESTAMP"
+        ),
+        {"key": ENRICHMENT_SCHEMA_KEY, "value": str(ENRICHMENT_SCHEMA_VERSION)},
+    )
+    return rebuilt
+
+
 async def init_db() -> None:
     """Create the data/library directories and all tables if they are missing.
 
     Safe to call on every startup; ``create_all`` is a no-op for existing
-    tables. This does not perform migrations — the schema is created as-is.
+    tables. This does not perform migrations — the schema is created as-is — with
+    one exception: the enrichment side tables carry a version and are rebuilt
+    when it moves. See :func:`_reconcile_enrichment_schema`.
     """
     settings = get_settings()
     settings.ensure_directories()
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _reconcile_enrichment_schema(conn)
 
     logger.info("Database ready at %s", settings.db_path)
 

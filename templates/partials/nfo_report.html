@@ -1,0 +1,23 @@
+{#
+  Result of an NFO write.
+  Context: nfo (LibraryTidyOut | None)
+
+  No preview, for the same reason re-tagging has none: the file is rendered from
+  the database and rewriting it is idempotent. Unlike a re-file, nothing moves.
+#}
+{% if nfo is none %}
+<p class="empty">
+  Writes <code>album.nfo</code> beside each release and <code>artist.nfo</code>
+  in the artist folder, so Kodi, Jellyfin, Emby and Plex read the biography,
+  identifiers and artwork Qobuzarr already resolved instead of looking them up
+  again. Derived data — safe to rewrite whenever, and it replaces nothing but
+  the previous <code>.nfo</code>.
+</p>
+{% else %}
+<div class="lede">{{ nfo.summary }}.</div>
+{% if nfo.errors %}
+<ul class="small">
+  {% for error in nfo.errors %}<li class="bad">{{ error }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endif %}

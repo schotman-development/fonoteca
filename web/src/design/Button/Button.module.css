@@ -1,0 +1,208 @@
+/* The button — five shapes and four sizes, all of them the design's own.
+ *
+ * The design draws no "button component"; it draws the same handful of inline
+ * styles over and over, and the shapes fall out of them cleanly:
+ *
+ *   primary    bg #1B1A17, 1px solid #1B1A17, #FFFFFF, radius 8px
+ *              (39 — the scan button, 87, 154 — Download, 336 — Edit tags,
+ *               663 — Accept & apply, 694 — the stack-mode Accept)
+ *   secondary  #FFFFFF, 1px solid #DFD9CE, #33302A, same geometry
+ *              (156 — Ignore, 222 — Settings, 535 — + Follow artist, 664–665)
+ *   quiet      no border, no background, #1B1A17, 12.5px, with
+ *              `border-bottom: 1px solid #C3BDB0` — the section links
+ *              (100 — Activity, 119 — Release radar)
+ *   iconRound  30×30, radius 50%, 1px solid #DFD9CE on #FFFFFF — the shelf ‹ ›
+ *              (134–135)
+ *   close      borderless ×, 17px, #6E6A61 (356, 383, 436)
+ *
+ * ── the geometry is a custom property, not five copies of `padding` ──────────
+ *
+ * A variant and a size are different questions — "what does this button mean?"
+ * and "how much room does it take?" — and every combination of the two is legal
+ * except the ones where the variant IS the geometry (quiet, iconRound, close
+ * have no padding of their own to size). Writing `padding` in both places makes
+ * the winner a question of stylesheet order, which the note at the top of
+ * `shared/surface.module.css` explains is exactly what a component must not have
+ * to reason about. So `.button` owns the one `padding` declaration and reads it
+ * out of `--btn-pad-*`; a size sets those, and a variant that has no padding
+ * zeroes them. Nothing overrides anything.
+ *
+ * ── the off-scale values ────────────────────────────────────────────────────
+ *
+ * 6px, 10px, 14px, 18px and 30px are not on the 4px layout scale, and they are
+ * not meant to be: `--sp-*` measures the gaps BETWEEN blocks, and a control's
+ * inner padding sits on a finer grid — the same argument tokens.css makes when
+ * it names the chip's 6px/12px rather than snapping it. They are declared here,
+ * once each, as this control's own custom properties (the pattern
+ * `shared/switch.module.css` uses for its 34×19 track), so every use site reads
+ * a `var()` and a retune is one edit.
+ */
+
+.button {
+  --btn-pad-y: var(--sp-2);   /* 8px — design 39, 222, 535 */
+  --btn-pad-x: 14px;          /* design 39 */
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  box-sizing: border-box;
+  padding: var(--btn-pad-y) var(--btn-pad-x) var(--btn-pad-b, var(--btn-pad-y));
+  border: var(--sp-px) solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--c-ink);
+  font-family: var(--ff-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background var(--mo-fast) var(--mo-ease),
+    border-color var(--mo-fast) var(--mo-ease),
+    color var(--mo-fast) var(--mo-ease);
+}
+
+/* Both spellings, because a navigating button is an `<a>` and an anchor cannot
+   be `disabled` — it carries `aria-disabled` and refuses the click in JS. If
+   only `:disabled` were styled, a disabled link would look pressable. */
+.button:disabled,
+.button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- sizes ---------------------------------------------------------------- */
+
+/* A row action: `6px 12px / 12px` (154 — Download, 156 — Ignore, 336). */
+.sm {
+  --btn-pad-y: 6px;
+  --btn-pad-x: var(--sp-3);
+
+  font-size: var(--fs-2xs);
+}
+
+/* The default: `8px 13–14px / 12.5–13px` (39, 222, 535). */
+.md {
+  --btn-pad-y: var(--sp-2);
+  --btn-pad-x: 14px;
+}
+
+/* The one-per-panel commitment: `10px 18px / 13px` (663–665). */
+.lg {
+  --btn-pad-y: 10px;
+  --btn-pad-x: 18px;
+}
+
+/* A button that shares a row equally with its siblings (368, 416, 519, 694):
+   `flex: 1` and vertical padding only, so the label centres in whatever width
+   the row hands it. */
+.block {
+  --btn-pad-y: 10px;
+  --btn-pad-x: var(--sp-3);
+
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- variants ------------------------------------------------------------- */
+
+.primary {
+  border-color: var(--c-ink);
+  background: var(--c-ink);
+  color: var(--c-on-ink);
+}
+
+.primary:not(:disabled):not([aria-disabled='true']):hover {
+  border-color: var(--c-ink-hover);
+  background: var(--c-ink-hover);
+}
+
+.secondary {
+  border-color: var(--c-line);
+  background: var(--c-paper);
+  color: var(--c-ink-2);
+}
+
+.secondary:not(:disabled):not([aria-disabled='true']):hover {
+  border-color: var(--c-line-mute);
+}
+
+/* The section link (100, 119). It is a button, not prose, so it gets the
+   design's underline as a real border rather than `text-decoration` — the
+   distance from the baseline is then the same whether it renders as a
+   `<button>` or as a `<Link>`, which `a { text-decoration }` in base.css would
+   not guarantee. */
+.quiet {
+  --btn-pad-y: var(--sp-0);
+  --btn-pad-x: var(--sp-0);
+  --btn-pad-b: var(--sp-px);
+
+  border-radius: var(--r-none);
+  border-bottom-color: var(--c-line-mute);
+  color: var(--c-ink);
+  font-weight: var(--fw-regular);
+}
+
+.quiet:not(:disabled):not([aria-disabled='true']):hover {
+  border-bottom-color: var(--c-ink);
+}
+
+/* The shelf's ‹ › (134–135). Square box, round edge, icon only — the caller is
+   required to give it a name, which Button.tsx enforces by rendering the
+   `.visuallyHidden` span whenever `label` is present. */
+.iconRound {
+  --btn-pad-y: var(--sp-0);
+  --btn-pad-x: var(--sp-0);
+  --btn-icon-size: 30px;      /* design 134 */
+
+  width: var(--btn-icon-size);
+  height: var(--btn-icon-size);
+  flex: none;
+  border-radius: var(--r-full);
+  border-color: var(--c-line);
+  background: var(--c-paper);
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  line-height: 1;
+}
+
+.iconRound:not(:disabled):not([aria-disabled='true']):hover {
+  border-color: var(--c-line-mute);
+}
+
+/* The borderless × (356, 383, 436). Same declaration as `Drawer`'s own close,
+   which is the drawer's private copy of this variant and predates it; they are
+   one shape and the two must not drift. */
+.close {
+  --btn-pad-y: var(--sp-0);
+  --btn-pad-x: var(--sp-0);
+
+  border-color: transparent;
+  color: var(--c-ink-mark);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-regular);
+  line-height: 1;
+}
+
+.close:not(:disabled):not([aria-disabled='true']):hover {
+  color: var(--c-ink);
+}
+
+/* ---- the loading mark ------------------------------------------------------
+ *
+ * There is none here any more, and that is the point. This file used to hold a
+ * ring of its own — 11px, a 2px `currentcolor` border with the top knocked out,
+ * `spin` at 0.8s — on the argument that `Spinner` is `--c-fill` with an accent
+ * cap and therefore invisible on a primary button's ink fill. The argument was
+ * right and the answer was wrong: it left the design's one spinning ring drawn
+ * twice in this layer, at two diameters, free to drift.
+ *
+ * `Spinner` now takes `tone="current"`, which is that ring, and `Button.tsx`
+ * renders `<Spinner size="md" tone="current" />`. Both live under the same
+ * barrel, so "another bundle" was never true of them.
+ */

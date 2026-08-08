@@ -15,13 +15,18 @@ scheduler.  The FastAPI lifespan calls :func:`init_state` on startup and
 Design rules worth preserving:
 
 * **One rate limiter.** It is built here with
-  :meth:`~app.qobuz.ratelimit.RateLimiter.from_settings` and handed to the
+  :meth:`~app.net.ratelimit.RateLimiter.from_settings` and handed to the
   Qobuz client, so the indexer, the downloader and UI searches all share one
   global budget.
 * **Startup never explodes.** Missing credentials, an unreachable Qobuz or a
   not-yet-written downloader module degrade to a warning plus a flag on the
   state (``credentials_ok`` / ``app_secret_ok``); the web UI still boots so the
   user can see what is wrong.
+* **The settings overlay is installed here, once.** :func:`init_state` reads the
+  ``app_setting`` rows before it constructs anything, so every component is built
+  with the values the user chose; :meth:`AppState.apply_setting_overrides` is the
+  only thing that changes them afterwards, and it re-points every component
+  rather than leaving half the process on the old value.
 * **Nothing here imports the API layer**, so ``app.core`` stays importable from
   scripts and tests.
 """
@@ -37,18 +42,22 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, install_overrides, reset_overrides
 from app.core import scheduler as scheduler_module
+from app.core import settings_store
+from app.core.discovery import identifier_for
+from app.core.enricher import Enricher
 from app.core.importer import LibraryImporter, load_last_import
 from app.core.indexer import IndexResult, Indexer
 from app.core.queue import QueueWorker, SessionFactory, resolve_download_callable
 from app.core.scanner import LibraryScanner, ScanResult, load_last_scan
 from app.db import init_db, session_scope
+from app.enrich.registry import build_providers
 from app.logging_conf import get_logger
 from app.models import Album, AlbumStatus, Artist, Track, TrackStatus
 from app.qobuz.client import QobuzClient
 from app.qobuz.errors import QobuzError
-from app.qobuz.ratelimit import RateLimiter
+from app.net.ratelimit import RateLimiter
 
 __all__ = [
     "AppState",
@@ -80,12 +89,18 @@ class AppState:
     queue: QueueWorker
     scanner: LibraryScanner
     importer: LibraryImporter
+    enricher: Enricher
     session_factory: SessionFactory = session_scope
     scheduler: Any = None
     started_at: datetime = field(default_factory=_now)
     credentials_ok: bool = False
     app_secret_ok: bool = False
     startup_errors: list[str] = field(default_factory=list)
+    base_settings: Settings | None = None
+    """The settings *before* the overlay — the environment, or whatever a test
+    injected. Kept because a settings write rebuilds the effective value from
+    scratch: laying a new overlay over the previous *effective* object would make
+    a cleared override survive its own reset."""
 
     # ------------------------------------------------------------- lifecycle
     @property
@@ -99,7 +114,109 @@ class AppState:
         self.scheduler = None
         await self.importer.cancel()
         await self.queue.stop()
+        await self.enricher.aclose()
         await self.client.aclose()
+
+    # ------------------------------------------------------ settings overlay
+    def pending_setting_keys(self) -> tuple[str, ...]:
+        """Overridden keys whose new value has not reached the running process.
+
+        Asked of the objects that hold the stale value rather than remembered
+        when the write happened: a flag set at write time would still say
+        "pending" after the thing it was waiting for had happened, which is the
+        same lie in the other direction. Today the only such key is
+        ``enrichment_sources`` — every other one is read per call.
+        """
+        return (
+            ("enrichment_sources",)
+            if getattr(self.enricher, "ladder_pending", False)
+            else ()
+        )
+
+    async def apply_setting_overrides(
+        self, overrides: dict[str, str]
+    ) -> dict[str, Any]:
+        """Install *overrides* and hand the new values to everything running.
+
+        Returns ``{"settings", "ladder_rebuilt", "pending"}`` — the effective
+        settings, whether the enrichment ladder was swapped here, and the keys
+        that are stored but not yet live. The caller renders that; it does not
+        infer it.
+
+        Three things happen, in this order:
+
+        1. The overlay is rebuilt from :attr:`base_settings`, never from the
+           current effective object, so clearing an override really clears it.
+        2. Every component this state constructed is re-pointed at the new
+           ``Settings``. Each captured a reference at construction and only ever
+           *reads* from it, so replacing the reference is exactly equivalent to
+           having been constructed with the new value — and it is the only way a
+           switch takes effect without a restart. Nothing here mutates a
+           ``Settings`` object; a new one is built and handed out.
+        3. If the ladder changed, and *only* then, the enricher rebuilds it —
+           through :meth:`app.core.enricher.Enricher.reconfigure`, which disposes
+           the rungs it replaces. Rebuilding unconditionally would mint a second
+           ``RateLimiter`` per upstream every time an unrelated switch was
+           pressed, which is the one-limiter-per-upstream rule broken by
+           accident rather than by design.
+        """
+        base = self.base_settings or self.settings
+        previous_sources = self.settings.enrichment_source_list
+        settings = install_overrides(overrides, base=base)
+        self.settings = settings
+        self._repoint_settings(settings)
+
+        ladder_rebuilt = False
+        if settings.enrichment_source_list != previous_sources:
+            ladder_rebuilt = await self.enricher.reconfigure(
+                lambda: build_providers(settings), settings=settings
+            )
+
+        return {
+            "settings": settings,
+            "ladder_rebuilt": ladder_rebuilt,
+            "pending": list(self.pending_setting_keys()),
+        }
+
+    def _downloader(self) -> Any:
+        """The :class:`~app.core.downloader.AlbumDownloader` behind the worker.
+
+        Reached through the callable the worker holds because that is how it was
+        handed over (``resolve_download_callable`` returns a bound method). It is
+        the object that reads ``naming_template``, ``upgrade_cleanup`` and
+        ``nfo_enabled``, so a settings write that skipped it would be live
+        everywhere except where the files are actually written.
+
+        A download already in flight keeps the album folder it started with —
+        that is decided once, before the first track — so the worst a press
+        mid-album can do is name the remaining *files* by the new template. The
+        alternative, deferring until the queue is idle, means a switch that does
+        nothing for as long as the queue is busy and never says so.
+        """
+        return getattr(getattr(self.queue, "_download", None), "__self__", None)
+
+    def _repoint_settings(self, settings: Settings) -> None:
+        """Give every long-lived component the new effective ``Settings``."""
+        for component in (
+            self.indexer,
+            self.queue,
+            self.scanner,
+            self.importer,
+            self.enricher,
+            self._downloader(),
+        ):
+            if component is None:
+                continue
+            if getattr(component, "_settings", None) is None:
+                continue
+            try:
+                component._settings = settings  # noqa: SLF001 - this state built it
+            except AttributeError:  # pragma: no cover - a slotted component
+                logger.warning(
+                    "Could not re-point settings on %s; it keeps the value it "
+                    "started with until the next restart",
+                    type(component).__name__,
+                )
 
     # ----------------------------------------------------------- reporting
     def rate_limit_status(self) -> dict[str, Any]:
@@ -248,13 +365,28 @@ async def init_state(
         if _state is not None:
             return _state
 
-        settings = settings or get_settings()
+        base_settings = settings or get_settings()
         if initialise_database:
             await init_db()
 
+        # The settings overlay, loaded before anything is constructed so every
+        # component below is built with the values the user actually chose —
+        # rather than being built from ``.env`` and corrected a moment later.
+        settings = install_overrides(
+            await _load_overrides(session_factory), base=base_settings
+        )
+
         limiter = RateLimiter.from_settings(settings)
         client = QobuzClient(settings, limiter=limiter)
-        indexer = Indexer(client, settings=settings)
+        # Built before the indexer so the indexer can queue what it discovers for
+        # enrichment in the same transaction. Each source inside gets its own
+        # limiter — still one per upstream, just not one in total.
+        enricher = Enricher(
+            build_providers(settings),
+            settings=settings,
+            session_factory=session_factory,
+        )
+        indexer = Indexer(client, settings=settings, enricher=enricher)
 
         download_album = None
         try:
@@ -270,6 +402,11 @@ async def init_state(
         )
 
         scanner = LibraryScanner(settings=settings)
+        # The audio route into the catalogue, bound to the ladder's own rungs so
+        # there is still exactly one limiter per upstream. ``None`` whenever
+        # AcoustID or MusicBrainz is switched off, and the importer then behaves
+        # exactly as it did before the route existed.
+        identify_by_audio = identifier_for(enricher.providers, client)
         state = AppState(
             settings=settings,
             limiter=limiter,
@@ -283,8 +420,11 @@ async def init_state(
                 scanner,
                 settings=settings,
                 session_factory=session_factory,
+                identify_by_audio=identify_by_audio,
             ),
+            enricher=enricher,
             session_factory=session_factory,
+            base_settings=base_settings,
         )
 
         if login and settings.has_credentials:
@@ -302,7 +442,14 @@ async def init_state(
 
         if start_scheduler:
             state.scheduler = await scheduler_module.start_background(
-                indexer, settings=settings, session_factory=session_factory
+                indexer,
+                settings=settings,
+                session_factory=session_factory,
+                enricher=enricher,
+                # The same chain the importer gets, for the same reason: bound to
+                # the ladder's rungs, so the nightly binding pass shares one
+                # limiter per upstream instead of standing up a second set.
+                identify_by_audio=identify_by_audio,
             )
         else:
             scheduler_module.set_scheduler(None, indexer=indexer, session_factory=session_factory)
@@ -315,6 +462,22 @@ async def init_state(
             state.app_secret_ok,
         )
         return state
+
+
+async def _load_overrides(session_factory: SessionFactory) -> dict[str, str]:
+    """Read the stored settings overlay, or ``{}`` when it cannot be read.
+
+    Startup never explodes: a database that has not been created yet (tests pass
+    ``initialise_database=False``), a table from before this feature existed, or
+    an unreadable file all mean *no overlay* — the application comes up on the
+    environment alone, which is exactly what it did before there was an overlay.
+    """
+    try:
+        async with session_factory() as session:
+            return await settings_store.load_overrides(session)
+    except Exception as exc:  # noqa: BLE001 - startup degrades, never fails
+        logger.warning("Could not load the settings overrides: %s", exc)
+        return {}
 
 
 async def _handshake(state: AppState) -> None:
@@ -349,6 +512,11 @@ async def shutdown_state() -> None:
     async with _lock:
         state = _state
         _state = None
+
+    # The overlay is process state built from a database this process is done
+    # with. Leaving it installed would let one run's settings reach the next
+    # ``init_state()`` — which in a test suite is the next test.
+    reset_overrides()
 
     if state is None:
         await scheduler_module.shutdown(wait=False)

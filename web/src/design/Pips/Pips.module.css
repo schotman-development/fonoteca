@@ -1,0 +1,69 @@
+/* The stack-mode dashes — design 699–703.
+
+   `display: flex; justify-content: center; gap: 6px` over spans of
+   `width: 26px; height: 3px; border-radius: 2px`, painted `#00857A` for the
+   current one and `#C3BDB0` for the rest (DCLogic 1313).
+
+   THREE MEASUREMENTS AND WHERE EACH COMES FROM.
+
+   26×3 is this control's own shape and is declared here as custom properties,
+   the same call `shared/switch.module.css` makes for its 34×19 track: a dash
+   is not a layout gap, nothing else in the application is 26px wide because a
+   pip is, and rounding either number onto `--sp-*` (24×4) would make the row
+   visibly shorter and the dashes visibly fatter for no gain.
+
+   The radius is `--r-xs` rather than the design's literal 2px, and it paints
+   identically: a border radius is clamped to half the shorter side, so 6px on
+   a 3px-tall box draws 1.5px. Same trick, same reason, as `Meter`.
+
+   The gap is the design's 6px snapped UP to `--sp-2` (8px). It falls exactly
+   between two steps, and the tie is broken by what these are: press targets,
+   where 4px between two adjacent controls is a mis-tap. The 18px above the row
+   (line 699) belongs to the caller — it is the space between this and the card
+   it describes, not part of the control.
+
+   Colours: `--c-accent` is identity, not status — "the one you are on", which
+   is exactly what the accent means everywhere else in this system. The rest
+   are `--c-toggle-off`, the same grey as the off half of a switch, which is
+   the design's own choice and reads as "reachable, not current". */
+
+.row {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+}
+
+/* The hit area: 27px tall, pulled back by an equal negative margin so the row
+   still occupies the 3px the design draws. Without this the target is the dash
+   itself, which is three pixels of vertical aim. */
+.button {
+  display: block;
+  margin: calc(-1 * var(--sp-3)) 0;
+  padding: var(--sp-3) 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.pip {
+  --pip-w: 26px;
+  --pip-h: 3px;
+
+  display: block;
+  width: var(--pip-w);
+  height: var(--pip-h);
+  border-radius: var(--r-xs);
+  background: var(--c-toggle-off);
+  transition: background var(--mo-fast) var(--mo-ease);
+}
+
+.pipCurrent {
+  background: var(--c-accent);
+}

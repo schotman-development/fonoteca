@@ -36,8 +36,9 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    album_out,
     albums_by_status,
-    artist_to_out,
+    artist_out,
     build_settings_out,
     build_status,
     get_settings_dep,
@@ -49,12 +50,14 @@ from app.api.deps import (
     list_albums_for_artist,
     list_artists,
     list_queue_items,
+    list_release_group,
     list_wanted_albums,
     naming_preview,
     nav_counts,
     queue_stats,
     rate_limit_status,
     render,
+    render_page,
     templates,
 )
 from app.api.params import (
@@ -83,6 +86,12 @@ from app.api.routes_api import (
     refile_library,
     restore_trash_entry,
     retag_library,
+    enrichment_candidates,
+    enrichment_review,
+    enrichment_status,
+    identify_entity,
+    run_enrichment_now,
+    write_nfo_library,
     retry_queue_item,
     run_search,
     scan_all,
@@ -96,7 +105,10 @@ from app.config import Settings
 from app.db import get_session
 from app.logging_conf import get_logger
 from app.models import Album, AlbumStatus, Artist, MonitorMode, QueueState
+from app.core.enricher import load_album_metadata
+from app.enrich.merge import decode_consensus
 from app.schemas import (
+    EnrichmentIdentifyIn,
     AlbumUpdateIn,
     ArtistBulkUpdateIn,
     ArtistCreateIn,
@@ -309,7 +321,8 @@ async def _artist_stats_context(
     for album in all_albums:
         counts[album.status.value] = counts.get(album.status.value, 0) + 1
     return {
-        "artist": artist_to_out(
+        "artist": await artist_out(
+            session,
             artist,
             album_count=len(all_albums),
             wanted_count=counts.get(AlbumStatus.WANTED.value, 0)
@@ -349,8 +362,9 @@ async def page_dashboard(request: Request, session: SessionDep) -> Response:
     )
     queue_items, _ = await list_queue_items(session, limit=DASHBOARD_QUEUE)
     wanted, wanted_total = await list_wanted_albums(session, limit=DASHBOARD_WANTED)
-    return render(
+    return await render_page(
         request,
+        session,
         "dashboard.html",
         {
             "status": status,
@@ -379,8 +393,9 @@ async def page_artists(
     artists, total = await list_artists(
         session, query=q, monitored=monitored, sort=sort, order=order, limit=1000
     )
-    return render(
+    return await render_page(
         request,
+        session,
         "artists.html",
         _artist_list_context(artists, total, q, monitored, sort, order, view),
         active="artists",
@@ -420,7 +435,7 @@ async def page_artist_detail(
             "activity": activity,
         }
     )
-    return render(request, "artist_detail.html", context, active="artists")
+    return await render_page(request, session, "artist_detail.html", context, active="artists")
 
 
 @router.get("/add", response_class=Response, summary="Add artist")
@@ -437,8 +452,9 @@ async def page_add_artist(
             result = await run_search(session, q, search_type="all", limit=25)
         except HTTPException as exc:
             error = str(exc.detail)
-    return render(
+    return await render_page(
         request,
+        session,
         "add_artist.html",
         {"q": q or "", "result": result, "search_error": error},
         active="add",
@@ -468,7 +484,7 @@ async def page_wanted(
         session, status=AlbumStatus.WANTED, monitored=True, limit=1
     )
     context["showing_filtered"] = bool(q or album_status or monitored is not True)
-    return render(request, "wanted.html", context, active="wanted")
+    return await render_page(request, session, "wanted.html", context, active="wanted")
 
 
 @router.get("/queue", response_class=Response, summary="Download queue")
@@ -479,8 +495,9 @@ async def page_queue(
 ) -> Response:
     """The sequential download queue, polled live by HTMX."""
     items, total = await list_queue_items(session, state=state, limit=300)
-    return render(
+    return await render_page(
         request,
+        session,
         "queue.html",
         await _queue_context(session, items, total, state),
         active="queue",
@@ -499,8 +516,9 @@ async def page_activity(
     items, total = await list_activity(
         session, level=level, event=event, limit=limit
     )
-    return render(
+    return await render_page(
         request,
+        session,
         "activity.html",
         {
             "items": items,
@@ -518,8 +536,9 @@ async def page_settings(
     request: Request, session: SessionDep, settings: SettingsDep
 ) -> Response:
     """Read-only effective configuration plus the per-artist defaults."""
-    return render(
+    return await render_page(
         request,
+        session,
         "settings.html",
         {
             "config": build_settings_out(settings),
@@ -537,8 +556,9 @@ async def page_library_scan(
     request: Request, session: SessionDep, settings: SettingsDep
 ) -> Response:
     """Report of the last disk scan, the import controls, and their progress."""
-    return render(
+    return await render_page(
         request,
+        session,
         "library_scan.html",
         {
             "scan": await library_scan_status(session, settings),
@@ -555,24 +575,248 @@ async def _tidy_context(
     artist_id: str | None = None,
     refile: Any = None,
     retag: Any = None,
+    nfo: Any = None,
 ) -> dict[str, Any]:
     """Context shared by the Library tidy page and every fragment it swaps.
 
-    ``refile``/``retag`` carry the result of whatever the user just pressed;
-    both are ``None`` on a plain page load, which is what makes the panels
-    render their "nothing has been run yet" state.
+    ``refile``/``retag``/``nfo`` carry the result of whatever the user just
+    pressed; all are ``None`` on a plain page load, which is what makes the
+    panels render their "nothing has been run yet" state.
     """
     artist = await get_artist_or_404(session, artist_id) if artist_id else None
     return {
-        "artist": artist_to_out(artist) if artist is not None else None,
+        "artist": await artist_out(session, artist) if artist is not None else None,
         "artist_id": artist_id or "",
         "scope": _scope(artist_id=artist_id),
         "trash": await trash_contents(settings),
         "refile": refile,
         "retag": retag,
+        "nfo": nfo,
         "library_path": str(settings.library_path),
         "trash_path": str(settings.trash_dir),
     }
+
+
+@router.get("/albums/{album_id}", response_class=Response, summary="Release detail")
+async def page_album_detail(
+    request: Request, session: SessionDep, album_id: str
+) -> Response:
+    """One release in full, with every other edition of the same record.
+
+    Not a live region: nothing here changes without an action, and polling a page
+    that shows a tracklist and a set of identifiers would be motion for its own
+    sake.
+    """
+    album = await get_album_or_404(session, album_id)
+    out = await album_out(session, album, include_tracks=True)
+    editions, _ = await list_release_group(
+        session, out.release_group_key or album.id, artist_id=album.artist_id
+    )
+    meta = (await load_album_metadata(session, [album.id])).get(str(album.id))
+    return await render_page(
+        request,
+        session,
+        "album_detail.html",
+        {
+            "album": out,
+            "editions": editions,
+            "consensus": decode_consensus(getattr(meta, "consensus_json", None)),
+        },
+        active="artists",
+    )
+
+
+@router.get(
+    "/release-groups/{key}", response_class=Response, summary="Release group"
+)
+async def page_release_group(
+    request: Request, session: SessionDep, key: str, artist_id: OptStrQuery = None
+) -> Response:
+    """Every edition of one record, best first."""
+    editions, title = await list_release_group(session, key, artist_id=artist_id)
+    if not editions:
+        raise HTTPException(status_code=404, detail="No such release group.")
+    return await render_page(
+        request,
+        session,
+        "release_group.html",
+        {"editions": editions, "group_title": title, "group_key": key},
+        active="artists",
+    )
+
+
+#: Rows of the review list shown at once. A constant because the page and the
+#: polled fragment must build the *same* context, or the table would rearrange
+#: itself a few seconds after it loaded.
+ENRICHMENT_REVIEW_ROWS = 100
+
+
+async def _enrichment_context(
+    session: AsyncSession,
+    *,
+    state: str | None = None,
+    run_summary: str | None = None,
+) -> dict[str, Any]:
+    """Context shared by the enrichment page and the fragment that replaces it."""
+    review, total = await enrichment_review(
+        session, state=state, limit=ENRICHMENT_REVIEW_ROWS
+    )
+    return {
+        "status": await enrichment_status(session),
+        "review": review,
+        "review_total": total,
+        "review_state": state or "",
+        "run_summary": run_summary,
+    }
+
+
+@router.get("/enrichment", response_class=Response, summary="Enrichment")
+async def page_enrichment(
+    request: Request,
+    session: SessionDep,
+    state: OptStrQuery = None,
+) -> Response:
+    """What the open sources have identified, and what they refused to guess at."""
+    return await render_page(
+        request,
+        session,
+        "enrichment.html",
+        await _enrichment_context(session, state=state),
+        active="enrichment",
+    )
+
+
+@router.get("/partials/enrichment", response_class=Response)
+async def partial_enrichment(
+    request: Request, session: SessionDep, state: OptStrQuery = None
+) -> Response:
+    """The polled body of the enrichment page.
+
+    Rendered plainly, **not** through ``_fragment``: that helper fires
+    ``qobuzarr:refresh`` on every response, and only a ``/ui/*`` mutation may
+    claim something changed. A poller that announced a change would make every
+    live region on the page refresh every other one, every fifteen seconds,
+    forever.
+    """
+    return templates.TemplateResponse(
+        request,
+        "partials/enrichment_body.html",
+        await _enrichment_context(session, state=state),
+    )
+
+
+@router.post("/ui/enrichment/run", response_class=Response)
+async def ui_enrichment_run(request: Request, session: SessionDep) -> Response:
+    """Drain a batch now and re-render. No Qobuz calls, and nothing is queued."""
+    try:
+        summary = await run_enrichment_now()
+    except HTTPException as exc:
+        summary = str(exc.detail)
+    return _fragment(
+        request,
+        "partials/enrichment_body.html",
+        await _enrichment_context(session, run_summary=summary),
+        toast=summary,
+        level="success",
+    )
+
+
+@router.get("/partials/enrichment/identify", response_class=Response)
+async def partial_identify_close(request: Request) -> Response:
+    """Empty the picker panel. What the Close button swaps in.
+
+    A ``GET`` under ``/partials`` on purpose: closing a panel changed nothing, so
+    it must not go through ``_fragment()`` and fire ``qobuzarr:refresh`` — that
+    event means "something changed" and every live region on the page acts on it.
+    """
+    return render(request, "partials/identify_panel.html", {"picker": None})
+
+
+@router.get(
+    "/partials/enrichment/{entity_type}/{entity_id}/candidates",
+    response_class=Response,
+)
+async def partial_identify_candidates(
+    request: Request,
+    session: SessionDep,
+    entity_type: str,
+    entity_id: str,
+    source: str,
+    name: str = "",
+    q: OptStrQuery = None,
+) -> Response:
+    """The picker: upstream records someone can look at and choose between.
+
+    Rendered into ``#identify-panel``, which lives *outside* the polled
+    ``#enrichment-body``. That is not a layout preference — the body re-fetches
+    itself every fifteen seconds, and a picker inside it would be swapped out
+    from under whoever was reading it, on average halfway through.
+    """
+    picker: dict[str, Any] = {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "source": source,
+        "name": name,
+        "query": q or "",
+        "results": [],
+        "error": None,
+    }
+    try:
+        found = await enrichment_candidates(session, entity_type, entity_id, source, q)
+        picker["results"] = found.items
+        picker["query"] = found.query
+    except HTTPException as exc:
+        picker["error"] = str(exc.detail)
+    return render(request, "partials/identify_panel.html", {"picker": picker})
+
+
+@router.post("/ui/enrichment/{entity_type}/{entity_id}/identify", response_class=Response)
+async def ui_enrichment_identify(
+    request: Request,
+    session: SessionDep,
+    entity_type: str,
+    entity_id: str,
+    source: Annotated[str, Form()],
+    external_id: Annotated[str, Form()],
+    name: Annotated[str, Form()] = "",
+) -> Response:
+    """Record an identifier someone supplied, and close the picker.
+
+    Renders the *panel*, not the review list: the panel is what the press came
+    from and what needs to change. The list refreshes itself, because this goes
+    through ``_fragment()`` and ``#enrichment-body`` listens for the event it
+    fires — which is also why a failure re-renders the picker with its results
+    still in place rather than dropping someone back to square one.
+    """
+    picker: dict[str, Any] = {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "source": source,
+        "name": name,
+        "query": "",
+        "results": [],
+        "error": None,
+        "done": None,
+    }
+    try:
+        message = await identify_entity(
+            session,
+            entity_type,
+            entity_id,
+            EnrichmentIdentifyIn(source=source, external_id=external_id),
+        )
+        level = "success"
+        picker["done"] = message
+    except HTTPException as exc:
+        message, level = str(exc.detail), "warning"
+        picker["error"] = message
+    return _fragment(
+        request,
+        "partials/identify_panel.html",
+        {"picker": picker},
+        toast=message,
+        level=level,
+    )
 
 
 @router.get("/library/tidy", response_class=Response, summary="Library tidy")
@@ -588,8 +832,9 @@ async def page_library_tidy(
     actions in Qobuzarr that modify or remove music you already have, and the
     re-file panel previews before it moves anything.
     """
-    return render(
+    return await render_page(
         request,
+        session,
         "library_tidy.html",
         await _tidy_context(session, settings, artist_id=artist_id),
         active="library-tidy",
@@ -1177,12 +1422,15 @@ async def ui_monitor_album(
     request: Request,
     session: SessionDep,
     album_id: str,
-    view: Literal["artist", "wanted", "queue", "dashboard"] = Query("artist"),
+    view: Literal[
+        "artist", "wanted", "queue", "dashboard", "release-group"
+    ] = Query("artist"),
     q: OptStrQuery = None,
     album_status: StatusQuery = None,
     release_type: OptStrQuery = None,
     monitored: OptBoolQuery = None,
     state: OptQueueStateQuery = None,
+    key: OptStrQuery = None,
 ) -> Response:
     """Toggle one release's monitored flag and re-render the caller's table.
 
@@ -1230,6 +1478,15 @@ async def ui_monitor_album(
             request,
             "partials/dashboard_wanted.html",
             {"wanted_albums": items, "wanted_total": total},
+            toast=toast,
+        )
+
+    if view == "release-group" and key:
+        editions, _title = await list_release_group(session, key)
+        return _fragment(
+            request,
+            "partials/release_group_rows.html",
+            {"editions": editions, "group_key": key},
             toast=toast,
         )
 
@@ -1374,6 +1631,28 @@ async def ui_library_retag(
         await _tidy_context(session, settings, artist_id=artist_id, retag=result),
         toast=result.summary,
         level="warning" if result.failed or result.blocked else "success",
+    )
+
+
+@router.post("/ui/library/nfo", response_class=Response)
+async def ui_library_nfo(
+    request: Request,
+    session: SessionDep,
+    settings: SettingsDep,
+    artist_id: OptStrQuery = None,
+) -> Response:
+    """Write NFO files across the library (or one artist's) and report.
+
+    No confirmation, unlike re-file and re-tag: an NFO is derived data, nothing
+    moves and nothing is overwritten but a previous ``.nfo``.
+    """
+    result = await write_nfo_library(session, artist_id=artist_id)
+    return _fragment(
+        request,
+        "partials/nfo_report.html",
+        await _tidy_context(session, settings, artist_id=artist_id, nfo=result),
+        toast=result.summary,
+        level="warning" if result.blocked else "success",
     )
 
 

@@ -4,12 +4,14 @@
   once an artist is actually checked, and these tiles carry artwork, so
   re-rendering them often buys nothing.
   Context: recent_artists (list[ArtistOut]), artist_total (int)
+
+  A quiet head, because this is the indexer's own backlog rather than anything
+  you are being asked to do — the artwork already makes the row loud enough.
 #}
 {% if recent_artists %}
-<section style="margin-bottom:18px">
-  <div class="card__head card__head--plain" style="padding-left:0;padding-right:0">
+<section class="dash-section">
+  <div class="card__head card__head--quiet card__head--plain">
     <h2>Least recently checked</h2>
-    <span class="muted">the indexer works through these one at a time</span>
     <a class="link push" href="/artists">All {{ artist_total }} artists</a>
   </div>
   <div class="tiles tiles--dense">

@@ -1,0 +1,60 @@
+/* Chip geometry — the pill shared by the filter chip and the source chip.
+
+   Two sizes, because the design draws two:
+
+     - `.chip`   the filter pill: `padding: 6px 12px; border-radius: 20px;
+                 font-size: 12.5px; font-weight: 500; border: 1px solid`
+                 (design 247 — the library filters, and 807 — the activity
+                 filters, byte for byte the same rule).
+     - `.chipSm` the source chip: `padding: 4px 9px; border-radius: 6px;
+                 font-size: 11.5px` with a 5px dot in front (design 471), and
+                 the token buttons on the Rules screen at the same size (725).
+
+   What is deliberately NOT here is colour. A filter chip's on-state is
+   `--c-ink` on `--c-on-ink`; a source chip is never tinted and never has an
+   on-state at all. Folding either into the shared recipe is how a chip ends up
+   able to carry a status colour, which the design system forbids: a Chip says
+   which subset you are looking at, and colour in this app means how bad
+   something is.
+
+   Sizes snap onto the type ladder as tokens.css requires — 12.5px is `--fs-xs`
+   (13px), 11.5px is `--fs-2xs` (12px). The paddings do not snap onto the
+   4px space scale, so the two in-between values are tokens of their own; see
+   the control-geometry block appended to tokens.css. */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-chip);
+  padding: var(--pad-chip-y) var(--pad-chip-x);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: var(--c-paper);
+  color: var(--c-ink-2);
+  font-family: var(--ff-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+}
+
+.chipSm {
+  composes: chip;
+  padding: var(--pad-chip-sm-y) var(--pad-chip-sm-x);
+  border-radius: var(--r-xs);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-regular);
+}
+
+/* The round dot that identifies a metadata source: 5px inside a chip
+   (design 472) and 6px in the Rules ladder (764). Both snap to `--sp-1` — a
+   pixel either way on a 5px disc is invisible, and inventing a token for each
+   is not. Its colour comes from the caller as `currentcolor`, out of the
+   `--c-src-*` family — categorical, meaning "which one", never "how bad". */
+.dot {
+  flex: none;
+  width: var(--sp-1);
+  height: var(--sp-1);
+  border-radius: var(--r-full);
+  background: currentcolor;
+}

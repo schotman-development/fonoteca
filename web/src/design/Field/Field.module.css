@@ -1,0 +1,88 @@
+/* A labelled control (design 360–366) — the Edit-tags drawer's four fields.
+
+   The design's own structure is `<label>` wrapping an uppercase caption span,
+   the input, and a hint span. The caption is the eyebrow recipe verbatim
+   (`11px; uppercase; letter-spacing: .07em; #6E6A61`, line 362), so it
+   `composes:` `shared/label.module.css` rather than restating it — the same
+   eleven-px caption appears nineteen more times in the design and there is one
+   definition of it.
+
+   The snap: the label's 7px bottom margin and the hint's 6px top margin both
+   become `--sp-2`; the input's `9px 11px` padding becomes `--sp-2 --sp-3`;
+   13px is `--fs-xs` and 11.5px is `--fs-2xs`; radius 8px is `--r-sm`.
+
+   The disabled and read-only appearances are not in the design and are required
+   by it: the Edit-tags drawer draws an Aliases field that the API refuses
+   (`ArtistTagsIn` is `extra="forbid"`), and a control that looks live while
+   discarding what somebody types is the one outcome worse than not offering the
+   field at all. A control that cannot be written has to look like one. */
+
+.field {
+  display: block;
+}
+
+.label {
+  composes: label from '../shared/label.module.css';
+  margin-bottom: var(--sp-2);
+}
+
+.hint {
+  display: block;
+  margin: var(--sp-2) 0 0;
+  max-width: none;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+.input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-sm);
+  background: var(--c-canvas);
+  color: var(--c-ink);
+  font-family: var(--ff-sans);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  transition: border-color var(--mo-fast) var(--mo-ease);
+}
+
+/* The multi-line form. Same box as `.input` — composed rather than restated —
+   plus the two things a textarea needs: a floor so a four-line list is not a
+   one-line slot, and vertical-only resize, because a horizontal drag inside a
+   drawer overflows a fixed-width panel. */
+.textArea {
+  composes: input;
+  min-height: calc(var(--sp-8) * 2);
+  resize: vertical;
+}
+
+.input::placeholder {
+  color: var(--c-ink-mark);
+}
+
+.input:hover:not(:disabled):not([readonly]) {
+  border-color: var(--c-line-mute);
+}
+
+/* An identifier — an MBID, a barcode, a path fragment — is read character by
+   character, and a proportional face makes `l1I` and `0O` the same glyph. */
+.mono {
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+}
+
+.input[readonly] {
+  background: var(--c-sunk);
+  color: var(--c-ink-2);
+}
+
+.input:disabled {
+  background: var(--c-sunk);
+  color: var(--c-ink-3);
+  cursor: not-allowed;
+}

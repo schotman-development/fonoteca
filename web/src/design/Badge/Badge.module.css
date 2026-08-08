@@ -1,0 +1,50 @@
+/* The on-artwork pill, design 282.
+
+   `padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.94);
+   font-size: 11px; font-weight: 600` — the two paddings fall between the steps
+   of the 4px space scale, so they are built out of it rather than written as
+   literals; 6px is `--r-xs` exactly and 11px is `--fs-3xs` exactly.
+
+   THE BACKGROUND IS NOT A NEW COLOUR. `rgba(255,255,255,0.94)` is `--c-paper`
+   at 94% opacity, and `color-mix` says exactly that — which keeps the value
+   pointing at the token, so a re-skin that changes what paper is changes this
+   too. Writing the rgba() would have forked the surface colour into a place
+   nobody would think to look. */
+
+.badge {
+  --badge-pad-y: calc(var(--sp-px) * 2); /* design 282: 2px */
+  --badge-pad-x: calc(var(--sp-2) - var(--sp-px)); /* design 282: 7px */
+
+  display: inline-flex;
+  align-items: center;
+  padding: var(--badge-pad-y) var(--badge-pad-x);
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--c-paper) 94%, transparent);
+  font-family: var(--ff-sans);
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  /* Resting ink. A badge that only labels must not read as a warning. */
+  color: var(--c-ink-2);
+}
+
+/* The four exceptions. All of these land on TEXT, so amber is `--c-warn`
+   (5.0:1) and never `--c-warn-solid` — see the note at the top of tokens.css
+   and the header of Badge.tsx. */
+
+.accent {
+  color: var(--c-accent);
+}
+
+.ok {
+  color: var(--c-ok);
+}
+
+.warn {
+  color: var(--c-warn);
+}
+
+.bad {
+  color: var(--c-bad);
+}

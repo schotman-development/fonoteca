@@ -1,0 +1,49 @@
+{#
+  The editions of one record, as table rows.
+
+  Its own partial so the monitor toggle on this page can re-render *this* table.
+  Every album table shares one endpoint, POST /ui/albums/<id>/monitor, and the
+  ``view`` it carries picks the fragment that comes back — sending back the
+  artist page's rows would swap a differently-shaped table into this one.
+
+  Context: editions (list[AlbumOut], best first), group_key (str)
+#}
+{% from "partials/macros.html" import completion, cover, monitor_toggle %}
+{% for album in editions %}
+{% set state = album.status | enum_value %}
+<tr class="{% if not album.monitored %}row--muted{% endif %}">
+  <td>
+    <div class="cell-media">
+      {{ cover(album.cover_url or album.image_url) }}
+      <div class="cell-media__body">
+        <div class="table__title">
+          <a href="/albums/{{ album.id }}">{{ album.title }}</a>
+          {%- if album.version %} <span class="muted">· {{ album.version }}</span>{% endif %}
+        </div>
+        {# One sub-line, three facts. The year was its own column of four
+           digits; here it is what tells two pressings apart. #}
+        {% if album.year or album.label or album.catalog_number %}
+        <div class="table__sub">
+          {%- if album.year %}{{ album.year }}{% endif %}
+          {%- if album.year and (album.label or album.catalog_number) %} · {% endif %}
+          {%- if album.label %}{{ album.label }}{% endif %}
+          {%- if album.label and album.catalog_number %} · {% endif %}
+          {%- if album.catalog_number %}<span class="mono">{{ album.catalog_number }}</span>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </td>
+  <td class="num mono small">{{ album.tracks_count or '—' }}</td>
+  <td class="nowrap">{{ completion(album) }}</td>
+  <td class="nowrap"><span class="qual {% if album.hires %}qual--hires{% endif %}">{{ album | quality }}</span></td>
+  <td><span class="tag {{ album.status | status_class }}">{{ state }}</span></td>
+  <td class="num nowrap">
+    {{ monitor_toggle(album.monitored, album.title,
+                      '/ui/albums/' ~ album.id ~ '/monitor?view=release-group&key=' ~ (group_key | urlencode),
+                      '#edition-rows') }}
+    {# No Open button: the edition title above is already an anchor to the
+       identical href. #}
+  </td>
+</tr>
+{% endfor %}

@@ -7,11 +7,12 @@
 {% endblock %}
 
 {% block actions %}
+  {# No primary here: nothing on this screen is the thing you came to press.
+     The shell header already carries Add artist. #}
   <button class="btn" hx-post="/ui/scan-all" hx-target="#scan-all-msg" hx-swap="innerHTML"
           hx-confirm="Queue a full re-scan of every monitored artist? The indexer still works through them one at a time.">
     Scan all artists
   </button>
-  <a class="btn btn--primary" href="/add">Add artist</a>
 {% endblock %}
 
 {% block content %}
@@ -22,6 +23,11 @@
   They also all listen for `qobuzarr:refresh`, which every mutating /ui/* action
   fires, so pressing Download updates the numbers at once instead of leaving
   them wrong until the next tick.
+
+  Reading order is the hierarchy: the backlog figure, then the two panels you
+  act on (Wanted, Queue) with the diagnostics beside them, then the indexer's
+  own work queue, then the log. `#dash-artists` sits below the split for that
+  reason — artwork tiles above the fold out-shouted every number on the page.
 #}
 <div id="scan-all-msg"></div>
 
@@ -31,20 +37,13 @@
   {% include "partials/dashboard_metrics.html" %}
 </div>
 
-<div id="dash-artists"
-     hx-get="/partials/dashboard/artists" hx-swap="innerHTML"
-     hx-trigger="every 60s, qobuzarr:refresh from:body">
-  {% include "partials/dashboard_artists.html" %}
-</div>
-
 <div class="grid grid--split">
 
   <div class="stack">
     <section class="card">
       <header class="card__head">
         <h2>Wanted</h2>
-        <span class="muted">found by the indexer, not on disk yet</span>
-        <a class="link push" href="/wanted">All {{ wanted_total }}</a>
+        <a class="link push" href="/wanted">Open Wanted</a>
       </header>
       <div class="card__body card__body--flush">
         <div id="dash-wanted"
@@ -56,9 +55,8 @@
     </section>
 
     <section class="card">
-      <header class="card__head">
+      <header class="card__head card__head--quiet">
         <h2>Queue</h2>
-        <span class="muted">one album at a time, by design</span>
         <a class="link push" href="/queue">Open queue</a>
       </header>
       <div class="card__body card__body--flush">
@@ -79,8 +77,14 @@
 
 </div>
 
+<div id="dash-artists"
+     hx-get="/partials/dashboard/artists" hx-swap="innerHTML"
+     hx-trigger="every 60s, qobuzarr:refresh from:body">
+  {% include "partials/dashboard_artists.html" %}
+</div>
+
 <section class="card">
-  <header class="card__head">
+  <header class="card__head card__head--quiet">
     <h2>Recent activity</h2>
     <a class="link push" href="/activity">Full history</a>
   </header>

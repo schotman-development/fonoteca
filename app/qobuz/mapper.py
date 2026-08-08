@@ -34,6 +34,8 @@ from typing import Any, Iterable, Mapping
 from app.models import ReleaseType, normalize_release_type
 
 __all__ = [
+    "album_credit_names",
+    "album_guest_appearance",
     "album_track_items",
     "classify_release_type",
     "extract_album_artist",
@@ -348,6 +350,93 @@ def extract_album_artist(raw: Mapping[str, Any] | None) -> dict[str, Any] | None
     return mapped if mapped["id"] else None
 
 
+def album_guest_appearance(
+    raw: Mapping[str, Any] | None, artist_id: str | None
+) -> bool | None:
+    """Whether *artist_id* merely guests on this release.
+
+    ``True`` only when the id is in the payload's ``artists`` array carrying
+    ``featured-artist`` and **not** ``main-artist``. Feeds
+    :attr:`app.models.Album.guest_appearance`; read that docstring for what the
+    three values mean and why the third exists.
+
+    The phrasing is the whole function. "Lacks ``main-artist``" is the reading
+    to avoid: ``artists`` lists *performers*, so a composer is routinely absent
+    from their own release — Samuel Barber's id appears on 13 of his 169 — and
+    that reading would call the other 156 guest appearances and demote them.
+    Absent therefore answers ``False``: nothing said this artist is a guest.
+
+    ``None`` — *no payload has said* — is reserved for a payload that carries no
+    usable ``artists`` array at all, which is the older
+    ``artist/get?extra=albums`` shape :meth:`QobuzClient.iter_artist_albums`
+    falls back to. A co-credited ``main-artist`` (a genuine collaboration, two
+    names on the sleeve) is ``False``: it is that artist's release too.
+    """
+    owner = _identifier(artist_id)
+    if owner is None:
+        return None
+    entries = _mapping(raw).get("artists")
+    if not isinstance(entries, (list, tuple)) or not entries:
+        return None
+    guest = False
+    seen = False
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        if _identifier(entry.get("id")) != owner:
+            continue
+        seen = True
+        roles = entry.get("roles")
+        roles = {str(r).strip().lower() for r in roles} if isinstance(roles, (list, tuple)) else set()
+        if "main-artist" in roles:
+            return False
+        if "featured-artist" in roles:
+            guest = True
+    if not seen:
+        # Named nowhere in the performer credits — a composer, a conductor, an
+        # orchestra. Not a guest; not our business to demote.
+        return False
+    return guest
+
+
+def album_credit_names(
+    raw: Mapping[str, Any] | None, artist_name: str | None
+) -> list[str]:
+    """Qualified credit names on this release that extend *artist_name*.
+
+    Qobuz writes each track's credits as ``"Boaz, Vocals, MainArtist - Maurice
+    van Hoek, Lyricist - Boaz Roelevink, Lyricist"``: segments split on ``" - "``,
+    each ``name, role, role``. This returns the distinct names that *begin with*
+    the artist's name and are longer than it — ``Boaz Roelevink``, never the
+    bare ``Boaz`` that every release under the id carries and which therefore
+    distinguishes nothing.
+
+    Pure, and it **selects nothing**. The list is shown to a person, who picks;
+    what they pick decides ``wanted`` vs ``skipped`` and reaches no file, no NFO
+    and no identifier. Nothing here may be fed to :mod:`app.enrich.matching`.
+
+    Returns ``[]`` when the payload carries no credits or none qualify — a real
+    answer about a release, distinct from never having looked. See
+    :attr:`app.models.Album.credit_names`.
+    """
+    base = " ".join(str(artist_name or "").split()).casefold()
+    if not base:
+        return []
+    out: list[str] = []
+    for track in album_track_items(_mapping(raw)):
+        performers = track.get("performers")
+        if not isinstance(performers, str):
+            continue
+        for segment in performers.split(" - "):
+            name = " ".join(segment.split(",")[0].split())
+            folded = name.casefold()
+            # Extends the artist's name on a word boundary: "Boaz Roelevink"
+            # qualifies, "Boazts and Hammock" does not.
+            if len(folded) > len(base) and folded.startswith(base + " ") and name not in out:
+                out.append(name)
+    return out
+
+
 def map_album(raw: Mapping[str, Any] | None, artist_id: str | None = None) -> dict[str, Any]:
     """Map a Qobuz album object onto :class:`app.models.Album` columns.
 
@@ -414,6 +503,10 @@ def map_album(raw: Mapping[str, Any] | None, artist_id: str | None = None) -> di
         "upc": _text(raw.get("upc")),
         "image_url": pick_image_url(_first(raw, "image", "images", "cover")),
         "duration": _int(raw.get("duration"), None),
+        # Not `credit_names`: that costs an `album/get` per release and is
+        # populated on request, per artist. Leaving it out of this dict is what
+        # keeps `_apply_metadata` from clearing it on every index tick.
+        "guest_appearance": album_guest_appearance(raw, owner),
     }
 
 

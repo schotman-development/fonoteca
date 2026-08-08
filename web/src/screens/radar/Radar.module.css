@@ -1,0 +1,61 @@
+/* Release radar, design 528–586.
+
+   THE SNAPS:
+     28px → `--sp-6 - --sp-1`   (538, the gap between the two columns)
+     320px → the column's own minimum (538); a measurement, not a step
+     12px → `--sp-3`            (540, the gap under an eyebrow)
+     22px → `--sp-5 - 2px`      (566, the right column's top padding)
+     14px → `--sp-3 + 2px`      (582, the footnote's top margin)
+   `#DFD9CE` is `--c-line`; `#6E6A61` is `--c-ink-mark`. */
+
+.section {
+  composes: section from '../screen.module.css';
+}
+
+.header {
+  composes: header from '../screen.module.css';
+}
+
+.headerMain {
+  composes: headerMain from '../screen.module.css';
+}
+
+.title {
+  composes: title from '../screen.module.css';
+}
+
+.lede {
+  composes: lede from '../screen.module.css';
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: calc(var(--sp-6) - var(--sp-1));
+  align-items: start;
+}
+
+/* 566: the followed list is ruled off at the top, the release list is not. */
+.ruled {
+  border-top: var(--sp-px) solid var(--c-line);
+  padding-top: calc(var(--sp-5) - var(--sp-px) * 2);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 582 */
+.footnote {
+  margin: calc(var(--sp-3) + var(--sp-px) * 2) 0 0;
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-mark);
+  text-wrap: pretty;
+}
+
+.empty {
+  padding: var(--sp-4) 0;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}

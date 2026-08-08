@@ -1,0 +1,83 @@
+/* The to-do row, design 171–176.
+
+   `display: flex; align-items: baseline; gap: 11px; padding: 14px 0;
+   border-bottom: 1px solid #E9E5DC` (171). Deliberately NOT `ListRow`: that
+   primitive centres its children and this row aligns on the BASELINE, so the
+   13.5px mono count and the 12.5px title sit on one line rather than the count
+   floating half a pixel above it. It also has no wrap — a two-word title
+   wrapping under a count is fine, a count wrapping is not.
+
+   THE SNAPS:
+     11px  → `--sp-3`                       (171, the gap)
+     14px  → `--sp-3 + --sp-px * 2`         (171, the vertical padding)
+     2px   → `--sp-px * 2`                  (175, the action line's lift)
+     13.5  → `--fs-sm`   (172, the count — the body step, and the row's figure)
+     12.5  → `--fs-xs`   (174, the title)
+     11.5  → `--fs-2xs`  (175, the action)
+   `#E9E5DC` is `--c-line-soft`; `#57534A` is `--c-ink-3`.
+
+   The count's colours are the design's `t.fg` (DCLogic 1216–1220) as TEXT, so
+   amber is `--c-warn` (#B45309, 5.0:1) and not `--c-warn-solid` (#D97706,
+   3.2:1), which is for bars and dots. */
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: calc(var(--sp-3) + var(--sp-px) * 2) 0;
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+  color: var(--c-ink);
+  transition: background var(--mo-fast) var(--mo-ease);
+}
+
+.row:hover {
+  background: var(--c-sunk);
+}
+
+.count {
+  flex: none;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+}
+
+.countNeutral {
+  color: var(--c-ink-2);
+}
+
+.countAccent {
+  color: var(--c-accent);
+}
+
+.countOk {
+  color: var(--c-ok);
+}
+
+.countWarn {
+  color: var(--c-warn);
+}
+
+.countBad {
+  color: var(--c-bad);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  display: block;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.action {
+  display: block;
+  margin-top: calc(var(--sp-px) * 2); /* design 175: 2px */
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+}

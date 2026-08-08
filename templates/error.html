@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}{{ status_code }} · {{ app_name }}{% endblock %}
-{% block heading %}{{ status_code }} — {{ title }}{% endblock %}
+{#
+  The title bar owns the heading and the line under it, like every other page.
+  The status code is the supporting fact, not the headline — somebody who has
+  landed here wants to read what went wrong first.
+#}
+{% block heading %}{{ title }}{% endblock %}
+{% block subtitle %}{{ status_code }}{% endblock %}
 
 {% block content %}
 <section class="card">
   <div class="card__body">
-    <p class="muted" style="margin-top:0">{{ message }}</p>
+    <p class="muted">{{ message }}</p>
     {% if detail %}
     <pre class="error-detail">{{ detail }}</pre>
     {% endif %}

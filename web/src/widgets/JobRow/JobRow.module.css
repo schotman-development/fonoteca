@@ -1,0 +1,36 @@
+/* The running-job row, design 189–194.
+
+   `padding: 14px 0; border-bottom: 1px solid #E9E5DC` (189), a label at
+   `12.5px; line-height: 1.4` (190), a detail at `11.5px; color: #57534A;
+   margin: 3px 0 8px` (191), and the 3px meter under it (192) — which is
+   `Meter`'s own `thickness={3}` and is NOT restated here.
+
+   THE SNAPS:
+     14px  → `--sp-3 + --sp-px * 2`   (189, the vertical padding)
+     3px   → `--sp-1 - --sp-px`       (191, the detail's lift)
+     8px   → `--sp-2`                 (191, the gap above the bar)
+     12.5  → `--fs-xs`                (190, the label)
+     11.5  → `--fs-2xs`               (191, the detail)
+     1.4   → `--lh-snug` (1.3), the ladder's step nearest it; tokens.css keeps
+             five line heights and a sixth for one row is how a scale stops
+             being one.
+   `#E9E5DC` is `--c-line-soft`; `#57534A` is `--c-ink-3`. */
+
+.row {
+  padding: calc(var(--sp-3) + var(--sp-px) * 2) 0;
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+}
+
+.label {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.detail {
+  margin: calc(var(--sp-1) - var(--sp-px)) 0 var(--sp-2);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+}

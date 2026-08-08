@@ -3,20 +3,22 @@
   live regions, because the progress meter is the one thing here that moves
   while you are looking at it.
   Context: queue_items (list[QueueItemOut])
+
+  The State column is gone: with concurrency fixed at one, every row but the
+  active one says `pending`, and a column whose value is the same on every row
+  is a sub-line fact. The row that is actually downloading is marked by
+  `row--active` — a darker title and the only dark progress bar in the column.
 #}
 {% if queue_items %}
 <table class="table table--compact">
-  <thead><tr><th>Album</th><th>State</th><th class="num">Progress</th></tr></thead>
+  <thead><tr><th>Album</th><th class="num">Progress</th></tr></thead>
   <tbody>
     {% for item in queue_items %}
     <tr class="{% if item.state | enum_value == 'active' %}row--active{% endif %}">
       <td>
         <div class="table__title">{{ item.album_title or item.album_id }}</div>
-        {% if item.artist_name %}
-        <div class="table__sub"><a href="/artists/{{ item.artist_id }}">{{ item.artist_name }}</a></div>
-        {% endif %}
+        <div class="table__sub">{{ item.state | enum_value }}{% if item.artist_name %} · <a href="/artists/{{ item.artist_id }}">{{ item.artist_name }}</a>{% endif %}</div>
       </td>
-      <td><span class="tag {{ item.state | status_class }}">{{ item.state | enum_value }}</span></td>
       <td class="num">
         <div class="progress-cell" style="justify-content:flex-end">
           <span class="meter meter--inline">

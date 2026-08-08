@@ -2,6 +2,11 @@
   Live status strip along the bottom of the shell (the design's provider bar,
   reworked around the things Qobuzarr actually knows).
   Context: status (app.schemas.StatusOut)
+
+  It is the least important row on the screen, so it renders the *exception*
+  and nothing else: a figure appears when it starts to matter and the exact
+  numbers live in each pill's ``title``. The library path and the version were
+  constants dressed as telemetry — both are on /settings.
 #}
 <span class="stat-pill" title="{% if status.credentials_ok %}Qobuz credentials configured{% else %}QOBUZ_APP_ID / QOBUZ_USER_AUTH_TOKEN missing{% endif %}">
   <span class="dot {% if status.credentials_ok and status.app_secret_ok %}dot--ok{% elif status.credentials_ok %}dot--warn{% else %}dot--bad{% endif %}"></span>
@@ -23,8 +28,13 @@
 
 <span class="stat-pill" title="{{ status.queue.pending }} pending · {{ status.queue.active }} active">
   <span class="dot {% if status.queue.active %}dot--busy{% elif status.queue.pending %}dot--warn{% endif %}"></span>
-  Queue · <span class="stat-pill__value">{{ status.queue.pending + status.queue.active }}</span>
-  {%- if status.queue.current_album_title %} · {{ status.queue.current_album_title }}{% endif %}
+  Queue
+  {#- A waiting queue is the exception this pill exists to report, so it says so
+      in words. Leaving it to the amber dot put the whole fact in a colour and a
+      tooltip, which is no fact at all to anyone not looking for it. -#}
+  {%- if status.queue.current_album_title %} · {{ status.queue.current_album_title }}
+  {%- elif status.queue.pending %} · <span class="stat-pill__value">{{ status.queue.pending }}</span> waiting
+  {%- endif %}
 </span>
 
 {% if status.rate_limit %}
@@ -34,11 +44,10 @@
   <span class="dot {% if rl.circuit_open %}dot--bad{% elif rl.budget_used_percent > 80 %}dot--warn{% else %}dot--ok{% endif %}"></span>
   {% if rl.circuit_open %}
     Breaker open
-  {% else %}
+  {% elif rl.budget_used_percent > 80 %}
     API <span class="stat-pill__value">{{ rl.requests_last_hour }}/{{ rl.max_requests_per_hour }}</span>
+  {% else %}
+    API
   {% endif %}
 </span>
 {% endif %}
-
-<span class="push mono faint" title="Library root">{{ status.library_path }}</span>
-<span class="mono" style="color:var(--ink-5)">v{{ app_version }}</span>

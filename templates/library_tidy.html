@@ -5,8 +5,7 @@
   {% if artist %}
   Re-file, re-tag and recover files for <a href="/artists/{{ artist.id }}">{{ artist.name }}</a>.
   {% else %}
-  The only pages that change music you already have. Everything deleted here
-  goes to <span class="mono">{{ trash_path }}</span> first.
+  The only pages that change music you already have.
   {% endif %}
 {% endblock %}
 
@@ -22,6 +21,12 @@
 {% set tail = '?' ~ scope if scope else '' %}
 {% set amp = '&' if scope else '?' %}
 
+{#
+  Ordered by how much they can cost you: a re-file moves folders and is
+  reversible by re-filing again, an NFO write only adds sidecar files, a re-tag
+  overwrites metadata with no undo, and the trash is the one irreversible thing
+  in the app. Reading down the page is reading up the risk.
+#}
 <section class="card">
   <header class="card__head">
     <h2>Re-file</h2>
@@ -32,7 +37,7 @@
               hx-target="#refile-report" hx-swap="innerHTML" hx-indicator="#refile-report">
         Preview
       </button>
-      <button class="btn btn--danger"
+      <button class="btn"
               hx-post="/ui/library/refile{{ amp }}apply=true"
               hx-target="#refile-report" hx-swap="innerHTML" hx-indicator="#refile-report"
               hx-confirm="Move every misfiled release{% if artist %} by {{ artist.name }}{% endif %} to where the template says it belongs? Whole folders are moved, cover art included. Preview it first if you have not.">
@@ -41,15 +46,29 @@
     </span>
   </header>
   <div class="card__body">
-    <p class="small muted" style="margin:0 0 12px">
-      Renames the album folder and the files inside it to whatever the template
-      renders today — the quality tag comes from the files on disk, not from what
-      the catalogue advertises. Useful after changing
-      <span class="mono">NAMING_TEMPLATE</span>, or on a library imported from
-      somewhere else. A release the download worker is busy with is left alone.
-    </p>
+    {# The panel's own empty state says what this does, in the same place the
+       other three cards say it. Two tellings is one too many. #}
     <div id="refile-report">
       {% include "partials/refile_report.html" %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <header class="card__head">
+    <h2>NFO files</h2>
+    <span class="muted">describe the library for a media server</span>
+    <span class="push">
+      <button class="btn"
+              hx-post="/ui/library/nfo{{ tail }}"
+              hx-target="#nfo-report" hx-swap="innerHTML" hx-indicator="#nfo-report">
+        Write NFO {% if artist %}for this artist{% else %}for everything{% endif %}
+      </button>
+    </span>
+  </header>
+  <div class="card__body">
+    <div id="nfo-report">
+      {% include "partials/nfo_report.html" %}
     </div>
   </div>
 </section>
@@ -59,7 +78,7 @@
     <h2>Re-tag</h2>
     <span class="muted">rewrite tags and cover art in place</span>
     <span class="push">
-      <button class="btn btn--danger"
+      <button class="btn"
               hx-post="/ui/library/retag{{ tail }}"
               hx-target="#retag-report" hx-swap="innerHTML" hx-indicator="#retag-report"
               hx-confirm="Rewrite the tags on every downloaded release{% if artist %} by {{ artist.name }}{% endif %}? The files are edited in place and the old tags are not kept. The audio is not touched.">
@@ -80,7 +99,10 @@
     <span class="muted">deleted and superseded files, still recoverable</span>
     {% if trash.entries %}
     <span class="push">
-      <button class="btn btn--danger"
+      {# The one action Qobuzarr cannot undo, and the only strong-danger button
+         in the app. Per-row "Delete forever" stays plain: twenty red buttons
+         teach the eye to ignore red. #}
+      <button class="btn btn--danger btn--danger-strong"
               hx-post="/ui/library/trash/empty{{ tail }}"
               hx-target="#trash-list" hx-swap="innerHTML"
               hx-confirm="Permanently delete all {{ trash.total }} item(s) in the trash, freeing {{ trash.size_bytes | size }}? This is the one thing Qobuzarr cannot undo.">

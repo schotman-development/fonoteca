@@ -1,0 +1,37 @@
+/* The quality figure on an album tile, design 285.
+
+   TWO SNAPS, both onto ladders tokens.css owns and neither more than a pixel:
+
+     font-size  the design's 10px has no step; `--fs-3xs` (11px) is the mono
+                micro-label size the whole app already uses for a figure this
+                small, and inventing a tenth step for one badge is exactly what
+                the nine-step ladder exists to prevent.
+     radius     the design's 5px lands on `--r-xs` (6px). `Badge` beside it is
+                6px in the design, so this snap also makes the two corners on
+                one tile agree, which they visibly should.
+
+   The background is `rgba(251,250,248,0.9)` — `--c-canvas` at 90%, said as a
+   `color-mix` so it stays a reference to the token rather than a fork of it.
+   Note it is canvas and not paper: the design tints this one very slightly
+   warmer than the status badge opposite it (282), and at 90% over a gradient
+   the difference is what stops the two corners reading as one plate. */
+
+.spec {
+  --spec-pad-y: calc(var(--sp-px) * 2); /* design 285: 2px */
+  --spec-pad-x: calc(var(--sp-1) + var(--sp-px) * 2); /* design 285: 6px */
+
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spec-pad-y) var(--spec-pad-x);
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--c-canvas) 90%, transparent);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-medium);
+  font-variant-ligatures: none;
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  /* Amber TEXT, so `--c-warn` (5.0:1) — never `--c-warn-solid` (3.2:1), which
+     is for bars and dots. The design paints this one #B45309 already. */
+  color: var(--c-warn);
+}

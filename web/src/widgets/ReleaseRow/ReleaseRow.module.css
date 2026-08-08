@@ -1,0 +1,114 @@
+/* The radar row, design 543–561.
+
+   `display: flex; align-items: center; gap: 15px; padding: 16px 0;
+   border-bottom: 1px solid #E9E5DC` (543) — deliberately NOT `ListRow`, which
+   is the design's other row shape (14px gap, 13px padding, and wrapping). This
+   one is taller because it carries a 62px tile and a three-line identity
+   block, and its right-hand column must not wrap under the title.
+
+   THE SNAPS, each onto the scale tokens.css owns:
+     15px  → `--sp-4 - --sp-px`   (543)
+     16px  → `--sp-4`             (543)
+     7px   → `--sp-2 - --sp-px`   (552, the right stack's gap)
+     4px   → `--sp-1`             (550, the facts line's lift)
+     14px  → `--fs-sm`            (547, the title)
+     12.5  → `--fs-xs`            (548, the credit)
+     11.5  → `--fs-2xs`           (553, the state word)
+     11px  → `--fs-3xs`           (550, 559, the two mono lines)
+     1.3   → `--lh-snug`          (547)
+   `#E9E5DC` is `--c-line-soft`; `#57534A` is `--c-ink-3`; `#6E6A61` is
+   `--c-ink-mark`; `#00857A` is `--c-ok`; `#DC2626` is `--c-bad`.
+
+   The design paints its quietest state word `#7D786D` (1190), which is
+   `--c-ink-faint` — 4.4:1 and decoration only. It is text, so it is painted
+   `--c-ink-mark` (5.4:1), the substitution recorded at the top of tokens.css.
+
+   THE PROGRESS BAR (555) IS GONE, and so is its `--release-meter-w: 118px`.
+   The row draws an `AlbumOut` now rather than a queue item, and
+   `progress_tracks_done`/`_total` exist on a queue payload only; the rule this
+   file keeps is that a row does not fetch a second payload per row to fill in
+   a decoration. The right-hand stack is therefore two lines, not three, and
+   its `gap` and `text-align` are unchanged — a row mid-download sits level
+   with the ones either side of it instead of growing 8px taller than them. */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--sp-4) - var(--sp-px)); /* design 543: 15px */
+  padding: var(--sp-4) 0;
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+}
+
+.identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.credit {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+}
+
+.facts {
+  margin-top: var(--sp-1); /* design 550: 4px */
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}
+
+/* design 552: text-align right, a column, gap 7px. `flex: none` so a long
+   error string shortens itself rather than the title beside it. */
+.status {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--sp-2) - var(--sp-px));
+  max-width: 40%;
+  text-align: right;
+}
+
+.state {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+}
+
+.stateOk {
+  color: var(--c-ok);
+}
+
+.stateBad {
+  color: var(--c-bad);
+}
+
+/* Nothing has happened to a queued row yet, so it gets no colour — resting
+   body ink, the same answer `Tone`'s `neutral` gives everywhere else. */
+.stateResting {
+  color: var(--c-ink-2);
+}
+
+/* The design's #7D786D, raised to the 5.4:1 text shade. */
+.stateQuiet {
+  color: var(--c-ink-mark);
+}
+
+.note {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  color: var(--c-ink-mark);
+}

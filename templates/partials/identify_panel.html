@@ -1,0 +1,130 @@
+{#
+  The identify picker.
+  Context: picker (dict | None)
+      entity_type, entity_id, source, name  — what is being identified
+      query (str)      — what was searched for, editable
+      results (list[EnrichmentCandidateOut])
+      error (str | None), done (str | None)
+
+  ``picker`` is None when the panel is closed, and an empty panel is the whole
+  template — closing is a swap like any other rather than a special case in JS.
+
+  This lives OUTSIDE #enrichment-body. The body re-fetches itself every fifteen
+  seconds; a picker inside it would vanish mid-read.
+#}
+{% if picker %}
+<section class="card card--picker" id="identify-card">
+  <header class="card__head">
+    <h2>
+      Identify
+      {%- if picker.name %} “{{ picker.name }}”{% endif %}
+      on {{ picker.source }}
+    </h2>
+    <button class="btn btn--sm" hx-get="/partials/enrichment/identify"
+            hx-target="#identify-panel" hx-swap="innerHTML">Close</button>
+  </header>
+
+  <div class="card__body">
+    {% if picker.done %}
+    <p class="note note--ok">{{ picker.done }} It is fetched on the next pass.</p>
+    {% endif %}
+
+    {% if picker.error %}
+    <p class="note note--warn">{{ picker.error }}</p>
+    {% endif %}
+
+    {% if not picker.done %}
+    {#
+      The search box is pre-filled with what the library calls this, which is the
+      obvious first guess and also, often enough, the exact reason nothing
+      matched — so it is editable rather than fixed.
+    #}
+    <div class="filters filters--inline">
+      <input class="input" type="search" name="q" value="{{ picker.query }}"
+             placeholder="Search {{ picker.source }}…"
+             aria-label="Search {{ picker.source }}"
+             hx-get="/partials/enrichment/{{ picker.entity_type }}/{{ picker.entity_id }}/candidates?source={{ picker.source }}&name={{ picker.name | urlencode }}"
+             hx-target="#identify-panel" hx-swap="innerHTML"
+             hx-indicator="#identify-card"
+             hx-trigger="keyup changed delay:500ms">
+      <span class="toolbar__end mono tiny muted">
+        {{ picker.results | length }} result{{ '' if picker.results | length == 1 else 's' }}
+      </span>
+    </div>
+
+    {% if picker.results %}
+    <ul class="result-list result-list--pick">
+      {% for item in picker.results %}
+      <li class="media">
+        <span class="media__art">
+          {% if item.image_url %}
+          {#
+            MusicBrainz has no artwork of its own, so a release card points at
+            the Cover Art Archive keyed by the very id on the card. That 404s
+            more often than not, which is a missing image rather than a broken
+            one — drop the element and the placeholder underneath shows through.
+          #}
+          <img src="{{ item.image_url }}" alt="" loading="lazy"
+               referrerpolicy="no-referrer" onerror="this.remove()">
+          {% endif %}
+          <span class="media__initial" aria-hidden="true">♪</span>
+        </span>
+        <div class="media__body">
+          <div class="media__title">
+            {{ item.title }}
+            {%- if item.disambiguation %}
+            <span class="tag tag--type">{{ item.disambiguation }}</span>
+            {%- endif %}
+          </div>
+          <div class="media__sub">
+            {%- if item.subtitle %}{{ item.subtitle }}{% endif %}
+            {%- if item.subtitle and item.detail %} · {% endif %}
+            {%- if item.detail %}{{ item.detail }}{% endif %}
+          </div>
+          {% if item.url %}
+          <div class="media__sub">
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+               class="mono tiny">{{ item.external_id }} ↗</a>
+          </div>
+          {% endif %}
+        </div>
+        <div class="media__end">
+          <form hx-post="/ui/enrichment/{{ picker.entity_type }}/{{ picker.entity_id }}/identify"
+                hx-target="#identify-panel" hx-swap="innerHTML" class="inline-form">
+            <input type="hidden" name="source" value="{{ picker.source }}">
+            <input type="hidden" name="external_id" value="{{ item.external_id }}">
+            <input type="hidden" name="name" value="{{ picker.name }}">
+            <button class="btn btn--sm btn--primary" type="submit">This one</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% elif not picker.error %}
+    <p class="empty">
+      Nothing came back for “{{ picker.query }}”. Try a shorter search — the
+      title alone, or the artist alone.
+    </p>
+    {% endif %}
+
+    <details class="picker__manual">
+      <summary>Or paste a link</summary>
+      <p class="note">
+        A {{ picker.source }} page URL works, and so does the bare id at the end
+        of one. Whatever you supply is marked as yours, and no later automatic
+        pass will overwrite it.
+      </p>
+      <form hx-post="/ui/enrichment/{{ picker.entity_type }}/{{ picker.entity_id }}/identify"
+            hx-target="#identify-panel" hx-swap="innerHTML" class="inline-form">
+        <input type="hidden" name="source" value="{{ picker.source }}">
+        <input type="hidden" name="name" value="{{ picker.name }}">
+        <input class="input" type="text" name="external_id" required
+               aria-label="{{ picker.source }} link or id"
+               placeholder="{{ 'https://musicbrainz.org/release/…' if picker.source == 'musicbrainz' else 'https://www.deezer.com/album/…' }}">
+        <button class="btn btn--sm" type="submit">Set</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+</section>
+{% endif %}

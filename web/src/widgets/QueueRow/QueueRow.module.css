@@ -1,0 +1,118 @@
+/* The queue row's own parts.
+
+   The row itself is `ListRow` — the design's universal row (145) — and is
+   deliberately not restated here, exactly as `MissingRow.module.css` does not
+   restate it. What is left is five children, and they are the missing-row's
+   four plus a bar:
+
+     identity  `flex: 1 1 160px; min-width: 0`
+     title     the row identity line, ellipsised
+     sub       the artist / attempt / timestamp line
+     error     the same size, painted `--c-bad`, clamped to one line
+     status    the state word over its track count, right-aligned
+     actions   `display: flex; gap: 7px; flex: none`
+     progress  the 4px meter, on its own line
+
+   THE SNAPS: 12px → `--fs-2xs`; 11px → `--fs-3xs` (the mono count); 1px is
+   `--sp-px`; 7px is `--sp-2 - --sp-px`; 4px is `--sp-1`.
+
+   THE BAR IS FULL WIDTH, AND THAT IS WHY IT IS HERE RATHER THAN IN `.status`.
+   `ListRow` is `flex-wrap: wrap` with `row-gap: 12px`, so a `flex-basis: 100%`
+   child is pushed onto a line of its own beneath the others without any
+   knowledge of how many children preceded it. The alternative — a fixed-width
+   bar in the right-hand stack, which is what the design's radar row did at
+   118px — makes a running row 8px taller than the ones either side of it, and
+   the queue is the one list where the running row is always at the top and the
+   difference is therefore always visible.
+
+   `--c-bad` is #DC2626; `--c-ok` is #00857A; `#57534A` is `--c-ink-3`;
+   `#6E6A61` is `--c-ink-mark`. */
+
+.identity {
+  --queue-identity-basis: 160px;
+
+  flex: 1 1 var(--queue-identity-basis);
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+}
+
+.sub {
+  margin-top: var(--sp-px);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+}
+
+/* The upstream's own words. One line, with the whole string in `title` — an
+   error that wraps to four lines pushes every row under it off the screen, and
+   this list is polled every five seconds. */
+.error {
+  margin-top: var(--sp-px);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-bad);
+}
+
+.status {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-px);
+  text-align: right;
+}
+
+.state {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+}
+
+.stateOk {
+  color: var(--c-ok);
+}
+
+.stateBad {
+  color: var(--c-bad);
+}
+
+/* Nothing has happened to a waiting row yet, so it gets no colour — the same
+   answer `Tone`'s `neutral` gives everywhere else. */
+.stateResting {
+  color: var(--c-ink-2);
+}
+
+/* The design's #7D786D, raised to the 5.4:1 text shade (tokens.css records the
+   substitution: --c-ink-faint is decoration only and this is text). */
+.stateQuiet {
+  color: var(--c-ink-mark);
+}
+
+.count {
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  color: var(--c-ink-mark);
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  /* No `margin-left: auto`, for `MissingRow`'s reason: `.identity` is `flex: 1`
+     and already pushes this to the right edge, and an auto margin would tear
+     the status and the actions apart the moment the row wraps. */
+  gap: calc(var(--sp-2) - var(--sp-px));
+}
+
+/* Its own line under everything else — see the note at the top. */
+.progress {
+  flex: 1 0 100%;
+  min-width: 0;
+}

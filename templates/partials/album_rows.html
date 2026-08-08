@@ -5,18 +5,23 @@
            scope (str — the active filters as a query string, carried by every
            row action so the refreshed table keeps the same filtering)
 #}
-{% from "partials/macros.html" import cover, monitor_toggle %}
+{% from "partials/macros.html" import completion, cover, monitor_toggle %}
 {% set scope = scope | default('', true) %}
 {% set tail = '&' ~ scope if scope else '' %}
 {% if albums %}
 <div class="table-wrap">
 <table class="table">
+  {#
+    Six columns: identity, two measures, a quality readout, one state chip and
+    the actions. Type and Year both left the table — the type is a filter thirty
+    pixels above and says "album" on nearly every row, and the year tells the
+    editions apart, which is identity, not a measure.
+  #}
   <thead>
     <tr>
       <th>Release</th>
-      <th>Type</th>
-      <th class="num">Year</th>
       <th class="num">Tracks</th>
+      <th>On disk</th>
       <th>Quality</th>
       <th>Status</th>
       <th class="num">Actions</th>
@@ -30,21 +35,39 @@
         <div class="cell-media">
           {{ cover(album.image_url) }}
           <div class="cell-media__body">
+            {#
+              The folder hangs off the title as a tooltip. Rendered, it was a
+              second monospace line per row that repeated the artist and the
+              album back at you and set the height of the whole table.
+            #}
             <div class="table__title">
-              {{ album.title }}{% if album.version %} <span class="muted">· {{ album.version }}</span>{% endif %}
+              <a href="/albums/{{ album.id }}"{% if album.path %} title="{{ album.path }}"{% endif %}>{{ album.title }}</a>
+              {%- if album.version %} <span class="muted">· {{ album.version }}</span>{% endif %}
             </div>
-            {% if album.label or album.genre %}
-            <div class="table__sub">{{ album.label }}{% if album.label and album.genre %} · {% endif %}{{ album.genre }}</div>
+            {#
+              One sub-line, three facts at most: what tells this release apart
+              from its neighbours. The genre chips, the catalogue number and the
+              per-source dots all live on /albums/{id}, in full.
+            #}
+            {% if album.year or album.label or album.genre %}
+            <div class="table__sub">
+              {%- if album.year %}{{ album.year }}{% endif %}
+              {%- if album.year and (album.label or album.genre) %} · {% endif %}
+              {%- if album.label %}{{ album.label }}{% endif %}
+              {%- if album.label and album.genre %} · {% endif %}
+              {%- if album.genre %}{{ album.genre }}{% endif %}
+            </div>
             {% endif %}
-            {% if album.path %}<div class="table__sub mono">{{ album.path }}</div>{% endif %}
           </div>
         </div>
       </td>
-      <td><span class="tag tag--type">{{ album.release_type }}</span></td>
-      <td class="num mono small">{{ album.year or '—' }}</td>
-      <td class="num mono small">
-        {{ album.tracks_count or '—' }}{% if album.media_count and album.media_count > 1 %}<span class="muted"> / {{ album.media_count }}d</span>{% endif %}
-      </td>
+      <td class="num mono">{{ album.tracks_count or '—' }}</td>
+      {#
+        On disk: how much of the release is actually present. Three-valued —
+        an album adopted by the disk scan has no track rows to count, and that
+        is reported as unknown rather than as zero.
+      #}
+      <td class="nowrap">{{ completion(album) }}</td>
       {#
         Quality: what is on disk once there *is* something on disk, not what
         Qobuz offers. For a downloaded release the catalogue maximum is the one
@@ -82,13 +105,15 @@
         {% if state in ('queued', 'downloading') or album.queue_state %}
         <a class="btn btn--sm btn--quiet" href="/queue">In queue</a>
         {% elif album.upgrade_format_id %}
-        <button class="btn btn--sm btn--primary"
+        {# Plain, not primary: a row action repeated down a list is not the one
+           thing this screen is for. #}
+        <button class="btn btn--sm"
                 hx-post="/ui/albums/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
                 hx-target="#album-rows" hx-swap="innerHTML"
                 hx-confirm="Re-download “{{ album.title }}” at {{ album.upgrade_format_id | format_label }}? Qobuzarr never deletes from your library, so if the new files land in a differently named folder the {{ album.owned_format_id | format_label }} copy is left behind for you to remove."
                 title="On disk: {{ album.owned_format_id | format_label }} · available: {{ album.upgrade_format_id | format_label }}">Upgrade</button>
         {% elif state != 'downloaded' %}
-        <button class="btn btn--sm btn--primary"
+        <button class="btn btn--sm"
                 hx-post="/ui/albums/{{ album.id }}/queue{{ '?' ~ scope if scope else '' }}"
                 hx-target="#album-rows" hx-swap="innerHTML">Download</button>
         {% endif %}

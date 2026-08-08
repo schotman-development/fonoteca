@@ -1,0 +1,137 @@
+/* The placeholder tile.
+
+   Design 123–131 (126px shelf card), 146 (38px row thumb), 257–259 (circle
+   grid cell), 279–291 (square grid cell + badges + ring), 306–309 (dimmed),
+   428–430 (108px drawer header), 544–546 (62px radar row), 571 (32px avatar),
+   620 (40px identify card), 677 (84px stack card).
+
+   FOUR VALUES ARRIVE FROM THE COMPONENT, all of them custom properties and
+   none of them a colour:
+
+     --art             `var(--art-N)` from artGradientVar() — a token, always
+     --art-size        the caller's pixel size; absent on the `fill` variant
+     --art-radius      a `--r-*` token picked by squareRadiusVar()
+     --art-initials-fs the design's mono size for that tile; absent ⇒ no span
+
+   THE PADDING IS A PERCENTAGE, and that is deliberate. The design pads the
+   initials 11px inside a 126px tile (124), 12px inside a ~132px grid cell
+   (279) and 9px inside a 108px one (428) — a constant fraction of the tile,
+   which is the only expression that also works for `fill`, where the pixel
+   width is whatever the grid column resolves to. 8.7% reproduces all three to
+   within a pixel and needs no size-keyed rule.
+
+   The circle overrides it to zero: a round tile centres its initials rather
+   than seating them in a corner (257 against 124). */
+
+.art {
+  --art-pad: 8.7%;
+  /* The badge inset, design 282/285: 9px. Built from the space scale rather
+     than written, so it moves with the scale if the scale ever moves. */
+  --art-badge-inset: calc(var(--sp-2) + var(--sp-px));
+  /* The selection ring, design 279 (`outline: 2px solid #00857A`), which is
+     also the width of the global focus ring in tokens.css. */
+  --art-ring: calc(var(--sp-px) * 2);
+
+  position: relative;
+  /* THE LAYERS BELOW ARE THIS ELEMENT'S OWN, AND MUST STAY THAT WAY. `.image`
+     is `z-index: 1` and the badges are `z-index: 2`, and `position: relative`
+     with `z-index: auto` does not create a stacking context — so without this
+     line those two numbers compete in whatever context an ancestor happens to
+     provide, which is usually the page root. A caller that draws anything over
+     a tile then loses: a checkbox at `z-index: 1` is painted *under* the cover
+     art and stops receiving clicks, which is how the artist grid's selection
+     overlay ended up navigating instead of selecting. `isolation` and not a
+     `z-index` of its own, because this element's business is keeping its
+     children in rather than placing itself among its siblings. */
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  width: var(--art-size);
+  height: var(--art-size);
+  padding: var(--art-pad);
+  overflow: hidden;
+  border-radius: var(--art-radius, var(--r-md));
+  background: var(--art);
+  box-shadow: var(--e-2);
+}
+
+/* A grid cell: the column decides the width, the aspect ratio the height
+   (design 257, 279). `flex: none` above is harmless here and wrong-looking
+   nowhere — a fill tile is a grid item, not a flex item. */
+.fill {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* A release: initials in the bottom-left corner (124, 281, 429, 545). */
+.square {
+  align-items: flex-end;
+}
+
+/* A person: initials centred, no padding (257, 571). */
+.circle {
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* Design 279: `box-shadow: {{ a.shadow }}; outline: {{ a.ring }};
+   outline-offset: 2px` — the selected tile is lifted one step and ringed in
+   the accent. An outline rather than a border so the ring costs no layout and
+   cannot be clipped by this element's own `overflow: hidden`. */
+.selected {
+  outline: var(--art-ring) solid var(--c-accent);
+  outline-offset: var(--art-ring);
+  box-shadow: var(--e-3);
+}
+
+/* Design 306: the collaboration tile, one step back from the ones the artist
+   is the primary credit on. */
+.dim {
+  opacity: 0.92;
+}
+
+.initials {
+  position: relative;
+  z-index: 0;
+  font-family: var(--ff-mono);
+  font-size: var(--art-initials-fs);
+  font-weight: var(--fw-medium);
+  font-variant-ligatures: none;
+  /* The design writes `line-height: 1` on all ten: the initials are a mark
+     sitting on a corner, so their box must be the glyphs and nothing else. */
+  line-height: 1;
+  color: var(--art-ink);
+  user-select: none;
+}
+
+/* Over the gradient, not instead of it: a cover that is slow or gone leaves
+   the tile still looking like this release rather than like a hole. */
+.image {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Both badge slots sit above the image (design 282, 285 — they are drawn over
+   the artwork whether or not there is a cover under it). */
+.badgeStart,
+.badgeEnd {
+  position: absolute;
+  z-index: 2;
+  top: var(--art-badge-inset);
+}
+
+.badgeStart {
+  left: var(--art-badge-inset);
+}
+
+.badgeEnd {
+  right: var(--art-badge-inset);
+}

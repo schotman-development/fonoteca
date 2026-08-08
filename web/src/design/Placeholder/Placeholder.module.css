@@ -1,0 +1,76 @@
+/* The only primitive with no line in the design — see Placeholder.tsx for why
+   it exists at all.
+
+   Every declaration here is chosen to make it UNMISTAKABLE, because the whole
+   value of the thing is that nobody ever reads one as data:
+
+     - the border is DASHED, and it is the only dashed border in the app;
+     - it is `--c-line-mute`, the visible control outline, not the hairline
+       `--c-line` that every real card uses;
+     - the fill is `--c-canvas`, the inset-panel tone, so it reads as a hole in
+       the page rather than as a card on it;
+     - the label is mono `--fs-3xs` `--c-ink-mark` — the same quiet register as
+       every other "this is machinery, not content" line in the design.
+
+   No status colour. A placeholder is not a warning: nothing is wrong, a screen
+   is simply not finished, and painting it amber would put it in the same
+   vocabulary as a corrupt file. */
+
+.root {
+  --placeholder-min-h: auto;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border: var(--sp-px) dashed var(--c-line-mute);
+  border-radius: var(--r-sm);
+  background: var(--c-canvas);
+  color: var(--c-ink-mark);
+  text-align: center;
+}
+
+/* The default: a block standing in for a panel, a row or a chart. `--sp-8`
+   (56px) is enough to read as a deliberate reservation rather than as a squashed
+   card; a caller sizes it to what it replaces with `minHeight`. */
+.block {
+  flex-direction: column;
+  min-height: var(--placeholder-min-h, var(--sp-8));
+  padding: var(--sp-4);
+}
+
+/* A slot inside a row — a missing column, a control the endpoint would reject.
+   Sits on the text baseline of its neighbours rather than owning a band. */
+.inline {
+  display: inline-flex;
+  min-height: var(--placeholder-min-h, auto);
+  padding: var(--pad-chip-sm-y) var(--pad-chip-sm-x);
+  vertical-align: middle;
+}
+
+/* Where a NUMBER would be: a StatCard's value, a Figure, the identify screen's
+   confidence percentage. The em dash occupies the figure's own size and weight
+   so the composition still reads, and the caption underneath says why. */
+.figure {
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-height: var(--placeholder-min-h, auto);
+  padding: var(--sp-3);
+}
+
+.dash {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-figure);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  color: var(--c-ink-mark);
+}
+
+.label {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  font-variant-ligatures: none;
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+  text-wrap: pretty;
+}

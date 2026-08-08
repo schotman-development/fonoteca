@@ -88,7 +88,7 @@ def bulk(client: TestClient, **fields: Any) -> Any:
         "q": "", "monitored": "", "sort": "name", "order": "asc", "view": "table",
     }
     data.update(fields)
-    return client.post("/ui/artists/bulk", data=data, headers={"HX-Request": "true"})
+    return client.post("/legacy/ui/artists/bulk", data=data, headers={"HX-Request": "true"})
 
 
 def activity_rows(client: TestClient) -> list[dict[str, Any]]:
@@ -100,7 +100,7 @@ def activity_rows(client: TestClient) -> list[dict[str, Any]]:
 def test_both_views_offer_selection_and_the_bulk_bar(
     client: TestClient, view: str
 ) -> None:
-    body = client.get(f"/artists?view={view}").text
+    body = client.get(f"/legacy/artists?view={view}").text
     # `value=` anchors this to real inputs; the page's script also mentions the
     # field name in a selector string.
     assert body.count('name="artist_ids" value="') == len(SEED)
@@ -112,14 +112,14 @@ def test_both_views_offer_selection_and_the_bulk_bar(
 
 
 def test_bulk_form_posts_to_the_bulk_endpoint(client: TestClient) -> None:
-    body = client.get("/artists").text
+    body = client.get("/legacy/artists").text
     assert 'hx-post="/ui/artists/bulk"' in body
     assert 'hx-target="#artist-list"' in body
 
 
 def test_confirm_lives_on_the_form_not_the_button(client: TestClient) -> None:
     """The shim reads hx-confirm off the element it bound — here, the form."""
-    body = client.get("/artists").text
+    body = client.get("/legacy/artists").text
     form = body.split('id="bulk-form"')[1].split(">")[0]
     assert "hx-confirm" in form
 

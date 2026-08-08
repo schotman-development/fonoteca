@@ -9,16 +9,16 @@
 {% block content %}
 <form method="get" action="/add" style="margin-bottom:16px">
   <div class="omnisearch__field" style="height:44px;max-width:720px;background:var(--paper);border-color:var(--ink)">
-    <span class="mono small faint" aria-hidden="true">artist:</span>
     <input class="omnisearch__input" style="font-size:.9375rem" type="search" name="q" value="{{ q }}" autofocus
            placeholder="Artist or album name…"
            hx-get="/partials/search" hx-target="#search-results" hx-swap="innerHTML"
            hx-trigger="keyup changed delay:450ms">
     <button class="btn btn--primary btn--sm" type="submit">Search</button>
   </div>
+  {# The rate-limiter sentence explained why a search is slow, on a screen where
+     the only evidence of slowness is the results arriving. The consequence of
+     pressing Monitor is the part worth stating. #}
   <p class="field__hint" style="margin:8px 0 0;max-width:720px">
-    Every search is a live Qobuz API call through the global rate limiter
-    (minimum {{ settings.qobuz_min_request_interval }}s between calls), so results can take a moment.
     Following an artist imports their back catalogue as <span class="mono">wanted</span>
     {%- if not settings.auto_download %} but downloads nothing until you ask{% endif %}.
   </p>

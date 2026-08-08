@@ -2,7 +2,7 @@
 
 One :class:`QobuzClient` instance is shared by the whole application. Every
 outbound call — indexer, UI search and downloads alike — passes through the same
-:class:`~app.qobuz.ratelimit.RateLimiter`, so the configured minimum interval
+:class:`~app.net.ratelimit.RateLimiter`, so the configured minimum interval
 and hourly ceiling are global guarantees rather than per-component wishes.
 
 Failure handling, in layers:
@@ -46,7 +46,7 @@ from app.qobuz.errors import (
     QobuzTransportError,
     QobuzUnstreamable,
 )
-from app.qobuz.ratelimit import RateLimiter
+from app.net.ratelimit import RateLimiter
 from app.qobuz.secrets import (
     FALLBACK_TRACK_ID,
     DerivationCooldown,

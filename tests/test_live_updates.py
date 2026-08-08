@@ -45,7 +45,16 @@ SEED_ALBUMS = (
     ("aaaa1111bbbb2", "Solo", AlbumStatus.QUEUED),
 )
 
-#: Every region that refreshes itself, as (page, region id, fragment URL).
+#: Where the old server-rendered UI is mounted now that the React shell owns
+#: ``/``. The templates were written when this UI owned the site, so the URLs
+#: *inside* the markup are still unprefixed — hence the split below between the
+#: declared URL and the one a request actually goes to. Transitional; this whole
+#: module becomes JSON-contract tests when the Jinja layer is deleted.
+LEGACY = "/legacy"
+
+#: Every region that refreshes itself, as (page, region id, declared fragment
+#: URL). The third element is asserted against the markup verbatim and fetched
+#: through :func:`legacy`.
 LIVE_REGIONS = [
     ("/", "dash-metrics", "/partials/dashboard/metrics"),
     ("/", "dash-artists", "/partials/dashboard/artists"),
@@ -59,6 +68,11 @@ LIVE_REGIONS = [
     (f"/artists/{ARTIST_ID}", "artist-stats", f"/partials/artists/{ARTIST_ID}/stats"),
     (f"/artists/{ARTIST_ID}", "album-rows", f"/partials/albums/{ARTIST_ID}"),
 ]
+
+
+def legacy(path: str) -> str:
+    """The URL a request goes to for a path the old templates still declare."""
+    return f"{LEGACY}{path}"
 
 
 @pytest.fixture(name="client")
@@ -139,7 +153,7 @@ def test_every_live_region_polls_itself(
     client: TestClient, page: str, region_id: str, url: str
 ) -> None:
     """The region declares a poll interval and the URL it polls."""
-    tag = region(client.get(page).text, region_id)
+    tag = region(client.get(legacy(page)).text, region_id)
     assert "hx-trigger=" in tag and "every " in tag
     assert f'hx-get="{url}"' in tag
 
@@ -149,7 +163,9 @@ def test_every_live_region_reacts_to_a_change_at_once(
     client: TestClient, page: str, region_id: str, url: str
 ) -> None:
     """Waiting out the poll interval is a fallback, not the only path."""
-    assert "qobuzarr:refresh from:body" in region(client.get(page).text, region_id)
+    assert "qobuzarr:refresh from:body" in region(
+        client.get(legacy(page)).text, region_id
+    )
 
 
 @pytest.mark.parametrize(("page", "region_id", "url"), LIVE_REGIONS)
@@ -157,7 +173,7 @@ def test_every_fragment_is_a_fragment(
     client: TestClient, page: str, region_id: str, url: str
 ) -> None:
     """A polled URL returns markup to swap in, never a whole page."""
-    response = client.get(url)
+    response = client.get(legacy(url))
     assert response.status_code == 200
     assert "<html" not in response.text and "<body" not in response.text
     assert "{{" not in response.text and "{%" not in response.text
@@ -183,44 +199,46 @@ def test_dashboard_first_frame_matches_the_fragment(
     rearrange itself a few seconds after loading. Comparing the whole fragment,
     rather than sampling lines out of it, is what catches that.
     """
-    assert squeeze(client.get(fragment_url).text) in squeeze(client.get("/").text)
+    assert squeeze(client.get(legacy(fragment_url)).text) in squeeze(
+        client.get(legacy("/")).text
+    )
 
 
 # -------------------------------------------------------------------- content
 def test_metrics_fragment_counts_the_library(client: TestClient) -> None:
-    body = client.get("/partials/dashboard/metrics").text
+    body = client.get("/legacy/partials/dashboard/metrics").text
     assert "artists followed" in body and "albums wanted" in body
     assert ">1</span></a> artists followed" in body
 
 
 def test_status_fragment_carries_indexer_and_limiter(client: TestClient) -> None:
-    body = client.get("/partials/dashboard/status").text
+    body = client.get("/legacy/partials/dashboard/status").text
     assert "Indexer" in body and "Rate limiter" in body and "Albums by status" in body
 
 
 def test_queue_fragment_shows_the_pending_download(client: TestClient) -> None:
-    body = client.get("/partials/dashboard/queue").text
+    body = client.get("/legacy/partials/dashboard/queue").text
     assert "Solo" in body and "pending" in body
 
 
 def test_artists_fragment_lists_the_indexer_backlog(client: TestClient) -> None:
-    body = client.get("/partials/dashboard/artists").text
+    body = client.get("/legacy/partials/dashboard/artists").text
     assert "Nils Frahm" in body and "All 1 artists" in body
 
 
 def test_artist_stats_fragment_reports_the_split(client: TestClient) -> None:
-    body = client.get(f"/partials/artists/{ARTIST_ID}/stats").text
+    body = client.get(f"/legacy/partials/artists/{ARTIST_ID}/stats").text
     # Two wanted plus one queued count as outstanding; one is on disk.
     assert "3 release(s) wanted, 1 downloaded." in body
 
 
 def test_artist_stats_fragment_404s_for_a_stranger(client: TestClient) -> None:
-    assert client.get("/partials/artists/nobody/stats").status_code == 404
+    assert client.get("/legacy/partials/artists/nobody/stats").status_code == 404
 
 
 def test_a_change_is_visible_on_the_next_poll(client: TestClient) -> None:
     """The whole point: no reload needed for the counters to catch up."""
-    before = client.get(f"/partials/artists/{ARTIST_ID}/stats").text
+    before = client.get(f"/legacy/partials/artists/{ARTIST_ID}/stats").text
     assert "3 release(s) wanted, 1 downloaded." in before
 
     response = client.post(
@@ -228,7 +246,7 @@ def test_a_change_is_visible_on_the_next_poll(client: TestClient) -> None:
     )
     assert response.status_code == 200
 
-    after = client.get(f"/partials/artists/{ARTIST_ID}/stats").text
+    after = client.get(f"/legacy/partials/artists/{ARTIST_ID}/stats").text
     assert "2 release(s) wanted, 1 downloaded." in after
 
 
@@ -241,30 +259,30 @@ def test_filtered_regions_carry_their_filters_into_the_poll(
     Both filterable regions include their form rather than a fixed URL, so
     whatever is typed or selected is re-sent on every tick.
     """
-    wanted = region(client.get("/wanted").text, "wanted-rows")
+    wanted = region(client.get("/legacy/wanted").text, "wanted-rows")
     assert 'hx-include="#wanted-filters"' in wanted
-    assert 'id="wanted-filters"' in client.get("/wanted").text
+    assert 'id="wanted-filters"' in client.get("/legacy/wanted").text
 
-    detail = client.get(f"/artists/{ARTIST_ID}").text
+    detail = client.get(f"/legacy/artists/{ARTIST_ID}").text
     assert 'hx-include="#artist-filters"' in region(detail, "album-rows")
     assert 'id="artist-filters"' in detail
 
-    activity = client.get("/activity").text
+    activity = client.get("/legacy/activity").text
     assert 'hx-include="#activity-filters"' in region(activity, "activity-rows")
     assert 'id="activity-filters"' in activity
 
 
 def test_the_polled_wanted_fragment_honours_those_filters(client: TestClient) -> None:
     """What the form sends is what the fragment filters on."""
-    everything = client.get("/partials/wanted-rows?q=&status=&monitored=").text
+    everything = client.get("/legacy/partials/wanted-rows?q=&status=&monitored=").text
     assert "Spaces" in everything and "Felt" in everything
 
-    narrowed = client.get("/partials/wanted-rows?q=felt&status=&monitored=true").text
+    narrowed = client.get("/legacy/partials/wanted-rows?q=felt&status=&monitored=true").text
     assert "Felt" in narrowed and "Spaces" not in narrowed
 
 
 def test_the_polled_album_fragment_honours_those_filters(client: TestClient) -> None:
-    url = f"/partials/albums/{ARTIST_ID}"
+    url = legacy(f"/partials/albums/{ARTIST_ID}")
     assert "Screws" in client.get(f"{url}?q=&status=&release_type=").text
     assert "Screws" not in client.get(f"{url}?q=&status=wanted&release_type=").text
 
@@ -277,23 +295,23 @@ def test_the_polled_activity_fragment_honours_those_filters(
     Before the Activity page started tailing itself the fragment took a limit
     and nothing else, which would have made every poll reset the filters.
     """
-    client.post("/ui/albums/uyej1o165e870/queue", headers={"HX-Request": "true"})
+    client.post("/legacy/ui/albums/uyej1o165e870/queue", headers={"HX-Request": "true"})
 
-    unfiltered = client.get("/partials/activity?level=&event=&limit=200").text
+    unfiltered = client.get("/legacy/partials/activity?level=&event=&limit=200").text
     assert "queue.add" in unfiltered
 
-    filtered = client.get("/partials/activity?level=&event=no.such.event&limit=200")
+    filtered = client.get("/legacy/partials/activity?level=&event=no.such.event&limit=200")
     assert "queue.add" not in filtered.text
 
 
 # --------------------------------------------------------------- refresh event
 #: One representative call per mutating handler shape (path, method, body).
 MUTATIONS = [
-    ("/ui/albums/uyej1o165e870/monitor", {}),
-    ("/ui/albums/uyej1o165e870/queue", {}),
-    (f"/ui/artists/{ARTIST_ID}/scan", {}),
-    ("/ui/wanted/download-all", {}),
-    ("/ui/scan-all", {}),
+    ("/legacy/ui/albums/uyej1o165e870/monitor", {}),
+    ("/legacy/ui/albums/uyej1o165e870/queue", {}),
+    (f"/legacy/ui/artists/{ARTIST_ID}/scan", {}),
+    ("/legacy/ui/wanted/download-all", {}),
+    ("/legacy/ui/scan-all", {}),
 ]
 
 
@@ -310,7 +328,7 @@ def test_every_mutation_asks_the_live_regions_to_refresh(
 def test_a_refresh_does_not_displace_the_toast(client: TestClient) -> None:
     """The event rides along with the message; it does not replace it."""
     response = client.post(
-        "/ui/albums/uyej1o165e870/monitor", headers={"HX-Request": "true"}
+        "/legacy/ui/albums/uyej1o165e870/monitor", headers={"HX-Request": "true"}
     )
     fired = triggers(response)
     assert fired.get("qobuzarr:refresh") is True

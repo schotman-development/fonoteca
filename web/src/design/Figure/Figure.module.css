@@ -1,0 +1,75 @@
+/* The mono readout — design 229–241 and 683–686.
+
+   The design: `font-family: 'IBM Plex Mono'; font-size: 19px | 24px;
+   font-weight: 500` over `font-size: 11px; text-transform: uppercase;
+   letter-spacing: 0.06em; color: #6E6A61`. The caption is the eyebrow recipe
+   at the tighter of the design's two letter-spacings and comes from
+   `shared/label.module.css`; only the 4px above it is set here.
+
+   THE ONE SNAP WORTH EXPLAINING. 24px is `--fs-figure`, the token that exists
+   for exactly this — a number, always mono, deliberately outside the heading
+   ladder so retuning headings cannot move it. 19px has no step of its own: the
+   ladder's nearest is `--fs-lg` (17px), and the step above it is `--fs-figure`
+   itself, which would make `md` and `lg` the same size and delete the
+   distinction the design draws. So `md` takes `--fs-lg`. Two pixels down on a
+   19px numeral is a hairline; a fifteenth font size in the system is not, and
+   tokens.css is explicit that the design's fourteen sizes snap onto the nine
+   the ladder has.
+
+   The weight is `--fw-medium`, which is the design's own 500 — unlike the
+   StatCard's 700, nothing is being snapped here. */
+
+.figure {
+  min-width: 0;
+}
+
+.value {
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  /* Set here rather than inherited: this is the one element where a poll
+     changing a digit must not move the caption under it. */
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  color: var(--c-ink);
+}
+
+.md {
+  font-size: var(--fs-lg);
+}
+
+.lg {
+  font-size: var(--fs-figure);
+}
+
+/* The design's 4px — `--sp-1`, the one step it lands on exactly. */
+.caption {
+  margin-top: var(--sp-1);
+  text-wrap: pretty;
+}
+
+/* Tone paints the figure and nothing else. These are the TEXT ambers and reds:
+   `--c-warn` (5.0:1), never `--c-warn-solid` (3.2:1, which is for marks). The
+   design paints the "Flagged" figure #D97706 at line 234; that is one of the
+   two substitutions recorded at the top of tokens.css, and this is a site it
+   was written for. */
+
+.toneNeutral {
+  color: var(--c-ink);
+}
+
+.toneAccent {
+  color: var(--c-accent);
+}
+
+.toneOk {
+  color: var(--c-ok);
+}
+
+.toneWarn {
+  color: var(--c-warn);
+}
+
+.toneBad {
+  color: var(--c-bad);
+}

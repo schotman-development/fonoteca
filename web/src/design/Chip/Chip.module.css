@@ -1,0 +1,90 @@
+/* The chip — a filter pill (design 247, 807) and, one size down, the path
+   template's token buttons (725).
+
+   The geometry is NOT here. It is `shared/chip.module.css`, `composes:`d twice
+   below, because the source chip needs the identical shape and two copies of a
+   padding pair is how two controls that are meant to be the same height stop
+   being it. What this module adds is the three things that are the chip's own:
+
+     - the ON state. Design 247 paints it through `{{ f.bg }}` / `{{ f.fg }}` /
+       `{{ f.border }}`, and DCLogic's own branch (line 1230) is
+       `#1B1A17 / #FFFFFF / #1B1A17` selected and `#FFFFFF / #33302A / #DFD9CE`
+       not. That is ink on ink, and it is the ONLY colouring a chip has: a chip
+       says which subset you are looking at, and in this system colour means how
+       bad something is. There is deliberately no `tone`.
+     - the count. Mono at `opacity: .6` (247), which is `meta.metaMuted` —
+       inheriting its colour rather than taking one, so it stays legible when the
+       chip flips to ink.
+     - the reset a `<button>` needs and a `<span>` does not.
+
+   The one non-status colour is `.accent`, for the token buttons at 725: teal
+   text on paper. `--c-accent` in this system is IDENTITY, not status (see the
+   note over it in tokens.css and the `Tone` doc in design/types.ts) — a link, a
+   proposed value, an on switch. It is not reachable from `tone`, because there
+   is no `tone`. */
+
+.chip {
+  composes: chip from '../shared/chip.module.css';
+
+  cursor: default;
+}
+
+.sm {
+  composes: chipSm from '../shared/chip.module.css';
+
+  cursor: default;
+}
+
+/* A pressable chip. `appearance: none` and the inherited box model are all a
+   button needs here — the geometry recipe already states font, padding, border
+   and radius, and the focus ring is the global one from tokens.css. */
+.pressable {
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background var(--mo-fast) var(--mo-ease),
+    border-color var(--mo-fast) var(--mo-ease),
+    color var(--mo-fast) var(--mo-ease);
+}
+
+.pressable:not(:disabled):hover {
+  border-color: var(--c-line-mute);
+}
+
+.pressable:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Selected: ink on ink (design 247 / DCLogic 1230). */
+.on {
+  border-color: var(--c-ink);
+  background: var(--c-ink);
+  color: var(--c-on-ink);
+}
+
+.on:not(:disabled):hover {
+  border-color: var(--c-ink-hover);
+  background: var(--c-ink-hover);
+}
+
+/* The token button (725): mono, teal, paper. Identity, not status. */
+.accent {
+  color: var(--c-accent);
+}
+
+.accent.on {
+  color: var(--c-on-ink);
+}
+
+.mono {
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+}
+
+/* The trailing `{{ f.count }}` (247). Mono, .6 alpha, colour inherited from
+   whatever the chip is painted — the one place a count must follow its
+   container rather than the ink ramp. */
+.count {
+  composes: metaMuted from '../shared/meta.module.css';
+}

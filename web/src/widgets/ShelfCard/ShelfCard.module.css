@@ -1,0 +1,63 @@
+/* The shelf card, design 123–130.
+
+   `width: 126px; flex: none` on the card (123); a 126px square of artwork
+   (124); then `margin-top: 9px; font-size: 12.5px; font-weight: 500;
+   line-height: 1.35` for the title (127), `font-size: 11.5px; color: #57534A;
+   margin-top: 1px` with an ellipsis for the credit (128), and `font-size:
+   11.5px; color: #6E6A61; margin-top: 3px` for the tag (129 with DCLogic
+   1212's `tagFg`).
+
+   THE SNAPS, each onto a ladder tokens.css owns:
+     12.5px → `--fs-xs`, 11.5px → `--fs-2xs` — the same two steps every 12.5/11.5
+              pair in the design lands on (see shared/chip.module.css).
+     1.35   → `--lh-snug` (1.3).
+     9px    → `--sp-2 + --sp-px`; 1px → `--sp-px`; 3px → `--sp-1 - --sp-px`.
+              None of the three is on the 4px scale, so each is written as an
+              expression over it rather than as a literal.
+     #6E6A61 is `--c-ink-mark` exactly; #57534A is `--c-ink-3` exactly.
+
+   The width is a named property on the card's own class rather than a token:
+   it is this one control's shape (126px is the shelf card and nothing else),
+   and `Artwork size={126}` is the same number arriving from the other side. */
+
+.card {
+  --shelf-card-w: 126px; /* design 123 */
+
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: var(--shelf-card-w);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.title {
+  margin-top: calc(var(--sp-2) + var(--sp-px)); /* design 127: 9px */
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+.subtitle {
+  margin-top: var(--sp-px); /* design 128: 1px */
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-3);
+}
+
+/* The design paints this #6E6A61 (DCLogic 1212), which is --c-ink-mark: the
+   quiet meta shade, one step below the credit above it. */
+.tag {
+  margin-top: calc(var(--sp-1) - var(--sp-px)); /* design 129: 3px */
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}

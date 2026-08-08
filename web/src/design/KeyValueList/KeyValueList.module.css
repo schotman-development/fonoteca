@@ -1,0 +1,73 @@
+/* The fact list — a label on the left, a mono value on the right.
+
+   Two sites, one shape (design 449–466, the release drawer's "Identification &
+   tags"; and 654–660, the identify screen's evidence list). Both are
+   `font-size: 12.5px`, both put the label in `#57534A` and the value in
+   `'IBM Plex Mono'` `#1B1A17`, and both space rows 7px apart. The only
+   difference is that the second rules each row off with a hairline, which is
+   `.ruled`.
+
+   The snap: 12.5px → `--fs-xs`, 7px → `--sp-2`, the 12px column gap → `--sp-3`.
+
+   The value is `word-break: break-all` because most of what lands here is an
+   MBID or a barcode — 36 characters with no space in them, which otherwise
+   pushes the label off its own row. */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.ruled .row {
+  padding-bottom: var(--sp-2);
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+}
+
+.key {
+  margin: 0;
+  color: var(--c-ink-3);
+}
+
+.value {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  color: var(--c-ink);
+  text-align: right;
+  word-break: break-all;
+}
+
+/* Tone is TEXT here, so amber is `--c-warn` (5.0:1) and never `--c-warn-solid`.
+   The design paints its one coloured value at weight 500 (line 456), so every
+   toned value takes that weight — a value that is coloured is a value that is
+   being pointed at, and it should not be the only one at regular weight. */
+.toneAccent {
+  color: var(--c-accent);
+  font-weight: var(--fw-medium);
+}
+
+.toneOk {
+  color: var(--c-ok);
+  font-weight: var(--fw-medium);
+}
+
+.toneWarn {
+  color: var(--c-warn);
+  font-weight: var(--fw-medium);
+}
+
+.toneBad {
+  color: var(--c-bad);
+  font-weight: var(--fw-medium);
+}

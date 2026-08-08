@@ -1,0 +1,346 @@
+/* Structure & tags, design 710–795.
+
+   THE SNAPS:
+     28px → `--sp-6 - --sp-1`   (717, the gap between the two columns)
+     40px → `--sp-7`            (718, the gap between blocks in a column)
+     22px → `--sp-5 - 2px`      (719, a block's top padding under its rule)
+     14px → `--sp-3 + 2px`      (721, 742, the gap under a block's note)
+     13.5 → `--fs-xs`           (720, a block title — the design's own step
+             between body and the section head, and the nearest token)
+      6px → `--sp-1 + 2px`      (723, the token row's gap)
+   `#DFD9CE` is `--c-line`; `#6E6A61` is `--c-ink-mark`. */
+
+.section {
+  composes: section from '../screen.module.css';
+}
+
+.header {
+  composes: header from '../screen.module.css';
+}
+
+.headerMain {
+  composes: headerMain from '../screen.module.css';
+}
+
+.title {
+  composes: title from '../screen.module.css';
+}
+
+.lede {
+  composes: lede from '../screen.module.css';
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: calc(var(--sp-6) - var(--sp-1));
+  align-items: start;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-7);
+}
+
+/* 719, 741, 757, 776: every block is ruled off at the top. */
+.block {
+  border-top: var(--sp-px) solid var(--c-line);
+  padding-top: calc(var(--sp-5) - var(--sp-px) * 2);
+}
+
+.blockTitle {
+  margin: 0 0 var(--sp-px);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.blockNote {
+  margin: 0 0 calc(var(--sp-3) + var(--sp-px) * 2);
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+/* 723: the token buttons and the two editing controls. */
+.tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--sp-1) + var(--sp-px) * 2);
+  margin-top: var(--sp-3);
+}
+
+.tokenSpacer {
+  flex: 1;
+}
+
+/* 731 */
+.preview {
+  margin-top: calc(var(--sp-4) + var(--sp-px) * 2);
+  padding-top: calc(var(--sp-4) + var(--sp-px) * 2);
+  border-top: var(--sp-px) solid var(--c-line-soft);
+}
+
+.previewLines {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sp-2) + var(--sp-px));
+  font-family: var(--ff-mono);
+  font-size: var(--fs-2xs);
+  color: var(--c-accent);
+  word-break: break-all;
+  line-height: var(--lh-normal);
+}
+
+.previewStale {
+  margin-top: var(--sp-3);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+/* 737: the library-wide re-file count. Press-driven — the button and its
+   warning sit on one baseline so the cost is read before the press. */
+.count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+.countNote {
+  flex: 1 1 12rem;
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+  line-height: var(--lh-normal);
+}
+
+.countLine {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-2);
+  line-height: var(--lh-normal);
+}
+
+.countBad {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-2xs);
+  color: var(--c-bad);
+  line-height: var(--lh-normal);
+}
+
+/* 743: the tag-mapping table. Header and body share one grid so the columns
+   line up; the body scrolls sideways on a narrow viewport rather than making
+   the page do it. */
+.mapHead,
+.mapRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 0.9fr);
+  gap: var(--sp-3);
+}
+
+.mapHead {
+  padding-bottom: calc(var(--sp-2) + var(--sp-px));
+  border-bottom: var(--sp-px) solid var(--c-line);
+  font-size: var(--fs-3xs);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-nav);
+  color: var(--c-ink-mark);
+}
+
+.mapBody {
+  padding-top: var(--sp-3);
+  overflow-x: auto;
+}
+
+.mapRow {
+  align-items: baseline;
+  padding: calc(var(--sp-1) + var(--sp-px)) 0;
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+  font-size: var(--fs-3xs);
+  min-width: 0;
+}
+
+.mapRow:last-child {
+  border-bottom: 0;
+}
+
+.mapField,
+.mapSource {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-px);
+  min-width: 0;
+}
+
+.mapField code,
+.mapSource code {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-1);
+  word-break: break-all;
+}
+
+.mapSource code {
+  color: var(--c-ink-2);
+}
+
+.mapId3 {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+.mapOrigin {
+  font-size: var(--fs-3xs);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-nav);
+  color: var(--c-ink-mark);
+}
+
+.mapConflict {
+  font-size: var(--fs-3xs);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-nav);
+  color: var(--c-ink-2);
+}
+
+/* Only the refusal is coloured: "never" is the one verdict that is a rule
+   somebody might otherwise go looking for. */
+.conflict_never {
+  color: var(--c-warn);
+}
+
+.conflict_qobuz,
+.conflict_enrichment,
+.conflict_derived,
+.conflict_consensus {
+  color: var(--c-ink-2);
+}
+
+.mapLegend {
+  margin: var(--sp-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.mapLegendRow {
+  display: grid;
+  grid-template-columns: minmax(0, 6rem) minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+
+.mapLegendNote {
+  margin: 0;
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+.mapRule {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+
+/* 760–772: the ladder. */
+.ladder {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sp-2) - var(--sp-px));
+}
+
+.rung {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) calc(var(--sp-3) + var(--sp-px) * 2);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-sm);
+  background: var(--c-paper);
+}
+
+.rank {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+.dot {
+  width: var(--sp-2);
+  height: var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--rung-dot, var(--c-ink-mark));
+  flex: none;
+}
+
+.rungName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.rungRole {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+.rungGated {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-warn);
+}
+
+.arrows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-px);
+}
+
+.arrow {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--c-ink-mark);
+  cursor: pointer;
+  font-size: var(--fs-3xs);
+  line-height: 1;
+}
+
+.arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.switches {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sp-3) + var(--sp-px) * 2);
+}
+
+/* The origin marker beside a control: where its value came from. */
+.origin {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  color: var(--c-ink-mark);
+}
+
+.pending {
+  color: var(--c-warn);
+}
+
+.actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+}

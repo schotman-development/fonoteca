@@ -1,0 +1,113 @@
+/* A small modern reset. Loaded AFTER tokens.css and BEFORE base.css, so it may
+   use tokens (the focus treatment does) but sets no product opinion of its own —
+   every colour, size and space decision belongs in base.css or a component module. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -moz-text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+}
+
+body,
+h1, h2, h3, h4, h5, h6,
+p, figure, blockquote, dl, dd, ol, ul, fieldset, legend, pre {
+  margin: 0;
+}
+
+/* Only lists that have had their marker removed on purpose; a prose list inside
+   an article keeps its bullets. */
+ul[role="list"],
+ol[role="list"] {
+  list-style: none;
+  padding: 0;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+/* Headings and short strings should not be broken into orphans by a narrow cell. */
+h1, h2, h3, h4, h5, h6 {
+  text-wrap: balance;
+}
+
+img, picture, video, canvas, svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* Cover art sits in a fixed aspect box; a failed load must never change row
+   height, so images never shrink their box by themselves. */
+img {
+  height: auto;
+}
+
+input, button, textarea, select {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+textarea:not([rows]) {
+  min-height: 8rem;
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+fieldset {
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+legend {
+  padding: 0;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--c-line);
+}
+
+/* ONE focus treatment for the whole app (spec section 4). Keyboard users get a
+   visible ring everywhere; a mouse press does not paint one. Never remove the
+   outline without replacing it — this is the only affordance a keyboard user has. */
+:focus-visible {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* An element scrolled to by a skip link or an anchor should arrive with a
+   little air above it rather than flush against the top of its scroller.
+
+   Just the air, and NOT --layout-topbar-h: the shell is a fixed frame and the
+   only scroller is `.well`, whose top edge already sits below the top bar (see
+   AppShell.module.css). Adding the bar's height here would push every anchor
+   62px further down its own scrollport than it was asked to go. */
+:target {
+  scroll-margin-top: var(--sp-4);
+}

@@ -175,6 +175,7 @@ def client_fixture(tmp_path: Path, settings: Settings) -> Iterator[TestClient]:
             await session.commit()
 
     asyncio.run(seed())
+    _MAKERS.append(session_maker)
     main.app.dependency_overrides[get_session] = override_session
     try:
         yield TestClient(main.app)
@@ -185,6 +186,26 @@ def client_fixture(tmp_path: Path, settings: Settings) -> Iterator[TestClient]:
         # loop it was created on, which surfaces as an intermittent
         # "Event loop is closed" thread exception.
         main.app.dependency_overrides.pop(get_session, None)
+
+
+#: The session maker of the live fixture, so a test can set up database state
+#: the API deliberately offers no way to write — an album whose ``path`` is a
+#: folder shared with another release is something only the disk scan produces.
+_MAKERS: list[Any] = []
+
+
+def _repoint(client: TestClient, album_id: str, path: str) -> None:
+    """Point *album_id* at *path*, the way a flat-layout disk scan would."""
+
+    async def go() -> None:
+        async with _MAKERS[-1]() as session:
+            album = await session.get(Album, album_id)
+            album.path = path
+            for track in album.tracks:
+                track.path = None
+            await session.commit()
+
+    asyncio.run(go())
 
 
 def album_json(client: TestClient, album_id: str) -> dict:
@@ -375,6 +396,39 @@ def test_deleting_an_ignored_release_marks_it_skipped(client: TestClient) -> Non
     assert album_json(client, ON_DISK)["status"] == "skipped"
 
 
+def test_deleting_refuses_a_folder_that_holds_another_release(
+    client: TestClient, settings: Settings
+) -> None:
+    """A library laid out flat gives several albums the same ``path`` — the
+    artist folder — and trashing it takes the whole discography along. The root
+    check does not catch it: an artist folder is not the library root."""
+    shared = album_json(client, ON_DISK)["path"]
+    # Exactly what the disk scan writes when audio sits directly in a folder
+    # shared by two releases.
+    client.post(f"/api/albums/{MISFILED}/refile")  # settle its own path first
+    _repoint(client, MISFILED, shared)
+
+    response = client.delete(f"/api/albums/{ON_DISK}/files")
+
+    assert response.status_code == 400
+    assert "more than this release" in response.json()["error"]
+    assert Path(shared).is_dir(), "nothing moved"
+    assert album_json(client, ON_DISK)["status"] == "downloaded"
+
+
+def test_refiling_refuses_the_same_shared_folder(
+    client: TestClient, settings: Settings
+) -> None:
+    """Re-file would move it rather than trash it, which is no better."""
+    shared = album_json(client, ON_DISK)["path"]
+    _repoint(client, MISFILED, shared)
+
+    plan = client.post(f"/api/albums/{ON_DISK}/refile?dry_run=true").json()
+
+    assert "more than this release" in (plan["blocked"] or "")
+    assert Path(shared).is_dir()
+
+
 def test_deleting_never_queues_a_replacement(client: TestClient) -> None:
     """Deleting is not a request to download it again. Nothing here auto-queues."""
     before = {item["album_id"] for item in client.get("/api/queue").json()["items"]}
@@ -412,14 +466,14 @@ def test_only_that_release_is_touched(client: TestClient, settings: Settings) ->
 
 
 def test_the_ui_delete_button_reports_where_the_files_went(client: TestClient) -> None:
-    response = client.post(f"/ui/albums/{ON_DISK}/delete", headers=HX)
+    response = client.post(f"/legacy/ui/albums/{ON_DISK}/delete", headers=HX)
     assert response.status_code == 200
     trigger = response.headers.get("HX-Trigger", "")
     assert "Library tidy" in trigger and "wanted" in trigger
 
 
 def test_a_release_with_no_files_offers_no_delete_button(client: TestClient) -> None:
-    body = client.get(f"/partials/albums/{ARTIST_ID}").text
+    body = client.get(f"/legacy/partials/albums/{ARTIST_ID}").text
     assert f"/ui/albums/{ON_DISK}/delete" in body
     assert f"/ui/albums/{NO_FILES}/delete" not in body
 
@@ -660,19 +714,19 @@ def test_renamed_files_in_place_are_cleared_individually(settings: Settings) -> 
 # The page
 # ---------------------------------------------------------------------------
 def test_the_tidy_page_renders(client: TestClient) -> None:
-    body = client.get("/library/tidy").text
+    body = client.get("/legacy/library/tidy").text
     assert "Re-file" in body and "Re-tag" in body and "Trash" in body
 
 
 def test_the_tidy_page_can_be_scoped_to_one_artist(client: TestClient) -> None:
-    body = client.get(f"/library/tidy?artist_id={ARTIST_ID}").text
+    body = client.get(f"/legacy/library/tidy?artist_id={ARTIST_ID}").text
     assert "Nils Frahm" in body
     assert f"artist_id={ARTIST_ID}" in body
 
 
 def test_the_trash_panel_lists_what_was_deleted(client: TestClient) -> None:
     client.delete(f"/api/albums/{ON_DISK}/files")
-    body = client.get("/library/tidy").text
+    body = client.get("/legacy/library/tidy").text
     assert "All Melody" in body
     assert "Restore" in body and "Delete forever" in body
 
@@ -682,7 +736,7 @@ def test_restoring_through_the_ui_puts_the_files_back(client: TestClient) -> Non
     client.delete(f"/api/albums/{ON_DISK}/files")
     entry_id = trash(client)["entries"][0]["id"]
 
-    response = client.post(f"/ui/library/trash/{entry_id}/restore", headers=HX)
+    response = client.post(f"/legacy/ui/library/trash/{entry_id}/restore", headers=HX)
 
     assert response.status_code == 200
     assert directory.is_dir() and (directory / TRACKS[0]).is_file()
@@ -691,7 +745,7 @@ def test_restoring_through_the_ui_puts_the_files_back(client: TestClient) -> Non
 
 def test_emptying_through_the_ui_is_final(client: TestClient) -> None:
     client.delete(f"/api/albums/{ON_DISK}/files")
-    response = client.post("/ui/library/trash/empty", headers=HX)
+    response = client.post("/legacy/ui/library/trash/empty", headers=HX)
 
     assert response.status_code == 200
     assert "Permanently deleted" in response.headers.get("HX-Trigger", "")
@@ -700,4 +754,232 @@ def test_emptying_through_the_ui_is_final(client: TestClient) -> None:
 
 def test_the_nav_shows_how_much_is_in_the_trash(client: TestClient) -> None:
     client.delete(f"/api/albums/{ON_DISK}/files")
-    assert "Library tidy" in client.get("/partials/nav").text
+    assert "Library tidy" in client.get("/legacy/partials/nav").text
+
+
+# ---------------------------------------------------------------------------
+# Per-release switches — pin_tags, freeze_path, mute_integrity
+# ---------------------------------------------------------------------------
+# Three flags a person sets about one release. Only ``freeze_path`` belongs to
+# this module — it is the one that refuses a library write — so the tests here
+# are its three refusals plus the partial-update rule the endpoint that writes
+# all three has to keep. ``pin_tags`` is exercised where the write-back lives
+# (``test_enrichment_scope_repairs.py``) and ``mute_integrity`` where the
+# quarantine does (``test_enrich_fingerprint.py``).
+def patch_album(client: TestClient, album_id: str, **fields: Any) -> dict:
+    response = client.patch(f"/api/albums/{album_id}", json=fields)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_the_switches_default_to_off(client: TestClient) -> None:
+    """A column added with the wrong default silently changes every existing row."""
+    payload = album_json(client, ON_DISK)
+    assert payload["pin_tags"] is False
+    assert payload["freeze_path"] is False
+    assert payload["mute_integrity"] is False
+
+
+def test_a_frozen_release_is_blocked_rather_than_moved(client: TestClient) -> None:
+    """The refusal is a *blocked plan*, in the shape every other refusal uses."""
+    before = Path(album_json(client, MISFILED)["path"])
+    patch_album(client, MISFILED, freeze_path=True)
+
+    plan = client.post(f"/api/albums/{MISFILED}/refile").json()
+
+    assert "frozen" in (plan["blocked"] or "").lower()
+    assert before.is_dir(), "nothing moved"
+    assert album_json(client, MISFILED)["path"] == str(before)
+
+
+def test_a_frozen_release_names_the_switch_that_refused(client: TestClient) -> None:
+    """A refusal that does not say where the decision lives cannot be undone."""
+    patch_album(client, MISFILED, freeze_path=True)
+    blocked = client.post(f"/api/albums/{MISFILED}/refile").json()["blocked"]
+    assert "Freeze path" in blocked
+
+
+def test_a_frozen_release_leaves_the_library_preview_alone(client: TestClient) -> None:
+    """Not listed as *blocked* either: it is a settled answer, not outstanding work.
+
+    Every other block is a problem somebody can go and fix — a stale baseline, an
+    occupied destination. Listing a frozen release beside them puts a question
+    that has already been answered back on the work list, every night.
+    """
+    patch_album(client, MISFILED, freeze_path=True)
+
+    report = client.post("/api/library/refile").json()
+
+    assert MISFILED not in {plan["album_id"] for plan in report["plans"]}
+
+
+def test_freezing_survives_the_apply_pass(client: TestClient) -> None:
+    """The library-wide *apply* is the pass that would actually move it."""
+    before = Path(album_json(client, MISFILED)["path"])
+    patch_album(client, MISFILED, freeze_path=True)
+
+    client.post("/api/library/refile?apply=true")
+
+    assert before.is_dir()
+    assert album_json(client, MISFILED)["path"] == str(before)
+
+
+def test_a_plan_built_before_the_freeze_is_still_refused(client: TestClient) -> None:
+    """A lock only the planner honours is a lock with a hole in it.
+
+    The preview-then-apply flow hands ``refile_album`` a plan built earlier, and
+    a plan built before the switch was set carries no ``blocked`` reason to trip
+    over. So the flag is checked in ``refile_album`` itself, *before* the plan is
+    consulted, and this is the sequence that proves it.
+    """
+
+    async def go() -> tuple[Any, str]:
+        async with _MAKERS[-1]() as session:
+            album = await session.get(Album, MISFILED)
+            plan = await librarian.plan_refile(session, album)
+            assert plan.blocked is None and plan.needed, "the plan was good"
+            album.freeze_path = True
+            await session.commit()
+        async with _MAKERS[-1]() as session:
+            album = await session.get(Album, MISFILED)
+            with pytest.raises(librarian.FrozenPathError) as caught:
+                await librarian.refile_album(session, album, plan=plan)
+            return caught.value, album.path
+
+    error, path = asyncio.run(go())
+
+    assert "frozen" in str(error).lower()
+    assert Path(path).is_dir(), "nothing was moved on the way to the refusal"
+
+
+def test_a_frozen_release_is_refused_through_the_api_as_a_block(
+    client: TestClient,
+) -> None:
+    """``FrozenPathError`` is a ``LibraryError``, so the route maps it to a 400.
+
+    It reaches the route only when a plan is built elsewhere; the single-album
+    route plans first and therefore reports the block. Both are refusals and
+    neither is a 500, which is the property worth pinning.
+    """
+    assert issubclass(librarian.FrozenPathError, librarian.LibraryError)
+    patch_album(client, MISFILED, freeze_path=True)
+    response = client.post(f"/api/albums/{MISFILED}/refile")
+    assert response.status_code == 200 and response.json()["blocked"]
+
+
+def test_freezing_the_path_does_not_freeze_the_tags(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each switch does one thing. Freezing is about *where* the files are."""
+    seen: list[str] = []
+    monkeypatch.setattr(
+        librarian, "tag_file", lambda path, *a, **k: seen.append(str(path)) or True
+    )
+    patch_album(client, ON_DISK, freeze_path=True)
+
+    response = client.post(f"/api/albums/{ON_DISK}/retag")
+
+    assert response.status_code == 200
+    assert len(seen) == len(TRACKS)
+
+
+def test_unfreezing_lets_the_release_move_again(client: TestClient) -> None:
+    """The switch is a switch, not a one-way door."""
+    patch_album(client, MISFILED, freeze_path=True)
+    client.post("/api/library/refile?apply=true")
+
+    patch_album(client, MISFILED, freeze_path=False)
+    client.post("/api/library/refile?apply=true")
+
+    assert "Spaces" in Path(album_json(client, MISFILED)["path"]).name
+
+
+# --- the endpoint's own rule: partial means partial -------------------------
+def test_patching_one_switch_leaves_the_others_alone(client: TestClient) -> None:
+    """An omitted key is not ``false``.
+
+    This is the bug that once unmonitored a whole selection of artists, in a new
+    costume: a tri-state control that serialises its untouched state would turn
+    the other two switches off on every press.
+    """
+    patch_album(client, ON_DISK, pin_tags=True, mute_integrity=True)
+
+    payload = patch_album(client, ON_DISK, freeze_path=True)
+
+    assert payload["pin_tags"] is True
+    assert payload["mute_integrity"] is True
+    assert payload["freeze_path"] is True
+
+
+def test_patching_a_switch_leaves_monitoring_alone(client: TestClient) -> None:
+    """The PATCH is not the toggle. Pinning a release must not unmonitor it."""
+    before = album_json(client, ON_DISK)["monitored"]
+    payload = patch_album(client, ON_DISK, pin_tags=True)
+    assert payload["monitored"] is before
+
+
+def test_patching_monitoring_off_still_collapses_a_wanted_release(
+    client: TestClient,
+) -> None:
+    """The one rule the PATCH does share with the toggle.
+
+    Turning monitoring off has to take a ``wanted`` release out of the backlog
+    rather than leave it sitting there inert — and put it back when it goes on
+    again.
+    """
+    patch_album(client, NO_FILES, status="wanted")
+
+    off = patch_album(client, NO_FILES, monitored=False)
+    assert (off["monitored"], off["status"]) == (False, "skipped")
+
+    on = patch_album(client, NO_FILES, monitored=True)
+    assert (on["monitored"], on["status"]) == (True, "wanted")
+
+
+def test_an_empty_patch_changes_nothing(client: TestClient) -> None:
+    """Every key is optional, so ``{}`` is a legal no-op rather than a reset."""
+    before = album_json(client, ON_DISK)
+    after = patch_album(client, ON_DISK)
+    for key in ("monitored", "status", "pin_tags", "freeze_path", "mute_integrity"):
+        assert after[key] == before[key]
+
+
+def test_the_monitor_toggle_refuses_a_switch(client: TestClient) -> None:
+    """``{"pin_tags": true}`` there would set the switch *and* flip monitoring.
+
+    That endpoint's contract is that an absent ``monitored`` toggles, so a body
+    sent to it for any other reason silently changes something nobody asked
+    about. A 400 naming the right endpoint is the honest answer.
+    """
+    before = album_json(client, ON_DISK)
+
+    response = client.post(
+        f"/api/albums/{ON_DISK}/monitor", json={"pin_tags": True}
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert "PATCH /api/albums/{album_id}" in body["error"]
+    assert body["detail"]["rejected"] == ["pin_tags"]
+    after = album_json(client, ON_DISK)
+    assert after["pin_tags"] is False, "nothing was written"
+    assert after["monitored"] is before["monitored"], "and nothing was toggled"
+
+
+def test_the_monitor_toggle_still_toggles(client: TestClient) -> None:
+    """The refusal above must not have cost the endpoint its own behaviour."""
+    before = album_json(client, ON_DISK)["monitored"]
+    after = client.post(f"/api/albums/{ON_DISK}/monitor").json()
+    assert after["monitored"] is not before
+
+
+def test_patching_an_unknown_release_is_a_404(client: TestClient) -> None:
+    response = client.patch("/api/albums/nosuchalbum", json={"pin_tags": True})
+    assert response.status_code == 404
+    assert response.json()["ok"] is False
+
+
+def test_a_switch_that_is_not_a_boolean_is_a_422(client: TestClient) -> None:
+    """Validation, not a 500 three layers down when something reads the column."""
+    response = client.patch(f"/api/albums/{ON_DISK}", json={"pin_tags": "maybe"})
+    assert response.status_code == 422

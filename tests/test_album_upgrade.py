@@ -34,6 +34,7 @@ from typing import AsyncIterator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -49,6 +50,7 @@ from app.models import (
     QueueItem,
     QueueState,
     Track,
+    TrackOrigin,
     TrackStatus,
 )
 
@@ -165,7 +167,7 @@ def row(body: str, album_id: str) -> str:
 
 
 def album_rows(client: TestClient) -> str:
-    return client.get(f"/partials/albums/{ARTIST_ID}").text
+    return client.get(f"/legacy/partials/albums/{ARTIST_ID}").text
 
 
 def album_json(client: TestClient, album_id: str) -> dict:
@@ -520,7 +522,7 @@ def test_the_api_reports_a_live_queue_entry(client: TestClient) -> None:
 
 # -------------------------------------------------------------- pressing it
 def test_pressing_upgrade_queues_the_album(client: TestClient) -> None:
-    response = client.post(f"/ui/albums/{UPGRADABLE}/queue", headers=HX)
+    response = client.post(f"/legacy/ui/albums/{UPGRADABLE}/queue", headers=HX)
     assert response.status_code == 200
     assert "upgrade" in response.headers.get("HX-Trigger", "").lower()
     queued = {item["album_id"] for item in client.get("/api/queue").json()["items"]}
@@ -529,13 +531,13 @@ def test_pressing_upgrade_queues_the_album(client: TestClient) -> None:
 
 def test_pressing_upgrade_leaves_the_album_downloaded(client: TestClient) -> None:
     """It is on disk until the replacement lands; the backlog must not claim it."""
-    client.post(f"/ui/albums/{UPGRADABLE}/queue", headers=HX)
+    client.post(f"/legacy/ui/albums/{UPGRADABLE}/queue", headers=HX)
     assert album_json(client, UPGRADABLE)["status"] == "downloaded"
-    assert UPGRADABLE not in client.get("/wanted").text
+    assert UPGRADABLE not in client.get("/legacy/wanted").text
 
 
 def test_the_row_stops_offering_an_upgrade_once_it_is_queued(client: TestClient) -> None:
-    body = client.post(f"/ui/albums/{UPGRADABLE}/queue", headers=HX).text
+    body = client.post(f"/legacy/ui/albums/{UPGRADABLE}/queue", headers=HX).text
     cell = row(body, UPGRADABLE)
     assert ">In queue<" in cell
     assert ">Upgrade<" not in cell
@@ -543,6 +545,68 @@ def test_the_row_stops_offering_an_upgrade_once_it_is_queued(client: TestClient)
 
 def test_nothing_else_gets_queued(client: TestClient) -> None:
     """One press, one album — the same blast-radius rule as everywhere else."""
-    client.post(f"/ui/albums/{UPGRADABLE}/queue", headers=HX)
+    client.post(f"/legacy/ui/albums/{UPGRADABLE}/queue", headers=HX)
     queued = {item["album_id"] for item in client.get("/api/queue").json()["items"]}
     assert queued == {UPGRADABLE, QUEUED_UPGRADE}
+
+
+# ---------------------------------------------------------------------------
+# Upgrading a release the scanner adopted
+# ---------------------------------------------------------------------------
+def test_downloading_supersedes_the_rows_the_scan_made(tmp_path: Path) -> None:
+    """Qobuz's real track ids replace the scan's positional guesses.
+
+    An adopted album carries ``scan`` rows keyed on ``(disc, track)``; a download
+    of the same release brings rows keyed on Qobuz track ids. Keeping both would
+    double the album's track count — which is what completeness and the quality
+    comparison are computed from, so an upgraded album would report half its
+    tracks missing for ever.
+    """
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'sync.db'}", poolclass=NullPool
+    )
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    raw = {
+        "tracks": {
+            "items": [
+                {"id": "q1", "title": "Sunson", "track_number": 1, "media_number": 1},
+                {"id": "q2", "title": "Says", "track_number": 2, "media_number": 1},
+            ]
+        }
+    }
+
+    async def run() -> list[Track]:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with maker() as session:
+            session.add(Artist(id=ARTIST_ID, name="Nils Frahm"))
+            session.add(
+                Album(id=UPGRADABLE, artist_id=ARTIST_ID, title="All Melody",
+                      status=AlbumStatus.DOWNLOADED, tracks_count=2)
+            )
+            for number in (1, 2):
+                session.add(
+                    Track(id=f"scan:{number:024d}", album_id=UPGRADABLE,
+                          title=f"Track {number}", track_number=number,
+                          origin=TrackOrigin.SCAN, status=TrackStatus.DOWNLOADED,
+                          path=f"/library/{number}.flac")
+                )
+            await session.commit()
+
+            album = await session.get(Album, UPGRADABLE)
+            downloader = AlbumDownloader(SimpleNamespace())  # type: ignore[arg-type]
+            await downloader._sync_tracks(session, album, raw)
+            await session.commit()
+
+            rows = await session.execute(
+                select(Track).where(Track.album_id == UPGRADABLE)
+            )
+            return list(rows.scalars().all())
+
+    try:
+        tracks = asyncio.run(run())
+    finally:
+        asyncio.run(engine.dispose())
+
+    assert sorted(track.id for track in tracks) == ["q1", "q2"]
+    assert all(track.origin is TrackOrigin.DOWNLOAD for track in tracks)

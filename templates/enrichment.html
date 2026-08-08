@@ -1,0 +1,34 @@
+{#
+  What the open sources have identified, and what they refused to guess at.
+  Context: status (EnrichmentStatusOut), review (list[EnrichmentReviewOut]),
+           review_total (int), review_state (str), settings
+#}
+{% extends "base.html" %}
+
+{% block title %}Enrichment{% endblock %}
+{% block heading %}Enrichment{% endblock %}
+{% block subtitle %}
+  Metadata from Deezer, MusicBrainz, AcoustID, the Cover Art Archive and Wikidata.
+{% endblock %}
+{% block actions %}
+<button class="btn btn--primary"
+        hx-post="/ui/enrichment/run"
+        hx-target="#enrichment-body" hx-swap="innerHTML" hx-indicator="#enrichment-body">
+  Run now
+</button>
+{% endblock %}
+
+{% block content %}
+{#
+  The picker sits here, above the polled body and outside it. Inside, the 15s
+  poll would swap it away while someone was reading the candidates.
+#}
+<div id="identify-panel"></div>
+
+<div id="enrichment-body"
+     hx-get="/partials/enrichment"
+     hx-trigger="every 15s, qobuzarr:refresh from:body"
+     hx-swap="innerHTML">
+  {% include "partials/enrichment_body.html" %}
+</div>
+{% endblock %}

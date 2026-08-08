@@ -111,7 +111,7 @@ def album(client: TestClient, album_id: str) -> dict:
 
 def toggle(client: TestClient, album_id: str, query: str = "") -> object:
     """Press the monitor button for one release."""
-    return client.post(f"/ui/albums/{album_id}/monitor{query}", headers=HX)
+    return client.post(f"/legacy/ui/albums/{album_id}/monitor{query}", headers=HX)
 
 
 def queued_ids(client: TestClient) -> set[str]:
@@ -122,10 +122,10 @@ def queued_ids(client: TestClient) -> set[str]:
 @pytest.mark.parametrize(
     ("path", "view"),
     [
-        ("/wanted", "view=wanted"),
-        ("/queue", "view=queue"),
-        ("/", "view=dashboard"),
-        (f"/artists/{ARTIST_ID}", "view=artist"),
+        ("/legacy/wanted", "view=wanted"),
+        ("/legacy/queue", "view=queue"),
+        ("/legacy/", "view=dashboard"),
+        (f"/legacy/artists/{ARTIST_ID}", "view=artist"),
     ],
 )
 def test_every_album_screen_offers_the_toggle(
@@ -139,7 +139,7 @@ def test_every_album_screen_offers_the_toggle(
 
 def test_the_toggle_states_are_distinguishable(client: TestClient) -> None:
     """A monitored row and an ignored row do not render identically."""
-    body = client.get("/wanted?monitored=").text
+    body = client.get("/legacy/wanted?monitored=").text
     assert 'aria-pressed="true"' in body and 'aria-pressed="false"' in body
     assert "btn--icon is-on" in body and "btn--icon is-off" in body
 
@@ -149,13 +149,13 @@ def test_ignoring_from_the_wanted_page_takes_the_row_out_of_the_backlog(
     client: TestClient,
 ) -> None:
     """The whole request: unmonitor a release without leaving the Wanted page."""
-    assert "All Melody" in client.get("/wanted").text
+    assert "All Melody" in client.get("/legacy/wanted").text
 
     response = toggle(client, WANTED_ID, "?view=wanted")
 
     assert response.status_code == 200
     assert album(client, WANTED_ID)["monitored"] is False
-    assert "All Melody" not in client.get("/wanted").text
+    assert "All Melody" not in client.get("/legacy/wanted").text
 
 
 def test_ignoring_a_wanted_release_also_marks_it_skipped(client: TestClient) -> None:
@@ -170,7 +170,7 @@ def test_monitoring_again_puts_it_back_in_the_backlog(client: TestClient) -> Non
     state = album(client, IGNORED_ID)
     assert state["monitored"] is True
     assert state["status"] == AlbumStatus.WANTED.value
-    assert "Screws" in client.get("/wanted").text
+    assert "Screws" in client.get("/legacy/wanted").text
 
 
 def test_the_toggle_is_symmetric(client: TestClient) -> None:
@@ -216,7 +216,7 @@ def test_a_posted_monitored_field_cannot_set_the_value_either(
 ) -> None:
     """The route takes no form body; a stray field must not become the value."""
     client.post(
-        f"/ui/albums/{IGNORED_ID}/monitor?view=wanted",
+        f"/legacy/ui/albums/{IGNORED_ID}/monitor?view=wanted",
         data={"monitored": "false"},
         headers=HX,
     )
@@ -320,8 +320,8 @@ def test_download_all_counts_the_backlog_it_will_actually_queue(
     client: TestClient,
 ) -> None:
     """The button ignores the page filter, so its label must not follow it."""
-    unfiltered = client.get("/wanted").text
-    filtered = client.get("/wanted?q=melody").text
+    unfiltered = client.get("/legacy/wanted").text
+    filtered = client.get("/legacy/wanted?q=melody").text
 
     assert "Download all (2)" in unfiltered     # two monitored WANTED releases
     assert "Download all (2)" in filtered       # one row shown, still queues two
@@ -330,7 +330,7 @@ def test_download_all_counts_the_backlog_it_will_actually_queue(
 
 def test_ignoring_shrinks_what_download_all_would_take(client: TestClient) -> None:
     toggle(client, WANTED_ID, "?view=wanted")
-    assert "Download all (1)" in client.get("/wanted").text
+    assert "Download all (1)" in client.get("/legacy/wanted").text
 
 
 def test_the_artist_is_left_alone(client: TestClient) -> None:

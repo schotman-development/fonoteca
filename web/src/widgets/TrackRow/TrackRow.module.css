@@ -1,0 +1,76 @@
+/* The track row, design 493–498.
+
+   The row shape itself — `gap: 11px; padding: 11px 2px; border-bottom: 1px
+   solid #E9E5DC` (493) — is `ListRow`'s `dense` variant and is NOT restated
+   here; this module is only the four cells and the one thing the shared row
+   gets wrong for a table.
+
+   THE SNAPS:
+     16px  → `--sp-4`     (494, the number column's width)
+     12.5  → `--fs-xs`    (495, the title)
+     11px  → `--fs-3xs`   (494, 496, 497, the three mono cells)
+   `#E9E5DC` is `--c-line-soft`; `#6E6A61` is `--c-ink-mark`; `#00857A` is
+   `--c-ok`; `#D97706` is the amber verdict — as TEXT, so it is `--c-warn`
+   (#B45309, 5.0:1) rather than `--c-warn-solid`, which is for bars and dots;
+   `#DC2626` is `--c-bad`.
+
+   The design paints the track number `#7D786D` (494), which is `--c-ink-faint`
+   — 4.4:1, decoration only. A track number is text somebody reads to find a
+   track, so it takes `--c-ink-mark` (5.4:1), the substitution recorded at the
+   top of tokens.css and already made for the radar row's cancelled state. The
+   number and the duration therefore share one ink where the design had two
+   shades a pixel apart; the audit result is not a pixel apart. */
+
+/* `ListRow` wraps, because a missing-album row carries two buttons that must be
+   allowed to drop. These four cells are a table: a wrapped duration under a
+   wrapped state is unreadable, and the title truncating is what should give. */
+.row {
+  flex-wrap: nowrap;
+}
+
+.number {
+  flex: none;
+  width: var(--sp-4); /* design 494: 16px */
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-2);
+}
+
+.state {
+  flex: none;
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+}
+
+.stateOk {
+  color: var(--c-ok);
+}
+
+.stateWarn {
+  color: var(--c-warn);
+}
+
+.stateBad {
+  color: var(--c-bad);
+}
+
+/* Never measured. Quiet ink, because it is neither good news nor bad. */
+.stateUnknown {
+  color: var(--c-ink-mark);
+}
+
+.duration {
+  flex: none;
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}

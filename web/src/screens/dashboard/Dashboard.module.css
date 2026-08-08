@@ -1,0 +1,96 @@
+/* The dashboard, design 80–202.
+
+   THE SNAPS:
+     56px → `--sp-8`            (90, the gap between the column and the aside)
+     46px → `--sp-7 + --sp-1 + 2px` (92, the gap between the three blocks)
+     38px → `--sp-6 + --sp-1 + 2px` (163, the aside's own block gap)
+     20px → `--sp-4 + --sp-1`   (102, the stat grid's top margin)
+     12px → `--sp-3`            (102, the stat grid's gap)
+     14px → `--sp-3 + 2px`      (165, the eyebrow's bottom padding)
+     11.5 → `--fs-2xs`          (197, the status line)
+   `#DFD9CE` is `--c-line`; `#6E6A61` is `--c-ink-mark`. */
+
+.section {
+  composes: section from '../screen.module.css';
+}
+
+.header {
+  composes: header from '../screen.module.css';
+  composes: wellNarrow from '../screen.module.css';
+}
+
+.headerMain {
+  composes: headerMain from '../screen.module.css';
+}
+
+.title {
+  composes: title from '../screen.module.css';
+}
+
+.lede {
+  composes: lede from '../screen.module.css';
+}
+
+/* Design 90: the body, a wrapping row of one wide column and one narrow one. */
+.body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  max-width: var(--layout-content-narrow);
+}
+
+/* 92 */
+.column {
+  flex: 4 1 290px;
+  min-width: 0;
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sp-7) + var(--sp-1) + var(--sp-px) * 2);
+}
+
+/* 163. `position: sticky` here is the aside's own, not the frame's — the
+   scroller is the section and this rides inside it. */
+.aside {
+  flex: 1 1 200px;
+  min-width: 190px;
+  max-width: 300px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sp-6) + var(--sp-1) + var(--sp-px) * 2);
+}
+
+/* 102: four tiles that collapse to two and then to one. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 128px), 1fr));
+  gap: var(--sp-3);
+  margin-top: calc(var(--sp-4) + var(--sp-1));
+}
+
+/* 144–159: the missing-album rows hang off the ruled heading with no gap. */
+.rows {
+  display: block;
+}
+
+.empty {
+  padding: var(--sp-4) 0;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-3);
+}
+
+/* 197 */
+.jobsStatus {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-2xs);
+  color: var(--c-ink-mark);
+}
+
+.placeholderRow {
+  padding: calc(var(--sp-3) + var(--sp-px) * 2) 0;
+  border-bottom: var(--sp-px) solid var(--c-line-soft);
+}

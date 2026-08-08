@@ -1,0 +1,110 @@
+/* Design lines 28–41. `position: relative` on the bar is what the centred
+   command trigger is absolutely positioned against, and it is the only
+   positioned element in the frame — nothing here is sticky, because the shell's
+   bands are `flex: none` siblings of the one scroller. */
+
+.bar {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  min-height: var(--layout-topbar-h);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--c-paper);
+  border-bottom: var(--sp-px) solid var(--c-line);
+}
+
+/* Design 29–31: `15.5px/600`, -0.01em. 15.5 is not on the ladder and must not
+   join it for one word — it sits between --fs-sm (14) and --fs-md (16), so it is
+   written once, here, as this element's own measurement. */
+.wordmark {
+  --wordmark-size: 15.5px;
+
+  flex: 0 0 auto;
+  font-size: var(--wordmark-size);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-snug);
+  color: var(--c-ink);
+}
+
+/* Design 32: absolutely centred, and its width leaves room for the wordmark and
+   the scan button on either side. A real <button> wearing the design's input. */
+.command {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2) calc(var(--sp-2) + var(--sp-px) * 2);
+  width: min(480px, calc(100% - 560px));
+  min-width: 220px;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: inherit;
+  text-align: left;
+  background: var(--c-canvas);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: 9px; /* design 32 — between --r-sm (8) and --r-md (10) */
+  cursor: pointer;
+  transition: border-color var(--mo-fast) var(--mo-ease);
+}
+
+.command:hover {
+  border-color: var(--c-line-mute);
+}
+
+/* Design 33: the mono ⌘ that marks the field as a command surface. */
+.commandGlyph {
+  flex: none;
+  font-family: var(--ff-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  color: var(--c-ink-mark);
+}
+
+/* Design 34. Painted --c-ink-mark rather than the design's #7D786D: this is
+   text, and #7D786D is decoration-only (tokens.css, deviation 1). */
+.commandHint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-mark);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Design 37: the key cap. */
+.commandKey {
+  flex: none;
+  padding: var(--sp-px) var(--sp-1);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--sp-1);
+}
+
+/* Design 38: pushed right, and it stays right of the absolutely-centred
+   trigger because that trigger is out of flow. */
+.actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2) calc(var(--sp-2) + var(--sp-1) / 2);
+  margin-left: auto;
+}
+
+/* Below the width where the centred trigger would collide with either side, it
+   stops being centred and becomes an ordinary flex child. The design draws one
+   viewport; this is the smallest honest way to keep the bar usable in the
+   others. */
+@media (max-width: 900px) {
+  .command {
+    position: static;
+    width: auto;
+    transform: none;
+  }
+}

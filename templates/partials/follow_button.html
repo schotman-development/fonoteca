@@ -1,6 +1,9 @@
 {#
   Replacement for the "Monitor" button after an artist has been followed.
-  Context: artist_id (str), followed (bool), name (str)
+  Context: artist_id (str), followed (bool), name (str),
+           quiet (bool, optional — a row in a list, where a filled button would
+           be one of ten primaries on the screen). Undefined is falsy, so both
+           the Artists section and the POST re-render keep the primary.
 #}
 {% if followed %}
 <a class="btn btn--sm btn--quiet" href="/artists/{{ artist_id }}">Monitored ✓</a>
@@ -8,6 +11,6 @@
 <form hx-post="/ui/artists/add" hx-target="this" hx-swap="outerHTML" hx-trigger="submit">
   <input type="hidden" name="artist_id" value="{{ artist_id }}">
   <input type="hidden" name="name" value="{{ name }}">
-  <button class="btn btn--sm btn--primary" type="submit">Monitor artist</button>
+  <button class="btn btn--sm {{ 'btn--quiet' if quiet else 'btn--primary' }}" type="submit">Monitor artist</button>
 </form>
 {% endif %}

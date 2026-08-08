@@ -1,0 +1,105 @@
+/* The side sheet — design lines 350–357 (Edit tags), 376–384 (Artist settings)
+   and 425–437 (Release detail). Three drawers, one rule, byte for byte:
+
+     width: min(408px, 45%); min-width: 300px; flex: none;
+     border-left: 1px solid #DFD9CE; background: #FFFFFF;
+     overflow-y: auto; animation: cadFade 0.25s ease both;
+
+   THE LOAD-BEARING PART IS `flex: none`. This is a flex SIBLING of the page's
+   `<section>`, not an overlay: the design's own markup puts the `<aside>` next
+   to the section inside the same row, so opening a drawer makes the content
+   column narrower rather than covering it. Everything about that is deliberate
+   — the artist grid behind an open release drawer stays readable and clickable,
+   which is why the dialog is non-modal (see Drawer.tsx) — and it is the one
+   thing a `position: fixed` "improvement" would destroy.
+
+   Two dimensions are custom properties on `.drawer` rather than tokens, for the
+   reason `shared/switch.module.css` gives about the 34×19 track: they are one
+   component's shape, not a shared measurement. 408px IS a token
+   (`--layout-drawer-w`); 300px is not, and nothing else in the app is 300px
+   because a drawer is.
+
+   Padding snapping: the design writes `28px 26px 0` on the header and
+   `22px 26px 32px` on the body. None of 22/26/28 is on the 4px space scale, so
+   they snap to `--sp-6` / `--sp-5` the same way the design's fourteen font
+   sizes snap onto the nine-step ladder. The body's 20px gap snaps to `--sp-5`. */
+
+.drawer {
+  --drawer-min-w: 300px;
+
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: min(var(--layout-drawer-w), 45%);
+  min-width: var(--drawer-min-w);
+  border-left: var(--sp-px) solid var(--c-line);
+  background: var(--c-paper);
+  overflow-y: auto;
+  animation: fadeIn var(--mo-base) var(--mo-ease) both;
+}
+
+/* The panel takes focus on open (tabindex="-1"), and a focus ring drawn around
+   a full-height sheet is noise rather than orientation — the ring belongs on
+   the control the user then tabs to. This is the one place the global
+   `:focus-visible` treatment is suppressed, and only for the programmatic
+   focus: a keyboard user never reaches this element by tabbing to it. */
+.drawer:focus {
+  outline: none;
+}
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-5) 0;
+}
+
+.heading {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 17px/600, --ls-snug (design 355, 383, 429). `h2` in base.css is 16px, so the
+   one step up is set here rather than by reaching for an `h1` the screen
+   already owns. */
+.title {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-snug);
+  color: var(--c-ink);
+  text-wrap: pretty;
+}
+
+/* Placement only. The borderless × itself (356, 383, 436) is `Button`'s
+   `close` variant — 17px in `--c-ink-mark`, no box at all — which this file
+   used to restate in full. All that is left here is where it sits in the
+   header row, which is genuinely the Drawer's business and nothing else's. */
+.close {
+  flex: none;
+  align-self: flex-start;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+}
+
+/* The action row the design puts at the foot of both edit drawers (367, 415):
+   `padding-top: 4px; border-top: 1px solid #E9E5DC`, its buttons pushed down.
+   It sits INSIDE the body so the body's own gap and side padding apply — a
+   separate padded block would give the footer a different left edge from the
+   fields above it. */
+.footer {
+  display: flex;
+  flex: none;
+  gap: var(--sp-2);
+  align-items: center;
+  padding-top: var(--sp-4);
+  border-top: var(--sp-px) solid var(--c-line-soft);
+}

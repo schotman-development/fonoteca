@@ -1,0 +1,39 @@
+/* The mono micro-label — the design's quiet second line.
+
+   `font-family: 'IBM Plex Mono'; font-size: 11px; color: #6E6A61` appears on
+   the To-do count (168), the artist grid's meta line (261), the album meta line
+   (290), the drawer footnotes (371, 419), the release-header block (434), a
+   source chip's field count (473), the paths caption (481), track numbers and
+   durations (494–497), the radar's date line (550) and note (559), a followed
+   artist's meta (574), the identify sub-line (623) and reason (633), the Rules
+   rank (763) and role (766), the activity time (815) and detail (819), and the
+   footer's counts (843). It is the mono counterpart of the eyebrow, and it is
+   defined once here for the same reason.
+
+   Two of those sites are painted #7D786D in the design (the sidebar version
+   line, 72, and the footer host, 844). That value is `--c-ink-faint`, which is
+   4.4:1 and decoration only, so this recipe paints them `--c-ink-mark` — the
+   approved substitution recorded at the top of tokens.css, not a deviation of
+   this file's own.
+
+   `.metaMuted` is NOT a third colour: it is the same text at the design's own
+   quieter weight for a value that sits inside a coloured control (a chip's
+   trailing count, 247, which is `opacity: .6` over whatever the chip is
+   painted). It inherits colour on purpose — the one place a count must follow
+   its container rather than the ramp. */
+
+.meta {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-regular);
+  font-variant-ligatures: none;
+  line-height: var(--lh-snug);
+  color: var(--c-ink-mark);
+}
+
+.metaMuted {
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  color: inherit;
+  opacity: 0.6;
+}

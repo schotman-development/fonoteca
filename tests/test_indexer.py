@@ -23,7 +23,9 @@ from sqlalchemy.pool import StaticPool
 from app.config import Settings
 from app.core.indexer import Indexer, dedupe_key, edition_rank
 from app.core.queue import QueueWorker
+from app.qobuz.client import QobuzError
 from app.models import (
+    Activity,
     Album,
     AlbumStatus,
     Artist,
@@ -212,6 +214,41 @@ async def queued_album_ids(session_maker: async_sessionmaker) -> set[str]:
             select(QueueItem.album_id).where(QueueItem.state == QueueState.PENDING)
         )
         return {row[0] for row in rows.all()}
+
+
+# ---------------------------------------------------------------------------
+# Upstream failure
+# ---------------------------------------------------------------------------
+def test_a_qobuz_failure_is_recorded_rather_than_crashing_the_handler() -> None:
+    """``rollback()`` expires every instance, so the handler that stamps
+    ``last_checked_at`` must not read the artist it was handed afterwards. If it
+    does, the stamp never lands and the sweep picks the same artist forever."""
+
+    class FailingClient(FakeQobuzClient):
+        async def iter_artist_albums(
+            self, artist_id: str | int, release_types: Any = None
+        ) -> AsyncIterator[dict[str, Any]]:
+            raise QobuzError("artist/get failed: 502 Bad Gateway")
+            yield {}  # pragma: no cover - unreachable, makes this a generator
+
+    async def main() -> None:
+        session_maker = await make_sessionmaker()
+        indexer = Indexer(FailingClient(), settings=make_settings())
+        await add_artist_row(session_maker, "100")
+
+        async with session_maker() as session:
+            result = await indexer.check_artist(session, "100")
+
+        assert result.errors, "the Qobuz message reaches the caller"
+        async with session_maker() as session:
+            artist = await session.get(Artist, "100")
+            events = (
+                (await session.execute(select(Activity.event))).scalars().all()
+            )
+        assert artist.last_checked_at is not None, "otherwise this artist is re-picked forever"
+        assert "indexer.error" in events
+
+    asyncio.run(main())
 
 
 # ---------------------------------------------------------------------------

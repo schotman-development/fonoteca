@@ -1,0 +1,56 @@
+/* The design draws no banner band — see the note in Banners.tsx. The stack is
+   therefore built out of the vocabulary the design uses everywhere else: a
+   tinted status background, one hairline in the matching ink, and the same
+   13px/12px pair the rest of the frame speaks in. It is a `flex: none` sibling
+   of the one scroller, exactly like the top bar above it. */
+
+.stack {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+.banner {
+  display: flex;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: var(--sp-px) solid var(--c-line);
+}
+
+/* `info` is the accent rather than a status colour: "the client is not wired
+   up yet" is a state of the installation, not a fault in the library. */
+.info {
+  color: var(--c-accent);
+  background: var(--c-accent-bg);
+}
+
+.warning {
+  color: var(--c-warn);
+  background: var(--c-warn-bg);
+}
+
+.error {
+  color: var(--c-bad);
+  background: var(--c-bad-bg);
+}
+
+/* The title carries the colour; the message is ordinary body ink, because a
+   whole sentence in amber is a sentence nobody can read at a glance. */
+.title {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  color: inherit;
+}
+
+.message {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: var(--layout-measure);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-snug);
+  color: var(--c-ink-2);
+}

@@ -42,3 +42,34 @@
   <span aria-hidden="true">{{ '●' if monitored else '○' }}</span>
 </button>
 {%- endmacro %}
+
+{% macro completion(album) -%}
+{#
+  How much of a release is on disk, as a bar.
+
+  ``complete`` is deliberately three-valued. ``None`` means *unknown*, which is
+  the honest answer for an album the disk scan adopted: only the download loop
+  writes track rows, so there is nothing to count. Showing that as 0% would
+  report a complete album as empty.
+#}
+{%- if album.complete is none -%}
+<span class="muted small" title="No per-track record — this release was adopted from disk">—</span>
+{%- elif album.tracks_on_disk is none -%}
+{# Not a green badge: "the files are there" is the normal, expected outcome,
+   and a colour spent on it is a colour that cannot mark a problem. #}
+<span class="muted small" title="Adopted from disk by the library scan">on disk</span>
+{%- else -%}
+{% set total = album.tracks_count or album.tracks_on_disk or 1 %}
+{% set pct = (100 * album.tracks_on_disk / total) | round | int %}
+<span class="meter" role="img"
+      aria-label="{{ album.tracks_on_disk }} of {{ total }} tracks on disk"
+      title="{{ album.tracks_on_disk }} of {{ total }} tracks on disk">
+  <span class="meter__fill {{ '' if album.complete else 'meter__fill--part' }}"
+        style="width: {{ pct }}%"></span>
+</span>
+{#- The "3/6" that used to sit here said what the bar's aria-label and title
+    already say, in a second typeface, and it is what made the On-disk cell
+    wrap onto two lines in every album table. -#}
+{%- endif -%}
+{%- endmacro %}
+

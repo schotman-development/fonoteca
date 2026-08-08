@@ -1,0 +1,257 @@
+{#
+  One release, in full: everything Qobuz said, everything the open sources
+  added, and every other edition of the same record.
+  Context: album (AlbumOut with tracks), editions (list[AlbumOut]),
+           consensus (dict), settings
+#}
+{% extends "base.html" %}
+{% from "partials/macros.html" import completion, cover, monitor_toggle %}
+
+{% block title %}{{ album.title }}{% endblock %}
+{% block heading %}{{ album.title }}{% endblock %}
+{% block subtitle %}
+  <a href="/artists/{{ album.artist_id }}">{{ album.artist_name }}</a>
+  {%- if album.version %} · {{ album.version }}{% endif %}
+  {%- if album.year %} · {{ album.year }}{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="entity">
+  <div class="entity__art">
+    {% if album.cover_url %}
+    <img src="{{ album.cover_url }}" alt="" referrerpolicy="no-referrer">
+    {% else %}
+    <span class="entity__initial" aria-hidden="true">♪</span>
+    {% endif %}
+  </div>
+
+  <div class="entity__body">
+    {#
+      The one promoted line on the page: is this release on disk, how much of
+      it, and at what quality. Everything else here is a supporting fact.
+      ``completion()`` no longer prints the fraction, which is why this line
+      renders its own when both figures are known.
+    #}
+    <div class="lede">
+      <span class="tag {{ album.status | status_class }}">{{ album.status | enum_value }}</span>
+      {{ completion(album) }}
+      {% if album.tracks_on_disk is not none and album.tracks_count %}
+      <span class="mono">{{ album.tracks_on_disk }}/{{ album.tracks_count }}</span>
+      {% endif %}
+      <span class="qual">{{ album | quality }}</span>
+    </div>
+
+    <div class="tag-row">
+      <span class="tag tag--type">{{ album.release_type }}</span>
+      {% if album.release_type_disagrees %}
+      {#
+        Only reachable with the write-back switched off: normally a majority
+        verdict is applied and there is nothing left to disagree about.
+      #}
+      <span class="tag tag--warn"
+            title="The open sources call this a {{ album.suggested_release_type }}">
+        sources say {{ album.suggested_release_type }}
+      </span>
+      {% endif %}
+    </div>
+
+    {# Genres are a fact, not a state: five dashed outlines said otherwise. #}
+    {% if album.genres %}
+    <div class="small muted">{{ album.genres | join(' · ') }}</div>
+    {% elif album.genre %}
+    <div class="small muted">{{ album.genre }}</div>
+    {% endif %}
+
+    {#
+      kv--inline puts every dt on row one and every dd on row two, so source
+      order IS reading order: the release's own facts first, the identifiers
+      after them, and the filesystem path — the longest and least readable —
+      last rather than shouting from under the heading.
+    #}
+    <dl class="kv kv--inline">
+      <dt>Quality</dt><dd class="mono">{{ album | quality }}</dd>
+      <dt>Tracks / discs</dt><dd class="mono">{{ album.tracks_count }} · {{ album.media_count }}</dd>
+      {% if album.release_date %}<dt>Released</dt><dd class="mono">{{ album.release_date | date }}</dd>{% endif %}
+      {% if album.label %}<dt>Label</dt><dd>{{ album.label }}</dd>{% endif %}
+      {% if album.catalog_number %}<dt>Catalogue no.</dt><dd class="mono">{{ album.catalog_number }}</dd>{% endif %}
+      {% if album.barcode %}<dt>Barcode</dt><dd class="mono">{{ album.barcode }}</dd>{% endif %}
+      {% if album.mb_country %}<dt>Country</dt><dd class="mono">{{ album.mb_country }}</dd>{% endif %}
+      <dt>Qobuz id</dt><dd class="mono">{{ album.id }}</dd>
+      {% if album.path %}<dt>Folder</dt><dd class="mono break">{{ album.path }}</dd>{% endif %}
+    </dl>
+
+    {% if album.mb_release_mbid or album.mb_release_group_mbid or album.deezer_album_id %}
+    <div class="tag-row">
+      {% if album.mb_release_mbid %}
+      <a class="tag tag--link" rel="noreferrer"
+         href="https://musicbrainz.org/release/{{ album.mb_release_mbid }}">MusicBrainz release</a>
+      {% endif %}
+      {% if album.mb_release_group_mbid %}
+      <a class="tag tag--link" rel="noreferrer"
+         href="https://musicbrainz.org/release-group/{{ album.mb_release_group_mbid }}">Release group</a>
+      {% endif %}
+      {% if album.deezer_album_id %}
+      <a class="tag tag--link" rel="noreferrer"
+         href="https://www.deezer.com/album/{{ album.deezer_album_id }}">Deezer</a>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="small muted">
+      Not yet identified on the open sources — see <a href="/enrichment">Enrichment</a>.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+{% if consensus %}
+<section class="card">
+  {# Diagnostics, not the page's subject — and the Votes column names Qobuz
+     among the sources, so the head does not have to. #}
+  <header class="card__head card__head--quiet">
+    <h2>What the sources said</h2>
+  </header>
+  <div class="card__body">
+    {#
+      A value only overwrites Qobuz when more than half the sources with an
+      opinion agree. A split leaves the Qobuz value alone and is shown here so
+      the disagreement is inspectable rather than silent.
+    #}
+    <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Field</th><th>Verdict</th><th>Votes</th></tr></thead>
+      <tbody>
+        {% for field, vote in consensus.items() %}
+        <tr>
+          <td class="mono small">{{ field }}</td>
+          <td>
+            {# Agreement is the ordinary outcome; only the disagreement is
+               worth a chip, which is why the verdict is plain text. #}
+            {% if vote.value %}
+            <span class="strong">{{ vote.value }}</span>
+            <span class="muted small">{{ vote.agreed }} of {{ vote.total }}</span>
+            {% else %}
+            <span class="tag tag--skipped">no majority</span>
+            {% endif %}
+          </td>
+          <td class="tiny muted">
+            {% for source, value in vote.votes.items() %}
+            {{ source }} {{ value }}{% if not loop.last %} · {% endif %}
+            {%- endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if editions | length > 1 %}
+<section class="card">
+  {# No count in the head: it would count the rows immediately beneath it. And
+     no grouping explanation: the identical paragraph is on the release-group
+     page, one click away through the "Release group" link above. #}
+  <header class="card__head">
+    <h2>Other editions</h2>
+  </header>
+  <div class="card__body">
+    <div class="table-wrap">
+    <table class="table">
+      {#
+        The identity column is built exactly as partials/release_group_rows.html
+        builds it — artwork, a .table__title, one sub-line of year · label ·
+        catalogue number — because it is the same object seen from a different
+        screen. Rendered as a bare anchor it inherited `.table td`'s --ink-2
+        body colour, which left the row's loudest element its status chip: the
+        release you are choosing between read quieter than the fact that one of
+        them happens to be on disk. The year moves onto the sub-line for the
+        same reason it does there: four digits do not earn a column, but they
+        are what tells two pressings apart. `qual--hires` travels with it too,
+        or a hi-res pressing is marked on one page and unmarked on the other.
+      #}
+      <thead>
+        <tr><th>Edition</th><th class="num">Tracks</th><th>On disk</th><th>Quality</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for edition in editions %}
+        <tr class="{% if edition.id == album.id %}row--live{% endif %}">
+          <td>
+            <div class="cell-media">
+              {{ cover(edition.cover_url or edition.image_url) }}
+              <div class="cell-media__body">
+                <div class="table__title">
+                  <a href="/albums/{{ edition.id }}">{{ edition.title }}</a>
+                  {%- if edition.version %} <span class="muted">· {{ edition.version }}</span>{% endif %}
+                  {%- if edition.id == album.id %} <span class="tag">this one</span>{% endif %}
+                </div>
+                {% if edition.year or edition.label or edition.catalog_number %}
+                <div class="table__sub">
+                  {%- if edition.year %}{{ edition.year }}{% endif %}
+                  {%- if edition.year and (edition.label or edition.catalog_number) %} · {% endif %}
+                  {%- if edition.label %}{{ edition.label }}{% endif %}
+                  {%- if edition.label and edition.catalog_number %} · {% endif %}
+                  {%- if edition.catalog_number %}<span class="mono">{{ edition.catalog_number }}</span>{% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+          <td class="num mono small">{{ edition.tracks_count or '—' }}</td>
+          <td class="nowrap">{{ completion(edition) }}</td>
+          <td class="nowrap"><span class="qual {% if edition.hires %}qual--hires{% endif %}">{{ edition | quality }}</span></td>
+          <td><span class="tag {{ edition.status | status_class }}">{{ edition.status | enum_value }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  {# Same again: the count counts the rows under it, and the catalogue figure
+     is already in the kv above as "Tracks / discs". #}
+  <header class="card__head">
+    <h2>Tracks</h2>
+  </header>
+  <div class="card__body">
+    {% if album.tracks %}
+    <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th class="num">#</th><th>Title</th><th class="num">Length</th><th>ISRC</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for track in album.tracks %}
+        <tr>
+          <td class="num mono small">
+            {%- if album.media_count > 1 %}{{ track.media_number }}-{% endif %}{{ track.track_number }}
+          </td>
+          <td>{{ track.title }}{% if track.version %} <span class="muted">· {{ track.version }}</span>{% endif %}</td>
+          <td class="num mono small">{{ track.duration | duration }}</td>
+          <td class="mono small">{{ track.isrc or '—' }}</td>
+          {# A column of identical "downloaded" chips marks nothing. Per-track
+             failure appears nowhere else, so the other states still render. #}
+          <td>
+            {% if track.status | enum_value == 'downloaded' %}
+            <span class="muted">—</span>
+            {% else %}
+            <span class="tag {{ track.status | status_class }}">{{ track.status | enum_value }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty">
+      No per-track record. Only the download loop writes these — a release the
+      disk scan adopted has its files but no tracklist here.
+    </p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

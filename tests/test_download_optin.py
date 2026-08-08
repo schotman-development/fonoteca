@@ -126,12 +126,12 @@ def test_single_album_queue_route_still_works(client: TestClient) -> None:
 
 def test_ui_download_wanted_button_renders_and_posts(client: TestClient) -> None:
     """The artist page offers the button, and it swaps the album table."""
-    page = client.get(f"/artists/{ARTIST_ID}")
+    page = client.get(f"/legacy/artists/{ARTIST_ID}")
     assert page.status_code == 200
     assert f"/ui/artists/{ARTIST_ID}/download-wanted" in page.text
 
     posted = client.post(
-        f"/ui/artists/{ARTIST_ID}/download-wanted", headers={"HX-Request": "true"}
+        f"/legacy/ui/artists/{ARTIST_ID}/download-wanted", headers={"HX-Request": "true"}
     )
     assert posted.status_code == 200
     assert queued_ids(client) == set(WANTED_IDS)

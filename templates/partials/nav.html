@@ -2,6 +2,11 @@
   Sidebar navigation, rendered inline by base.html and re-fetched by HTMX so
   the Wanted/Queue badges stay live.
   Context: active (str), nav_counts (dict | undefined)
+
+  A badge here means "there is work waiting". The Library and Library-tidy
+  counts were inventory, not work — a number that is the same on every page
+  load teaches the eye to skip the whole column, including the two badges that
+  do change. ``nav_counts`` still carries them for anyone who wants one back.
 #}
 {% set counts = nav_counts | default({}, true) %}
 
@@ -11,7 +16,6 @@
 </a>
 <a class="nav__link {% if active == 'artists' %}is-active{% endif %}" href="/artists">
   <span class="nav__label">Library</span>
-  {% if counts.get('artists') %}<span class="nav__count">{{ counts['artists'] }}</span>{% endif %}
 </a>
 <a class="nav__link {% if active == 'add' %}is-active{% endif %}" href="/add">
   <span class="nav__label">Add new</span>
@@ -34,9 +38,12 @@
 <a class="nav__link {% if active == 'library-scan' %}is-active{% endif %}" href="/library/scan">
   <span class="nav__label">Disk scan</span>
 </a>
+<a class="nav__link {% if active == 'enrichment' %}is-active{% endif %}" href="/enrichment">
+  <span class="nav__label">Enrichment</span>
+  {% if counts.get('enrichment_review') %}<span class="nav__count nav__count--hot">{{ counts['enrichment_review'] }}</span>{% endif %}
+</a>
 <a class="nav__link {% if active == 'library-tidy' %}is-active{% endif %}" href="/library/tidy">
   <span class="nav__label">Library tidy</span>
-  {% if counts.get('trash') %}<span class="nav__count">{{ counts['trash'] }}</span>{% endif %}
 </a>
 <a class="nav__link {% if active == 'settings' %}is-active{% endif %}" href="/settings">
   <span class="nav__label">Settings</span>

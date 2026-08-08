@@ -1,0 +1,34 @@
+/* The eyebrow, and its one variant.
+
+   Design lines 166, 183, 275, 299, 322, 353, 362, 380, 408, 448, 468, 478,
+   490, 502, 540, 567, 630, 653, 732 — every one of them is
+   `font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+   color: #6E6A61`. It is the single most repeated declaration in the design,
+   which is exactly why it is written once here and `composes:`d rather than
+   copied into Eyebrow, Field, SectionHead, Drawer and KeyValueList.
+
+   `.labelNav` is the same recipe at the design's OTHER letter-spacing, 0.06em:
+   the caption under a Figure (231, 235, 239, 685) and the tag-map column
+   headers (743). Two spacings for one shape is a distinction the design makes
+   deliberately — the wider one sits over a block, the tighter one under a
+   number — so both are named instead of being averaged.
+
+   Colour note: the design paints these #6E6A61 already, so nothing is
+   substituted here. Where the design paints small text #7D786D that value is
+   `--c-ink-faint` and is decoration only; text uses `--c-ink-mark`. */
+
+.label {
+  display: block;
+  font-family: var(--ff-sans);
+  font-size: var(--fs-3xs);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-snug);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-label);
+  color: var(--c-ink-mark);
+}
+
+.labelNav {
+  composes: label;
+  letter-spacing: var(--ls-nav);
+}

@@ -12,10 +12,9 @@
          {% if job.running %}hx-get="/partials/library-import" hx-target="#import-panel"
          hx-swap="outerHTML" hx-trigger="every 4s"{% endif %}>
   <div class="card__head">
+    {# What this costs is stated by the note in the body and again by the
+       confirm on the button; a third telling in the head is not hierarchy. #}
     <h2>Import artists from disk</h2>
-    <span class="muted">
-      one Qobuz search each, through the same rate limiter as everything else
-    </span>
     {% if job.running %}
     <span class="tag tag--active push">running</span>
     {% endif %}
@@ -27,11 +26,11 @@
       <strong>{{ job.processed }}</strong> of <strong>{{ job.total }}</strong> searched
       {%- if job.current %} · looking up <span class="mono">{{ job.current }}</span>{% endif %}
     </div>
-    <span class="meter" style="margin:10px 0" role="img"
+    <span class="meter meter--block" role="img"
           aria-label="{{ job.percent }}% complete">
       <span class="meter__fill" style="width: {{ job.percent }}%"></span>
     </span>
-    <div class="mono tiny faint">
+    <div class="mono tiny muted">
       {{ job.followed }} followed · {{ job.needs_review }} need a decision ·
       {{ job.not_found }} not on Qobuz
       {%- if job.failed %} · {{ job.failed }} failed{% endif %}
@@ -50,16 +49,13 @@
     <div class="readout">
       Last run: {{ job.summary }}
     </div>
-    <div class="mono tiny faint" style="margin-top:4px">
+    <div class="mono tiny muted" style="margin-top:4px">
       finished {{ job.finished_at | ago }}
     </div>
     {% if job.followed %}
     <p class="note" style="margin-top:10px">
-      Those {{ job.followed }} artist(s) are followed but their catalogues are not
-      imported yet — the indexer works through new artists one per tick, so releases
-      appear over the next few hours. Until then the disk scan below will list their
-      albums as “not in the catalogue”, which is expected. Press
-      <strong>Scan now</strong> again once the indexer has caught up.
+      Those {{ job.followed }} artist(s) are followed but their catalogues arrive
+      over the next few hours as the indexer works through them.
     </p>
     {% endif %}
     {% else %}
@@ -83,7 +79,8 @@
         <input class="check__box" type="checkbox" name="monitored" value="true" checked>
         <span class="check__text">monitor the new artists</span>
       </label>
-      <label class="check check--inline">
+      <label class="check check--inline"
+             title="Indexing 500 catalogues at once is tens of thousands of API calls in the first hour; the scheduled tick spreads the same work out.">
         <input class="check__box" type="checkbox" name="index_now" value="true">
         <span class="check__text">index each catalogue immediately</span>
       </label>
@@ -93,12 +90,11 @@
                placeholder="all" style="width:90px">
       </label>
       <button class="btn btn--primary" type="submit">Import artists</button>
-      <span class="toolbar__end tiny faint" style="max-width:420px">
-        Leaving <em>index each catalogue immediately</em> off is strongly
-        recommended: the indexer picks new artists up one per tick on its own
-        schedule, which is thousands of API calls fewer in the first hour.
-      </span>
     </form>
+    <p class="field__hint">
+      Leaving that off is recommended — the indexer picks new artists up on its
+      own schedule.
+    </p>
     {% endif %}
 
     {% if job.errors %}
@@ -114,11 +110,9 @@
 
   {% if job.review %}
   <div class="card__body card__body--flush">
-    <div class="card__head card__head--plain">
+    <div class="card__head card__head--quiet card__head--plain">
       <h2>Needs a decision <span class="count">{{ job.needs_review }}</span></h2>
-      <span class="muted">
-        no Qobuz artist matched the folder name exactly — pick the right one, or none
-      </span>
+      <span class="muted">no exact match — pick the right one, or none</span>
     </div>
     <div class="table-wrap">
     <table class="table table--compact">
@@ -146,7 +140,7 @@
                         hx-target="#follow-{{ option.id }}" hx-swap="innerHTML"
                         hx-confirm="Follow “{{ option.name }}” ({{ option.albums_count }} releases) for the folder “{{ row.name }}”?">
                   {{ option.name }}
-                  <span class="mono tiny faint">{{ option.albums_count }}</span>
+                  <span class="chip">{{ option.albums_count }}</span>
                 </button>
               </span>
               {% endfor %}

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Activity · {{ app_name }}{% endblock %}
 {% block heading %}Activity <span class="count">{{ total }}</span>{% endblock %}
-{% block subtitle %}
-  Append-only history of everything the indexer, queue and downloader have done
-  {%- if filter_level %} · {{ filter_level }} only{% endif %}
-  {%- if filter_event %} · event “{{ filter_event }}”{% endif %}
-{% endblock %}
+{#
+  No subtitle. The first clause restated the heading, and the filter echo was
+  restated by the <select> and the <input> twenty pixels below it. An empty
+  block renders no container at all.
+#}
 
 {% block content %}
 <form class="toolbar filters--inline" id="activity-filters" method="get" action="/activity">
@@ -24,8 +24,6 @@
 
   <button class="btn btn--sm" type="submit">Apply</button>
   <a class="btn btn--sm btn--quiet" href="/activity">Reset</a>
-
-  <span class="toolbar__end mono tiny faint">newest first</span>
 </form>
 
 <section class="card">

@@ -1,0 +1,60 @@
+/* The mono block: a path, a rendered template, or one half of a diff.
+
+   Four sites, two tones (design 480–486, 638–650, 688–692, 722):
+
+     neutral  `--c-canvas` on `--c-line`, ink `--c-ink-2`   — the canonical path
+              (480), the "On disk" half of the diff (642)
+     accent   `--c-accent-bg` on `--c-accent-line`, `--c-accent` — the "Proposed"
+              half (647) and the stack card's proposal (688)
+
+   `.surfaceInset` from shared/ is deliberately NOT composed here even though
+   the neutral tone is the same three declarations: the accent tone is not, and
+   half a component reading a shared recipe while the other half re-declares it
+   is worse than either. The one composed thing is the radius token.
+
+   The snap: the design's 11px and 11.5px both become `--fs-3xs`, which is the
+   token whose whole job is a mono micro-label; 13px/14px/12px of padding all
+   become `--sp-3`; radius 8px/9px becomes `--r-sm`. Line height is the design's
+   own distinction and is kept as a variant — 1.6 for a path (`--lh-normal`) and
+   1.9 for a diff panel (`--lh-log`), where the extra leading is what lets an
+   eye run down two columns line by line.
+
+   `word-break: break-all` because the content is a filesystem path, and a path
+   is one token: without it a 90-character album directory sets the width of the
+   whole drawer. */
+
+.block {
+  border: var(--sp-px) solid var(--c-line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3);
+  background: var(--c-canvas);
+  color: var(--c-ink-2);
+  font-family: var(--ff-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-3xs);
+  line-height: var(--lh-normal);
+  word-break: break-all;
+}
+
+.loose {
+  line-height: var(--lh-log);
+}
+
+.accent {
+  border-color: var(--c-accent-line);
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+}
+
+/* The line inside the block that says what it is — "canonical · 12 files"
+   (481), "⤳ symlink · …" (485). A shade quieter than the block it heads, in
+   each tone's own register. */
+.caption {
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--c-ink-mark);
+}
+
+.accent .caption {
+  color: var(--c-accent-hover);
+}

@@ -4,7 +4,6 @@
 #}
 {% if search_error %}
 <div class="banner banner--warning" role="status">
-  <span class="banner__dot" aria-hidden="true"></span>
   <div>
     <div class="banner__title">Search unavailable</div>
     <div class="banner__msg">{{ search_error }}</div>
@@ -15,12 +14,10 @@
 <p class="empty">Type an artist or album name to search the Qobuz catalogue.</p>
 
 {% else %}
-
-<div class="toolbar filters--inline" style="border-bottom:0;padding-top:0">
-  <span class="readout">Qobuz <b>{{ result.total_artists }} artists</b></span>
-  <span class="readout">Albums <b>{{ result.total_albums }}</b></span>
-  <span class="toolbar__end mono tiny faint">rate-limited live search</span>
-</div>
+{#
+  The readout strip that used to sit here repeated both totals forty pixels
+  above the card heads that state them *and* say how many are shown.
+#}
 
 <section class="card">
   <header class="card__head">
@@ -42,8 +39,7 @@
         <div class="media__body">
           <div class="media__title">{{ artist.name }}</div>
           <div class="media__sub">
-            {{ artist.albums_count }} release{{ '' if artist.albums_count == 1 else 's' }} on Qobuz ·
-            <span class="mono">{{ artist.id }}</span>
+            {{ artist.albums_count }} release{{ '' if artist.albums_count == 1 else 's' }} on Qobuz
           </div>
         </div>
         <div class="media__end">
@@ -64,7 +60,7 @@
 <section class="card">
   <header class="card__head">
     <h2>Releases</h2>
-    <span class="muted">{{ result.albums | length }} of {{ result.total_albums }} — follow the artist to track these</span>
+    <span class="muted">{{ result.albums | length }} of {{ result.total_albums }}</span>
   </header>
   <div class="card__body card__body--flush">
     <ul class="result-list">
@@ -81,17 +77,26 @@
           <div class="media__title">
             {{ album.title }}{% if album.version %} <span class="muted">· {{ album.version }}</span>{% endif %}
           </div>
+          {#
+            The chips ride on the supporting line so that media__end holds
+            exactly one control. "in library" and "tracked" are two different
+            claims, and conflating them told the user they already owned every
+            release of an artist they merely follow.
+          #}
           <div class="media__sub">
             {{ album.artist_name or 'Unknown artist' }}
             {%- if album.year %} · {{ album.year }}{% endif %}
             {%- if album.tracks_count %} · {{ album.tracks_count }} tracks{% endif %}
+            {% if album.hires %} <span class="qual qual--hires">Hi-Res</span>{% endif %}
+            {%- if album.in_library %} <span class="tag">in library</span>
+            {%- elif album.tracked %} <span class="tag">tracked</span>{% endif %}
           </div>
         </div>
         <div class="media__end">
-          {% if album.hires %}<span class="qual qual--hires">Hi-Res</span>{% endif %}
-          {% if album.in_library %}<span class="tag tag--ok">in library</span>{% endif %}
           {% if album.artist_id %}
-          {% with artist_id = album.artist_id, followed = false, name = album.artist_name or '' %}
+          {# Ten black buttons down a result list is ten primaries; the one that
+             follows an artist by name, in the Artists section, keeps it. #}
+          {% with artist_id = album.artist_id, followed = false, name = album.artist_name or '', quiet = true %}
             {% include "partials/follow_button.html" %}
           {% endwith %}
           {% endif %}

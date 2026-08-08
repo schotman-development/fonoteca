@@ -1,16 +1,38 @@
 /* ==========================================================================
-   Qobuzarr — light "hi-fi" theme, ported from the Claude Design document
-   "qobuzarr Screens" (AppShell + screens 01-09).
+   Qobuzarr — light "hi-fi" theme.
 
-   Hand-written, zero external dependencies: no @import, no CDN, no build
-   step. The design specifies IBM Plex Sans/Mono; those are named first in
-   the font stacks so they are used when installed locally, and the stack
-   degrades to system faces on a machine that has never seen a network.
+   This file began as a straight port of a design document. It is no longer
+   that: it is a hierarchy system of its own, rebuilt so that every screen has
+   one thing the eye lands on first, then the supporting numbers, then the
+   metadata — instead of a flat field of similar-looking 13px grey text.
 
-   Palette (straight from the design document):
-     ink      #14161A   surfaces  #FFFFFF / #FBFAF8 / #F4F2EE / #EDEBE5
-     hairline #E3E1DC   dividers  #F4F2EE           backdrop #EFEDE8
-     good     #2E7D4F   hi-res    #8A6212           trouble  #C2410C
+   Still hand-written and still zero external dependencies: no @import, no
+   CDN, no build step. IBM Plex Sans/Mono are named first in the font stacks
+   so they are used when installed locally, and the stack degrades to system
+   faces on a machine that has never seen a network.
+
+   The system, in one paragraph
+   ---------------------------
+   Nine text levels (L0 page title -> L8 chip), declared once each and never
+   re-declared per component. Size, weight and ink all move together, so a
+   demotion is a single class change rather than four properties. Anchors take
+   `color: inherit`, which means a link inside a row title reads as a title and
+   the same link inside a sub-line reads as a sub-line, with no markup at all.
+
+   Colour marks an exception, nothing else. A screen where nothing is wrong
+   shows no --ok, no --warn and no --bad: "downloaded" and "operation
+   succeeded" are the only two places green is allowed, and hi-res is tinted
+   with the neutral --sunk rather than spending an accent on good news.
+   Everything nominal — a healthy dot, a monitored toggle, a finished bar — is
+   rendered in the ink ramp.
+
+   Spacing is one 4/8/12/16/24/32 scale (--sp-1..--sp-6) and nothing else.
+
+   Palette
+     ink      #14161A / #4A4D54 / #6E7278   decoration #A9A69E
+     surfaces #FFFFFF / #FBFAF8 / #F4F2EE / #EDEBE5   backdrop #EFEDE8
+     hairline #E3E1DC   dividers #F4F2EE
+     good     #2E7D4F   hi-res tint --sunk   trouble #C2410C   caution #8A6212
    ========================================================================== */
 
 :root {
@@ -18,8 +40,8 @@
   --backdrop:    #EFEDE8;   /* behind the shell */
   --paper:       #FFFFFF;   /* shell, cards */
   --canvas:      #FBFAF8;   /* inset panels, search field */
-  --sunk:        #F4F2EE;   /* active nav, hover, neutral chip */
-  --fill:        #EDEBE5;   /* artwork placeholder, meter track */
+  --sunk:        #F4F2EE;   /* active nav, hover, neutral chip, hi-res tint */
+  --fill:        #EDEBE5;   /* artwork placeholder, meter track, chips */
 
   /* ---- lines ---- */
   --line:        #E3E1DC;   /* card + section borders */
@@ -27,19 +49,32 @@
   --line-mute:   #CFCCC5;   /* unselected radio/checkbox outline */
   --toggle-off:  #DCD9D2;
 
-  /* ---- ink ---- */
-  --ink:         #14161A;
-  --ink-2:       #5C5F66;
-  --ink-3:       #6E7278;
-  --ink-4:       #8B8880;
-  --ink-5:       #9A9790;
-  --ink-6:       #A9A69E;
+  /* ---- ink ----
+     Four values, and only four. The contrast ratio is against --paper. */
+  --ink:         #14161A;   /* 18.1:1 — identity, values, the one thing per row */
+  --ink-2:       #4A4D54;   /*  8.0:1 — body, table cells, inherited link colour */
+  --ink-3:       #6E7278;   /*  4.8:1 — labels, hints, every secondary line */
+  --ink-faint:   #A9A69E;   /*  2.4:1 — DECORATION ONLY. Never text. */
+  /* The quiet grey for marks that still carry meaning: a control's off state,
+     a progress bar, a proportion. Not text, so 4.5:1 does not apply — but it is
+     not decoration either, and WCAG 1.4.11 puts non-text meaning at 3:1, which
+     --ink-faint misses (2.4:1 on paper, 2.0:1 on --fill). Use this instead
+     whenever removing the grey would remove information. */
+  --ink-mark:    #84817A;   /*  3.9:1 on --paper, 3.3:1 on --fill */
+  /* Deprecated aliases. Kept so that a call site missed during the remap
+     degrades to a legal grey rather than to an invalid var(). Do not write
+     these in any new rule. */
+  --ink-4: var(--ink-3);
+  --ink-5: var(--ink-3);
+  --ink-6: var(--ink-faint);
   --link-hover:  #14337F;
 
-  /* ---- status ---- */
+  /* ---- status ----
+     Spend these only where §2 of the hierarchy spec allows: something is
+     wrong, notable, or safely finished. Nowhere else. */
   --ok:          #2E7D4F;
   --ok-bg:       #E7F0E9;
-  --warn:        #8A6212;   /* also "hi-res" */
+  --warn:        #8A6212;
   --warn-bg:     #FBF3E2;
   --warn-solid:  #B4801A;
   --bad:         #C2410C;
@@ -56,40 +91,58 @@
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
           "DejaVu Sans Mono", monospace;
 
-  --fs-xs:   0.625rem;   /* 10px  — uppercase mono labels */
-  --fs-sm:   0.6875rem;  /* 11px  — footer, counts */
-  --fs-md:   0.75rem;    /* 12px  — secondary text */
-  --fs-base: 0.8125rem;  /* 13px  — body */
-  --fs-lg:   0.84375rem; /* 13.5px— card titles */
-  --fs-xl:   1rem;       /* 16px  — page title */
+  --fs-xs:   0.625rem;   /* 10px — mono uppercase micro-labels ONLY */
+  --fs-sm:   0.6875rem;  /* 11px — supporting lines, footer, log */
+  --fs-md:   0.75rem;    /* 12px — controls and prose you read once */
+  --fs-base: 0.8125rem;  /* 13px — body and table cells */
+  --fs-row:  0.875rem;   /* 14px — row identity */
+  --fs-lg:   0.9375rem;  /* 15px — section / card titles */
+  --fs-xl:   1.25rem;    /* 20px — the page <h1> */
+  --fs-2xl:  1.5rem;     /* 24px — the ONE lead figure on a screen */
+
+  /* ---- spacing ---- one scale, whole app ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
 
   --shadow: 0 18px 50px -24px rgba(20, 22, 26, .28);
 
   /* Layout constants mirrored from the AppShell component. */
-  --topbar-h:  52px;
-  --titlebar-h: 56px;
-  --footer-h:  30px;
+  --topbar-h:   52px;
+  --titlebar-h: 62px;
+  --footer-h:   30px;   /* .toasts reads this — keep the two in step */
   --sidebar-w: 220px;
-  --gutter:    22px;
+  --gutter:     22px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html { -webkit-text-size-adjust: 100%; }
 
+/* L4 — body copy is --ink-2. Anything that should out-rank ordinary prose
+   claims --ink explicitly; that is the whole hierarchy in one declaration. */
 body {
   margin: 0;
   min-height: 100dvh;
   background: var(--backdrop);
-  color: var(--ink);
+  color: var(--ink-2);
   font: 400 var(--fs-base)/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
 
-a { color: var(--ink); text-decoration: none; }
+/* An anchor takes the level of whatever contains it: --ink inside a row
+   title, --ink-2 inside a cell, --ink-3 inside a sub-line. That is the one
+   change that stopped artist links out-shouting release titles. */
+a { color: inherit; text-decoration: none; }
 a:hover { color: var(--link-hover); }
+/* Underlines only where a link sits in running text and needs to be findable. */
+p a, .empty a, .table__sub a, .kv dd a, .log__msg a, .switch__text a,
+.field__hint a, .note a { text-decoration: underline; text-underline-offset: 2px; }
 
-h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
+h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; color: var(--ink); }
 
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
@@ -103,10 +156,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
 /* --------------------------------------------------------------- utilities */
 .mono, code { font-family: var(--mono); }
 .muted   { color: var(--ink-3); }
-.faint   { color: var(--ink-4); }
+/* Deprecated synonym of .muted: the level it used to name is gone. Existing
+   call sites keep working; do not write it in new markup. */
+.faint   { color: var(--ink-3); }
+.dim     { color: var(--ink-2); }
 .small   { font-size: var(--fs-md); }
 .tiny    { font-size: var(--fs-sm); }
 .strong  { font-weight: 500; color: var(--ink); }
+.bad     { color: var(--bad); }
 .nowrap  { white-space: nowrap; }
 .num     { text-align: right; }
 .break   { word-break: break-all; }
@@ -114,19 +171,57 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
 .push    { margin-left: auto; }
 .is-busy { opacity: .55; pointer-events: none; }
 
-/* Small-caps mono section label used all over the design. */
-.eyebrow {
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  letter-spacing: .09em;
-  text-transform: uppercase;
-  color: var(--ink-4);
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+  white-space: nowrap; border: 0;
 }
 
+/* L7 — the label recipe, declared exactly once.
+   Five components used to carry five near-identical copies of this, which is
+   how three of them drifted to an illegal grey. Everything below keeps only
+   its own geometry. `.card__head.card__head--quiet h2` is written with both
+   classes so it out-ranks `.card__head h2` wherever this block sits. */
+.table th,
+.field__label,
+.kv dt,
+.eyebrow,
+.nav__group,
+.card__head.card__head--quiet h2 {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Small-caps mono section label: groups a run of cards on a long page. Always
+   a <div>, never a heading — the page already owns its one <h1>. */
+.eyebrow { display: block; margin: var(--sp-5) 0 var(--sp-2); }
+.eyebrow:first-child { margin-top: 0; }
+
+/* L6 — a link rendered as prose rather than inheriting a row's level. */
 .link {
+  color: var(--ink-2);
+  font-size: var(--fs-md);
   text-decoration: underline;
   text-underline-offset: 2px;
-  font-size: var(--fs-md);
+}
+
+/* L8 — one chip geometry, four families, so they read as one system.
+   .tag = state (may be tinted, see below).  .chip = neutral fact.
+   .qual = a quality readout.  .count / .nav__count = a number on a heading. */
+.tag, .chip, .qual, .count, .nav__count {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  padding: 2px 5px;
+  border-radius: var(--r-chip);
+  white-space: nowrap;
 }
 
 /* ====================================================================== shell
@@ -137,7 +232,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
   flex-direction: column;
   min-height: 100dvh;
   background: var(--paper);
-  color: var(--ink);
+  color: var(--ink-2);
 }
 
 /* ---- top bar ---- */
@@ -148,7 +243,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 16px;
+  gap: var(--sp-4);
   padding: 0 18px;
   background: var(--paper);
   position: sticky; top: 0; z-index: 30;
@@ -162,7 +257,12 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
   font-family: var(--mono); font-size: .875rem; font-weight: 600;
   display: grid; place-items: center;
 }
-.brand__name { font-size: .9375rem; font-weight: 600; letter-spacing: -.01em; }
+/* Demoted: the wordmark used to compete with the page <h1> at the same weight.
+   7px and 100 weight units of clearance settle that without deleting it. */
+.brand__name {
+  font-size: var(--fs-base); font-weight: 500;
+  color: var(--ink-2); letter-spacing: -.01em;
+}
 
 .omnisearch { justify-self: center; width: min(460px, 100%); }
 .omnisearch__field {
@@ -170,22 +270,18 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
   border: 1px solid var(--line);
   border-radius: var(--r-ctl);
   background: var(--canvas);
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--sp-2);
   padding: 0 10px;
 }
 .omnisearch__field:focus-within { border-color: var(--ink); }
-.omnisearch__hint {
-  font-family: var(--mono); font-size: var(--fs-md); color: var(--ink-5);
-  flex: none;
-}
 .omnisearch__input {
   flex: 1; min-width: 0;
   border: 0; background: none; outline: none;
   font: inherit; font-size: var(--fs-md); color: var(--ink);
 }
-.omnisearch__input::placeholder { color: var(--ink-5); }
+.omnisearch__input::placeholder { color: var(--ink-3); }
 
-.shell__top-right { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.shell__top-right { display: flex; align-items: center; gap: var(--sp-2); justify-self: end; }
 
 /* ---- middle ---- */
 .shell__body { flex: 1; display: flex; min-height: 0; }
@@ -199,34 +295,31 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
 }
 .sidebar__nav { display: flex; flex-direction: column; gap: 1px; padding: 0 10px; }
 
-.nav__group {
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--ink-5);
-  padding: 12px 10px 5px;
-}
+/* Typography comes from the label recipe; this is geometry only. The rule
+   above each group after the first is what makes a ten-item list scannable. */
+.nav__group { letter-spacing: .12em; padding: var(--sp-3) 10px 5px; }
 .nav__group:first-child { padding-top: 2px; }
+.nav__group:not(:first-child) { border-top: 1px solid var(--line-soft); margin-top: 6px; }
 
 .nav__link {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--sp-2);
   padding: 7px 10px;
   border-radius: var(--r-ctl);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-base);
   line-height: 1;
   color: var(--ink-2);
 }
 .nav__link:hover { background: var(--sunk); color: var(--ink); }
-.nav__link.is-active { background: var(--sunk); color: var(--ink); font-weight: 600; }
-.nav__label { flex: 1; min-width: 0; }
-.nav__count {
-  font-family: var(--mono); font-size: var(--fs-sm);
-  padding: 2px 6px; border-radius: var(--r-chip);
-  background: var(--sunk); color: var(--ink-2);
+/* The active marker is a rail, not a weight jump: 600 made the current item
+   read as a heading for the ones below it. */
+.nav__link.is-active {
+  background: var(--sunk); color: var(--ink); font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--ink);
 }
+.nav__label { flex: 1; min-width: 0; }
+.nav__count { background: var(--sunk); color: var(--ink-2); }
 .nav__link.is-active .nav__count { background: var(--paper); }
-.nav__count--hot { background: var(--warn-bg); color: var(--warn); }
+.nav__count--hot { background: var(--warn-bg); color: var(--warn); font-weight: 500; }
 
 .shell__main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
@@ -234,51 +327,65 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
 .titlebar {
   min-height: var(--titlebar-h);
   flex: none;
-  display: flex; align-items: center; gap: 16px;
-  padding: 10px var(--gutter);
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3) var(--gutter);
 }
 .titlebar__text { min-width: 0; }
+/* L0 — the one thing on the page that is 20px. */
 .titlebar__title {
-  font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.01em;
-  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.02em;
+  color: var(--ink);
+  display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
 }
-.titlebar__sub { font-size: var(--fs-md); color: var(--ink-3); margin-top: 1px; }
+/* L6 — one line, clamped. A subtitle that wraps to three lines is a paragraph
+   pretending to be a subtitle. */
+.titlebar__sub {
+  font-size: var(--fs-md); color: var(--ink-3); margin-top: 3px;
+  max-width: 78ch;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1; overflow: hidden;
+}
 .titlebar__actions { margin-left: auto; display: flex; gap: 7px; flex: none; flex-wrap: wrap; }
 
 .content { flex: 1; min-height: 0; padding: 0 var(--gutter) 26px; }
-.content--flush { padding: 0; }
 
 /* ---- footer ---- */
 .shell__foot {
   min-height: var(--footer-h);
   flex: none;
   border-top: 1px solid var(--line);
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
   padding: 6px 18px;
   font-size: var(--fs-sm);
   color: var(--ink-3);
   background: var(--paper);
 }
-.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-5); flex: none; }
-.dot--ok   { background: var(--ok); }
+/* Nominal is neutral. A green dot on every healthy pill trained the eye to
+   ignore the colour, which is exactly what you do not want of a status strip. */
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+.dot--ok   { background: var(--ink-faint); }
 .dot--warn { background: var(--warn-solid); }
 .dot--bad  { background: var(--bad); }
 .dot--busy { background: var(--ink); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 
 .stat-pill { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.stat-pill__value { font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink); }
+.stat-pill__value { font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink-2); }
 
 /* ====================================================================== bars
    toolbars and filter strips that sit directly under the title bar
    ========================================================================= */
 .toolbar {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 12px 0 14px;
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  padding: 10px 0 var(--sp-3);
   border-bottom: 1px solid var(--line);
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
-.toolbar__end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+/* The left cluster changes WHAT is shown; .toolbar__end changes HOW it is
+   ordered, plus any read-only note. */
+.toolbar__end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
+/* A select is a control, not a value: it must not out-rank the rows below. */
+.toolbar select.input--sm { color: var(--ink-2); }
 
 /* Segmented control (Grid / Table, Queue / History). */
 .seg {
@@ -292,6 +399,9 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
 .seg__item:hover { background: var(--sunk); color: var(--ink); }
 .seg__item.is-active { background: var(--ink); color: #fff; }
 .seg__item.is-active:hover { background: var(--ink); color: #fff; }
+/* A count riding on a segment, so the filter and its size are one control. */
+.seg__item .chip { margin-left: 6px; background: var(--fill); color: var(--ink-2); }
+.seg__item.is-active .chip { background: rgba(255, 255, 255, .18); color: #fff; }
 
 /* A labelled read-out that looks like a control ("Genre  All"). */
 .readout {
@@ -308,79 +418,108 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
   border: 1px solid var(--line);
   border-radius: var(--r-card);
   overflow: hidden;
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
+/* A card head holds at most three things: the <h2>, one count chip, and one
+   right-aligned link or button group. Not a sentence explaining the panel —
+   that belongs in the panel's own empty state. */
 .card__head {
-  padding: 13px 16px;
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
 }
-.card__head h2 { font-size: var(--fs-lg); font-weight: 600; }
+/* L2 — section title. */
+.card__head h2 { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -.01em; }
 .card__head .muted { font-size: var(--fs-md); }
-.card__head--plain { border-bottom: 0; padding-bottom: 6px; }
-.card__body { padding: 16px; }
+/* L2q — a card whose subject is diagnostics rather than the screen's subject.
+   Its <h2> drops to the label recipe above, so the loud heads stay loud. */
+.card__head--quiet { padding: 10px var(--sp-4); }
+.card__head--plain { border-bottom: 0; padding: 0 0 6px; }
+
+.card__body { padding: var(--sp-4); }
 .card__body--flush { padding: 0; }
+/* So a report panel needs no inline margin overrides. */
+.card__body > p:first-child { margin-top: 0; }
+.card__body > p:last-child  { margin-bottom: 0; }
+.card__body .meter--block   { margin: 10px 0; }
+
 .card__foot {
-  padding: 12px 16px;
+  padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--line);
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
 }
 
-.count {
-  font-family: var(--mono); font-size: var(--fs-sm); font-weight: 400;
-  color: var(--ink-2); background: var(--sunk);
-  border-radius: var(--r-chip); padding: 2px 6px;
-}
+/* --ink-2, for the reason given at .chip: 10px mono on --sunk is 4.33:1 at
+   --ink-3 and 7.57:1 here. */
+.count { background: var(--sunk); color: var(--ink-2); }
 
-.grid { display: grid; gap: 16px; }
-.grid--2 { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); align-items: start; }
-.grid--split { grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); align-items: start; }
-.stack { display: flex; flex-direction: column; gap: 16px; }
+.grid { display: grid; gap: var(--sp-4); }
+/* The subject column and the diagnostics column are not equals. */
+.grid--split { grid-template-columns: minmax(0, 2.4fr) minmax(240px, 1fr); align-items: start; }
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
 
+/* A run of sections on a page that is not made of cards. */
+.dash-section { margin-bottom: 18px; }
+
+/* L6 — an explanation or a reported outcome. Un-boxed: 31 of these were
+   drawn as filled panels, which made every screen look like a warning. */
 .note {
-  background: var(--canvas);
-  border: 1px solid var(--line);
-  border-radius: var(--r-ctl);
-  padding: 12px 14px;
-  margin: 0 0 16px;
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  padding: 0 0 0 var(--sp-3);
+  margin: 0 0 14px;
   font-size: var(--fs-md);
-  color: var(--ink-2);
+  color: var(--ink-3);
+  max-width: 78ch;
   text-wrap: pretty;
 }
 .note b, .note strong { color: var(--ink); font-weight: 500; }
+/* A note that reports an outcome rather than explaining a screen. */
+.note--ok   { border-left-color: var(--ok);         color: var(--ink); }
+.note--warn { border-left-color: var(--warn-solid); color: var(--ink); }
+
+/* A block of literal configuration text (an .env line, a naming template). */
+.code-block {
+  font-family: var(--mono); font-size: var(--fs-md);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: 10px var(--sp-3);
+  word-break: break-word;
+}
 
 /* ================================================================== headline
-   the metric strip across the top of the dashboard
+   the metric strip across the top of a screen
    ========================================================================= */
 .metrics {
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  display: flex; align-items: flex-end; gap: var(--sp-5); flex-wrap: wrap;
   font-size: var(--fs-md); color: var(--ink-3);
-  padding: 0 0 16px;
+  padding: 0 0 18px;
 }
-.metric { display: flex; align-items: baseline; gap: 6px; }
-.metric__value { font-size: .9375rem; font-weight: 600; color: var(--ink); }
+/* Column, so the bare text node after </a> falls under the number as its
+   label without any extra markup. */
+.metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* L3 */
+.metric__value {
+  font-size: var(--fs-lg); font-weight: 600; color: var(--ink);
+  line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+/* L1 — the ONE lead figure on a screen. Two screens in the whole app have one. */
+.metric__value--lead { font-size: var(--fs-2xl); letter-spacing: -.02em; }
 .metric__value--warn { color: var(--warn); }
-.metric__value--bad  { color: var(--bad); }
-.metric__value--ok   { color: var(--ok); }
+/* A healthy number is not news. */
+.metric__value--ok   { color: inherit; }
 .metric a { color: inherit; }
-
-/* Big number tiles (mobile-style summary, settings). */
-.figures { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-.figure {
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--r-card); padding: 12px 14px;
-  display: block; color: var(--ink);
-}
-a.figure:hover { border-color: var(--ink-6); color: var(--ink); }
-.figure__value { font-size: 1.5rem; font-weight: 600; margin-top: 6px; line-height: 1.1; }
-.figure__value--warn { color: var(--warn); }
-.figure__value--bad  { color: var(--bad); }
-.figure__sub { font-size: var(--fs-md); color: var(--ink-3); margin-top: 2px; }
+.metric a:hover .metric__value { color: var(--link-hover); }
 
 /* ==================================================================== tables
-   The design lays its tables out with CSS grid; these are real <table>
-   elements styled to match, so they stay sortable, selectable and readable
-   by assistive tech.
+   Real <table> elements, styled to match the design's grid layout so they
+   stay sortable, selectable and readable by assistive tech.
+
+   Doctrine: one identity column, at most three measures, at most one state
+   chip, at most three actions. Six columns, or seven with a selector.
    ========================================================================= */
 .table-wrap { overflow-x: auto; }
 .table {
@@ -388,73 +527,90 @@ a.figure:hover { border-color: var(--ink-6); color: var(--ink); }
   border-collapse: collapse;
   font-size: var(--fs-base);
 }
+/* Typography from the label recipe; geometry here. The z-index is deliberately
+   1: the top bar is 30 and the header is meant to slide under it. */
 .table th {
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  font-weight: 400;
-  letter-spacing: .09em;
-  text-transform: uppercase;
-  color: var(--ink-4);
   text-align: left;
-  padding: 10px 16px;
+  padding: var(--sp-2) 14px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   white-space: nowrap;
   position: sticky; top: 0; z-index: 1;
 }
 .table td {
-  padding: 11px 16px;
+  padding: 10px 14px;
   border-top: 1px solid var(--line-soft);
   vertical-align: middle;
+  color: var(--ink-2);
 }
 .table tbody tr:first-child td { border-top: 0; }
 .table th.num, .table td.num { text-align: right; }
 .table tbody tr:hover { background: var(--canvas); }
-.table--compact th { padding: 8px 16px; }
-.table--compact td { padding: 9px 16px; }
-.table__title { font-weight: 500; }
-.table__sub { font-size: var(--fs-md); color: var(--ink-3); }
+.table--compact th { padding: 7px 14px; }
+.table--compact td { padding: var(--sp-2) 14px; }
+
+/* L3 — row identity. The only thing in a normal row rendered in --ink. */
+.table__title { font-size: var(--fs-row); font-weight: 500; color: var(--ink); }
+/* L5 — exactly one of these per row, at most three facts joined by " · ". */
+.table__sub { font-size: var(--fs-sm); color: var(--ink-3); }
+
 .row--active { background: var(--sunk); }
 .row--active:hover { background: var(--sunk); }
-.row--muted .table__title { color: var(--ink-4); }
+.row--active .table__title { font-weight: 600; }
+/* The row you are currently looking at, inside a list of its siblings. */
+.row--live { background: var(--sunk); box-shadow: inset 2px 0 0 var(--ink); }
+/* Not monitored. This is now the primary "ignored" signal, so it is a real
+   demotion rather than a shade change on the title alone. */
+.row--muted .table__title { color: var(--ink-3); font-weight: 400; }
+.row--muted td { color: var(--ink-3); }
 
+/* Where a panel's explanation lives, so its head does not have to carry one. */
 .empty {
   color: var(--ink-3); text-align: center;
-  padding: 34px 16px; margin: 0;
+  padding: 28px var(--sp-4); margin: 0;
   font-size: var(--fs-base);
+  text-wrap: pretty;
 }
 .table-note {
-  margin: 0; padding: 10px 16px;
+  margin: 0; padding: 10px var(--sp-4);
   border-top: 1px solid var(--line-soft);
-  font-size: var(--fs-md); color: var(--ink-4);
+  font-size: var(--fs-sm); color: var(--ink-3);
 }
 
 /* ===================================================================== chips
-   quality readouts, statuses and release types
+   quality readouts, statuses and release types. Geometry is declared once at
+   the top of the file; this is colour and the handful of variants.
+
+   Ceiling: two chips per row — the state .tag plus at most one .qual. A third
+   chip is a deletion, not a layout problem.
    ========================================================================= */
-.qual {
-  display: inline-block;
-  font-family: var(--mono); font-size: var(--fs-xs);
-  padding: 2px 5px; border-radius: var(--r-chip);
-  background: var(--fill); color: var(--ink-2);
-  white-space: nowrap;
-}
-.qual--hires { background: var(--warn-bg); color: var(--warn); }
-.qual--none  { background: none; color: var(--ink-4); padding-left: 0; }
-/* "16-44.1 -> 24-96": what is on disk, then what an upgrade would fetch. */
+
+/* A neutral fact: a count, a quality, an id. NEVER tinted.
+
+   Ink is --ink-2, not --ink-3, and that is a contrast decision rather than a
+   hierarchy one. A chip is 10px mono on a tinted surface, so WCAG's 4.5:1
+   applies with no large-text exemption: --ink-3 on --fill measures 4.06:1 and
+   on --sunk 4.33:1, both failures. --ink-2 gives 7.10:1 and 7.57:1. It also
+   makes the claim above the geometry rule true — the four families really do
+   read at one weight, instead of .tag sitting a level above its three
+   siblings. Demotion inside the family is expressed by tint (see .qual--none,
+   .tag--skipped), never by dropping below legible. */
+.chip { background: var(--fill); color: var(--ink-2); }
+
+.qual { background: var(--fill); color: var(--ink-2); }
+/* The one tinted quality. Notable, but not a problem: --sunk rather than the
+   warn family, which is reserved for things that need attention. */
+.qual--hires { background: var(--sunk); color: var(--ink); font-weight: 500; }
+.qual--none  { background: none; color: var(--ink-3); padding-left: 0; }
+/* "16-44.1 -> 24-96": what is on disk, then what an upgrade would fetch.
+   Information, not celebration. */
 .qual__to {
   font-family: var(--mono); font-size: var(--fs-xs);
-  color: var(--ok); white-space: nowrap; margin-left: 4px;
+  color: var(--ink-2); white-space: nowrap; margin-left: var(--sp-1);
 }
 
-.tag {
-  display: inline-block;
-  font-family: var(--mono); font-size: var(--fs-xs);
-  padding: 2px 5px; border-radius: var(--r-chip);
-  background: var(--fill); color: var(--ink-2);
-  white-space: nowrap;
-}
-.tag--ok   { background: var(--ok-bg);   color: var(--ok); }
+/* A state. Neutral by default; only the modifiers below may tint one. */
+.tag { background: var(--fill); color: var(--ink-2); }
 .tag--warn { background: var(--warn-bg); color: var(--warn); }
 .tag--bad  { background: var(--bad-bg);  color: var(--bad); }
 .tag--live { background: var(--sunk); color: var(--ink); }
@@ -465,21 +621,81 @@ a.figure:hover { border-color: var(--ink-6); color: var(--ink); }
 .tag--downloading { background: var(--sunk);    color: var(--ink); }
 .tag--downloaded  { background: var(--ok-bg);   color: var(--ok); }
 .tag--failed      { background: var(--bad-bg);  color: var(--bad); }
-.tag--skipped     { background: var(--fill);    color: var(--ink-4); }
+.tag--skipped     { background: var(--fill);    color: var(--ink-2); }
 .tag--pending     { background: var(--fill);    color: var(--ink-2); }
 .tag--active      { background: var(--sunk);    color: var(--ink); }
 .tag--done        { background: var(--ok-bg);   color: var(--ok); }
-.tag--cancelled   { background: var(--fill);    color: var(--ink-4); }
-.tag--level-debug   { background: var(--fill);    color: var(--ink-4); }
+.tag--cancelled   { background: var(--fill);    color: var(--ink-2); }
+.tag--level-debug   { background: var(--fill);    color: var(--ink-2); }
 .tag--level-info    { background: var(--fill);    color: var(--ink-2); }
 .tag--level-warning { background: var(--warn-bg); color: var(--warn); }
 .tag--level-error   { background: var(--bad-bg);  color: var(--bad); }
 
 .tag--type { background: none; border: 1px solid var(--line); color: var(--ink-2); }
 
+/* Enrichment. Genres come from the open sources and there are often several,
+   so they are quieter than a state tag — informative, not shouting. */
+.tag--genre { background: none; border: 1px dashed var(--line); color: var(--ink-3); }
+.tag--link  { background: var(--fill); color: var(--ink-2); text-decoration: none; }
+.tag--link:hover { background: var(--sunk); color: var(--ink); }
+
 .tag-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 
-/* =================================================================== buttons */
+/* ============================================================ meters & bars
+   How much of a release is on disk; how much of an hourly budget is spent.
+   A bar rather than a number because the interesting question is "is this
+   whole?", which is a shape.
+
+   There used to be two .meter blocks and two .input--sm blocks in this file,
+   the later of each silently winning. That is what made --part dead and the
+   On-disk cell wrap to two lines. One of each now, and --part comes after the
+   base fill so it can actually apply.
+   ========================================================================= */
+.meter {
+  display: inline-flex; vertical-align: middle;
+  width: 46px; min-width: 0; height: 5px;
+  border-radius: 3px;
+  background: var(--fill);
+  overflow: hidden;
+}
+.meter--inline { width: 90px; flex: none; }
+.meter--block  { display: flex; width: 100%; }
+.meter__fill        { background: var(--ink); transition: width .3s ease; }
+.meter__fill--part  { background: var(--warn-solid); }
+.meter__fill--warn  { background: var(--warn-solid); }
+.meter__fill--bad   { background: var(--bad); }
+
+/* Queue progress: only the row actually downloading gets a dark bar, so a
+   column of identical bars stops reading as a column of identical bars. */
+.progress-cell { display: flex; align-items: center; gap: var(--sp-2); min-width: 130px; }
+.progress-cell .meter__fill { background: var(--ink-mark); }
+.row--active .progress-cell .meter__fill { background: var(--ink); }
+
+.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.bar { display: grid; grid-template-columns: 84px 1fr 36px; align-items: center; gap: 10px; }
+.bar__track { height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; display: flex; }
+.bar__fill { background: var(--ink-mark); }
+.bar__fill--wanted      { background: var(--warn-solid); }
+.bar__fill--queued      { background: var(--ink-2); }
+.bar__fill--downloading { background: var(--ink); }
+.bar__fill--downloaded  { background: var(--ink-2); }
+.bar__fill--failed      { background: var(--bad); }
+.bar__fill--skipped     { background: var(--line-mute); }
+.bar__value { text-align: right; font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink-3); }
+
+/* ================================================================ biography */
+.bio { margin: var(--sp-2) 0; }
+.bio > summary { cursor: pointer; font-size: var(--fs-sm); color: var(--ink-2); }
+.bio__text { white-space: pre-wrap; margin: var(--sp-2) 0 var(--sp-1); max-width: 68ch; }
+.bio__credit { margin: 0; }
+
+/* Inline identify form on the enrichment review list. */
+.inline-form { display: inline-flex; gap: 5px; align-items: center; }
+
+/* =================================================================== buttons
+   Exactly one .btn--primary per screen, and it lives in .titlebar__actions.
+   A primary repeated down a result list is not a primary.
+   ========================================================================= */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 30px; padding: 0 11px;
@@ -490,35 +706,35 @@ a.figure:hover { border-color: var(--ink-6); color: var(--ink); }
   color: var(--ink);
   cursor: pointer;
   white-space: nowrap;
-  transition: background .12s ease, border-color .12s ease;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
 }
 .btn:hover { background: var(--sunk); color: var(--ink); }
 .btn--primary {
   background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 500;
 }
 .btn--primary:hover { background: #24272d; border-color: #24272d; color: #fff; }
-.btn--quiet { color: var(--ink-2); }
-.btn--danger { color: var(--bad); border-color: var(--line); }
+/* A real text button: present, reachable, and not competing. */
+.btn--quiet { color: var(--ink-3); border-color: transparent; }
+.btn--quiet:hover { background: var(--sunk); color: var(--ink); border-color: var(--line); }
+/* Neutral at rest, red on contact. Twenty red buttons is the disease, not the
+   safety measure — the hx-confirm is the gate. */
+.btn--danger { color: var(--ink-3); border-color: var(--line); }
+/* The single irreversible action in the app (Empty trash). Nothing else. */
+.btn--danger-strong { color: var(--bad); border-color: var(--bad); }
 .btn--danger:hover { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
 .btn--sm { height: 27px; padding: 0 10px; }
-.btn--lg { height: 36px; padding: 0 14px; font-size: var(--fs-base); font-weight: 500; }
 .btn--block { width: 100%; }
 .btn--icon { width: 27px; padding: 0; font-size: var(--fs-base); }
-/* The monitor toggle: filled dot = watched, hollow = ignored. */
-.btn--icon.is-on  { color: var(--ok); }
-.btn--icon.is-off { color: var(--ink-4); }
+/* The monitor toggle. Monitored is the normal state, so it is ink; ignored is
+   the marked one, so it is the one that looks different. */
+.btn--icon.is-on  { color: var(--ink); }
+.btn--icon.is-off { color: var(--ink-mark); }
 .btn:disabled, .btn.is-busy { opacity: .5; pointer-events: none; }
 
-.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.btn-stack { display: flex; flex-direction: column; gap: 7px; flex: none; }
+.btn-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
 
 /* ===================================================================== forms */
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; border: 0; padding: 0; margin: 0 0 14px; }
-.field--grow { flex: 1; min-width: 200px; }
-.field__label {
-  font-family: var(--mono); font-size: var(--fs-xs);
-  letter-spacing: .09em; text-transform: uppercase; color: var(--ink-4);
-}
 .field__hint { font-size: var(--fs-md); color: var(--ink-3); text-wrap: pretty; }
 
 .input {
@@ -531,10 +747,10 @@ a.figure:hover { border-color: var(--ink-6); color: var(--ink); }
   width: 100%; min-width: 0;
 }
 .input:focus { border-color: var(--ink); outline: none; }
+/* Every control in a filter strip is this height, so the strip is one height. */
 .input--sm { height: 30px; font-size: var(--fs-md); width: auto; }
-.input--lg { height: 44px; font-size: .9375rem; padding: 0 14px; }
 select.input { cursor: pointer; }
-textarea.input { height: auto; padding: 8px 11px; }
+textarea.input { height: auto; padding: var(--sp-2) 11px; }
 
 .filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .filters .field { margin-bottom: 0; }
@@ -542,8 +758,8 @@ textarea.input { height: auto; padding: 8px 11px; }
 
 /* Checkbox rendered as the design's square swatch. */
 .check {
-  display: flex; align-items: center; gap: 8px;
-  font-size: var(--fs-base); cursor: pointer; margin-bottom: 8px;
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-base); cursor: pointer; margin-bottom: var(--sp-2);
 }
 .check input { position: absolute; opacity: 0; width: 0; height: 0; }
 .check__box {
@@ -580,67 +796,46 @@ textarea.input { height: auto; padding: 8px 11px; }
 .switch input:checked + .switch__track { background: var(--ink); }
 .switch input:checked + .switch__track .switch__knob { transform: translateX(15px); }
 .switch input:focus-visible + .switch__track { outline: 2px solid var(--ink); outline-offset: 2px; }
-.switch__text { min-width: 0; }
+.switch__text { min-width: 0; color: var(--ink); }
 .switch__text div + div { font-size: var(--fs-md); color: var(--ink-3); }
 
-fieldset.field { border: 1px solid var(--line); border-radius: var(--r-ctl); padding: 10px 12px; }
-fieldset.field legend { padding: 0 4px; }
+fieldset.field { border: 1px solid var(--line); border-radius: var(--r-ctl); padding: 10px var(--sp-3); }
+fieldset.field legend { padding: 0 var(--sp-1); }
 
-.inline-msg { margin: 8px 0 0; font-size: var(--fs-md); color: var(--ink-3); }
+.inline-msg { margin: var(--sp-2) 0 0; font-size: var(--fs-md); color: var(--ink-3); }
 .inline-msg--success { color: var(--ok); }
 .inline-msg--warning { color: var(--warn); }
 .inline-msg--error   { color: var(--bad); }
 
 /* ============================================================ key/value list */
 .kv { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 7px 14px; margin: 0; }
-.kv dt { font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: .09em;
-         text-transform: uppercase; color: var(--ink-4); align-self: baseline; }
-.kv dd { margin: 0; font-size: var(--fs-base); min-width: 0; }
-.kv--inline { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 26px; }
+.kv dt { align-self: baseline; }
+.kv dd { margin: 0; font-size: var(--fs-base); color: var(--ink-2); min-width: 0; }
+/* Every dt on row 1, every dd on row 2 — so source order IS reading order. */
+.kv--inline { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 var(--sp-5); }
 .kv--inline dt { grid-row: 1; }
 .kv--inline dd { grid-row: 2; margin-top: 3px; }
 
-/* ============================================================ meters & bars */
-.meter {
-  height: 5px; border-radius: 3px;
-  background: var(--fill);
-  overflow: hidden; display: flex;
-  min-width: 60px;
-}
-.meter__fill { background: var(--ink); transition: width .3s ease; }
-.meter__fill--warn { background: var(--warn-solid); }
-.meter__fill--bad  { background: var(--bad); }
-.meter--inline { width: 90px; flex: none; }
-
-.progress-cell { display: flex; align-items: center; gap: 8px; min-width: 130px; }
-
-.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
-.bar { display: grid; grid-template-columns: 96px 1fr 40px; align-items: center; gap: 10px; }
-.bar__track { height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; display: flex; }
-.bar__fill { background: var(--ink-6); }
-.bar__fill--wanted      { background: var(--warn-solid); }
-.bar__fill--queued      { background: var(--ink-2); }
-.bar__fill--downloading { background: var(--ink); }
-.bar__fill--downloaded  { background: var(--ok); }
-.bar__fill--failed      { background: var(--bad); }
-.bar__fill--skipped     { background: var(--line-mute); }
-.bar__value { text-align: right; font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink-3); }
-
 /* ================================================================== bulk bar
-   Multi-select editing on the library page.
+   Multi-select editing on the library page. Present at all times so the
+   feature is discoverable, but it is a tool rail, not a panel: no border and
+   no fill until at least one artist is ticked and it can actually act.
    ========================================================================= */
 .bulkbar {
   display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
-  background: var(--canvas);
-  border: 1px solid var(--line);
+  background: none;
+  border: 1px solid transparent;
   border-radius: var(--r-card);
-  padding: 12px 14px;
-  margin-bottom: 16px;
-  transition: border-color .12s ease, background .12s ease;
+  padding: var(--sp-3) 0;
+  margin-bottom: var(--sp-4);
+  transition: border-color .12s ease, background .12s ease, padding .12s ease;
 }
-/* Armed = at least one artist ticked. Kept subtle: the bar is always present
-   so the feature is discoverable, and only gains emphasis once it can act. */
-.bulkbar.is-armed { border-color: var(--ink); background: var(--paper); }
+.bulkbar.is-armed {
+  border-color: var(--ink); background: var(--paper); padding: var(--sp-3) 14px;
+}
+#bulk-apply[disabled] {
+  background: var(--paper); border-color: var(--line); color: var(--ink-3);
+}
 
 .bulkbar__all { margin-bottom: 0; align-self: center; }
 .bulkbar__count {
@@ -654,11 +849,9 @@ fieldset.field legend { padding: 0 4px; }
 .bulkbar__field--wide { flex: 1; min-width: 260px; }
 .bulkbar__types { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .bulkbar__end { margin-left: auto; align-self: flex-end; }
-.bulkbar__hint {
-  flex-basis: 100%; margin: 2px 0 0;
-  font-size: var(--fs-md); color: var(--ink-3); text-wrap: pretty;
-}
-.bulkbar__hint .mono { color: var(--ink-2); }
+/* DEPRECATED: the paragraph this styles is scheduled for deletion in
+   artist_list.html. Kept until that markup goes, so the interim render is not
+   an unstyled block of prose. */
 
 .check--inline { margin-bottom: 0; }
 .col-select { width: 34px; }
@@ -666,7 +859,7 @@ fieldset.field legend { padding: 0 4px; }
 /* Selection checkbox floating over a grid tile's artwork. */
 .tile-wrap { position: relative; min-width: 0; }
 .tile-select {
-  position: absolute; top: 8px; left: 8px; z-index: 1;
+  position: absolute; top: var(--sp-2); left: var(--sp-2); z-index: 1;
   margin: 0; padding: 3px;
   background: rgba(255, 255, 255, .82);
   border-radius: var(--r-chip);
@@ -674,23 +867,15 @@ fieldset.field legend { padding: 0 4px; }
 }
 .tile-select .check__box { box-shadow: 0 1px 2px rgba(20, 22, 26, .18); }
 
-.visually-hidden {
-  position: absolute !important;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
-  white-space: nowrap; border: 0;
-}
-
 /* ===================================================================== tiles
    artwork-led cards: artists on the library grid, "needs attention" strip
    ========================================================================= */
-.tiles { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
-.tiles--dense { gap: 13px; grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
+.tiles { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.tiles--dense { gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
 
-.tile { display: flex; flex-direction: column; gap: 8px; color: var(--ink); min-width: 0; }
+.tile { display: flex; flex-direction: column; gap: var(--sp-2); color: var(--ink); min-width: 0; }
 .tile:hover { color: var(--ink); }
-.tile:hover .tile__art { border-color: var(--ink-6); }
+.tile:hover .tile__art { border-color: var(--ink-faint); }
 .tile__art {
   aspect-ratio: 1;
   border-radius: var(--r-ctl);
@@ -698,21 +883,22 @@ fieldset.field legend { padding: 0 4px; }
   border: 1px solid var(--line);
   overflow: hidden;
   display: flex; align-items: flex-end;
-  padding: 8px;
+  padding: var(--sp-2);
   transition: border-color .12s ease;
 }
 .tile__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.tile__art-label { font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink-6); }
-.tile__name { font-size: var(--fs-base); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile__meta { font-size: var(--fs-md); color: var(--ink-3); margin-top: -4px;
+.tile__art-label { font-family: var(--mono); font-size: var(--fs-sm); color: var(--ink-faint); }
+/* L3 */
+.tile__name { font-size: var(--fs-row); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* L5 */
+.tile__meta { font-size: var(--fs-sm); color: var(--ink-3); margin-top: -4px;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile__stat { font-family: var(--mono); font-size: var(--fs-sm); }
-.tile__stat--ok   { color: var(--ok); }
+.tile__stat--ok   { color: var(--ink-3); }
 .tile__stat--warn { color: var(--warn); }
-.tile__stat--bad  { color: var(--bad); }
 .tile__line { display: flex; align-items: center; gap: 6px; margin-top: -4px; min-width: 0; }
 
-/* ================================================================= artwork
+/* ================================================================== artwork
    Cover thumbnails inside table rows (see templates/partials/macros.html).
    ========================================================================= */
 .art {
@@ -724,9 +910,8 @@ fieldset.field legend { padding: 0 4px; }
   display: grid; place-items: center;
 }
 .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.art__fallback { font-size: var(--fs-md); color: var(--ink-6); line-height: 1; }
+.art__fallback { font-size: var(--fs-md); color: var(--ink-faint); line-height: 1; }
 .art--sm { width: 30px; height: 30px; }
-.art--lg { width: 44px; height: 44px; }
 
 /* Artwork + text in a single table cell. */
 .cell-media { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -736,8 +921,8 @@ fieldset.field legend { padding: 0 4px; }
    search results, queue rows, album header
    ========================================================================= */
 .media {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 16px;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--line-soft);
 }
 .media:first-child { border-top: 0; }
@@ -752,24 +937,44 @@ fieldset.field legend { padding: 0 4px; }
 }
 .media__art--lg { width: 64px; height: 64px; }
 .media__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.media__initial { font-size: var(--fs-lg); font-weight: 500; color: var(--ink-6); }
+/*
+ * Artwork stacked ON the placeholder rather than instead of it. The identify
+ * picker cannot know whether a cover exists — a MusicBrainz card points at the
+ * Cover Art Archive by release id, which 404s more often than not — so it
+ * renders both and lets `onerror` drop the image. Same grid cell, or the two
+ * would sit one above the other and double the row height.
+ */
+.media__art > * { grid-area: 1 / 1; }
+.media__art img { z-index: 1; }
+.media__initial { font-size: var(--fs-lg); font-weight: 500; color: var(--ink-faint); }
 .media__body { flex: 1; min-width: 0; }
-.media__title { font-size: var(--fs-base); font-weight: 500; }
-.media__sub { font-size: var(--fs-md); color: var(--ink-3); }
+/* L3 / L5 — same pair as a table row, because it is the same job. */
+.media__title { font-size: var(--fs-row); font-weight: 500; color: var(--ink); }
+.media__sub { font-size: var(--fs-sm); color: var(--ink-3); }
 .media__end { flex: none; display: flex; align-items: center; gap: 10px; }
-.media--framed {
-  border: 1px solid var(--ink);
-  border-radius: var(--r-card);
-  padding: 14px;
-  background: var(--paper);
-}
-.media--framed:hover { background: var(--paper); }
+
+/* ================================================================== picker
+   The identify panel on /enrichment: search an upstream, read the cards, pick
+   one. Framed more strongly than an ordinary card because it is transient and
+   modal-ish — it appears above the page it belongs to and is dismissed.
+   ========================================================================= */
+.card--picker { border-color: var(--ink); }
+.card--picker .card__head { background: var(--canvas); }
+.card--picker .card__head h2 { flex: 1; min-width: 0; }
+.result-list--pick { margin-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.result-list--pick .media { padding-left: 0; padding-right: 0; }
+.result-list--pick .media__title { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.picker__manual { margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+.picker__manual summary { cursor: pointer; font-size: var(--fs-md); color: var(--ink-2); }
+.picker__manual summary:hover { color: var(--ink); }
+.picker__manual .note { margin: 10px 0; }
+.picker__manual .input { min-width: min(28rem, 100%); }
 
 .result-list { list-style: none; margin: 0; padding: 0; }
 
 /* ---- artist / album detail header ---- */
 .entity {
-  display: flex; gap: 20px; flex-wrap: wrap;
+  display: flex; gap: var(--sp-5); flex-wrap: wrap;
   padding: 0 0 18px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 18px;
@@ -783,9 +988,25 @@ fieldset.field legend { padding: 0 4px; }
   display: grid; place-items: center;
 }
 .entity__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.entity__initial { font-size: 2.25rem; font-weight: 600; color: var(--ink-6); }
+.entity__initial { font-size: 2.25rem; font-weight: 600; color: var(--ink-faint); }
 .entity__body { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 10px; }
+/* L4 */
 .entity__blurb { font-size: var(--fs-base); color: var(--ink-2); max-width: 640px; text-wrap: pretty; }
+/* L2 — the one promoted line under a detail heading: state, completeness,
+   quality. Use it where a page needs a single answer above the fold.
+
+   It carries its own bottom margin because it is also used standalone at the
+   top of a card body (the re-file / re-tag / NFO reports), where nothing else
+   supplies separation: the next element there is a .table-wrap or a <ul>, and
+   the `.card__body > p:first-child` reset cannot reach it through the report's
+   own wrapper div. Inside .entity__body the flex `gap` already spaces it, so
+   the margin is zeroed there rather than added to. */
+.lede {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  font-size: var(--fs-lg); font-weight: 500; color: var(--ink);
+  margin: 0 0 var(--sp-3);
+}
+.entity__body > .lede { margin-bottom: 0; }
 
 /* ======================================================================= log
    monospace live log (activity feed, queue log)
@@ -794,41 +1015,51 @@ fieldset.field legend { padding: 0 4px; }
   font-family: var(--mono);
   font-size: var(--fs-sm);
   line-height: 1.85;
-  color: var(--ink-2);
-  padding: 12px 16px;
+  color: var(--ink-3);
+  padding: var(--sp-3) var(--sp-4);
   margin: 0;
   overflow-x: auto;
 }
 .log__line { display: flex; gap: 10px; white-space: nowrap; }
-.log__time { color: var(--ink-4); flex: none; }
-.log__event { color: var(--ink-4); flex: none; min-width: 84px; }
-.log__msg { color: inherit; white-space: pre-wrap; }
-.log__line--debug   { color: var(--ink-4); }
+.log__time { color: var(--ink-3); flex: none; }
+.log__event { color: var(--ink-3); flex: none; min-width: 84px; }
+/* The message is the content; the timestamp and the event name are the index. */
+.log__msg { color: var(--ink); white-space: pre-wrap; }
+.log__line--debug   { color: var(--ink-3); }
 .log__line--warning { color: var(--warn); }
 .log__line--error   { color: var(--bad); }
-.log__line--success { color: var(--ok); }
+/* Success is the majority level in this log; colouring it made the feed a
+   wall of green with the two lines that mattered hidden inside it. */
+.log__line--success { color: inherit; }
+/* .log__msg claims --ink, so the two levels that DO mean something have to
+   restate themselves at higher specificity or the message would swallow them. */
+.log__line--warning .log__msg { color: var(--warn); }
+.log__line--error   .log__msg { color: var(--bad); }
+.log__line--debug   .log__msg { color: var(--ink-3); }
 
 /* ================================================================== banners */
-.banners { display: grid; gap: 8px; padding: 0 0 16px; }
+.banners { display: grid; gap: var(--sp-2); padding: 0 0 var(--sp-4); }
+/* A coloured left edge, the same device .toast already used — one signal
+   instead of a dot plus a border plus a fill. */
 .banner {
   background: var(--paper);
   border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-2);
   border-radius: var(--r-card);
-  padding: 12px 14px;
+  padding: var(--sp-3) 14px;
   display: flex; gap: 10px; align-items: flex-start;
   font-size: var(--fs-base);
 }
-.banner__dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--ink-5); }
-.banner--error   .banner__dot { background: var(--bad); }
-.banner--warning .banner__dot { background: var(--warn-solid); }
-.banner--info    .banner__dot { background: var(--ok); }
-.banner__title { font-weight: 500; }
+.banner--error   { border-left-color: var(--bad); }
+.banner--warning { border-left-color: var(--warn-solid); }
+.banner--info    { border-left-color: var(--ink-2); }
+.banner__title { font-weight: 500; color: var(--ink); }
 .banner__msg { font-size: var(--fs-md); color: var(--ink-3); text-wrap: pretty; }
 
 /* =================================================================== toasts */
 .toasts {
   position: fixed; right: 18px; bottom: calc(var(--footer-h) + 14px); z-index: 60;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: var(--sp-2);
   max-width: min(400px, calc(100vw - 36px));
 }
 .toast {
@@ -838,6 +1069,7 @@ fieldset.field legend { padding: 0 4px; }
   border-radius: var(--r-card);
   padding: 11px 14px;
   font-size: var(--fs-base);
+  color: var(--ink-2);
   box-shadow: var(--shadow);
   animation: toast-in .2s ease-out;
 }
@@ -851,8 +1083,8 @@ fieldset.field legend { padding: 0 4px; }
 .error-detail {
   font-family: var(--mono); font-size: var(--fs-md);
   background: var(--canvas); border: 1px solid var(--line);
-  border-radius: var(--r-ctl); padding: 12px;
-  overflow-x: auto; margin: 12px 0 0;
+  border-radius: var(--r-ctl); padding: var(--sp-3);
+  overflow-x: auto; margin: var(--sp-3) 0 0;
 }
 
 /* =============================================================== responsive */
@@ -865,7 +1097,6 @@ fieldset.field legend { padding: 0 4px; }
 
   .shell__top { grid-template-columns: auto 1fr; gap: 10px; padding: 0 14px; }
   .omnisearch { justify-self: stretch; width: auto; }
-  .omnisearch__hint { display: none; }
   .shell__top-right { display: none; }
 
   /* The sidebar becomes a horizontal rail above the content. */
@@ -888,15 +1119,15 @@ fieldset.field legend { padding: 0 4px; }
   .nav__group { display: none; }
   .nav__link { white-space: nowrap; padding: 7px 9px; }
 
-  .titlebar { flex-wrap: wrap; padding: 12px var(--gutter) 8px; }
+  .titlebar { flex-wrap: wrap; padding: var(--sp-3) var(--gutter) var(--sp-2); }
   .titlebar__actions { margin-left: 0; width: 100%; }
 
   .entity__art { width: 92px; height: 92px; }
   .kv { grid-template-columns: 1fr; gap: 2px; }
-  .kv dd { margin-bottom: 8px; }
+  .kv dd { margin-bottom: var(--sp-2); }
   .kv--inline dt, .kv--inline dd { grid-row: auto; }
-  .table th, .table td { padding: 9px 12px; }
-  .toasts { right: 12px; left: 12px; max-width: none; }
+  .table th, .table td { padding: var(--sp-2) 10px; }
+  .toasts { right: var(--sp-3); left: var(--sp-3); max-width: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
