@@ -9,5 +9,5 @@
  */
 
 export type { ApiClient, ApiClientOptions } from './client.ts'
-export { ApiError, createApiClient } from './client.ts'
+export { ApiError, createApiClient, problemDetail } from './client.ts'
 export type { components, operations, paths } from './schema.d.ts'

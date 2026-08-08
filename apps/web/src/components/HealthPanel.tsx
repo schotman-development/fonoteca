@@ -23,10 +23,19 @@ type LoadState =
  * Plain `useState` + `useEffect` rather than a server-state library: choosing
  * one is still an open decision (see the plan), and hard-wiring TanStack Query
  * here would quietly make it. This is deliberately the throwaway version.
+ *
+ * `refreshKey` is the crudest possible cache invalidation: the counts below are
+ * catalogue rows, and a scan changes them, so something has to say when they
+ * went stale. A server-state library would make this a query key. Until there
+ * is one, it is a number that goes up.
  */
-export function HealthPanel() {
+export function HealthPanel({ refreshKey = 0 }: { readonly refreshKey?: number }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
 
+  // The effect never reads `refreshKey` — re-running is the whole point of it.
+  // The rule models dependencies as inputs to a computation, which an
+  // invalidation token deliberately is not.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is an invalidation token, not an input
   useEffect(() => {
     let cancelled = false
 
@@ -49,7 +58,7 @@ export function HealthPanel() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshKey])
 
   if (state.status === 'loading') {
     return <Text tone="tertiary">Contacting API…</Text>

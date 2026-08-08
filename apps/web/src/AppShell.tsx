@@ -1,11 +1,17 @@
 import { Badge, Stack, Text, ThemeSwitch } from '@fonoteca/ui'
-import type { ReactNode } from 'react'
+import { type ReactNode, useReducer } from 'react'
 
 import styles from './AppShell.module.css'
 import { HealthPanel } from './components/HealthPanel.tsx'
 import { JobsPanel } from './components/JobsPanel.tsx'
+import { LibraryScanPanel } from './components/LibraryScanPanel.tsx'
 
 export function AppShell() {
+  // The one piece of cross-panel state: a scan changes the catalogue, and the
+  // panel showing its row counts has no other way to learn that. This is what a
+  // server-state library would do properly; see the plan.
+  const [catalogueVersion, catalogueChanged] = useReducer((n: number) => n + 1, 0)
+
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
@@ -32,14 +38,18 @@ export function AppShell() {
               Foundation
             </Text>
             <Text tone="secondary" block>
-              Everything below is a live check that one seam of the scaffold works. No product
-              features exist yet.
+              One product feature exists — the library scan. Everything else below is a live check
+              that one seam of the scaffold works.
             </Text>
           </Stack>
 
           <div className={styles.grid}>
+            <Card title="Library — scan">
+              <LibraryScanPanel onScanned={catalogueChanged} />
+            </Card>
+
             <Card title="API — via generated client">
-              <HealthPanel />
+              <HealthPanel refreshKey={catalogueVersion} />
             </Card>
 
             <Card title="Realtime — SignalR">
