@@ -21,6 +21,19 @@ namespace Fonoteca.Integration.Tests;
 /// </remarks>
 public sealed class PostgresFixture : IAsyncLifetime
 {
+    /// <summary>Points Testcontainers at podman before anything asks it to.</summary>
+    /// <remarks>
+    /// <c>PostgreSqlBuilder.Build()</c> validates that a container runtime is
+    /// reachable, and it runs as part of the field initialiser below — before
+    /// <see cref="InitializeAsync"/> gets a chance to set DOCKER_HOST. Doing the
+    /// discovery there set the variable long after the only code that reads it,
+    /// so the whole suite failed with "Docker is either not running or
+    /// misconfigured" on a host where podman was running perfectly. A static
+    /// constructor is ordered before instance field initialisers, so this
+    /// happens in time.
+    /// </remarks>
+    static PostgresFixture() => EnsureContainerRuntimeDiscoverable();
+
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
         .WithImage("docker.io/library/postgres:18-alpine")
         .WithDatabase("fonoteca_test")
@@ -30,11 +43,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public string ConnectionString => _container.GetConnectionString();
 
-    public async ValueTask InitializeAsync()
-    {
-        EnsureContainerRuntimeDiscoverable();
+    public async ValueTask InitializeAsync() =>
         await _container.StartAsync().ConfigureAwait(false);
-    }
 
     public async ValueTask DisposeAsync() => await _container.DisposeAsync().ConfigureAwait(false);
 
