@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The provider adapters, tested against a stub transport rather than the real
+    services. Not because the network is slow — because AcoustID and MusicBrainz
+    are somebody else's production systems with published rate limits, and a
+    test suite that hits them on every run is exactly the traffic their limits
+    exist to stop.
+
+    What is NOT stubbed is the wiring: these tests build the real service
+    collection through AddAcoustId and AddMusicBrainz, so the handler order, the
+    rate gate, the retry pipeline and the User-Agent are the ones the
+    application gets. Only the socket is fake.
+  -->
+
+  <PropertyGroup>
+    <!-- xUnit v3 test projects are executables. -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fonoteca.Providers/Fonoteca.Providers.csproj" />
+    <ProjectReference Include="../../src/Fonoteca.Domain/Fonoteca.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <!--
+    Real MusicBrainz responses, recorded verbatim, embedded rather than copied
+    to the output directory so a test cannot depend on a working directory.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Responses/*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

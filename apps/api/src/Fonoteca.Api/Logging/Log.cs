@@ -14,6 +14,8 @@ namespace Fonoteca.Api.Logging;
 ///   1000-1099  startup and host lifecycle
 ///   1100-1199  realtime / SignalR
 ///   1200-1299  library scanning
+///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
+///              another assembly, but the same numbering
 /// </remarks>
 internal static partial class Log
 {
@@ -41,6 +43,22 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Design-time host detected; skipping migrations and startup checks.")]
     public static partial void DesignTimeStartupSkipped(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1004,
+        Level = LogLevel.Information,
+        Message = "AcoustID has no API key (Fonoteca:AcoustIdApiKey is empty). Fingerprint "
+            + "lookups will be refused. Keys are free for non-commercial use from "
+            + "https://acoustid.org/new-application.")]
+    public static partial void AcoustIdNotConfigured(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1005,
+        Level = LogLevel.Information,
+        Message = "MusicBrainz has no contact (Fonoteca:MusicBrainzContact is empty). Lookups "
+            + "will be refused rather than sent unidentified, which MusicBrainz blocks addresses "
+            + "for. Set it to a URL or an email address.")]
+    public static partial void MusicBrainzNotConfigured(ILogger logger);
 
     [LoggerMessage(
         EventId = 1100,

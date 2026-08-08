@@ -12,5 +12,6 @@
     <Project Path="tests/Fonoteca.Domain.Tests/Fonoteca.Domain.Tests.csproj" />
     <Project Path="tests/Fonoteca.Fixtures/Fonoteca.Fixtures.csproj" />
     <Project Path="tests/Fonoteca.Integration.Tests/Fonoteca.Integration.Tests.csproj" />
+    <Project Path="tests/Fonoteca.Providers.Tests/Fonoteca.Providers.Tests.csproj" />
   </Folder>
 </Solution>

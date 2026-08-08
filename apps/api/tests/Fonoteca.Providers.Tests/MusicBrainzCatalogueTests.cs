@@ -1,0 +1,297 @@
+using System.Net;
+using System.Reflection;
+using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Catalogue;
+using Fonoteca.Providers.MusicBrainz;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http.Resilience;
+using Polly;
+
+namespace Fonoteca.Providers.Tests;
+
+/// <summary>
+/// The MusicBrainz adapter, against responses recorded from the live service.
+/// </summary>
+/// <remarks>
+/// The fixtures under <c>Responses/</c> are verbatim WS/2 documents, captured
+/// on 2026-08-08 and not tidied. That is the point: they carry the details a
+/// hand-written fixture would smooth away — empty strings where a hand-written
+/// one would put null, a partial date, twelve releases for one recording, a
+/// track whose printed number is a string.
+///
+/// The parsing under test is <c>MetaBrainz.MusicBrainz</c>'s, not ours. What is
+/// ours is the mapping to the catalogue's vocabulary, and the wiring that has
+/// to be right for MusicBrainz not to block the address.
+/// </remarks>
+public sealed class MusicBrainzCatalogueTests : IDisposable
+{
+    private const string Contact = "https://example.invalid/fonoteca";
+
+    private static readonly Mbid RecordingId =
+        new(Guid.Parse("cd2e7c47-16f5-46c6-a37c-a1eb7bf599ff"));
+
+    private static readonly Mbid ReleaseId =
+        new(Guid.Parse("db85c244-53e7-441c-bab0-52c9c0d27450"));
+
+    private readonly List<ServiceProvider> _providers = [];
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    /// <summary>
+    /// The rule with teeth. MusicBrainz blocks clients that do not identify
+    /// themselves, and the requests are composed inside MetaBrainz.MusicBrainz
+    /// where no code of ours can add a header — so it goes on the HttpClient,
+    /// and this is what proves it survived the trip.
+    /// </summary>
+    [Fact]
+    public async Task EveryRequestIdentifiesTheApplicationAndAContact()
+    {
+        var (catalogue, stub) = Build(Recorded("recording-lower-your-eyelids.json"));
+
+        await catalogue.GetRecordingAsync(RecordingId, Token);
+
+        var userAgent = Assert.Single(stub.Requests).UserAgent;
+
+        Assert.NotNull(userAgent);
+        Assert.Contains("Fonoteca/", userAgent, StringComparison.Ordinal);
+        Assert.Contains(Contact, userAgent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARecordingLookupAsksForEverythingOneRoundTripCanCarry()
+    {
+        var (catalogue, stub) = Build(Recorded("recording-lower-your-eyelids.json"));
+
+        await catalogue.GetRecordingAsync(RecordingId, Token);
+
+        var request = Assert.Single(stub.Requests);
+
+        Assert.Contains(RecordingId.Value.ToString(), request.Uri.AbsolutePath, StringComparison.Ordinal);
+
+        // At one request per second, splitting these into four lookups turns
+        // identifying one track into four seconds.
+        var query = request.Uri.Query;
+        Assert.Contains("artists", query, StringComparison.Ordinal);
+        Assert.Contains("releases", query, StringComparison.Ordinal);
+        Assert.Contains("release-groups", query, StringComparison.Ordinal);
+        Assert.Contains("media", query, StringComparison.Ordinal);
+        Assert.Contains("isrcs", query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARecordingIsMappedToTheCataloguesVocabulary()
+    {
+        var (catalogue, _) = Build(Recorded("recording-lower-your-eyelids.json"));
+
+        var recording = await catalogue.GetRecordingAsync(RecordingId, Token);
+
+        Assert.NotNull(recording);
+        Assert.Equal(RecordingId, recording.Id);
+        Assert.Equal("Lower Your Eyelids to Die With the Sun", recording.Title);
+        Assert.Equal(TimeSpan.FromMilliseconds(637_333), recording.Length);
+
+        // MusicBrainz sends "" for an absent disambiguation, which is not the
+        // same shape as absent and would leak an empty string into the catalogue.
+        Assert.Null(recording.Disambiguation);
+
+        var credit = Assert.Single(recording.Credits);
+        Assert.Equal("M83", credit.Name);
+        Assert.Equal("Group", credit.ArtistType);
+        Assert.Equal(new Mbid(Guid.Parse("6d7b7cd4-254b-4c25-83f6-dd20f98ceacd")), credit.ArtistId);
+
+        // The last credit in a list has an empty join phrase, not a null one.
+        Assert.Null(credit.JoinPhrase);
+    }
+
+    [Fact]
+    public async Task EveryReleaseTheRecordingAppearsOnIsCarriedWithItsPosition()
+    {
+        var (catalogue, _) = Build(Recorded("recording-lower-your-eyelids.json"));
+
+        var recording = await catalogue.GetRecordingAsync(RecordingId, Token);
+
+        Assert.NotNull(recording);
+
+        // Twelve editions of one album. Choosing between them is a later
+        // question; losing eleven of them here would make it unanswerable.
+        Assert.Equal(12, recording.Appearances.Count);
+
+        var appearance = Assert.Single(recording.Appearances, a => a.ReleaseId == ReleaseId);
+
+        Assert.Equal("Before the Dawn Heals Us", appearance.ReleaseTitle);
+        Assert.Equal("FR", appearance.Country);
+        Assert.Equal("Official", appearance.Status);
+        Assert.Equal("Album", appearance.PrimaryType);
+        Assert.Equal(1, appearance.DiscNumber);
+        Assert.Equal(15, appearance.TrackPosition);
+        Assert.Equal("15", appearance.TrackNumber);
+
+        // The number an incomplete rip is measured against.
+        Assert.Equal(15, appearance.TrackCount);
+    }
+
+    /// <summary>
+    /// A release MusicBrainz only dates to a year must not come back dated to
+    /// the 1st of January — the difference decides which edition sorts first.
+    /// </summary>
+    [Fact]
+    public async Task PartialDatesStayPartial()
+    {
+        var (catalogue, _) = Build(Recorded("recording-lower-your-eyelids.json"));
+
+        var recording = await catalogue.GetRecordingAsync(RecordingId, Token);
+
+        Assert.NotNull(recording);
+
+        var complete = Assert.Single(recording.Appearances, a => a.ReleaseId == ReleaseId);
+
+        Assert.Equal(new ReleaseDate(2005, 1, 24), complete.ReleasedOn);
+        Assert.Equal(new DateOnly(2005, 1, 24), complete.ReleasedOn?.ToDateOnly());
+
+        // And a year-only date resolves to nothing rather than to a guess.
+        Assert.Null(new ReleaseDate(1969, null, null).ToDateOnly());
+        Assert.Equal("1969", new ReleaseDate(1969, null, null).ToString());
+    }
+
+    [Fact]
+    public async Task AReleaseCarriesItsWholeTrackListInOrder()
+    {
+        var (catalogue, _) = Build(Recorded("release-before-the-dawn-heals-us.json"));
+
+        var release = await catalogue.GetReleaseAsync(ReleaseId, Token);
+
+        Assert.NotNull(release);
+        Assert.Equal("Before the Dawn Heals Us", release.Title);
+        Assert.Equal("724356386228", release.Barcode);
+        Assert.Equal("Album", release.PrimaryType);
+
+        var label = Assert.Single(release.Labels);
+        Assert.Equal("Gooom", label.Name);
+        Assert.Equal("Gooom035CD", label.CatalogNumber);
+
+        Assert.Equal(15, release.Tracks.Count);
+        Assert.Equal([.. Enumerable.Range(1, 15)], release.Tracks.Select(t => t.Position));
+        Assert.All(release.Tracks, track => Assert.Equal(1, track.DiscNumber));
+
+        var last = release.Tracks[^1];
+        Assert.Equal("Lower Your Eyelids to Die With the Sun", last.Title);
+        Assert.Equal(RecordingId, last.RecordingId);
+    }
+
+    /// <summary>
+    /// An MBID that AcoustID still points at can have been merged away hours
+    /// ago. That is an answer, not a failure — a batch of 100,000 files cannot
+    /// treat it as one.
+    /// </summary>
+    [Fact]
+    public async Task AnUnknownIdentifierIsNullRatherThanAnException()
+    {
+        var (catalogue, _) = Build(_ => StubHttpHandler.Json(
+            HttpStatusCode.NotFound,
+            """{"error":"Not Found","help":"For usage, please see: https://musicbrainz.org/development/mmd"}"""));
+
+        Assert.Null(await catalogue.GetRecordingAsync(RecordingId, Token));
+    }
+
+    [Fact]
+    public async Task ARateLimitedResponseIsReportedAsUnavailable()
+    {
+        var (catalogue, stub) = Build(_ => StubHttpHandler.Json(
+            HttpStatusCode.ServiceUnavailable,
+            """{"error":"Your requests are exceeding the allowable rate limit."}"""));
+
+        var failure = await Assert.ThrowsAsync<ProviderUnavailableException>(
+            async () => await catalogue.GetRecordingAsync(RecordingId, Token));
+
+        Assert.Equal("MusicBrainz", failure.Provider);
+
+        // Retried, because a rate limit is the most likely thing this ever is.
+        Assert.Equal(2, stub.Requests.Count);
+    }
+
+    [Fact]
+    public async Task WithoutAContactNothingIsSent()
+    {
+        var (catalogue, stub) = Build(
+            Recorded("recording-lower-your-eyelids.json"),
+            options => options.Contact = string.Empty);
+
+        var failure = await Assert.ThrowsAsync<ProviderRejectedException>(
+            async () => await catalogue.GetRecordingAsync(RecordingId, Token));
+
+        Assert.Contains("Fonoteca:MusicBrainzContact", failure.Message, StringComparison.Ordinal);
+
+        // The whole point: an unidentified request works once per address.
+        Assert.Empty(stub.Requests);
+    }
+
+    /// <summary>
+    /// Configuration that would get the address blocked is refused rather than
+    /// obeyed. The public instance is the only server this applies to.
+    /// </summary>
+    [Fact]
+    public void TheOfficialServerIsRecognisedRegardlessOfCase()
+    {
+        Assert.True(new MusicBrainzOptions().IsOfficialServer);
+        Assert.True(new MusicBrainzOptions { Server = new Uri("https://MusicBrainz.org") }.IsOfficialServer);
+        Assert.False(new MusicBrainzOptions { Server = new Uri("http://mirror.lan:5000") }.IsOfficialServer);
+    }
+
+    public void Dispose()
+    {
+        foreach (var provider in _providers) provider.Dispose();
+    }
+
+    private static Func<RecordedRequest, HttpResponseMessage> Recorded(string fixture)
+    {
+        var body = ReadFixture(fixture);
+        return _ => StubHttpHandler.Json(HttpStatusCode.OK, body);
+    }
+
+    private static string ReadFixture(string name)
+    {
+        var assembly = typeof(MusicBrainzCatalogueTests).Assembly;
+        var resource = $"{assembly.GetName().Name}.Responses.{name}";
+
+        using var stream = assembly.GetManifestResourceStream(resource)
+            ?? throw new InvalidOperationException(
+                $"Missing embedded fixture '{resource}'. Available: "
+                + string.Join(", ", assembly.GetManifestResourceNames()));
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private (IMusicBrainzCatalogue Catalogue, StubHttpHandler Stub) Build(
+        Func<RecordedRequest, HttpResponseMessage> respond,
+        Action<MusicBrainzOptions>? configure = null)
+    {
+        var stub = new StubHttpHandler(respond);
+        var services = new ServiceCollection();
+
+        services.AddMusicBrainz(options =>
+        {
+            options.Contact = Contact;
+            // The real interval is a second. Tests assert that requests are
+            // gated, not that they are gated for exactly that long.
+            options.MinimumRequestInterval = TimeSpan.FromMilliseconds(20);
+            configure?.Invoke(options);
+        });
+
+        services.AddHttpClient(MusicBrainzOptions.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => stub);
+
+        services.ConfigureAll<HttpStandardResilienceOptions>(options =>
+        {
+            options.Retry.MaxRetryAttempts = 1;
+            options.Retry.Delay = TimeSpan.FromMilliseconds(1);
+            options.Retry.BackoffType = DelayBackoffType.Constant;
+            options.Retry.UseJitter = false;
+        });
+
+        var provider = services.BuildServiceProvider();
+        _providers.Add(provider);
+
+        return (provider.GetRequiredService<IMusicBrainzCatalogue>(), stub);
+    }
+}

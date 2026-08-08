@@ -5,6 +5,11 @@
     official contract and WILL break without warning, so each lives behind a
     narrow interface declared in Fonoteca.Domain — breakage is then contained to
     one adapter rather than spreading into the catalogue.
+
+    The other two are built: AcoustID answers "what recording is this audio",
+    MusicBrainz answers "what is that recording". Both are rate-limited by
+    policy rather than by capacity, and RequestGate is what keeps this from
+    getting an address blocked.
   -->
 
   <ItemGroup>
@@ -14,6 +19,16 @@
   <ItemGroup>
     <PackageReference Include="MetaBrainz.MusicBrainz" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <!--
+      All three arrive transitively through Http.Resilience anyway. Named
+      explicitly because this project compiles against them: a service
+      collection, an options monitor and a source-generated logger are part of
+      how these adapters are used, not an implementation detail of somebody
+      else's dependency graph.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
 </Project>

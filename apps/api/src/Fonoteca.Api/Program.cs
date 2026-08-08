@@ -6,6 +6,7 @@ using Fonoteca.Api.Startup;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Ingest;
+using Fonoteca.Providers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,15 @@ builder.Services
     // Fail at startup rather than at first use. A misconfigured library path
     // discovered three hours into a scan is a much worse failure.
     .ValidateOnStart();
+
+// The same settings again, read eagerly, because service registration happens
+// before there is a container to resolve IOptions from. It is a copy used only
+// for wiring: the validated instance above is still what the application reads
+// at runtime, and a value bad enough to matter stops the host from starting
+// either way.
+var fonoteca = builder.Configuration
+    .GetSection(FonotecaOptions.SectionName)
+    .Get<FonotecaOptions>() ?? new FonotecaOptions();
 
 // ---------------------------------------------------------------------------
 // Persistence
@@ -68,6 +78,27 @@ builder.Services.AddSingleton<IAudioFileStore>(
 
 builder.Services.AddSingleton<LibraryScanner>();
 builder.Services.AddSingleton<LibraryScanService>();
+
+// ---------------------------------------------------------------------------
+// External services. Both are registered unconditionally, including when the
+// key or the contact is missing: the failure then names the setting at the
+// point of use, which is far more useful than a resolution error saying
+// IAcoustIdLookup is not registered.
+// ---------------------------------------------------------------------------
+
+builder.Services.AddAcoustId(options => options.ApiKey = fonoteca.AcoustIdApiKey);
+
+builder.Services.AddMusicBrainz(options =>
+{
+    options.Server = new Uri(fonoteca.MusicBrainzServer);
+    options.Contact = fonoteca.MusicBrainzContact;
+    options.MinimumRequestInterval =
+        TimeSpan.FromMilliseconds(fonoteca.MusicBrainzRequestIntervalMs);
+
+    // The real version, so a request MusicBrainz has to ask about can be traced
+    // to a build. An honest User-Agent is the whole basis of their rate policy.
+    options.ApplicationVersion = ThisAssembly.Version;
+});
 
 // ---------------------------------------------------------------------------
 // Web

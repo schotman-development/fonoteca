@@ -10,12 +10,15 @@ Four pillars, none of them built yet:
 3. **Upgrade monitoring** — watch for better versions, *arr-style
 4. **Tag editor** — write corrected tags, artwork and MBIDs back to files
 
-> **Status: scaffold, plus the first slice of pillar 1.** The library scan
+> **Status: scaffold, plus the first slices of pillar 1.** The library scan
 > exists: `POST /api/library/scan` walks the library root and reconciles the
 > catalogue's file list with what is on disk — path, size and modification time,
-> and nothing more. Nothing yet hashes, fingerprints, identifies, downloads or
-> writes tags. `Fonoteca:AllowFileMutation` defaults to `false` and no code path
-> writes to an audio file.
+> and nothing more. The AcoustID and MusicBrainz adapters exist too, behind
+> interfaces in `Fonoteca.Domain`, rate-limited and verified against the live
+> services — but nothing calls them yet, because there is no fingerprinting pass
+> to feed them. Nothing hashes, fingerprints, downloads or writes tags.
+> `Fonoteca:AllowFileMutation` defaults to `false` and no code path writes to an
+> audio file.
 
 ## Layout
 
@@ -104,6 +107,22 @@ rather than returning `undefined` in a browser.
 | [0003](docs/adr/0003-custom-design-system.md) | Custom design system, `react` + `react-dom` only — a11y is ours, and axe enforces it in CI |
 | [0004](docs/adr/0004-musicbrainz-shaped-entity-graph.md) | MusicBrainz-shaped entity graph, because it cannot be retrofitted |
 | [0005](docs/adr/0005-typescript-7.md) | TypeScript 7, with the OpenAPI generator isolated on 5.9 |
+
+## Credentials
+
+Neither is required to start, and neither is needed to scan or browse. Both are
+needed to identify anything, and a lookup attempted without them is refused
+locally with a message naming the setting.
+
+| Setting | Where to get it |
+| --- | --- |
+| `Fonoteca:AcoustIdApiKey` | free for non-commercial use at [acoustid.org/new-application](https://acoustid.org/new-application) |
+| `Fonoteca:MusicBrainzContact` | a URL or email address of your own — MusicBrainz blocks clients that do not identify themselves |
+
+`Fonoteca:MusicBrainzServer` points at a mirror if you run one. That is the
+supported way to go faster than one request per second; lowering
+`Fonoteca:MusicBrainzRequestIntervalMs` against the public instance is refused
+at startup, because the unsupported way ends in a blocked address.
 
 ## Still open
 

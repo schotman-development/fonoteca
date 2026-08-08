@@ -7,12 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A self-hosted music library manager for 100,000+ track libraries: catalogue and
 dedupe, acquisition (Qobuz/Deezer), *arr-style upgrade monitoring, tag editing.
 
-**Status: scaffold plus one feature.** The library scan exists — it walks the
-library root and reconciles `MediaFiles` with what is on disk, recording path,
-size and modification time. Nothing else does: no hashing, probing,
-fingerprinting, identification, downloading or tag writing.
-`Fonoteca:AllowFileMutation` defaults to `false` and no code path writes to an
-audio file. Read `README.md` and `docs/adr/` before adding one.
+**Status: scaffold, one feature, two adapters.** The library scan exists — it
+walks the library root and reconciles `MediaFiles` with what is on disk,
+recording path, size and modification time. The AcoustID and MusicBrainz
+adapters exist, are registered and are verified against the live services, but
+**nothing calls them yet**: the fingerprinting pass that would feed them does
+not exist. Still missing between the two: hashing, probing, fingerprinting,
+downloading and tag writing. `Fonoteca:AllowFileMutation` defaults to `false`
+and no code path writes to an audio file. Read `README.md` and `docs/adr/`
+before adding one.
 
 ## Toolchain
 
@@ -136,6 +139,64 @@ It runs in the foreground of the request on purpose — a walk with no file read
 is seconds, even at 100k. The moment a pass opens files it belongs behind
 `IJobQueue` with progress on `JobsHub`, and `LibraryScanService` is the thing
 that gets replaced then, not the foundation it grows on.
+
+### The identification providers, and what they refuse to do
+
+| | |
+| --- | --- |
+| `Domain/Abstractions/IAcoustIdLookup.cs` | fingerprint → AcoustID clusters → recording MBIDs |
+| `Domain/Abstractions/IMusicBrainzCatalogue.cs` | MBID → recording / release, flattened to catalogue shapes |
+| `Domain/Abstractions/ProviderException.cs` | two subclasses, because there are two reactions: retry later, or fix something |
+| `Domain/Identification/RecordingCandidates.cs` | the rule — collapse clusters onto recordings and rank them. Pure |
+| `Providers/RequestGate.cs` | one request at a time, no faster than an interval. Both providers |
+| `Providers/AcoustId/AcoustIdClient.cs` | gzipped form POST, `meta=recordingids sources` |
+| `Providers/MusicBrainz/MusicBrainzCatalogue.cs` | `MetaBrainz.MusicBrainz`, with its rate limiting turned off |
+| `Providers/ProviderServiceCollectionExtensions.cs` | the wiring, which is where most of the correctness lives |
+
+The theme this time is *these are somebody else's production systems and they
+enforce their limits by blocking you*:
+
+- **The rate gate sits underneath the resilience pipeline, not above it.**
+  Handlers run outermost-first in registration order, so `AddStandardResilienceHandler()`
+  goes on before `RateLimitedHandler`. Reversed, a 503 is answered with three
+  immediate retries — the precise burst that turns a temporary rate limit into
+  a lasting block.
+- **`Query.DelayBetweenRequests = 0`, deliberately.** MetaBrainz throttles
+  through a process-wide static, which cannot differ between the official host
+  and a mirror and cannot be substituted in a test. `RequestGate` replaces it.
+  Removing that line without the gate in place is how the address gets blocked.
+- **The attempt timeout is 30s, not the standard 10s.** A cold recording lookup
+  against musicbrainz.org with releases and media included was measured at 10.3
+  seconds. The default would have cancelled it.
+- **`Fonoteca:MusicBrainzRequestIntervalMs` below 1000 is refused at startup**
+  when the server is `musicbrainz.org` (`FonotecaOptions.Validate`). Going
+  faster is what a mirror is for.
+- **The User-Agent is set on the `HttpClient`, not per request**, because
+  `MetaBrainz.MusicBrainz` composes the requests. It is the one header
+  MusicBrainz blocks an address over, so no code path may be able to forget it.
+- **Partial dates stay partial.** `ReleaseDate(Year, Month?, Day?)` rather than
+  `DateOnly`, because MusicBrainz's `NearestDate` turns "1969" into
+  "1969-01-01" — a claim nobody made, and the one that makes a reissue outrank
+  an original when editions are sorted.
+- **AcoustID answers identity, MusicBrainz answers metadata.** `meta=recordingids sources`,
+  never `meta=recordings`: the titles AcoustID would return are a stale mirror
+  of MusicBrainz, and taking them would mean two paths to the same fact ageing
+  at different rates.
+- **One recording can sit under several AcoustID clusters.**
+  `results[0].recordings[0]` is what a naive client reads and it is how a
+  remaster gets tagged as the original. `RecordingCandidates.From` collapses
+  them: max score, summed sources, ties broken by id so a rerun cannot change
+  its mind.
+
+Missing credentials are not startup failures. Without `Fonoteca:AcoustIdApiKey`
+or `Fonoteca:MusicBrainzContact` the app starts, logs one line each, and
+refuses lookups *locally* with a message naming the setting — rather than
+sending an unidentified request to find out.
+
+`Fonoteca.Providers.Tests` builds the real service collection and replaces only
+the socket, so handler order, the gate and the User-Agent are the ones the
+application gets. The MusicBrainz fixtures under `Responses/` are verbatim WS/2
+documents; don't tidy them, the mess is the point.
 
 ### Two things that must stay in a hosted service
 

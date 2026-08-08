@@ -1,0 +1,103 @@
+using System.Collections.Concurrent;
+using System.IO.Compression;
+using System.Net;
+using System.Text;
+
+namespace Fonoteca.Providers.Tests;
+
+/// <summary>
+/// The fake socket: answers from a delegate and records everything that was sent.
+/// </summary>
+/// <remarks>
+/// Installed as the <i>primary</i> handler, so every real handler in the
+/// pipeline — the resilience pipeline, the rate gate, the decompression
+/// settings — is still in the chain above it. That is what makes these tests
+/// worth more than a mocked client would be: the thing under test is the wiring
+/// as much as the code.
+/// </remarks>
+internal sealed class StubHttpHandler(Func<RecordedRequest, HttpResponseMessage> respond)
+    : HttpMessageHandler
+{
+    private readonly ConcurrentQueue<RecordedRequest> _requests = new();
+
+    /// <summary>Every request that reached the wire, in order.</summary>
+    public IReadOnlyList<RecordedRequest> Requests => [.. _requests];
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var body = request.Content is null
+            ? []
+            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+
+        var recorded = new RecordedRequest
+        {
+            Method = request.Method,
+            Uri = request.RequestUri!,
+            UserAgent = request.Headers.UserAgent.Count > 0
+                ? request.Headers.UserAgent.ToString()
+                : null,
+            ContentEncoding = request.Content is null
+                ? []
+                : [.. request.Content.Headers.ContentEncoding],
+            Body = body,
+        };
+
+        _requests.Enqueue(recorded);
+
+        return respond(recorded);
+    }
+
+    /// <summary>Always answers with this status and body.</summary>
+    public static StubHttpHandler Returning(HttpStatusCode status, string body) =>
+        new(_ => Json(status, body));
+
+    public static HttpResponseMessage Json(HttpStatusCode status, string body) =>
+        new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+}
+
+/// <summary>One request as it left the pipeline.</summary>
+internal sealed record RecordedRequest
+{
+    public required HttpMethod Method { get; init; }
+    public required Uri Uri { get; init; }
+    public required string? UserAgent { get; init; }
+    public required IReadOnlyList<string> ContentEncoding { get; init; }
+    public required byte[] Body { get; init; }
+
+    public bool IsGzipped =>
+        ContentEncoding.Contains("gzip", StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The form body, ungzipped first when it was sent compressed.</summary>
+    public IReadOnlyDictionary<string, string> Form()
+    {
+        var bytes = Body;
+
+        if (IsGzipped)
+        {
+            using var compressed = new MemoryStream(Body);
+            using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
+            using var plain = new MemoryStream();
+            gzip.CopyTo(plain);
+            bytes = plain.ToArray();
+        }
+
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var pair in Encoding.UTF8.GetString(bytes).Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var split = pair.IndexOf('=', StringComparison.Ordinal);
+            if (split < 0) continue;
+
+            // '+' is a space in form encoding, which UnescapeDataString does not
+            // know — and `meta` is two space-separated words, so it matters.
+            var key = Uri.UnescapeDataString(pair[..split].Replace('+', ' '));
+            var value = Uri.UnescapeDataString(pair[(split + 1)..].Replace('+', ' '));
+
+            fields[key] = value;
+        }
+
+        return fields;
+    }
+}

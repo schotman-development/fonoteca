@@ -63,6 +63,21 @@ public sealed class StartupTasks(
         {
             Log.FileMutationDisabled(logger);
         }
+
+        // Information, not a warning, and certainly not a failure. Neither
+        // credential is needed to scan, browse or serve a library, and an
+        // installation that never identifies anything is a legitimate one.
+        // Saying so once at boot is what makes "why did identification do
+        // nothing?" answerable without reading code.
+        if (string.IsNullOrWhiteSpace(config.AcoustIdApiKey))
+        {
+            Log.AcoustIdNotConfigured(logger);
+        }
+
+        if (string.IsNullOrWhiteSpace(config.MusicBrainzContact))
+        {
+            Log.MusicBrainzNotConfigured(logger);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

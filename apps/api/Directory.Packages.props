@@ -42,8 +42,26 @@
   </ItemGroup>
 
   <ItemGroup Label="Providers">
+    <!--
+      MetaBrainz.MusicBrainz is maintained by a MusicBrainz server developer and
+      tracks WS/2 as it changes. Hand-rolling that schema means owning forty
+      entity types of somebody else's edge cases.
+    -->
     <PackageVersion Include="MetaBrainz.MusicBrainz" Version="8.0.1" />
+    <!--
+      Retries, circuit breaking and timeouts for the provider HTTP clients. It
+      does NOT supply the rate limiting: Polly's limiters reject once the budget
+      is spent, and what these services need is a queue that makes callers wait.
+      See Fonoteca.Providers/RequestGate.cs.
+    -->
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
+    <!--
+      All three arrive transitively through Http.Resilience. Pinned and
+      referenced directly because Fonoteca.Providers compiles against them.
+    -->
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup Label="Hosting">
@@ -88,6 +106,12 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+    <!--
+      The provider tests build the real service collection rather than
+      constructing the adapters by hand, so the handler order and the rate gate
+      under test are the ones the application gets.
+    -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
   </ItemGroup>
 
 </Project>
