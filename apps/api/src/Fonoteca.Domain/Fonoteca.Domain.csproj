@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    THE DOMAIN REFERENCES NOTHING. No EF Core, no HttpClient, no System.IO.
+
+    That emptiness is the architecture, not an oversight. Entities, matching
+    rules, quality ranking and dedupe decisions live here and are testable with
+    no database, no filesystem and no network. Everything the domain needs from
+    the outside world it declares as an interface in Abstractions/ and receives.
+
+    If a PackageReference ever appears in this file, something has leaked.
+  -->
+
+</Project>

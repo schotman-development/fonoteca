@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Adapters for the four external services. Two of them (Qobuz, Deezer) have no
+    official contract and WILL break without warning, so each lives behind a
+    narrow interface declared in Fonoteca.Domain — breakage is then contained to
+    one adapter rather than spreading into the catalogue.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="../Fonoteca.Domain/Fonoteca.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MetaBrainz.MusicBrainz" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+  </ItemGroup>
+
+</Project>

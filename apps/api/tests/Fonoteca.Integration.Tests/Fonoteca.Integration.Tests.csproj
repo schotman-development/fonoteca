@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests that need real infrastructure. Testcontainers starts an actual
+    PostgreSQL 18 and migrations are applied against it — a migration that only
+    works on an empty in-memory provider is not a migration that works.
+
+    On this host the container runtime is podman, not docker. Testcontainers
+    drives it through the podman socket; see docs/toolchain.md.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fonoteca.Api/Fonoteca.Api.csproj" />
+    <ProjectReference Include="../../src/Fonoteca.Data/Fonoteca.Data.csproj" />
+    <ProjectReference Include="../Fonoteca.Fixtures/Fonoteca.Fixtures.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

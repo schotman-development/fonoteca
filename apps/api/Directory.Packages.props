@@ -1,0 +1,93 @@
+<Project>
+
+  <!--
+    Central Package Management. Every version in the solution is pinned here, so
+    two projects can never disagree about which build of a dependency they get.
+
+    Versions verified against nuget.org on 2026-08-08.
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Persistence">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Label="Jobs">
+    <!--
+      Hangfire sits behind Fonoteca.Jobs' IJobQueue rather than being referenced
+      directly from feature code. Wolverine's durable outbox is the stronger
+      reliability story and is the likely successor once job semantics are real;
+      the interface is what keeps that swap cheap.
+    -->
+    <PackageVersion Include="Hangfire.AspNetCore" Version="1.8.24" />
+    <PackageVersion Include="Hangfire.PostgreSql" Version="1.21.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Audio metadata">
+    <!--
+      TWO tag libraries on purpose — the pattern Jellyfin ships today.
+      ATL.NET writes (actively maintained, 7.16.0); TagLib# is used only to read
+      a file back after a write and confirm the two agree. A disagreement aborts
+      the operation. See docs/adr/0002 and Fonoteca.Tagging.
+    -->
+    <PackageVersion Include="z440.atl.core" Version="7.16.0" />
+    <PackageVersion Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Providers">
+    <PackageVersion Include="MetaBrainz.MusicBrainz" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Hosting">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <!--
+      Build-time OpenAPI document emission. Without this the document only
+      exists at runtime on /openapi/v1.json, which would make the TypeScript
+      client generation depend on a running API and a live database.
+    -->
+    <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.10" />
+    <!--
+      Microsoft.Extensions.Diagnostics.HealthChecks is NOT listed: it ships in
+      the ASP.NET Core shared framework, and referencing it explicitly trips
+      NU1510. The EntityFrameworkCore health-check package is a real package and
+      does need referencing.
+    -->
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup Label="Transitive security pins">
+    <!--
+      Neither of these is referenced directly; both arrive transitively at a
+      version with a published high-severity advisory, and TreatWarningsAsErrors
+      turns NU1903 into a build failure. Pinning forward is the fix.
+
+        Microsoft.OpenApi  2.0.0  -> 2.11.0  (via Microsoft.AspNetCore.OpenApi)
+                                             GHSA-v5pm-xwqc-g5wc; stays on 2.x
+                                             so the AspNetCore integration keeps
+                                             the major version it expects.
+        Newtonsoft.Json    11.0.1 -> 13.0.4  (via Hangfire) GHSA-5crp-9r3c-p9vr
+
+      Re-check these whenever the parent packages move; a pin that is no longer
+      needed is worth removing rather than carrying.
+    -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.11.0" />
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      // The web dev server opens the browser; two tabs per `pnpm dev` is one
+      // too many.
+      "launchBrowser": false,
+      // Fixed port, matched by apps/web/src/api.ts and by the API's CORS
+      // origins. A random port would break the dev client on every restart.
+      "applicationUrl": "http://localhost:5088",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Fonoteca.Api/Fonoteca.Api.csproj" />
+    <Project Path="src/Fonoteca.Data/Fonoteca.Data.csproj" />
+    <Project Path="src/Fonoteca.Domain/Fonoteca.Domain.csproj" />
+    <Project Path="src/Fonoteca.Ingest/Fonoteca.Ingest.csproj" />
+    <Project Path="src/Fonoteca.Jobs/Fonoteca.Jobs.csproj" />
+    <Project Path="src/Fonoteca.Providers/Fonoteca.Providers.csproj" />
+    <Project Path="src/Fonoteca.Tagging/Fonoteca.Tagging.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Fonoteca.Domain.Tests/Fonoteca.Domain.Tests.csproj" />
+    <Project Path="tests/Fonoteca.Fixtures/Fonoteca.Fixtures.csproj" />
+    <Project Path="tests/Fonoteca.Integration.Tests/Fonoteca.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

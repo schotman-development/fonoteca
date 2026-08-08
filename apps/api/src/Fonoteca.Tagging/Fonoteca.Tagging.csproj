@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The highest-risk project in the solution: the only code permitted to modify
+    a file in the user's library.
+
+    Two tag libraries, deliberately. ATL.NET performs writes; TagLib# is a
+    second, independent reader used to verify the result. See TagWritePlan and
+    docs/adr/0002.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="../Fonoteca.Domain/Fonoteca.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="z440.atl.core" />
+    <PackageReference Include="TagLibSharp" />
+  </ItemGroup>
+
+</Project>

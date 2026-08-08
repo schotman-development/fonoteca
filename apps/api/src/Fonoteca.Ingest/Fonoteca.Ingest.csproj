@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Scanning, change detection, hashing, integrity testing and fingerprinting.
+
+    No NuGet packages: the heavy lifting is ffprobe and fpcalc, invoked as
+    subprocesses through the abstractions in Fonoteca.Domain, and hashing uses
+    the BCL. Both binaries live in ~/.local/opt on this host (see docs/toolchain.md)
+    and in the container image in deployment.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="../Fonoteca.Domain/Fonoteca.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

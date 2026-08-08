@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Fonoteca.Api</RootNamespace>
+    <UserSecretsId>fonoteca-api</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Fonoteca.Domain/Fonoteca.Domain.csproj" />
+    <ProjectReference Include="../Fonoteca.Data/Fonoteca.Data.csproj" />
+    <ProjectReference Include="../Fonoteca.Ingest/Fonoteca.Ingest.csproj" />
+    <ProjectReference Include="../Fonoteca.Tagging/Fonoteca.Tagging.csproj" />
+    <ProjectReference Include="../Fonoteca.Providers/Fonoteca.Providers.csproj" />
+    <ProjectReference Include="../Fonoteca.Jobs/Fonoteca.Jobs.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- HealthChecks itself comes from the shared framework; only the EF Core integration is a package. -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <!--
+    Write the OpenAPI document into the repository root on every build.
+
+    This is the seam between the two toolchains: packages/api-client generates
+    its TypeScript types from this file, the result is committed, and CI fails
+    on a diff. That is what turns backend/frontend drift into a build failure
+    instead of a runtime surprise.
+  -->
+  <PropertyGroup>
+    <OpenApiGenerateDocuments>true</OpenApiGenerateDocuments>
+    <OpenApiGenerateDocumentsOnBuild>true</OpenApiGenerateDocumentsOnBuild>
+    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/../../../..</OpenApiDocumentsDirectory>
+  </PropertyGroup>
+
+  <!--
+    The generator names the file after the assembly. `openapi.json` says what it
+    is at the repository root, where a reader will not have the project name in
+    mind — and it keeps the generator's naming an implementation detail rather
+    than something packages/api-client has to know about.
+  -->
+  <Target Name="NameOpenApiDocumentForContract" AfterTargets="GenerateOpenApiDocuments">
+    <PropertyGroup>
+      <_GeneratedOpenApiDoc>$(OpenApiDocumentsDirectory)/$(AssemblyName).json</_GeneratedOpenApiDoc>
+      <_ContractOpenApiDoc>$(OpenApiDocumentsDirectory)/openapi.json</_ContractOpenApiDoc>
+    </PropertyGroup>
+    <Move
+      SourceFiles="$(_GeneratedOpenApiDoc)"
+      DestinationFiles="$(_ContractOpenApiDoc)"
+      Condition="Exists('$(_GeneratedOpenApiDoc)')" />
+  </Target>
+
+</Project>
