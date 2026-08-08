@@ -1,0 +1,61 @@
+# Development infrastructure.
+#
+# The API is NOT here on purpose. It runs on the host via `dotnet watch`, which
+# keeps the debugger attachable and the library mount a plain host path. A
+# container image for the API is a deployment concern, not a development one.
+#
+# The host runs podman, not docker; this file stays docker-compatible, so
+# `podman compose` and `docker compose` both work.
+
+name: fonoteca
+
+services:
+  postgres:
+    image: docker.io/library/postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fonoteca}
+      POSTGRES_USER: ${POSTGRES_USER:-fonoteca}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fonoteca}
+      # Postgres re-sorts and re-plans when the collation changes underneath it.
+      # Pinning the locale at init keeps index ordering stable across image
+      # upgrades — which matters for a catalogue sorted by artist name.
+      POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=en-US --encoding=UTF8'
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      # PostgreSQL 18 changed this. The image now expects a SINGLE mount at
+      # /var/lib/postgresql and puts the cluster in a major-version subdirectory
+      # beneath it, so that `pg_upgrade --link` can see both versions without
+      # crossing a mount boundary. Mounting the old /var/lib/postgresql/data
+      # path makes the container refuse to start on 18+.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # `pg_isready` alone returns true while the init scripts are still
+      # running; an actual query is the honest readiness signal.
+      test: ['CMD-SHELL', 'psql -U ${POSTGRES_USER:-fonoteca} -d ${POSTGRES_DB:-fonoteca} -c "SELECT 1" || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # Opt-in: `podman compose --profile tools up -d`
+  pgadmin:
+    image: docker.io/dpage/pgadmin4:latest
+    profiles: ['tools']
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-dev@localhost}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-pgadmin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - '${PGADMIN_PORT:-5050}:80'
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  pgadmin-data:
