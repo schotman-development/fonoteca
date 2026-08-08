@@ -1,0 +1,15 @@
+{
+  "name": "@fonoteca/openapi-codegen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolation wrapper for openapi-typescript, which needs the TypeScript compiler API that 7.0 does not yet ship. Build-time only; nothing imports this.",
+  "scripts": {
+    "generate": "openapi-typescript ../../openapi.json --output ../../packages/api-client/src/schema.d.ts",
+    "print": "openapi-typescript ../../openapi.json"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

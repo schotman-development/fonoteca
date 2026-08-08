@@ -1,0 +1,110 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Fonoteca.Api | v1",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/system/info": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Runtime configuration and catalogue counts.",
+        "operationId": "GetSystemInfo",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CatalogueCounts": {
+        "required": [
+          "files",
+          "recordings",
+          "releases",
+          "artists"
+        ],
+        "type": "object",
+        "properties": {
+          "files": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "recordings": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "releases": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "artists": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "SystemInfoResponse": {
+        "required": [
+          "version",
+          "serverTimeUtc",
+          "libraryPath",
+          "fileMutationAllowed",
+          "counts"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "serverTimeUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "libraryPath": {
+            "type": "string"
+          },
+          "fileMutationAllowed": {
+            "type": "boolean"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/CatalogueCounts"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "System"
+    }
+  ]
+}
