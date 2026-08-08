@@ -1,0 +1,47 @@
+{
+  "name": "@fonoteca/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fonoteca's design system. Hand-built components on design tokens, with no third-party runtime dependencies.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./reset.css": "./src/styles/reset.css"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b && tsc -p tsconfig.storybook.json",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist storybook-static"
+  },
+  "dependencies": {
+    "@fonoteca/tokens": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@fonoteca/tsconfig": "workspace:*",
+    "@storybook/addon-a11y": "10.5.7",
+    "@storybook/addon-docs": "10.5.7",
+    "@storybook/addon-vitest": "10.5.7",
+    "@storybook/react-vite": "10.5.7",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "@vitest/browser": "4.1.10",
+    "@vitest/browser-playwright": "4.1.10",
+    "playwright": "1.62.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "storybook": "10.5.7",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
+  }
+}

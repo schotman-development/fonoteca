@@ -1,0 +1,18 @@
+{
+  "extends": "@fonoteca/tsconfig/react-library.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  // Explicit glob, not just ".storybook": TypeScript's wildcard expansion skips
+  // directories whose name begins with a dot, so the bare path matches nothing.
+  "include": [
+    ".storybook/**/*.ts",
+    ".storybook/**/*.tsx",
+    // The preview imports stylesheets for their side effects; this supplies the
+    // `*.css` module declarations that make those imports resolvable.
+    "src/types/css-modules.d.ts"
+  ]
+}

@@ -1,0 +1,120 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+
+  border: var(--border-width-thin) solid transparent;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-family-sans);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+
+.root[data-mono] {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.root[data-size="sm"] {
+  height: 18px;
+  padding-inline: var(--space-6);
+  font-size: var(--font-size-2xs);
+}
+
+.root[data-size="md"] {
+  height: 22px;
+  padding-inline: var(--space-8);
+  font-size: var(--font-size-xs);
+}
+
+/* ---- subtle: tinted background, coloured text ---- */
+
+.root[data-variant="subtle"][data-tone="neutral"] {
+  background-color: var(--color-surface-inset);
+  color: var(--color-text-secondary);
+}
+.root[data-variant="subtle"][data-tone="accent"] {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+}
+.root[data-variant="subtle"][data-tone="success"] {
+  background-color: var(--color-success-subtle);
+  color: var(--color-success-text);
+}
+.root[data-variant="subtle"][data-tone="warning"] {
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning-text);
+}
+.root[data-variant="subtle"][data-tone="danger"] {
+  background-color: var(--color-danger-subtle);
+  color: var(--color-danger-text);
+}
+.root[data-variant="subtle"][data-tone="info"] {
+  background-color: var(--color-info-subtle);
+  color: var(--color-info-text);
+}
+
+/*
+ * ---- solid: filled ----
+ *
+ * Each tone pairs its fill with its OWN foreground rather than a single shared
+ * "on accent" colour. Amber and green cannot carry white text at any shade that
+ * still reads as amber or green, so warning and success use dark text on a
+ * bright fill while the rest use white on a deep one. See StatusColors.onSolid.
+ */
+
+.root[data-variant="solid"][data-tone="neutral"] {
+  background-color: var(--color-text-secondary);
+  color: var(--color-text-inverse);
+}
+.root[data-variant="solid"][data-tone="accent"] {
+  background-color: var(--color-accent-solid);
+  color: var(--color-accent-on-solid);
+}
+.root[data-variant="solid"][data-tone="success"] {
+  background-color: var(--color-success-solid);
+  color: var(--color-success-on-solid);
+}
+.root[data-variant="solid"][data-tone="warning"] {
+  background-color: var(--color-warning-solid);
+  color: var(--color-warning-on-solid);
+}
+.root[data-variant="solid"][data-tone="danger"] {
+  background-color: var(--color-danger-solid);
+  color: var(--color-danger-on-solid);
+}
+.root[data-variant="solid"][data-tone="info"] {
+  background-color: var(--color-info-solid);
+  color: var(--color-info-on-solid);
+}
+
+/* ---- outline: border only ---- */
+
+.root[data-variant="outline"] {
+  background-color: transparent;
+}
+.root[data-variant="outline"][data-tone="neutral"] {
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+.root[data-variant="outline"][data-tone="accent"] {
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-text);
+}
+.root[data-variant="outline"][data-tone="success"] {
+  border-color: var(--color-success-border);
+  color: var(--color-success-text);
+}
+.root[data-variant="outline"][data-tone="warning"] {
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+}
+.root[data-variant="outline"][data-tone="danger"] {
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-text);
+}
+.root[data-variant="outline"][data-tone="info"] {
+  border-color: var(--color-info-border);
+  color: var(--color-info-text);
+}

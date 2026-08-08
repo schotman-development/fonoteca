@@ -1,0 +1,88 @@
+.root {
+  display: inline;
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-normal);
+}
+
+.root[data-block] {
+  display: block;
+}
+
+.root[data-truncate] {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.root[data-family="mono"] {
+  font-family: var(--font-family-mono);
+  /* Line up digits in a column; the whole reason mono exists here. */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--letter-spacing-tight);
+}
+
+.root[data-size="2xs"] {
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+}
+.root[data-size="xs"] {
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+}
+.root[data-size="sm"] {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-snug);
+}
+.root[data-size="md"] {
+  font-size: var(--font-size-md);
+}
+.root[data-size="lg"] {
+  font-size: var(--font-size-lg);
+}
+.root[data-size="xl"] {
+  font-size: var(--font-size-xl);
+  line-height: var(--line-height-snug);
+}
+
+.root[data-weight="regular"] {
+  font-weight: var(--font-weight-regular);
+}
+.root[data-weight="medium"] {
+  font-weight: var(--font-weight-medium);
+}
+.root[data-weight="semibold"] {
+  font-weight: var(--font-weight-semibold);
+}
+.root[data-weight="bold"] {
+  font-weight: var(--font-weight-bold);
+}
+
+.root[data-tone="primary"] {
+  color: var(--color-text-primary);
+}
+.root[data-tone="secondary"] {
+  color: var(--color-text-secondary);
+}
+.root[data-tone="tertiary"] {
+  color: var(--color-text-tertiary);
+}
+.root[data-tone="disabled"] {
+  color: var(--color-text-disabled);
+}
+.root[data-tone="accent"] {
+  color: var(--color-accent-text);
+}
+.root[data-tone="success"] {
+  color: var(--color-success-text);
+}
+.root[data-tone="warning"] {
+  color: var(--color-warning-text);
+}
+.root[data-tone="danger"] {
+  color: var(--color-danger-text);
+}

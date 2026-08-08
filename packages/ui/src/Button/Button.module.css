@@ -1,0 +1,114 @@
+/*
+ * Variants are selected with data-attributes rather than concatenated class
+ * names: one source of truth for the variant value, visible in the DOM when
+ * debugging, and no class-name-joining helper to depend on.
+ */
+
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+
+  border: var(--border-width-thin) solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-sans);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  cursor: pointer;
+
+  transition:
+    background-color var(--duration-fast) var(--easing-standard),
+    border-color var(--duration-fast) var(--easing-standard),
+    color var(--duration-fast) var(--easing-standard);
+}
+
+.root[data-size="sm"] {
+  height: var(--density-row-compact);
+  padding-inline: var(--space-8);
+  font-size: var(--font-size-sm);
+}
+
+.root[data-size="md"] {
+  height: var(--density-row-cozy);
+  padding-inline: var(--space-12);
+  font-size: var(--font-size-md);
+}
+
+.root[data-full-width] {
+  width: 100%;
+}
+
+/* ---- primary ---- */
+
+.root[data-variant="primary"] {
+  background-color: var(--color-accent-solid);
+  color: var(--color-accent-on-solid);
+}
+
+.root[data-variant="primary"]:hover:not(:disabled) {
+  background-color: var(--color-accent-solid-hover);
+}
+
+.root[data-variant="primary"]:active:not(:disabled) {
+  background-color: var(--color-accent-solid-active);
+}
+
+/* ---- secondary ---- */
+
+.root[data-variant="secondary"] {
+  background-color: var(--color-surface-raised);
+  border-color: var(--color-border-default);
+  color: var(--color-text-primary);
+}
+
+.root[data-variant="secondary"]:hover:not(:disabled) {
+  background-color: var(--color-interactive-hover);
+  border-color: var(--color-border-strong);
+}
+
+.root[data-variant="secondary"]:active:not(:disabled) {
+  background-color: var(--color-interactive-active);
+}
+
+/* ---- ghost ---- */
+
+.root[data-variant="ghost"] {
+  background-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.root[data-variant="ghost"]:hover:not(:disabled) {
+  background-color: var(--color-interactive-hover);
+  color: var(--color-text-primary);
+}
+
+.root[data-variant="ghost"]:active:not(:disabled) {
+  background-color: var(--color-interactive-active);
+}
+
+/* ---- danger ---- */
+
+.root[data-variant="danger"] {
+  background-color: var(--color-danger-solid);
+  color: var(--color-danger-on-solid);
+}
+
+.root[data-variant="danger"]:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.root[data-variant="danger"]:active:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+/* ---- disabled ---- */
+
+.root:disabled {
+  cursor: not-allowed;
+  background-color: var(--color-interactive-disabled-surface);
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-disabled);
+  filter: none;
+}
