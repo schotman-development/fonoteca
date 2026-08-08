@@ -85,7 +85,7 @@ public sealed class AcoustIdTagWriteTests : IDisposable
         var before = Hash(path);
 
         var plan = await writer.PlanAsync(path, new Guid(Corpus.PreExistingAcoustId), Token);
-        var result = await writer.ApplyAsync(plan, "batch", "system", Token);
+        var result = await writer.ApplyAsync(plan, "file-1", "batch", "system", Token);
 
         Assert.Equal(TagWriteStatus.NothingToDo, result.Status);
         Assert.Equal(before, Hash(path));
@@ -195,7 +195,7 @@ public sealed class AcoustIdTagWriteTests : IDisposable
         var plan = await writer.PlanAsync(path, Identified, Token);
         Assert.Null(plan);
 
-        var result = await writer.ApplyAsync(plan, "batch", "system", Token);
+        var result = await writer.ApplyAsync(plan, "file-1", "batch", "system", Token);
         Assert.Equal(TagWriteStatus.Unsupported, result.Status);
     }
 
@@ -236,7 +236,7 @@ public sealed class AcoustIdTagWriteTests : IDisposable
         foreach (var name in names)
         {
             var plan = await writer.PlanAsync(new LibraryPath(name), Identified, Token);
-            await writer.ApplyAsync(plan, "one-pass", "system", Token);
+            await writer.ApplyAsync(plan, name, "one-pass", "system", Token);
         }
 
         Assert.Equal(3, _events.Entries.Count);
@@ -318,7 +318,7 @@ public sealed class AcoustIdTagWriteTests : IDisposable
     private async Task<TagWriteResult> Write(AcoustIdTagWriter writer, LibraryPath path)
     {
         var plan = await writer.PlanAsync(path, Identified, Token);
-        return await writer.ApplyAsync(plan, "batch", "system", Token);
+        return await writer.ApplyAsync(plan, "file-1", "batch", "system", Token);
     }
 
     private static string SourceFor(string extension) => extension switch

@@ -59,6 +59,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/identify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many files still have no AcoustID, and how the last pass went. */
+        get: operations["GetLibraryIdentificationStatus"];
+        put?: never;
+        /**
+         * Fingerprint the files with no AcoustID and look them up.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. This pass opens every file that has not been identified, runs fpcalc on it and asks AcoustID, which enforces three requests a second — so a first pass over a large library is a matter of tens of minutes, not seconds. Tags are only written when Fonoteca:AllowFileMutation is enabled; with it off the pass still fingerprints and identifies everything, so enabling it and running again costs no further lookups.
+         */
+        post: operations["StartLibraryIdentification"];
+        /** Ask the running pass to stop after the file it is on. */
+        delete: operations["CancelLibraryIdentification"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -72,6 +94,54 @@ export interface components {
             releases: number;
             /** Format: int32 */
             artists: number;
+        };
+        IdentificationStartedResponse: {
+            jobId: string;
+            /** Format: int32 */
+            pending: number;
+        };
+        IdentificationStatusResponse: {
+            running: boolean;
+            jobId: null | string;
+            /** Format: int32 */
+            processed: number;
+            /** Format: int32 */
+            total: number;
+            currentFile: null | string;
+            /** Format: int32 */
+            pending: number;
+            writesTags: boolean;
+            lastCompleted: null | components["schemas"]["IdentificationSummary"];
+        };
+        IdentificationSummary: {
+            jobId: string;
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number;
+            /** Format: int32 */
+            examined: number;
+            /** Format: int32 */
+            alreadyTagged: number;
+            /** Format: int32 */
+            fingerprinted: number;
+            /** Format: int32 */
+            identified: number;
+            /** Format: int32 */
+            unknown: number;
+            /** Format: int32 */
+            ambiguous: number;
+            /** Format: int32 */
+            unfingerprintable: number;
+            /** Format: int32 */
+            tagged: number;
+            /** Format: int32 */
+            writeRefused: number;
+            /** Format: int32 */
+            failed: number;
+            cancelled: boolean;
         };
         LibraryScanStatusResponse: {
             running: boolean;
@@ -226,6 +296,91 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryIdentificationStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentificationStatusResponse"];
+                };
+            };
+        };
+    };
+    StartLibraryIdentification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentificationStartedResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelLibraryIdentification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

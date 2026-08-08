@@ -26,12 +26,27 @@ type PostPath = {
   [P in keyof paths]: paths[P] extends { post: unknown } ? P : never
 }[keyof paths]
 
-/** The 200 application/json body for a POST, extracted from the generated types. */
+/**
+ * The JSON body a POST answers with.
+ *
+ * Both 200 and 202 are extracted, because a command that finishes inside its
+ * request and one that hands back a job id are the same call as far as a caller
+ * is concerned — only the server knows which it is.
+ */
 type PostResponse<P extends PostPath> = paths[P] extends {
   post: { responses: { 200: { content: { 'application/json': infer R } } } }
 }
   ? R
-  : never
+  : paths[P] extends {
+        post: { responses: { 202: { content: { 'application/json': infer R } } } }
+      }
+    ? R
+    : undefined
+
+/** Paths that expose a DELETE, narrowed from the generated `paths` map. */
+type DeletePath = {
+  [P in keyof paths]: paths[P] extends { delete: unknown } ? P : never
+}[keyof paths]
 
 export type ApiClientOptions = {
   /** Base URL of the API, without a trailing slash. */
@@ -70,6 +85,11 @@ export type ApiClient = {
    * check it against, would be a guess dressed as a contract.
    */
   post<P extends PostPath>(path: P, init?: RequestInit): Promise<PostResponse<P>>
+  /**
+   * DELETE, for endpoints where the thing being removed is a running operation
+   * rather than a record. Answers with nothing.
+   */
+  delete<P extends DeletePath>(path: P, init?: RequestInit): Promise<void>
 }
 
 export function createApiClient(options: ApiClientOptions): ApiClient {
@@ -89,7 +109,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       throw new ApiError(response.status, response.statusText, await response.text(), url)
     }
 
-    return await response.json()
+    // Not every success has a body. A 204, or a 202 that only means "accepted",
+    // answers with nothing at all, and `response.json()` on an empty body throws
+    // a SyntaxError that would surface as a failed request.
+    if (response.status === 204 || response.headers.get('Content-Length') === '0') {
+      return undefined
+    }
+
+    const body = await response.text()
+    return body.length === 0 ? undefined : JSON.parse(body)
   }
 
   return {
@@ -99,6 +127,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 
     async post<P extends PostPath>(path: P, init?: RequestInit): Promise<PostResponse<P>> {
       return (await request('POST', String(path), init)) as PostResponse<P>
+    },
+
+    async delete<P extends DeletePath>(path: P, init?: RequestInit): Promise<void> {
+      await request('DELETE', String(path), init)
     },
   }
 }

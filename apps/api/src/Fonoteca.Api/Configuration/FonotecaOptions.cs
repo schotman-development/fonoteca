@@ -86,6 +86,33 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public string AcoustIdApiKey { get; init; } = string.Empty;
 
+    /// <summary>
+    /// How well a fingerprint must match before its AcoustID is written to a file.
+    /// </summary>
+    /// <remarks>
+    /// Configurable because a library of CD rips and a library of live bootlegs
+    /// deserve different answers. The default of 0.90 is measured rather than
+    /// picked: a confident match against a real file scored 0.9667.
+    ///
+    /// Lowering it does not just tag more files, it tags more files
+    /// <i>wrongly</i>, and a wrong identifier is believed by every later pass and
+    /// by every other tool that reads the file. A margin over the runner-up
+    /// applies as well; see <c>AcoustIdSelection</c>.
+    /// </remarks>
+    [Range(0.0, 1.0)]
+    public double AcoustIdMinimumScore { get; init; } = 0.90;
+
+    /// <summary>
+    /// Whether finishing a scan starts an identification pass.
+    /// </summary>
+    /// <remarks>
+    /// On by default, which is what makes identification happen "during
+    /// scanning" without welding a forty-minute file-writing job onto a
+    /// six-second read-only one. The pass converges: once the library is
+    /// identified, later scans find nothing to do and it finishes immediately.
+    /// </remarks>
+    public bool IdentifyAfterScan { get; init; } = true;
+
     /// <summary>Origins allowed to call the API. The web app's dev server in development.</summary>
     public IReadOnlyList<string> CorsOrigins { get; init; } = [];
 

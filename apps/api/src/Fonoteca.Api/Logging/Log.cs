@@ -1,3 +1,5 @@
+using Fonoteca.Domain.Catalogue;
+
 namespace Fonoteca.Api.Logging;
 
 /// <summary>
@@ -13,7 +15,8 @@ namespace Fonoteca.Api.Logging;
 /// EventId ranges, so a message's origin is obvious from its id alone:
 ///   1000-1099  startup and host lifecycle
 ///   1100-1199  realtime / SignalR
-///   1200-1299  library scanning
+///   1200-1219  library scanning
+///   1220-1249  identification — fingerprinting, AcoustID, tag writing
 ///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
 ///              another assembly, but the same numbering
 /// </remarks>
@@ -115,4 +118,101 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Library scan requested while one is already running; the request was rejected.")]
     public static partial void ScanAlreadyRunning(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1220,
+        Level = LogLevel.Information,
+        Message = "Identification started ({JobId}): {Pending} files have no AcoustID yet. "
+            + "Writing tags is {WriteMode}.")]
+    public static partial void IdentificationStarted(
+        ILogger logger,
+        string jobId,
+        int pending,
+        string writeMode);
+
+    [LoggerMessage(
+        EventId = 1221,
+        Level = LogLevel.Information,
+        Message = "Identification finished ({JobId}): {Identified} identified, {Adopted} adopted "
+            + "from existing tags, {Unknown} unknown to AcoustID, {Ambiguous} ambiguous, "
+            + "{Tagged} tagged, {WriteRefused} would be tagged, {Failed} failed, in {ElapsedMs}ms")]
+    public static partial void IdentificationCompleted(
+        ILogger logger,
+        string jobId,
+        int identified,
+        int adopted,
+        int unknown,
+        int ambiguous,
+        int tagged,
+        int writeRefused,
+        int failed,
+        long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1222,
+        Level = LogLevel.Information,
+        Message = "Identification requested while {ActiveKind} is running; the request was rejected.")]
+    public static partial void IdentificationBusy(ILogger logger, string activeKind);
+
+    /// <summary>
+    /// Logged once per run, not once per file.
+    /// </summary>
+    /// <remarks>
+    /// 7,735 identical warnings is not a log, it is a denial of service against
+    /// whoever has to read it. The count goes in the summary above instead.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1223,
+        Level = LogLevel.Information,
+        Message = "Identification is not writing tags: Fonoteca:AllowFileMutation is false. "
+            + "Fingerprints and AcoustIDs are still being stored, so enabling it and running "
+            + "again costs no further lookups.")]
+    public static partial void IdentificationWillNotWrite(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1224,
+        Level = LogLevel.Warning,
+        Message = "Identification stopped early: {Reason}")]
+    public static partial void IdentificationAborted(ILogger logger, string reason);
+
+    [LoggerMessage(
+        EventId = 1225,
+        Level = LogLevel.Warning,
+        Message = "Could not write the AcoustID into {Path}: {Detail}")]
+    public static partial void TagWriteFailed(ILogger logger, string path, string? detail);
+
+    [LoggerMessage(
+        EventId = 1226,
+        Level = LogLevel.Information,
+        Message = "Removed {Count} staging files left behind by an interrupted run.")]
+    public static partial void StagingFilesSwept(ILogger logger, int count);
+
+    [LoggerMessage(
+        EventId = 1227,
+        Level = LogLevel.Debug,
+        Message = "{Path}: {Outcome} ({Detail})")]
+    public static partial void FileIdentified(
+        ILogger logger,
+        string path,
+        AcoustIdOutcome outcome,
+        string? detail);
+
+    /// <summary>
+    /// The same, with the score unformatted.
+    /// </summary>
+    /// <remarks>
+    /// A separate overload rather than a ToString at the call site: formatting
+    /// eagerly costs an allocation per file whether or not debug logging is on,
+    /// which over 100,000 files is the difference the source generator exists to
+    /// avoid.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1228,
+        Level = LogLevel.Debug,
+        Message = "{Path}: {Outcome} (best score {Score})")]
+    public static partial void FileNotIdentified(
+        ILogger logger,
+        string path,
+        AcoustIdOutcome outcome,
+        double? score);
 }

@@ -107,6 +107,89 @@
           }
         }
       }
+    },
+    "/api/library/identify": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Fingerprint the files with no AcoustID and look them up.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. This pass opens every file that has not been identified, runs fpcalc on it and asks AcoustID, which enforces three requests a second — so a first pass over a large library is a matter of tens of minutes, not seconds. Tags are only written when Fonoteca:AllowFileMutation is enabled; with it off the pass still fingerprints and identifies everything, so enabling it and running again costs no further lookups.",
+        "operationId": "StartLibraryIdentification",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentificationStartedResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "How many files still have no AcoustID, and how the last pass went.",
+        "operationId": "GetLibraryIdentificationStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentificationStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask the running pass to stop after the file it is on.",
+        "operationId": "CancelLibraryIdentification",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -135,6 +218,157 @@
           "artists": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "IdentificationStartedResponse": {
+        "required": [
+          "jobId",
+          "pending"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "IdentificationStatusResponse": {
+        "required": [
+          "running",
+          "jobId",
+          "processed",
+          "total",
+          "currentFile",
+          "pending",
+          "writesTags",
+          "lastCompleted"
+        ],
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentFile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "writesTags": {
+            "type": "boolean"
+          },
+          "lastCompleted": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IdentificationSummary"
+              }
+            ]
+          }
+        }
+      },
+      "IdentificationSummary": {
+        "required": [
+          "jobId",
+          "startedAtUtc",
+          "completedAtUtc",
+          "durationMilliseconds",
+          "examined",
+          "alreadyTagged",
+          "fingerprinted",
+          "identified",
+          "unknown",
+          "ambiguous",
+          "unfingerprintable",
+          "tagged",
+          "writeRefused",
+          "failed",
+          "cancelled"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMilliseconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "examined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "alreadyTagged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fingerprinted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "identified": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unknown": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ambiguous": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unfingerprintable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tagged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "writeRefused": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cancelled": {
+            "type": "boolean"
           }
         }
       },

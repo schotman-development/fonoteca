@@ -3,6 +3,7 @@ import { type ReactNode, useReducer } from 'react'
 
 import styles from './AppShell.module.css'
 import { HealthPanel } from './components/HealthPanel.tsx'
+import { IdentificationPanel } from './components/IdentificationPanel.tsx'
 import { JobsPanel } from './components/JobsPanel.tsx'
 import { LibraryScanPanel } from './components/LibraryScanPanel.tsx'
 import { MusicBrainzPanel } from './components/MusicBrainzPanel.tsx'
@@ -47,6 +48,14 @@ export function AppShell() {
           <div className={styles.grid}>
             <Card title="Library — scan">
               <LibraryScanPanel onScanned={catalogueChanged} />
+            </Card>
+
+            {/*
+              Next to the scan, because it is the pass that follows it: the scan
+              says which files exist, this says what they are.
+            */}
+            <Card title="Library — identify">
+              <IdentificationPanel />
             </Card>
 
             <Card title="API — via generated client">

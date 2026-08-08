@@ -1,3 +1,4 @@
+using Fonoteca.Api.Library;
 using Fonoteca.Api.Logging;
 using Fonoteca.Domain.Abstractions;
 using Microsoft.AspNetCore.SignalR;
@@ -14,6 +15,7 @@ namespace Fonoteca.Api.Realtime;
 /// </remarks>
 public sealed class HeartbeatService(
     IHubContext<JobsHub, IJobsClient> hub,
+    LibraryWorkGate gate,
     IClock clock,
     ILogger<HeartbeatService> logger) : BackgroundService
 {
@@ -27,9 +29,10 @@ public sealed class HeartbeatService(
 
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
-            // No job queue is wired yet, so ActiveJobs is always zero. Once
-            // IJobQueue has an implementation this reads from it.
-            var message = new HeartbeatMessage(clock.UtcNow, ActiveJobs: 0);
+            // Real, now that there is something to count. It is deliberately
+            // not a queue depth: nothing queues here, one piece of library-wide
+            // work runs at a time, so this is 0 or 1 and says which.
+            var message = new HeartbeatMessage(clock.UtcNow, gate.IsBusy ? 1 : 0);
             await hub.Clients.All.Heartbeat(message).ConfigureAwait(false);
         }
     }

@@ -7,15 +7,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A self-hosted music library manager for 100,000+ track libraries: catalogue and
 dedupe, acquisition (Qobuz/Deezer), *arr-style upgrade monitoring, tag editing.
 
-**Status: scaffold, one feature, two adapters.** The library scan exists — it
-walks the library root and reconciles `MediaFiles` with what is on disk,
-recording path, size and modification time. The AcoustID and MusicBrainz
-adapters exist, are registered and are verified against the live services, but
-**nothing calls them yet**: the fingerprinting pass that would feed them does
-not exist. Still missing between the two: hashing, probing, fingerprinting,
-downloading and tag writing. `Fonoteca:AllowFileMutation` defaults to `false`
-and no code path writes to an audio file. Read `README.md` and `docs/adr/`
-before adding one.
+**Status: scaffold, two features.** The library scan walks the root and
+reconciles `MediaFiles` with what is on disk. The **identification pass** then
+fingerprints every file that has no AcoustID, looks it up, and writes the result
+into the file's tags — so `Fonoteca.Tagging` is real, `IStagedWrite` is
+implemented, and there *is* now a code path that modifies audio files. It is
+behind `Fonoteca:AllowFileMutation`, which still defaults to `false`; with it off
+the pass does everything except the write. **Read `docs/adr/0002` before touching
+that path.**
+
+Still missing: hashing, probing (`AudioQuality` is never populated), downloading,
+MusicBrainz enrichment, and anything that reads the catalogue back out.
 
 ## Toolchain
 
@@ -138,9 +140,70 @@ Four sharp edges are already paid for, all of them variations on one theme —
   emptied library.
 
 It runs in the foreground of the request on purpose — a walk with no file reads
-is seconds, even at 100k. The moment a pass opens files it belongs behind
-`IJobQueue` with progress on `JobsHub`, and `LibraryScanService` is the thing
-that gets replaced then, not the foundation it grows on.
+is seconds, even at 100k. The pass that *does* open files is separate and
+asynchronous; see below.
+
+### The identification pass, and the loop it must not create
+
+| | |
+| --- | --- |
+| `Domain/Abstractions/IAudioFingerprinter.cs` | the seam — path in, Chromaprint out |
+| `Domain/Identification/AcoustIdSelection.cs` | the rule — which cluster is safe to write. Pure |
+| `Ingest/ProcessRunner.cs` | the first subprocess in the app; ffprobe and ffmpeg follow this |
+| `Ingest/FpcalcFingerprinter.cs` | `fpcalc -json -length 120` |
+| `Ingest/FileSystemAudioFileStore.cs` | `OpenForReplaceAsync` — temp sibling, atomic swap |
+| `Tagging/AcoustIdTagField.cs` | where an AcoustID lives, per container. Measured, not assumed |
+| `Tagging/AcoustIdTagWriter.cs` | ADR 0002's write path, for one field |
+| `Api/Library/IdentificationService.cs` | the pass: two stages, one gate, one commit per file |
+| `Api/Library/LibraryWorkGate.cs` | a scan and a pass must not overlap |
+
+**The sharp edge, and it is sharper than the scan's four.** Writing a tag changes
+the file's bytes, and `ApplyChangesAsync` reacts to changed bytes by nulling
+every derived column — including the AcoustID that was just written. Naively
+implemented the two passes undo each other forever: identify, tag, rescan,
+discard, identify. So **a committed write records the file's new size and mtime
+in the same transaction as the AcoustID**, through `StoreTime.ToStorePrecision`,
+which is why that rule moved into the domain where both callers share one copy of
+it. `TaggingAFileDoesNotMakeTheNextScanThinkItChanged` is the guard. Do not
+"fix" this by forging the old mtime back onto the file: the file genuinely
+changed and the catalogue must agree with the filesystem.
+
+The rest, in the same spirit as the scan's list:
+
+- **The worklist is `AcoustIdCheckedUtc IS NULL`, not `AcoustId IS NULL`.** A
+  library is full of bootlegs and field recordings AcoustID has never heard.
+  Keyed on the identifier, every one is re-fingerprinted and re-asked about on
+  every pass forever, at 340ms each. Recording *that we asked* lets the worklist
+  reach empty.
+- **`AcoustIdTaggedUtc` is a separate column from it, deliberately.** "We know
+  what this is" and "the file says what it is" are different facts, and keeping
+  them apart is what makes a run with mutation disabled a complete dry run: the
+  run after the flag is flipped writes tags and spends no lookups.
+- **The file is committed before the row.** Crash in the gap and the file carries
+  a verified tag while the row says pending — the next run reads the tag, adopts
+  it and converges. The reverse leaves a row claiming an AcoustID the file does
+  not carry, which nothing can detect.
+- **One scope and one `SaveChanges` per file, not batched.** It is the entire
+  resumability story, and the journal entry only persists because it shares that
+  scope — `IEventLog.AppendAsync` does not save itself, by design.
+- **Fingerprinting is parallel, lookups are strictly serial.** `RequestGate`
+  already allows one AcoustID request per 340ms, so concurrent lookups buy no
+  throughput and only pin fingerprints in memory. `ScanConcurrency` governs stage
+  A only, and past 2 it buys nothing.
+- **fpcalc failures are split by whose fault they are.** A truncated FLAC marks
+  one row; a missing binary must stop the pass on the first file. Merged, a PATH
+  problem marks 100,000 files unreadable.
+- **`AcoustIdTagField` was measured against ATL 7.16, not read off a spec.** ATL
+  uppercases Vorbis keys, so the ID3 spelling silently produces `ACOUSTID ID`;
+  MP4 takes the bare name and adds `----:com.apple.iTunes:` itself. The tests
+  assert through **ffprobe** — a third tool — because the two libraries agreeing
+  only proves they agree.
+- **The undo journal is keyed by `MediaFileId`, never by path.**
+  `DomainEvent.SubjectId` is `varchar(200)` and a library path is up to 4096; a
+  box set broke a live run at file 76. Paths also move.
+
+Not on a durable queue, and `Fonoteca.Jobs` is still empty — see ADR 0007, which
+records what would reopen that.
 
 ### The identification providers, and what they refuse to do
 
@@ -190,6 +253,11 @@ enforce their limits by blocking you*:
   remaster gets tagged as the original. `RecordingCandidates.From` collapses
   them: max score, summed sources, ties broken by id so a rerun cannot change
   its mind.
+
+**`Fonoteca:AcoustIdApiKey` is a flat key, and `.env.example` said otherwise for
+months.** It shipped as `Fonoteca__Providers__AcoustId__ApiKey`, which binds to
+nothing; nobody noticed because nothing called AcoustID. If lookups are being
+refused with a key that is plainly set, check the spelling before anything else.
 
 Missing credentials are not startup failures. Without `Fonoteca:AcoustIdApiKey`
 or `Fonoteca:MusicBrainzContact` the app starts, logs one line each, and
@@ -296,7 +364,11 @@ Adding a component means adding stories, because that is what tests it.
   `**/Migrations/*.cs` as generated; don't hand-edit them.
 - **Two tag libraries on purpose** (ADR 0002): ATL.NET writes, TagLib# reads
   the file back to verify, disagreement aborts the operation. ffmpeg must never
-  write tags — it rewrites containers and can drop non-standard frames.
+  write tags — it rewrites containers and can drop non-standard frames. The
+  implemented path adds two steps the ADR does not have: a length sanity check,
+  which catches the one failure two agreeing readers cannot (perfect tags, no
+  audio), and appending the undo entry *before* the commit rather than after, so
+  a crash in between over-records rather than under-records.
 - **TypeScript 7 everywhere**, except `tools/openapi-codegen`, which pins 5.9
   because `openapi-typescript` drives the compiler API that 7.0 doesn't ship
   (ADR 0005). Nothing imports that package.

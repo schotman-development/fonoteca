@@ -159,11 +159,88 @@ public sealed class MediaFile
     /// <summary>Chromaprint fingerprint — cross-encoding identity, and the AcoustID lookup key.</summary>
     public string? Fingerprint { get; set; }
 
+    /// <summary>
+    /// The span <see cref="Fingerprint"/> was computed over.
+    /// </summary>
+    /// <remarks>
+    /// Stored with it, never apart from it. A lookup takes both — the fingerprint
+    /// covers only the leading two minutes, so duration is what separates a track
+    /// from a twelve-minute extended mix that opens identically — which means a
+    /// fingerprint kept without its duration cannot be used for anything and the
+    /// column above would be write-only.
+    /// </remarks>
+    public TimeSpan? FingerprintDuration { get; set; }
+
+    /// <summary>The AcoustID cluster this file's audio belongs to, once one is known.</summary>
+    public AcoustId? AcoustId { get; set; }
+
+    /// <summary>
+    /// When AcoustID was last asked about this file — set even when the answer
+    /// was "never heard of it".
+    /// </summary>
+    /// <remarks>
+    /// This, not <see cref="AcoustId"/>, is what "files with no AcoustID yet"
+    /// means. Selecting on a null identifier would re-fingerprint and re-ask
+    /// about every unidentifiable file on every pass, forever, at a third of a
+    /// second each: a library's worth of bootlegs and field recordings that
+    /// AcoustID will never know, asked again every time. Recording that we asked
+    /// makes the worklist shrink to empty instead.
+    ///
+    /// Kept as a timestamp rather than a flag so the question can be reopened
+    /// deliberately — AcoustID's database grows, and "re-ask about everything
+    /// last checked before six months ago" stays one indexed query.
+    /// </remarks>
+    public DateTimeOffset? AcoustIdCheckedUtc { get; set; }
+
+    /// <summary>
+    /// When the AcoustID was last confirmed present in the file's own tags.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="AcoustIdCheckedUtc"/>. "We know what
+    /// this is" and "the file says what it is" are different facts, and keeping
+    /// them apart is what lets a run with <c>Fonoteca:AllowFileMutation</c> off
+    /// be a complete dry run: it fills in everything expensive, leaves this null,
+    /// and the run after the flag is flipped writes the tags without spending a
+    /// single request.
+    /// </remarks>
+    public DateTimeOffset? AcoustIdTaggedUtc { get; set; }
+
+    /// <summary>What the last identification attempt concluded. For display, not for the worklist.</summary>
+    public AcoustIdOutcome AcoustIdOutcome { get; set; } = AcoustIdOutcome.NotAttempted;
+
     public AudioQuality? Quality { get; set; }
 
     public IntegrityState Integrity { get; set; } = IntegrityState.Unchecked;
     public DateTimeOffset? LastScannedUtc { get; set; }
     public DateTimeOffset? LastVerifiedUtc { get; set; }
+}
+
+/// <summary>
+/// What identification concluded about a file.
+/// </summary>
+/// <remarks>
+/// Not the worklist — <c>AcoustIdCheckedUtc IS NULL</c> is. This exists so the
+/// three ways of not being identified can be told apart when reporting: "nobody
+/// has ever submitted this audio" invites submitting it, "two clusters were too
+/// close to call" invites a human look, and "the decoder refused the file"
+/// invites checking whether the file is intact. One null column answers none of
+/// those.
+/// </remarks>
+public enum AcoustIdOutcome
+{
+    NotAttempted = 0,
+
+    /// <summary>A cluster cleared both the score threshold and the margin.</summary>
+    Identified = 1,
+
+    /// <summary>AcoustID has never heard this audio.</summary>
+    Unknown = 2,
+
+    /// <summary>Clusters matched, but none clearly enough to write into a file.</summary>
+    Ambiguous = 3,
+
+    /// <summary>The decoder could not produce a fingerprint at all.</summary>
+    Unfingerprintable = 4,
 }
 
 /// <summary>Result of decode-testing a file.</summary>

@@ -6,8 +6,10 @@ using Fonoteca.Api.Realtime;
 using Fonoteca.Api.Startup;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Events;
 using Fonoteca.Ingest;
 using Fonoteca.Providers;
+using Fonoteca.Tagging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -79,6 +81,40 @@ builder.Services.AddSingleton<IAudioFileStore>(
 
 builder.Services.AddSingleton<LibraryScanner>();
 builder.Services.AddSingleton<LibraryScanService>();
+
+// ---------------------------------------------------------------------------
+// Identification: fingerprint, look up, tag.
+// ---------------------------------------------------------------------------
+
+// fpcalc takes a path and opens the file itself, so the fingerprinter needs the
+// store rather than a stream (ADR 0001). Plain constructor values rather than
+// IOptions, because Fonoteca.Ingest carries no NuGet references and keeping it
+// that way is worth a lambda here.
+builder.Services.AddSingleton<IAudioFingerprinter>(sp => new FpcalcFingerprinter(
+    sp.GetRequiredService<FileSystemAudioFileStore>(),
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FpcalcPath));
+
+builder.Services.AddSingleton<TagReader>();
+
+// The one switch that decides whether this process may modify a file at all.
+// It is read here, once, so Fonoteca.Tagging never learns what FonotecaOptions
+// is — and so there is exactly one place to look for the answer.
+builder.Services.AddSingleton(new TagWriterOptions
+{
+    AllowFileMutation = fonoteca.AllowFileMutation,
+});
+
+builder.Services.AddScoped<IEventLog, EventLog>();
+builder.Services.AddScoped<AcoustIdTagWriter>();
+
+// One at a time across the whole library: a scan clears the very columns an
+// identification pass is filling in, so the two must not overlap.
+builder.Services.AddSingleton<LibraryWorkGate>();
+builder.Services.AddSingleton<IdentificationService>();
+
+// Registered as a hosted service as well as a singleton, so shutdown cancels a
+// running pass and waits for it rather than severing it mid-write.
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationService>());
 
 // ---------------------------------------------------------------------------
 // External services. Both are registered unconditionally, including when the

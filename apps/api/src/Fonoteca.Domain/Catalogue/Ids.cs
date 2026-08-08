@@ -63,3 +63,22 @@ public readonly record struct Mbid(Guid Value)
 {
     public override string ToString() => Value.ToString();
 }
+
+/// <summary>
+/// An AcoustID cluster identifier — what a fingerprint resolves to.
+/// </summary>
+/// <remarks>
+/// Externally assigned, like <see cref="Mbid"/>, and worth its own type for a
+/// sharper reason than the others: an AcoustID and a recording MBID are both
+/// <c>Guid</c> and arrive in the same response body, one nested inside the
+/// other. Untyped, transposing them compiles and produces a file tagged with a
+/// plausible identifier for the wrong thing.
+///
+/// Not unique across files. Two encodings of one track share a cluster — that is
+/// the cross-encoding half of dedupe, and the reason the index on it is not a
+/// unique one.
+/// </remarks>
+public readonly record struct AcoustId(Guid Value)
+{
+    public override string ToString() => Value.ToString();
+}

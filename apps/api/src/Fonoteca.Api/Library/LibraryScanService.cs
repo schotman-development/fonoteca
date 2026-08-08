@@ -266,9 +266,25 @@ public sealed class LibraryScanService(
                 row.ContentHash = null;
                 row.AudioHash = null;
                 row.Fingerprint = null;
+                row.FingerprintDuration = null;
                 row.Quality = null;
                 row.Integrity = IntegrityState.Unchecked;
                 row.LastVerifiedUtc = null;
+
+                // The identification too, and for the same reason: an AcoustID
+                // describes audio, and these bytes are not the audio it was
+                // derived from. Re-encoded, replaced, restored from a different
+                // rip — the identifier has to be earned again.
+                //
+                // Note what makes this safe rather than a treadmill: our own tag
+                // writes update SizeBytes and LastModifiedUtc as they commit, so
+                // a file this application tagged does not arrive here. Only a
+                // file something else changed does. Break that and the two
+                // passes undo each other forever.
+                row.AcoustId = null;
+                row.AcoustIdCheckedUtc = null;
+                row.AcoustIdTaggedUtc = null;
+                row.AcoustIdOutcome = AcoustIdOutcome.NotAttempted;
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -325,20 +341,17 @@ public sealed class LibraryScanService(
         return removed;
     }
 
-    /// <summary>Truncates a timestamp to what PostgreSQL will actually store.</summary>
+    /// <summary>
+    /// Truncates a timestamp to what PostgreSQL will actually store.
+    /// </summary>
     /// <remarks>
-    /// <c>timestamptz</c> keeps microseconds; .NET keeps 100-nanosecond ticks.
-    /// Store a filesystem timestamp untruncated and the value that comes back
-    /// differs from the one that went in, so the next scan finds every file
-    /// modified — 100,000 spurious updates, every hash and fingerprint in the
-    /// catalogue discarded with them, and a "nothing changed" rescan that never
-    /// converges. Truncating on the way in makes the comparison honest.
+    /// Delegates to <see cref="StoreTime"/>, which is where the rule lives now
+    /// that a second pass depends on it: the tag writer floors the modification
+    /// time of a file it has just replaced, so this scan sees it as unchanged.
+    /// Two copies of the rule that drifted would put the two into a loop.
     /// </remarks>
-    private static DateTimeOffset ToStorePrecision(DateTimeOffset value)
-    {
-        var utc = value.ToUniversalTime();
-        return utc.AddTicks(-(utc.Ticks % TimeSpan.TicksPerMicrosecond));
-    }
+    private static DateTimeOffset ToStorePrecision(DateTimeOffset value) =>
+        StoreTime.ToStorePrecision(value);
 
     private readonly record struct KnownFile(
         MediaFileId Id,

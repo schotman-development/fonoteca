@@ -10,15 +10,28 @@ Four pillars, none of them built yet:
 3. **Upgrade monitoring** — watch for better versions, *arr-style
 4. **Tag editor** — write corrected tags, artwork and MBIDs back to files
 
-> **Status: scaffold, plus the first slices of pillar 1.** The library scan
-> exists: `POST /api/library/scan` walks the library root and reconciles the
-> catalogue's file list with what is on disk — path, size and modification time,
-> and nothing more. The AcoustID and MusicBrainz adapters exist too, behind
-> interfaces in `Fonoteca.Domain`, rate-limited and verified against the live
-> services — but nothing calls them yet, because there is no fingerprinting pass
-> to feed them. Nothing hashes, fingerprints, downloads or writes tags.
-> `Fonoteca:AllowFileMutation` defaults to `false` and no code path writes to an
-> audio file.
+> **Status: scaffold, plus the first two slices of pillar 1.**
+>
+> `POST /api/library/scan` walks the library root and reconciles the catalogue's
+> file list with what is on disk — path, size and modification time, and nothing
+> more.
+>
+> `POST /api/library/identify` then fingerprints every file that has no AcoustID,
+> looks it up, and writes the answer into the file's own tags. It returns `202`
+> and a job id: AcoustID allows three requests a second, so a first pass over
+> eight thousand files is tens of minutes. Progress arrives on `JobsHub`.
+>
+> **Tags are only written when `Fonoteca:AllowFileMutation` is enabled, and it
+> defaults to `false`.** With it off the pass still fingerprints, still asks, and
+> still records everything — it just does not write. Enabling it and running
+> again then costs no further lookups, which makes the safe default a preview
+> rather than a wasted hour. Take a backup before the first real write: the path
+> is careful (see [ADR 0002](docs/adr/0002-two-tag-libraries.md)) and it is still
+> the only operation here that can destroy anything.
+>
+> Nothing hashes, probes, downloads, or reads the catalogue back out. MusicBrainz
+> enrichment is the next slice and does not exist — the adapter does, and is
+> verified against the live service, but only the health probe calls it.
 
 ## Layout
 
@@ -119,12 +132,19 @@ rather than returning `undefined` in a browser.
 | [0004](docs/adr/0004-musicbrainz-shaped-entity-graph.md) | MusicBrainz-shaped entity graph, because it cannot be retrofitted |
 | [0005](docs/adr/0005-typescript-7.md) | TypeScript 7, with the OpenAPI generator isolated on 5.9 |
 | [0006](docs/adr/0006-musicbrainz-mirror.md) | Mirror MusicBrainz locally, without a search index — and don't try to mirror AcoustID |
+| [0007](docs/adr/0007-identification-in-process.md) | Identification runs in-process, not on a durable queue — the catalogue *is* the worklist |
 
 ## Credentials
 
-Neither is required to start, and neither is needed to scan or browse. Both are
-needed to identify anything, and a lookup attempted without them is refused
-locally with a message naming the setting.
+Neither is required to start, and neither is needed to scan or browse.
+`Fonoteca:AcoustIdApiKey` is what identification needs; the MusicBrainz contact
+is for the enrichment that follows it. A lookup attempted without either is
+refused locally, with a message naming the setting, rather than sent and
+rejected.
+
+**The key binds as `Fonoteca:AcoustIdApiKey` — flat, not nested.** `.env.example`
+shipped `Fonoteca__Providers__AcoustId__ApiKey` for months, which binds to
+nothing and which nothing noticed because nothing called AcoustID.
 
 | Setting | Where to get it |
 | --- | --- |
@@ -162,5 +182,7 @@ the reasoning, including why AcoustID does *not* get the same treatment, in
   `useEffect` so this stays an open choice rather than being settled by default.
 - **The catalogue virtualizer.** Excluding `@tanstack/react-virtual` from the
   design system means writing one. The largest piece of unplanned frontend work.
-- **`.env.example`** predates this scaffold and does not describe the current
-  configuration; `appsettings.json` and `compose.yaml` do. Needs reconciling.
+- **Run history is not persisted.** `LastCompleted` for both the scan and the
+  identification pass is an in-memory field, forgotten on restart. Making it
+  durable means deciding what a run *is* as an entity, which ADR 0007 defers
+  along with the job queue.

@@ -37,6 +37,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         configurationBuilder.Properties<MediaFileId>().HaveConversion<MediaFileIdConverter>();
         configurationBuilder.Properties<ArtistId>().HaveConversion<ArtistIdConverter>();
         configurationBuilder.Properties<Mbid>().HaveConversion<MbidConverter>();
+        configurationBuilder.Properties<AcoustId>().HaveConversion<AcoustIdConverter>();
 
         base.ConfigureConventions(configurationBuilder);
     }
@@ -135,6 +136,35 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // The rescan predicate: "files not looked at since <time>".
             e.HasIndex(x => x.LastScannedUtc);
             e.HasIndex(x => x.Integrity);
+
+            // The identification worklist, and it is partial on purpose. The
+            // predicate is the entire selectivity, and — unlike every other index
+            // here — this one is meant to shrink to nothing: once the library has
+            // been identified, "what is left" is the empty set, and a full index
+            // over a column that is non-null for 99% of 100,000 rows would be
+            // 99% dead weight rewritten on every pass.
+            //
+            // Note the two-argument HasIndex: it declares a *named* index.
+            // `HasIndex(x => x.Id).HasDatabaseName(...)` twice does not produce
+            // two indexes — EF keys them by property list, so the second call
+            // returns the first builder and quietly renames it and replaces its
+            // filter. The worklist index then never reaches the migration, and
+            // nothing says so.
+            e.HasIndex(x => x.Id, "IX_MediaFiles_AcoustIdPending")
+                .HasFilter("\"AcoustIdCheckedUtc\" IS NULL");
+
+            // Identified, but the file itself does not say so yet — exactly what
+            // a run with Fonoteca:AllowFileMutation off leaves behind. The run
+            // after the flag is flipped finds its work through this, and so costs
+            // no lookups at all.
+            e.HasIndex(x => x.Id, "IX_MediaFiles_AcoustIdUntagged")
+                .HasFilter("\"AcoustId\" IS NOT NULL AND \"AcoustIdTaggedUtc\" IS NULL");
+
+            // Not unique, and that is the point: two encodings of one track
+            // legitimately share a cluster. That is the dedupe signal, not a
+            // conflict — it is the cross-encoding half Fingerprint hints at and
+            // this answers exactly.
+            e.HasIndex(x => x.AcoustId).HasFilter("\"AcoustId\" IS NOT NULL");
 
             e.HasOne(x => x.Recording)
                 .WithMany(r => r.Files)

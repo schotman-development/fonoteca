@@ -115,8 +115,15 @@ public sealed class AcoustIdTagWriter(
     /// Shared by every file in one pass, so ADR 0002's "a whole batch is
     /// reversible as a unit" is answerable by a single indexed query.
     /// </param>
+    /// <param name="subjectId">
+    /// The catalogue id of the file, not its path. Paths move — a rename would
+    /// orphan a journal keyed by one — and <c>DomainEvent.SubjectId</c> is a
+    /// <c>varchar(200)</c> while a library path is up to 4096. The path is still
+    /// recorded, in the payload, where it is descriptive rather than a key.
+    /// </param>
     public async Task<TagWriteResult> ApplyAsync(
         TagWritePlan? plan,
+        string subjectId,
         string correlationId,
         string actorId,
         CancellationToken cancellationToken = default)
@@ -140,7 +147,8 @@ public sealed class AcoustIdTagWriter(
             // computed and stored by the caller, and this is the only step
             // skipped. Journalled so a disabled pass leaves evidence of what it
             // would have done.
-            await JournalAsync(plan, change, RefusedEventType, correlationId, actorId, null, cancellationToken)
+            await JournalAsync(
+                plan, change, RefusedEventType, subjectId, correlationId, actorId, null, cancellationToken)
                 .ConfigureAwait(false);
 
             return new TagWriteResult(plan, TagWriteStatus.Refused,
@@ -162,8 +170,9 @@ public sealed class AcoustIdTagWriter(
 
             if (rendered is not null)
             {
-                await JournalAsync(plan, change, AbortedEventType, correlationId, actorId, rendered, cancellationToken)
-                    .ConfigureAwait(false);
+                await JournalAsync(
+                    plan, change, AbortedEventType, subjectId, correlationId, actorId, rendered,
+                    cancellationToken).ConfigureAwait(false);
 
                 return new TagWriteResult(plan, TagWriteStatus.VerificationFailed, rendered);
             }
@@ -172,8 +181,9 @@ public sealed class AcoustIdTagWriter(
 
             if (problem is not null)
             {
-                await JournalAsync(plan, change, AbortedEventType, correlationId, actorId, problem, cancellationToken)
-                    .ConfigureAwait(false);
+                await JournalAsync(
+                    plan, change, AbortedEventType, subjectId, correlationId, actorId, problem,
+                    cancellationToken).ConfigureAwait(false);
 
                 // Falling out of the await using without committing deletes the
                 // staged file and leaves the original exactly as it was.
@@ -181,7 +191,7 @@ public sealed class AcoustIdTagWriter(
             }
 
             var undoId = await JournalAsync(
-                plan, change, WrittenEventType, correlationId, actorId, null, cancellationToken)
+                plan, change, WrittenEventType, subjectId, correlationId, actorId, null, cancellationToken)
                 .ConfigureAwait(false);
 
             await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -290,6 +300,7 @@ public sealed class AcoustIdTagWriter(
         TagWritePlan plan,
         TagFieldChange change,
         string type,
+        string subjectId,
         string correlationId,
         string actorId,
         string? reason,
@@ -313,7 +324,7 @@ public sealed class AcoustIdTagWriter(
         var entry = DomainEvent.Create(
             type,
             FileSubject,
-            plan.Path.Value,
+            subjectId,
             actorId,
             _clock.UtcNow,
             payload,

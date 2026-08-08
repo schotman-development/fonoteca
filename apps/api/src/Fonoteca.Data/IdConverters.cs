@@ -33,3 +33,6 @@ internal sealed class ArtistIdConverter()
     : ValueConverter<ArtistId, Guid>(id => id.Value, v => new ArtistId(v));
 
 internal sealed class MbidConverter() : ValueConverter<Mbid, Guid>(id => id.Value, v => new Mbid(v));
+
+internal sealed class AcoustIdConverter()
+    : ValueConverter<AcoustId, Guid>(id => id.Value, v => new AcoustId(v));
