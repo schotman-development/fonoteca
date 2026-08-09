@@ -264,6 +264,79 @@
         }
       }
     },
+    "/api/library/attribute": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Work out which album each identified file came from.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. Decides files in sets rather than one at a time — a single file cannot name its release, since one recording appears on the album, on compilations and on every regional pressing. The folders are not consulted: a set is discovered by following shared candidate releases, and the answer is checked against the folders afterwards at GET /api/catalogue/attribution. Opens no file and modifies none.",
+        "operationId": "StartReleaseAttribution",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttributionStartedResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "How many files have no album yet, and how the last pass went.",
+        "operationId": "GetReleaseAttributionStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttributionStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask the running pass to stop after the set it is on.",
+        "operationId": "CancelReleaseAttribution",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/artists": {
       "get": {
         "tags": [
@@ -434,6 +507,148 @@
           "trackCount": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "AttributionStartedResponse": {
+        "required": [
+          "jobId",
+          "pending"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AttributionStatusResponse": {
+        "required": [
+          "running",
+          "jobId",
+          "processed",
+          "total",
+          "currentFile",
+          "pending",
+          "lastCompleted"
+        ],
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentFile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastCompleted": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttributionSummary"
+              }
+            ]
+          }
+        }
+      },
+      "AttributionSummary": {
+        "required": [
+          "jobId",
+          "startedAtUtc",
+          "completedAtUtc",
+          "durationMilliseconds",
+          "examined",
+          "attributed",
+          "ambiguous",
+          "groupOnly",
+          "noConfidentFit",
+          "noCandidate",
+          "failed",
+          "components",
+          "releases",
+          "cancelled"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMilliseconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "examined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "attributed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ambiguous": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "groupOnly": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "noConfidentFit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "noCandidate": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "components": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "releases": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cancelled": {
+            "type": "boolean"
           }
         }
       },

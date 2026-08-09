@@ -112,11 +112,13 @@ builder.Services.AddScoped<AcoustIdTagWriter>();
 builder.Services.AddSingleton<LibraryWorkGate>();
 builder.Services.AddSingleton<IdentificationService>();
 builder.Services.AddSingleton<EnrichmentService>();
+builder.Services.AddSingleton<ReleaseAttributionService>();
 
 // Registered as a hosted service as well as a singleton, so shutdown cancels a
 // running pass and waits for it rather than severing it mid-write.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EnrichmentService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ReleaseAttributionService>());
 
 // ---------------------------------------------------------------------------
 // External services. Both are registered unconditionally, including when the

@@ -307,4 +307,62 @@ internal static partial class Log
         string path,
         EnrichmentOutcome outcome,
         string? detail);
+
+    [LoggerMessage(
+        EventId = 1260,
+        Level = LogLevel.Information,
+        Message = "Release attribution started ({JobId}): {Pending} files have no album yet.")]
+    public static partial void AttributionStarted(ILogger logger, string jobId, int pending);
+
+    [LoggerMessage(
+        EventId = 1261,
+        Level = LogLevel.Information,
+        Message = "Release attribution finished ({JobId}): {Attributed} attributed, "
+            + "{Ambiguous} from tied editions, {GroupOnly} to an album but no pressing, "
+            + "{NoFit} with no confident fit, {NoCandidate} on no release at all, {Failed} failed; "
+            + "{Releases} releases written, in {ElapsedMs}ms")]
+    public static partial void AttributionCompleted(
+        ILogger logger,
+        string jobId,
+        int attributed,
+        int ambiguous,
+        int groupOnly,
+        int noFit,
+        int noCandidate,
+        int failed,
+        int releases,
+        long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1262,
+        Level = LogLevel.Information,
+        Message = "Release attribution requested while {ActiveKind} is running; the request was rejected.")]
+    public static partial void AttributionBusy(ILogger logger, string activeKind);
+
+    [LoggerMessage(
+        EventId = 1263,
+        Level = LogLevel.Warning,
+        Message = "Release attribution stopped early: {Reason}")]
+    public static partial void AttributionAborted(ILogger logger, string reason);
+
+    /// <summary>
+    /// A component that stopped growing because it hit a cap rather than because
+    /// it closed.
+    /// </summary>
+    /// <remarks>
+    /// Warning rather than debug, and deliberately so: a capped component was
+    /// decided on partial evidence, and from the outside that is indistinguishable
+    /// from one that used all of it. Jazz standards are where this fires — one
+    /// recording on hundreds of anthologies, each naming hundreds more.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1264,
+        Level = LogLevel.Warning,
+        Message = "Component from {Path} hit a cap at {Files} files and {Releases} candidate releases; "
+            + "it was decided on what had been gathered, and the rest stay on the worklist.")]
+    public static partial void AttributionComponentCapped(
+        ILogger logger,
+        string path,
+        int files,
+        int releases);
 }

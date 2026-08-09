@@ -103,6 +103,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/attribute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many files have no album yet, and how the last pass went. */
+        get: operations["GetReleaseAttributionStatus"];
+        put?: never;
+        /**
+         * Work out which album each identified file came from.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. Decides files in sets rather than one at a time — a single file cannot name its release, since one recording appears on the album, on compilations and on every regional pressing. The folders are not consulted: a set is discovered by following shared candidate releases, and the answer is checked against the folders afterwards at GET /api/catalogue/attribution. Opens no file and modifies none.
+         */
+        post: operations["StartReleaseAttribution"];
+        /** Ask the running pass to stop after the set it is on. */
+        delete: operations["CancelReleaseAttribution"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/artists": {
         parameters: {
             query?: never;
@@ -162,6 +184,51 @@ export interface components {
             type: null | string;
             /** Format: int32 */
             trackCount: number;
+        };
+        AttributionStartedResponse: {
+            jobId: string;
+            /** Format: int32 */
+            pending: number;
+        };
+        AttributionStatusResponse: {
+            running: boolean;
+            jobId: null | string;
+            /** Format: int32 */
+            processed: number;
+            /** Format: int32 */
+            total: number;
+            currentFile: null | string;
+            /** Format: int32 */
+            pending: number;
+            lastCompleted: null | components["schemas"]["AttributionSummary"];
+        };
+        AttributionSummary: {
+            jobId: string;
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number;
+            /** Format: int32 */
+            examined: number;
+            /** Format: int32 */
+            attributed: number;
+            /** Format: int32 */
+            ambiguous: number;
+            /** Format: int32 */
+            groupOnly: number;
+            /** Format: int32 */
+            noConfidentFit: number;
+            /** Format: int32 */
+            noCandidate: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            components: number;
+            /** Format: int32 */
+            releases: number;
+            cancelled: boolean;
         };
         CatalogueCounts: {
             /** Format: int32 */
@@ -580,6 +647,82 @@ export interface operations {
         };
     };
     CancelLibraryEnrichment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetReleaseAttributionStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionStatusResponse"];
+                };
+            };
+        };
+    };
+    StartReleaseAttribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionStartedResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelReleaseAttribution: {
         parameters: {
             query?: never;
             header?: never;

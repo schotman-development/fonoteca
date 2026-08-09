@@ -96,6 +96,27 @@ public static class LibraryEndpoints
             .WithSummary("Ask the running pass to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/attribute", StartAttribution)
+            .WithName("StartReleaseAttribution")
+            .WithSummary("Work out which album each identified file came from.")
+            .WithDescription(
+                "Returns immediately with a job id; progress arrives on the jobs hub. Decides files "
+                + "in sets rather than one at a time — a single file cannot name its release, since "
+                + "one recording appears on the album, on compilations and on every regional "
+                + "pressing. The folders are not consulted: a set is discovered by following "
+                + "shared candidate releases, and the answer is checked against the folders "
+                + "afterwards at GET /api/catalogue/attribution. Opens no file and modifies none.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/attribute", GetAttributionStatus)
+            .WithName("GetReleaseAttributionStatus")
+            .WithSummary("How many files have no album yet, and how the last pass went.");
+
+        group.MapDelete("/attribute", CancelAttribution)
+            .WithName("CancelReleaseAttribution")
+            .WithSummary("Ask the running pass to stop after the set it is on.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         return app;
     }
 
@@ -262,6 +283,60 @@ public static class LibraryEndpoints
                 title: "Nothing to cancel",
                 detail: "No enrichment pass is running.",
                 statusCode: StatusCodes.Status409Conflict);
+
+    /// <summary>
+    /// Starts the attribution pass, which needs enrichment to have run first.
+    /// </summary>
+    /// <remarks>
+    /// Like enrichment, no 503 arm: it reads fingerprint durations and recording
+    /// links out of the catalogue and never opens a file, so an unmounted library
+    /// volume is no reason to refuse.
+    /// </remarks>
+    private static async Task<Results<Accepted<AttributionStartedResponse>, ProblemHttpResult>>
+        StartAttribution(ReleaseAttributionService attribution, CancellationToken cancellationToken)
+    {
+        var pending = await attribution.CountPendingAsync(cancellationToken).ConfigureAwait(false);
+        var outcome = attribution.Start();
+
+        return outcome switch
+        {
+            { Status: AttributionStatus.Started, JobId: { } jobId } => TypedResults.Accepted(
+                "/api/library/attribute",
+                new AttributionStartedResponse(jobId, pending)),
+
+            _ => TypedResults.Problem(
+                title: "The library is already busy",
+                detail: "A scan, an identification, an enrichment or an attribution pass is "
+                    + "running. Only one at a time touches the catalogue. Poll "
+                    + "GET /api/library/attribute.",
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    private static async Task<Ok<AttributionStatusResponse>> GetAttributionStatus(
+        ReleaseAttributionService attribution,
+        CancellationToken cancellationToken)
+    {
+        var progress = attribution.Progress;
+
+        return TypedResults.Ok(new AttributionStatusResponse(
+            Running: attribution.IsRunning,
+            JobId: progress?.JobId,
+            Processed: progress?.Processed ?? 0,
+            Total: progress?.Total ?? 0,
+            CurrentFile: progress?.Current,
+            Pending: await attribution.CountPendingAsync(cancellationToken).ConfigureAwait(false),
+            LastCompleted: attribution.LastCompleted));
+    }
+
+    private static Results<Accepted, ProblemHttpResult> CancelAttribution(
+        ReleaseAttributionService attribution) =>
+        attribution.Cancel()
+            ? TypedResults.Accepted("/api/library/attribute")
+            : TypedResults.Problem(
+                title: "Nothing to cancel",
+                detail: "No attribution pass is running.",
+                statusCode: StatusCodes.Status409Conflict);
 }
 
 /// <summary>Current scan state. <c>LastCompleted</c> is null until one has run.</summary>
@@ -309,3 +384,19 @@ public sealed record EnrichmentStatusResponse(
     int Pending,
 
     EnrichmentSummary? LastCompleted);
+
+/// <summary>An attribution pass was accepted, with the size of the job it took on.</summary>
+public sealed record AttributionStartedResponse(string JobId, int Pending);
+
+/// <summary>Everything the attribution card needs, in one read.</summary>
+public sealed record AttributionStatusResponse(
+    bool Running,
+    string? JobId,
+    int Processed,
+    int Total,
+    string? CurrentFile,
+
+    /// <summary>Identified files that have never been asked which album they came from.</summary>
+    int Pending,
+
+    AttributionSummary? LastCompleted);

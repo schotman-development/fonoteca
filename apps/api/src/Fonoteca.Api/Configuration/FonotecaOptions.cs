@@ -125,6 +125,43 @@ public sealed class FonotecaOptions : IValidatableObject
     public double AcoustIdMinimumMargin { get; init; } = 0.05;
 
     /// <summary>
+    /// How much of a release's track list must be present before a file may be
+    /// filed under it.
+    /// </summary>
+    /// <remarks>
+    /// The loosest rung of <c>ReleaseAttribution</c>'s ladder; the strict rungs
+    /// above it are fixed, because loosening those is what lets a compilation
+    /// outbid the album it drew from. This is also the prune the attribution pass
+    /// uses to decide whether a candidate release is worth a request at all, so
+    /// lowering it costs wall-clock as well as precision.
+    ///
+    /// 0.25 against a real library leaves anthologies of licensed catalogue
+    /// unattributed, which is the intended answer: they genuinely cannot be told
+    /// from the twenty other anthologies carrying the same recordings. Raise it
+    /// for a library of complete album rips; lower it if you would rather have a
+    /// probable album than none.
+    /// </remarks>
+    [Range(0.0, 1.0)]
+    public double ReleaseMinimumCoverage { get; init; } = 0.25;
+
+    /// <summary>
+    /// How far a file's measured length may sit from a release's printed one.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the same rung. Drift is what separates two editions with
+    /// identical track lists — a correctly attributed album in the author's
+    /// library sits under 100ms, and the compilations that cause trouble sit near
+    /// two seconds — so this is the setting that decides how much mastering
+    /// difference counts as the same release.
+    ///
+    /// Milliseconds rather than a <c>TimeSpan</c>, matching how
+    /// <c>MusicBrainzRequestIntervalMs</c> is configured, because environment
+    /// variables carry strings and a number is unambiguous.
+    /// </remarks>
+    [Range(0, 60_000)]
+    public int ReleaseMaximumDriftMs { get; init; } = 3_000;
+
+    /// <summary>
     /// Whether finishing a scan starts an identification pass.
     /// </summary>
     /// <remarks>
