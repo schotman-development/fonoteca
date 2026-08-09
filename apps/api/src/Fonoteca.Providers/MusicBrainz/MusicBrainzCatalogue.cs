@@ -40,7 +40,23 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         | Include.Releases
         | Include.ReleaseGroups
         | Include.Media
-        | Include.Isrcs;
+        | Include.Isrcs
+        // The people the credit line does not name. A classical recording is
+        // billed to its composer, and the conductor, the orchestra and the
+        // soloists are relationships — so without these two the recording is
+        // unfindable under anyone who actually played it. The work link is a
+        // stub; its composer needs the separate lookup below.
+        | Include.ArtistRelationships
+        | Include.WorkRelationships;
+
+    /// <summary>
+    /// A work is asked only for who wrote it.
+    /// </summary>
+    /// <remarks>
+    /// No <c>Include.Recordings</c>: a popular work has thousands, they arrive
+    /// paginated, and the question here is the composer.
+    /// </remarks>
+    private const Include WorkIncludes = Include.ArtistRelationships;
 
     private const Include ReleaseIncludes =
         Include.Artists
@@ -122,6 +138,17 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
             id,
             async token => MusicBrainzMapper.ToRelease(
                 await _query.LookupReleaseAsync(id.Value, ReleaseIncludes, token)
+                    .ConfigureAwait(false)),
+            cancellationToken);
+
+    public Task<MusicBrainzWork?> GetWorkAsync(
+        Mbid id,
+        CancellationToken cancellationToken = default) =>
+        LookupAsync(
+            "work",
+            id,
+            async token => MusicBrainzMapper.ToWork(
+                await _query.LookupWorkAsync(id.Value, WorkIncludes, token)
                     .ConfigureAwait(false)),
             cancellationToken);
 

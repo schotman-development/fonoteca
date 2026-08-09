@@ -21,15 +21,34 @@ namespace Fonoteca.Providers.MusicBrainz;
 /// </remarks>
 internal static class MusicBrainzMapper
 {
-    public static MusicBrainzRecording ToRecording(IRecording source) =>
-        new(
+    public static MusicBrainzRecording ToRecording(IRecording source)
+    {
+        // MusicBrainz allows a recording to be a performance of more than one
+        // work — a medley, a segue. The first is taken and the rest dropped,
+        // because the catalogue's Recording.WorkId is a single link and inventing
+        // a second one here would be modelling the exception before anything
+        // asks about it. Visible in the title when it happens.
+        var performance = FirstWorkLink(source.Relationships);
+
+        return new MusicBrainzRecording(
             Id: new Mbid(source.Id),
             Title: source.Title ?? string.Empty,
             Disambiguation: NullIfBlank(source.Disambiguation),
             Length: source.Length,
             Credits: ToCredits(source.ArtistCredit),
             Isrcs: source.Isrcs ?? [],
-            Appearances: ToAppearances(source));
+            Appearances: ToAppearances(source),
+            Relations: ToRelations(source.Relationships),
+            WorkId: performance is null ? null : new Mbid(performance.Id),
+            WorkTitle: NullIfBlank(performance?.Title));
+    }
+
+    public static MusicBrainzWork ToWork(IWork source) =>
+        new(
+            Id: new Mbid(source.Id),
+            Title: source.Title ?? string.Empty,
+            Type: NullIfBlank(source.Type),
+            Relations: ToRelations(source.Relationships));
 
     public static MusicBrainzRelease ToRelease(IRelease source)
     {
@@ -118,6 +137,60 @@ internal static class MusicBrainzMapper
         }
 
         return appearances;
+    }
+
+    /// <summary>The work this recording is a performance of, if MusicBrainz links one.</summary>
+    private static IWork? FirstWorkLink(IReadOnlyList<IRelationship>? relationships)
+    {
+        foreach (var relationship in relationships ?? [])
+        {
+            if (relationship.Work is { } work) return work;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Every relationship that points at an artist, flattened to that artist.
+    /// </summary>
+    /// <remarks>
+    /// Relationships to works, releases, places and URLs are dropped here rather
+    /// than filtered later: this file exists so that MusicBrainz's shape stops at
+    /// its boundary, and a relation with no artist has nothing the catalogue can
+    /// store. The work link is read separately by <see cref="FirstWorkLink"/>.
+    ///
+    /// Only the first attribute is kept. MusicBrainz allows several — "guitar"
+    /// and "guest" on one performer link — and the catalogue's
+    /// <c>Relationship.Attribute</c> is a single column; the rest are recoverable
+    /// from MusicBrainz and nothing reads them yet.
+    /// </remarks>
+    private static List<MusicBrainzRelation> ToRelations(IReadOnlyList<IRelationship>? relationships)
+    {
+        if (relationships is null || relationships.Count == 0) return [];
+
+        var mapped = new List<MusicBrainzRelation>(relationships.Count);
+
+        foreach (var relationship in relationships)
+        {
+            if (relationship.Artist is not { } artist) continue;
+
+            mapped.Add(new MusicBrainzRelation(
+                Type: relationship.Type ?? string.Empty,
+                Attribute: relationship.Attributes is { Count: > 0 } attributes
+                    ? NullIfBlank(attributes[0])
+                    : null,
+                ArtistId: new Mbid(artist.Id),
+                // The target credit is how this relationship printed the name —
+                // an orchestra billed under a former name on a 1962 pressing.
+                // Absent far more often than an artist credit's, so the artist's
+                // own name is the ordinary answer rather than the fallback.
+                Name: NullIfBlank(relationship.TargetCredit) ?? artist.Name ?? string.Empty,
+                SortName: NullIfBlank(artist.SortName),
+                ArtistType: NullIfBlank(artist.Type),
+                Disambiguation: NullIfBlank(artist.Disambiguation)));
+        }
+
+        return mapped;
     }
 
     private static List<MusicBrainzCredit> ToCredits(IReadOnlyList<INameCredit>? credits)

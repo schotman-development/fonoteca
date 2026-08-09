@@ -33,6 +33,15 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     private static readonly Mbid ReleaseId =
         new(Guid.Parse("db85c244-53e7-441c-bab0-52c9c0d27450"));
 
+    private static readonly Mbid SymphonyRecordingId =
+        new(Guid.Parse("85db2cdf-80c9-4aa2-9789-19328dde47ed"));
+
+    private static readonly Mbid SymphonyWorkId =
+        new(Guid.Parse("70729fa3-654b-4a0b-85ec-5c0ba3b3fb80"));
+
+    private static readonly Mbid CollaborationId =
+        new(Guid.Parse("b161074b-1b43-4559-bd6f-0a106a2c7547"));
+
     private readonly List<ServiceProvider> _providers = [];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -176,6 +185,103 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         var last = release.Tracks[^1];
         Assert.Equal("Lower Your Eyelids to Die With the Sun", last.Title);
         Assert.Equal(RecordingId, last.RecordingId);
+    }
+
+    /// <summary>
+    /// The case the relationship includes exist for. MusicBrainz bills this
+    /// recording to nobody who played it, and without <c>artist-rels</c> the
+    /// conductor and the orchestra are simply absent from the response.
+    /// </summary>
+    [Fact]
+    public async Task AClassicalRecordingCarriesItsConductorItsOrchestraAndItsWork()
+    {
+        var (catalogue, stub) = Build(Recorded("recording-symphony-no-40.json"));
+
+        var recording = await catalogue.GetRecordingAsync(SymphonyRecordingId, Token);
+
+        Assert.NotNull(recording);
+
+        var query = Assert.Single(stub.Requests).Uri.Query;
+        Assert.Contains("artist-rels", query, StringComparison.Ordinal);
+        Assert.Contains("work-rels", query, StringComparison.Ordinal);
+
+        var conductor = Assert.Single(recording.Relations, r => r.Type == "conductor");
+        Assert.Equal("Anzor Kinkladze", conductor.Name);
+        Assert.Equal("Person", conductor.ArtistType);
+
+        var orchestra = Assert.Single(recording.Relations, r => r.Type == "performing orchestra");
+        Assert.Equal("Georgian SIMI Festival Orchestra", orchestra.Name);
+
+        // The work arrives as a stub — enough to look it up, not enough to name
+        // the composer, which is why GetWorkAsync exists.
+        Assert.Equal(SymphonyWorkId, recording.WorkId);
+        Assert.Equal(
+            "Symphony no. 40 in G minor, K. 550 “Great”: I. Allegro molto",
+            recording.WorkTitle);
+    }
+
+    /// <summary>
+    /// A relationship whose target is not an artist has nothing the catalogue
+    /// can store, and the work link is read on its own.
+    /// </summary>
+    [Fact]
+    public async Task RelationsToAnythingButAnArtistAreDropped()
+    {
+        var (catalogue, _) = Build(Recorded("recording-symphony-no-40.json"));
+
+        var recording = await catalogue.GetRecordingAsync(SymphonyRecordingId, Token);
+
+        Assert.NotNull(recording);
+
+        // The response carries three relationships; the third is the performance
+        // link to the work.
+        Assert.Equal(2, recording.Relations.Count);
+        Assert.DoesNotContain(recording.Relations, r => r.Type == "performance");
+        Assert.All(recording.Relations, r => Assert.NotNull(r.ArtistId));
+    }
+
+    [Fact]
+    public async Task AWorkNamesWhoWroteIt()
+    {
+        var (catalogue, stub) = Build(Recorded("work-symphony-no-40.json"));
+
+        var work = await catalogue.GetWorkAsync(SymphonyWorkId, Token);
+
+        Assert.NotNull(work);
+        Assert.Equal(SymphonyWorkId, work.Id);
+
+        var request = Assert.Single(stub.Requests);
+        Assert.Contains("/work/", request.Uri.AbsolutePath, StringComparison.Ordinal);
+        Assert.Contains("artist-rels", request.Uri.Query, StringComparison.Ordinal);
+
+        // Not recordings: a popular work has thousands and they arrive paginated.
+        Assert.DoesNotContain("recordings", request.Uri.Query, StringComparison.Ordinal);
+
+        var composer = Assert.Single(work.Relations, r => r.Type == "composer");
+        Assert.Equal("Wolfgang Amadeus Mozart", composer.Name);
+        Assert.Equal("Person", composer.ArtistType);
+    }
+
+    /// <summary>
+    /// The other case the credit line gets right and a relationship-only reading
+    /// would lose: two artists on the sleeve, with the word between them.
+    /// </summary>
+    [Fact]
+    public async Task ACollaborationKeepsBothCreditsAndTheJoinPhrase()
+    {
+        var (catalogue, _) = Build(Recorded("recording-nutbush-city-limits.json"));
+
+        var recording = await catalogue.GetRecordingAsync(CollaborationId, Token);
+
+        Assert.NotNull(recording);
+        Assert.Equal(["Beth Hart", "Joe Bonamassa"], recording.Credits.Select(c => c.Name));
+
+        // MusicBrainz sends "" for the last join phrase in a list.
+        Assert.Equal(" & ", recording.Credits[0].JoinPhrase);
+        Assert.Null(recording.Credits[1].JoinPhrase);
+
+        // Kept, and it is the domain rule's job to decide it is not a credit.
+        Assert.Single(recording.Relations, r => r.Type == "mix");
     }
 
     /// <summary>

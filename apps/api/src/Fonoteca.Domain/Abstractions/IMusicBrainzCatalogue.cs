@@ -47,6 +47,23 @@ public interface IMusicBrainzCatalogue
     Task<MusicBrainzRelease?> GetReleaseAsync(
         Mbid id,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One composition, with the people MusicBrainz says wrote it.
+    /// </summary>
+    /// <remarks>
+    /// A separate call rather than a deeper <c>inc=</c> on the recording, for two
+    /// reasons. WS/2 does not offer the hop: a recording asked for
+    /// <c>work-rels</c> gets a work <i>stub</i> — id, title, type — and the
+    /// work's own artist relationships are only served by a work lookup. And the
+    /// sharing is the point: a symphony movement recorded forty times is one
+    /// work, so a caller that memoises by <see cref="MusicBrainzWork.Id"/> spends
+    /// one request where folding it into the recording lookup would spend forty.
+    /// </remarks>
+    /// <returns>Null when MusicBrainz has no such work.</returns>
+    Task<MusicBrainzWork?> GetWorkAsync(
+        Mbid id,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -95,7 +112,72 @@ public sealed record MusicBrainzRecording(
     /// </remarks>
     IReadOnlyList<string> Isrcs,
 
-    IReadOnlyList<MusicBrainzAppearance> Appearances);
+    IReadOnlyList<MusicBrainzAppearance> Appearances,
+
+    /// <summary>
+    /// Typed links to the people behind the performance, which the credit line
+    /// does not name.
+    /// </summary>
+    /// <remarks>
+    /// The whole reason this type is not just <see cref="Credits"/>. MusicBrainz
+    /// bills a classical recording to the composer — "Ludwig van Beethoven" — and
+    /// puts the conductor, the orchestra and the soloists in relationships. A
+    /// consumer that reads only the credit line therefore cannot find the
+    /// recording under the people who actually played it.
+    /// </remarks>
+    IReadOnlyList<MusicBrainzRelation> Relations,
+
+    /// <summary>The composition this is a performance of, when MusicBrainz links one.</summary>
+    /// <remarks>
+    /// Only the identity and the title: the work's own relationships — the
+    /// composer among them — need <see cref="IMusicBrainzCatalogue.GetWorkAsync"/>.
+    /// </remarks>
+    Mbid? WorkId,
+
+    string? WorkTitle);
+
+/// <summary>A composition and the people credited with writing it.</summary>
+public sealed record MusicBrainzWork(
+    Mbid Id,
+    string Title,
+
+    /// <summary>Song, Symphony, Opera. Free text, mirroring MusicBrainz work types.</summary>
+    string? Type,
+
+    IReadOnlyList<MusicBrainzRelation> Relations);
+
+/// <summary>One typed link from an entity to an artist.</summary>
+/// <remarks>
+/// Flattened to the artist end on purpose: every relationship this application
+/// has a use for — conductor, orchestra, composer, engineer — points at a
+/// person or a group, and carrying MusicBrainz's full bidirectional relationship
+/// model would put its serialisation format in the catalogue's vocabulary. Links
+/// to anything else are dropped by the adapter rather than represented here.
+///
+/// <see cref="ArtistType"/> earns its place: "is this an ensemble" is a fact
+/// about the <i>artist</i>, not about the relation. MusicBrainz links the
+/// Berliner Philharmoniker to a recording as a plain <c>performer</c> about as
+/// often as it uses <c>performing orchestra</c>, so a rule that reads only the
+/// relation type finds one of them and misses the other.
+/// </remarks>
+public sealed record MusicBrainzRelation(
+    /// <summary>The relationship type: "conductor", "composer", "performer", "mix".</summary>
+    string Type,
+
+    /// <summary>Instrument or role qualifier — "trumpet", "guest", "orchestra".</summary>
+    string? Attribute,
+
+    Mbid? ArtistId,
+
+    /// <summary>Name as credited on this relationship, falling back to the artist's own.</summary>
+    string Name,
+
+    string? SortName,
+
+    /// <summary>Person, Group, Orchestra, Choir.</summary>
+    string? ArtistType,
+
+    string? Disambiguation);
 
 /// <summary>An artist's credit, in billing order, as printed.</summary>
 /// <remarks>
