@@ -10,7 +10,7 @@ Four pillars, none of them built yet:
 3. **Upgrade monitoring** — watch for better versions, *arr-style
 4. **Tag editor** — write corrected tags, artwork and MBIDs back to files
 
-> **Status: scaffold, plus the first two slices of pillar 1.**
+> **Status: scaffold, plus the first four slices of pillar 1.**
 >
 > `POST /api/library/scan` walks the library root and reconciles the catalogue's
 > file list with what is on disk — path, size and modification time, and nothing
@@ -37,9 +37,23 @@ Four pillars, none of them built yet:
 > come out: everyone credited on something you own, including the conductors,
 > orchestras and composers a credit line never mentions.
 >
-> Nothing hashes, probes or downloads, and **releases are not attributed** —
-> which of the thirty releases a recording appears on a given file came from is
-> a rule of its own, and until it exists a track names the folder it sits in.
+> **`POST /api/library/attribute`** decides which release each file actually came
+> from. It is the one pass that cannot work a file at a time: a recording of
+> *Sloe Gin* appears on the album, on two compilations, on a remaster and on six
+> regional pressings, and nothing about one file prefers any of them — eleven
+> files filling eleven of eleven tracks prefer exactly one. So it decides files
+> in *sets*, discovered by following shared candidate releases rather than by
+> reading directories.
+>
+> **The folders are deliberately not consulted.** They are used afterwards, at
+> `GET /api/catalogue/attribution`, as an independent second opinion: which
+> folders were split across albums, which albums drew from several folders. Both
+> sides are wrong sometimes — a folder named for a 1979 album can hold the audio
+> of its 2015 remaster, which is exactly the kind of thing comparing measured
+> durations against each edition's printed ones can tell.
+>
+> `GET /api/catalogue/releases` and the `/library/releases` page are what come
+> out, including the tracks you are missing. Nothing hashes, probes or downloads.
 
 ## Layout
 
@@ -193,11 +207,13 @@ the reasoning, including why AcoustID does *not* get the same treatment, in
   decision to take on evidence rather than one taken by association.
 - **The catalogue virtualizer.** Excluding `@tanstack/react-virtual` from the
   design system means writing one. The largest piece of unplanned frontend work.
-- **Releases are not attributed.** Enrichment writes recordings, works and
-  artists; `Releases`, `ReleaseGroups` and `Tracks` stay empty, because deciding
-  which of the thirty releases a recording appears on a given file came from is
-  a rule of its own. Until then a track names the folder it sits in, which is
-  the filesystem's claim rather than MusicBrainz's, and is labelled as such.
+- **Anthologies of licensed catalogue stay unattributed.** The attribution pass
+  refuses rather than guesses, and that is where the refusals land: one 1950s
+  recording sits on its original album and on twenty compilations, all fitting
+  equally badly, and nothing chooses between them. They are visible as
+  `NoConfidentFit` in `GET /api/catalogue/attribution`, and a track with no album
+  falls back to naming its folder — labelled as a folder, not dressed up as an
+  album.
 - **Run history is not persisted.** `LastCompleted` for the scan and both passes
   is an in-memory field, forgotten on restart. Making it
   durable means deciding what a run *is* as an entity, which ADR 0007 defers

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A self-hosted music library manager for 100,000+ track libraries: catalogue and
 dedupe, acquisition (Qobuz/Deezer), *arr-style upgrade monitoring, tag editing.
 
-**Status: scaffold, three passes and one browse screen.** The library scan walks
+**Status: scaffold, four passes and three browse screens.** The library scan walks
 the root and reconciles `MediaFiles` with what is on disk. The **identification
 pass** then fingerprints every file that has no AcoustID, looks it up, and writes
 the result into the file's tags — so `Fonoteca.Tagging` is real, `IStagedWrite` is
@@ -15,12 +15,12 @@ implemented, and there *is* now a code path that modifies audio files. It is
 behind `Fonoteca:AllowFileMutation`, which still defaults to `false`; with it off
 the pass does everything except the write. **Read `docs/adr/0002` before touching
 that path.** The **enrichment pass** turns those identities into a catalogue —
-recordings, works, artists — and `/library` browses it.
+recordings, works, artists — and `/library` browses it. The **attribution pass**
+then decides which release each file came from, from the audio alone, and
+`/library/releases` browses that.
 
-Still missing: hashing, probing (`AudioQuality` is never populated), downloading,
-and **release attribution** — `Releases`, `ReleaseGroups` and `Tracks` are still
-empty tables, because deciding which of the thirty releases a recording appears
-on a given file actually came from is a rule of its own.
+Still missing: hashing, probing (`AudioQuality` is never populated), and
+downloading.
 
 ## Toolchain
 
@@ -262,6 +262,75 @@ other half, and its own list of paid-for edges:
   expressing it as a union of `(artist, recording)` pairs is refused too
   ("unable to translate set operation after client projection has been applied").
   `TheListAndTheDetailPageAgree` is what stops the two copies drifting.
+
+### The attribution pass, and why its unit is a set
+
+| | |
+| --- | --- |
+| `Domain/Identification/ReleaseFit.cs` | how well one release explains a set of files. Pure |
+| `Domain/Identification/ReleaseAttribution.cs` | the rule — gated rounds, and the three ways a tie resolves. Pure |
+| `Api/Library/ReleaseAttributionService.cs` | the pass: seed → component → decision → rows |
+| `Api/Endpoints/CatalogueEndpoints.cs` | `GET /api/catalogue/releases`, `…/{id}`, `…/attribution` |
+
+**The folders are not consulted.** That was the ask and it turned out to be
+forced: sampling 60 files with `ffprobe` found `ACOUSTID_ID` on every one and
+nothing else at all — no `ALBUM`, no `TRACKNUMBER`, no barcode. The library was
+deliberately tag-stripped, so the directory name and the audio are the only two
+claims in existence and one of them is the one not to believe. It is wrong where
+it matters, too: a folder named for a 1979 album holds the audio of the 2015
+remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
+
+- **A single file cannot name its release, so the unit is a component** — a set
+  of files sharing candidate releases, decided and committed together. This is
+  the one pass with no per-file unit of work, so resumability is per component
+  rather than free. Components are *discovered* by following shared candidate
+  releases outward from one seed, never assumed from a directory.
+- **`inc=releases` on a recording lookup caps at 25 and does not say so.**
+  `Don't Rock the Jukebox` returns 25 where a browse of the same recording
+  reports 40. `MusicBrainzRecording.Appearances` is therefore not a candidate
+  set; `BrowseReleasesForRecordingAsync` is.
+- **`inc=recordings` on a *browse* is worse — it silently drops releases.** The
+  same browse returns 40 without it and **15** with it, at every page size, while
+  `release-count` goes on claiming 40. Track lists come from `GetReleaseAsync`,
+  one release at a time. This forces the two-stage shape and there is no way
+  around it.
+- **The prune is exact, and unsound on the opening round.** Coverage cannot
+  exceed the share of a release's track count the library holds — but after one
+  browse that share is 1/12 for any ordinary album, so applying it in round one
+  discards every album in the library before its track list is read. It cost a
+  live run of 1,149 refusals out of 1,247. Skipped on round one, applied after.
+- **Gates come before size.** The obvious greedy — take the release explaining
+  the most files — let a 31-track bootleg *Greatest Hits* (coverage 0.55, drift
+  1.99s) claim seventeen files out of four albums before any of them was
+  considered. Requiring a fit to be *good* before asking whether it is *big*
+  removes it entirely.
+- **Duration is the edition discriminator and it is precise enough to be one.**
+  `FingerprintDuration` is stored to 10ms; against *per-release* track lengths
+  the 2015 remaster of `Off the Wall` matches to 0.00s while three earlier
+  pressings sit at 0.76s, on identical track lists.
+- **Refusing is a first-class answer.** A file no release explains well comes
+  back `NoConfidentFit` rather than filed under whichever anthology scored least
+  badly. Anthologies of licensed catalogue are where this lands, and it is
+  working when it does — a wrong album is worse than a missing one and far
+  harder to notice.
+- **A tie resolves three ways, by what the tie costs.** Editions agreeing on
+  every position → pick by a stated tie-break and record the count. Editions
+  disagreeing about disc or position → keep only the release group, because a
+  track number would be an invention. Neither → refuse. The agreement question is
+  asked of the whole set, or one rip splits between a release and a group and
+  then reports itself incomplete.
+- **EF queries the database, not the change tracker.** Three unique-index
+  collisions in live runs came from this, all the same shape: a row Added but not
+  saved is invisible to the next query, and a component routinely names one thing
+  twice — two releases listing a bonus track nobody owns, and two pressings
+  sharing a release group, which is *by definition*. Everything the writer mints
+  goes through a dictionary.
+- **Only chosen releases are persisted, but their whole track list is.** The
+  candidate set for one component runs to hundreds; writing them all makes the
+  album list a browse of MusicBrainz. Writing the full track list of the ones
+  kept is what makes "you are missing track 7" answerable.
+- **`held` counts distinct tracks, not files.** Five encodings of one song are
+  one track of the album; counting files makes a half-ripped album read complete.
 
 ### The identification providers, and what they refuse to do
 
