@@ -252,8 +252,25 @@ public sealed class IdentificationService(
             FullMode = BoundedChannelFullMode.Wait,
         });
 
-        var produce = ProduceAsync(channel.Writer, cancellationToken);
-        var consume = ConsumeAsync(channel.Reader, counts, jobId, pending, correlationId, config, cancellationToken);
+        // A stage B that stops — for any reason — must release stage A.
+        //
+        // Without this the two stages deadlock on their own backpressure. The
+        // channel is bounded, so stage A blocks in WriteAsync once it is full;
+        // if stage B has died, nothing will ever drain it, and Task.WhenAll goes
+        // on waiting for a producer that cannot finish. The consumer's exception
+        // is then never observed, RunAsync never returns, and the pass hangs
+        // *silently* — no summary, no log line, the status endpoint still
+        // reporting "running" at whatever file it reached. That is exactly how a
+        // single unreadable file stopped a 7,317-file pass dead at 370 with
+        // nothing in the log to say so.
+        //
+        // Cancelling on the consumer's way out, whatever the reason, is what
+        // turns that into a prompt, loud failure.
+        using var abort = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var produce = ProduceAsync(channel.Writer, abort.Token);
+        var consume = ConsumeThenReleaseAsync(
+            channel.Reader, counts, jobId, pending, correlationId, config, abort, cancellationToken);
 
         await Task.WhenAll(produce, consume).ConfigureAwait(false);
 
@@ -273,6 +290,7 @@ public sealed class IdentificationService(
             Unfingerprintable: counts.Unfingerprintable,
             Tagged: counts.Tagged,
             WriteRefused: counts.WriteRefused,
+            TagUnreadable: counts.TagUnreadable,
             Failed: counts.Failed,
             Cancelled: cancellationToken.IsCancellationRequested);
 
@@ -414,6 +432,37 @@ public sealed class IdentificationService(
         }
     }
 
+    /// <summary>
+    /// Stage B, with the guarantee that stage A is released when it ends.
+    /// </summary>
+    /// <remarks>
+    /// A <c>finally</c> rather than a <c>catch</c>, because the release has to
+    /// happen on every exit and not only the interesting ones. On the ordinary
+    /// path the producer has already completed and the cancellation is a no-op;
+    /// on the failure path it is the only thing that lets the pass report what
+    /// went wrong instead of stopping forever.
+    /// </remarks>
+    private async Task ConsumeThenReleaseAsync(
+        ChannelReader<Fingerprinted> reader,
+        Tally counts,
+        string jobId,
+        int total,
+        string correlationId,
+        FonotecaOptions config,
+        CancellationTokenSource abort,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ConsumeAsync(reader, counts, jobId, total, correlationId, config, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            await abort.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Stage B: look up, choose, write, record. Strictly one at a time.</summary>
     private async Task ConsumeAsync(
         ChannelReader<Fingerprinted> reader,
@@ -430,7 +479,33 @@ public sealed class IdentificationService(
         {
             await foreach (var item in reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                await HandleAsync(item, counts, correlationId, config, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await HandleAsync(item, counts, correlationId, config, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (ProviderRejectedException)
+                {
+                    // Not this file's problem — the key is wrong, so every
+                    // remaining file would fail in exactly the same way. Stopping
+                    // on the first is the whole point of telling the two apart.
+                    throw;
+                }
+#pragma warning disable CA1031 // The backstop: no single file may end the pass.
+                catch (Exception cause)
+#pragma warning restore CA1031
+                {
+                    // Anything unforeseen, from any layer. The row keeps whatever
+                    // this file's scope had already committed, and stays on the
+                    // worklist if it committed nothing, so the next run retries
+                    // it. One surprising file costs one file.
+                    counts.Failed++;
+                    Log.FileFailed(logger, item.File.Path, cause);
+                }
 
                 counts.Examined++;
 
@@ -588,11 +663,35 @@ public sealed class IdentificationService(
         // the DbContext the row above lives in and commits with it.
         var writer = scope.ServiceProvider.GetRequiredService<AcoustIdTagWriter>();
 
-        var plan = await writer.PlanAsync(path, identified.Value, cancellationToken).ConfigureAwait(false);
-        var write = await writer
-            .ApplyAsync(
-                plan, row.Id.ToString(), correlationId, SystemCallerContext.SystemId, cancellationToken)
-            .ConfigureAwait(false);
+        TagWriteResult write;
+
+        try
+        {
+            var plan = await writer.PlanAsync(path, identified.Value, cancellationToken)
+                .ConfigureAwait(false);
+
+            write = await writer
+                .ApplyAsync(
+                    plan, row.Id.ToString(), correlationId, SystemCallerContext.SystemId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TagReadFailedException cause)
+        {
+            // Identified, but not writable. The AcoustID above is real and is
+            // kept — the lookup succeeded and repeating it would cost another
+            // turn at the rate limit for the same answer. What failed is reading
+            // the file well enough to change it safely, and the honest response
+            // to that is to leave the file alone: AcoustIdTaggedUtc stays null,
+            // so it shows up as identified-but-untagged rather than as done.
+            //
+            // In the author's library this is forty FLACs carrying a prepended
+            // ID3v2 header, which is not legal FLAC. `metaflac --remove --block-type=
+            // APPLICATION` or a re-tag in Picard fixes them at the source, which
+            // is the right place: they were like that before this app saw them.
+            counts.TagUnreadable++;
+            Log.FileTagUnreadable(logger, item.File.Path, cause.Library, cause.CauseType);
+            return;
+        }
 
         switch (write.Status)
         {
@@ -651,6 +750,7 @@ public sealed class IdentificationService(
         public int Unfingerprintable;
         public int Tagged;
         public int WriteRefused;
+        public int TagUnreadable;
         public int Failed;
     }
 
@@ -732,6 +832,17 @@ public sealed record IdentificationSummary(
 
     /// <summary>Files that would have been tagged if Fonoteca:AllowFileMutation were on.</summary>
     int WriteRefused,
+
+    /// <summary>
+    /// Files identified, but left alone because their tags could not be read.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Failed"/> because nothing went wrong with the
+    /// pass and retrying will not help: the file is malformed and the fix is in
+    /// the file, not here. Their AcoustID is recorded all the same, so they cost
+    /// no further lookups once the file is repaired.
+    /// </remarks>
+    int TagUnreadable,
 
     /// <summary>Transient failures. These stay on the worklist for the next run.</summary>
     int Failed,

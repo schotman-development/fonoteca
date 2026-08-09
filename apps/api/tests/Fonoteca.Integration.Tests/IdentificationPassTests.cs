@@ -427,8 +427,148 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
         Assert.Equal(0, second.Examined);
     }
 
+    /// <summary>
+    /// The regression test for a pass that stopped without saying so.
+    /// </summary>
+    /// <remarks>
+    /// The two stages are joined by a bounded channel and a <c>Task.WhenAll</c>.
+    /// When stage B died, stage A stayed blocked in <c>WriteAsync</c> on a
+    /// channel nobody would ever drain again — so <c>WhenAll</c> went on waiting
+    /// for the producer and never observed the consumer's exception. The pass
+    /// hung: no summary, no log line, the status endpoint still cheerfully
+    /// reporting "running" at the file it had reached. It sat like that for
+    /// twenty-five minutes before anyone looked.
+    ///
+    /// <b>The file count is load-bearing.</b> It has to exceed the channel's
+    /// bound, or the producer finishes on its own and the deadlock cannot happen
+    /// — which is precisely why every existing test here, all of them using one
+    /// or two files, stayed green while the bug was live.
+    ///
+    /// The assertion is deliberately only "it stopped". What the pass does with a
+    /// fatal error is the next test's business; this one insists it reaches a
+    /// conclusion at all.
+    /// </remarks>
+    [Fact]
+    public async Task AFatalErrorEndsThePassInsteadOfLeavingItRunningForever()
+    {
+        SkipWithoutTools();
+
+        for (var i = 0; i < 8; i++) Copy(Corpus.Flac, $"track-{i}.flac");
+
+        var services = Build(
+            allowMutation: false,
+            new StubLookup([], failure: () => new ProviderRejectedException("AcoustID", "Invalid API key.")));
+
+        await ScanAsync(services);
+
+        var identification = services.GetRequiredService<IdentificationService>();
+
+        Assert.Equal(IdentificationStatus.Started, identification.Start().Status);
+
+        Assert.True(
+            await StoppedWithinAsync(identification, TimeSpan.FromSeconds(30)),
+            "Still running 30s after a fatal error: stage A is deadlocked on the channel.");
+
+        // It failed, so there is no summary. "Finished" and "finished
+        // successfully" being different things is the point.
+        Assert.Null(identification.LastCompleted);
+    }
+
+    /// <summary>
+    /// One surprising file costs one file.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to the test above: an error that is <i>not</i> a reason to
+    /// stop must not stop anything. Before the backstop existed, any exception at
+    /// all — from any layer, on any file — took the entire pass down with it.
+    /// </remarks>
+    [Fact]
+    public async Task AnUnexpectedErrorOnOneFileDoesNotStopThePass()
+    {
+        SkipWithoutTools();
+
+        for (var i = 0; i < 8; i++) Copy(Corpus.Flac, $"track-{i}.flac");
+
+        var lookup = new StubLookup(
+            [new AcoustIdMatch(Cluster, 0.97, [])],
+            failure: () => new InvalidOperationException("Something nobody predicted."),
+            failOnCall: 1);
+
+        var services = Build(allowMutation: false, lookup);
+
+        await ScanAsync(services);
+
+        var summary = await IdentifyAsync(services);
+
+        Assert.Equal(8, summary.Examined);
+        Assert.Equal(1, summary.Failed);
+        Assert.Equal(7, summary.Identified);
+        Assert.False(summary.Cancelled);
+
+        // The one that blew up kept its place on the worklist rather than being
+        // written off, so the next run picks it up.
+        Assert.Equal(1, await PendingAsync(services));
+    }
+
+    /// <summary>
+    /// A file we cannot read is a file we do not write to.
+    /// </summary>
+    /// <remarks>
+    /// The AcoustID is still worth keeping — the lookup succeeded, and discarding
+    /// it would mean paying the rate limit again for the same answer once the
+    /// file is repaired. What is not kept is any pretence that the tag was
+    /// written.
+    /// </remarks>
+    [Fact]
+    public async Task AFileWhoseTagsCannotBeReadIsIdentifiedButLeftUntouched()
+    {
+        SkipWithoutTools();
+        Copy(Corpus.Id3PrefixedFlac, "id3-prefixed.flac");
+
+        var file = Path.Combine(_root, "id3-prefixed.flac");
+        var before = await File.ReadAllBytesAsync(file, Token);
+
+        // Mutation ON, so the refusal has to come from the file being unreadable
+        // rather than from the safety switch.
+        var services = Build(allowMutation: true, Answering(0.97));
+
+        await ScanAsync(services);
+        var summary = await IdentifyAsync(services);
+
+        Assert.Equal(1, summary.TagUnreadable);
+        Assert.Equal(0, summary.Tagged);
+        Assert.Equal(0, summary.Failed);
+
+        var row = await RowAsync("id3-prefixed.flac");
+
+        Assert.Equal(new AcoustId(Cluster), row.AcoustId);
+        Assert.Equal(AcoustIdOutcome.Identified, row.AcoustIdOutcome);
+        Assert.NotNull(row.AcoustIdCheckedUtc);
+        Assert.Null(row.AcoustIdTaggedUtc);
+
+        // Byte for byte, which is the promise that actually matters.
+        Assert.Equal(before, await File.ReadAllBytesAsync(file, Token));
+
+        // And it is not asked about again: the lookup was the expensive part and
+        // it has already been answered.
+        Assert.Equal(0, await PendingAsync(services));
+    }
+
     private static void SkipWithoutTools() =>
         Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+    /// <summary>Waits for a pass to stop, however it stops. False means it did not.</summary>
+    private static async Task<bool> StoppedWithinAsync(IdentificationService identification, TimeSpan limit)
+    {
+        var deadline = DateTime.UtcNow + limit;
+
+        while (identification.IsRunning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+        }
+
+        return !identification.IsRunning;
+    }
 
     private static StubLookup Answering(params double[] scores) =>
         new([.. scores.Select(score => new AcoustIdMatch(Cluster, score, []))]);
@@ -516,8 +656,23 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
         return provider;
     }
 
-    /// <summary>Answers with a fixed set of matches, and counts how often it was asked.</summary>
-    private sealed class StubLookup(IReadOnlyList<AcoustIdMatch> matches, bool unavailable = false)
+    /// <summary>
+    /// Answers with a fixed set of matches, and counts how often it was asked.
+    /// </summary>
+    /// <param name="failure">
+    /// Builds the exception to throw instead of answering, or null to always
+    /// answer. A factory rather than an instance so each throw carries its own
+    /// stack, exactly as a real one would.
+    /// </param>
+    /// <param name="failOnCall">
+    /// Which call fails, counting from one. Zero means every call fails — the
+    /// difference between "this file is a problem" and "this configuration is".
+    /// </param>
+    private sealed class StubLookup(
+        IReadOnlyList<AcoustIdMatch> matches,
+        bool unavailable = false,
+        Func<Exception>? failure = null,
+        int failOnCall = 0)
         : IAcoustIdLookup
     {
         private int _calls;
@@ -530,11 +685,16 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
             AudioFingerprint fingerprint,
             CancellationToken cancellationToken = default)
         {
-            Interlocked.Increment(ref _calls);
+            var call = Interlocked.Increment(ref _calls);
 
             if (unavailable)
             {
                 throw new ProviderUnavailableException("AcoustID", "Stubbed outage.");
+            }
+
+            if (failure is not null && (failOnCall == 0 || call == failOnCall))
+            {
+                throw failure();
             }
 
             return Task.FromResult(matches);

@@ -31,10 +31,17 @@ public sealed class TagReader(IAudioFileStore files)
     /// years ago, and re-deriving what they already state would cost 227
     /// fingerprints and 227 turns at a rate limit to learn nothing.
     ///
-    /// Never throws on a file it cannot parse. A container ATL does not
-    /// understand has no AcoustID as far as this is concerned, which is the same
-    /// answer as a file that simply has not been tagged, and both lead to the
-    /// same next step.
+    /// Never throws on a file it cannot parse, and that promise is kept with a
+    /// catch-all rather than a list of expected types — because the expected
+    /// types are not what a tag parser actually raises. ATL throws a
+    /// <see cref="NullReferenceException"/> on a FLAC carrying a prepended ID3v2
+    /// header, and there are forty of those in the author's library. Here that
+    /// costs nothing: a file whose fields cannot be read has no AcoustID as far
+    /// as this is concerned, which is the same answer as a file that was never
+    /// tagged, and both lead to the same next step — fingerprint it.
+    ///
+    /// <see cref="ReadAsync"/> deliberately does <i>not</i> take the same view,
+    /// because its answer is used to decide what to write.
     /// </remarks>
     public async Task<string?> ReadAcoustIdAsync(
         LibraryPath path,
@@ -52,15 +59,13 @@ public sealed class TagReader(IAudioFileStore files)
                 return Normalise(Lookup(track, field));
             }
         }
-        catch (IOException)
+        catch (OperationCanceledException)
         {
-            return null;
+            throw;
         }
-        catch (InvalidDataException)
-        {
-            return null;
-        }
-        catch (NotSupportedException)
+#pragma warning disable CA1031 // Documented above: an unreadable file simply has no AcoustID.
+        catch (Exception)
+#pragma warning restore CA1031
         {
             return null;
         }
@@ -90,7 +95,20 @@ public sealed class TagReader(IAudioFileStore files)
         var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
         await using (stream.ConfigureAwait(false))
         {
-            return Describe(new Track(stream, ExtensionOf(container)), AcoustIdTagField.For(container));
+            try
+            {
+                return Describe(new Track(stream, ExtensionOf(container)), AcoustIdTagField.For(container));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // Whatever ATL raises means one thing here; see TagReadFailedException.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                throw new TagReadFailedException(path, "ATL", cause);
+            }
         }
     }
 
@@ -116,8 +134,21 @@ public sealed class TagReader(IAudioFileStore files)
         var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
         await using (stream.ConfigureAwait(false))
         {
-            using var file = TagLib.File.Create(new StreamFileAbstraction(container.Value, stream));
-            return VerifierReading.Describe(file);
+            try
+            {
+                using var file = TagLib.File.Create(new StreamFileAbstraction(container.Value, stream));
+                return VerifierReading.Describe(file);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // TagLib# has its own vocabulary for "no"; see TagReadFailedException.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                throw new TagReadFailedException(path, "TagLib#", cause);
+            }
         }
     }
 

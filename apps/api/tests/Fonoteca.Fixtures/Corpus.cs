@@ -89,6 +89,35 @@ public static class Corpus
     /// <summary>A FLAC with a non-ASCII name, for the same reason.</summary>
     public static string NonAsciiNamedFlac => Built.Value.NonAscii;
 
+    /// <summary>
+    /// A playable FLAC with an ID3v2.3 tag glued to the front of it.
+    /// </summary>
+    /// <remarks>
+    /// Not a theoretical malformation: forty files in the library this was
+    /// written for are shaped exactly like this, and one of them stopped an
+    /// identification pass dead at file 370 of 7,317. FLAC has no business
+    /// carrying ID3 — the format says a file begins with <c>fLaC</c> — but
+    /// several taggers wrote one anyway, and players are forgiving enough that
+    /// nobody noticed for years.
+    ///
+    /// <b>The unsynchronisation is the whole point of the fixture.</b> A
+    /// prepended tag alone is harmless, and so is the unsynchronisation flag on
+    /// its own; ATL reads both without complaint. What breaks it is the
+    /// combination the real files have — the flag set <i>and</i> the bytes
+    /// genuinely unsynchronised, so that undoing it shifts every offset after
+    /// the picture. Reading ordinary tag fields still works; reading embedded
+    /// pictures throws <see cref="NullReferenceException"/> from inside ATL.
+    /// Five variants were built and measured before this one, and the other four
+    /// pass — which is why the recipe below is spelled out rather than
+    /// approximated.
+    ///
+    /// The audio is intact, so this file fingerprints perfectly well. That is
+    /// what makes it dangerous rather than merely broken: it gets identified,
+    /// and only then does anything try to read its tags in order to write one
+    /// back.
+    /// </remarks>
+    public static string Id3PrefixedFlac => Built.Value.Id3Prefixed;
+
     /// <summary>Every generated file, for a test that wants to sweep the lot.</summary>
     public static IReadOnlyList<string> All => Built.Value.All;
 
@@ -192,9 +221,86 @@ public static class Corpus
         var notAudio = Path.Combine(root, "not-audio.flac");
         File.WriteAllText(notAudio, "This has an audio extension and no audio in it.\n");
 
+        var id3Prefixed = Path.Combine(root, "id3-prefixed.flac");
+        File.WriteAllBytes(id3Prefixed, [.. UnsynchronisedId3Tag(), .. File.ReadAllBytes(flac)]);
+
         return new CorpusFiles(
             root, flac, mp3, m4a, ogg, withArtwork, alreadyTagged,
-            truncated, empty, notAudio, awkward, nonAscii);
+            truncated, empty, notAudio, awkward, nonAscii, id3Prefixed);
+    }
+
+    /// <summary>
+    /// An ID3v2.3 tag carrying a title and a picture, unsynchronised.
+    /// </summary>
+    /// <remarks>
+    /// Hand-built rather than produced by a tool, because no tool in this
+    /// toolchain will make one: ffmpeg's FLAC muxer ignores <c>-write_id3v2</c>
+    /// and writes a bare <c>fLaC</c> header, which is the correct thing for it to
+    /// do and useless here. The bytes are simple enough to state exactly.
+    ///
+    /// Unsynchronisation is an ID3v2 scheme for keeping tag data from looking
+    /// like an MPEG frame sync: every <c>0xFF</c> followed by <c>0x00</c> or by a
+    /// byte from <c>0xE0</c> up gets a <c>0x00</c> inserted after it, and the
+    /// reader takes them back out. It is pointless in a FLAC — there is no MPEG
+    /// sync to protect — which is exactly why a tagger doing it here produces a
+    /// file nothing has been tested against. The picture payload is deliberately
+    /// full of <c>0xFF</c>, like the JPEG cover art in the real files, so that the
+    /// scheme actually has work to do.
+    /// </remarks>
+    private static byte[] UnsynchronisedId3Tag()
+    {
+        var picture = new byte[60_000];
+
+        for (var i = 0; i < picture.Length; i++)
+        {
+            picture[i] = (byte)(i % 7 == 0 ? 0xFF : i % 251);
+        }
+
+        byte[] title = [0x00, .. "Corpus"u8];
+        byte[] art = [0x00, .. "image/jpeg"u8, 0x00, 0x03, 0x00, .. picture];
+
+        var content = Unsynchronise([.. Id3Frame("TIT2", title), .. Id3Frame("APIC", art)]);
+
+        const int Padding = 512;
+        var size = content.Length + Padding;
+
+        // The header's length is a "syncsafe" integer: seven bits per byte, so
+        // the length itself can never contain a 0xFF either.
+        byte[] syncsafe =
+        [
+            (byte)((size >> 21) & 0x7f),
+            (byte)((size >> 14) & 0x7f),
+            (byte)((size >> 7) & 0x7f),
+            (byte)(size & 0x7f),
+        ];
+
+        // "ID3", version 2.3.0, flags 0x80 = unsynchronisation applied.
+        return ["ID3"u8[0], "ID3"u8[1], "ID3"u8[2], 0x03, 0x00, 0x80, .. syncsafe, .. content, .. new byte[Padding]];
+    }
+
+    private static byte[] Id3Frame(string id, byte[] payload)
+    {
+        var size = new byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(size, payload.Length);
+
+        return [.. System.Text.Encoding.ASCII.GetBytes(id), .. size, 0x00, 0x00, .. payload];
+    }
+
+    private static byte[] Unsynchronise(byte[] input)
+    {
+        var output = new List<byte>(input.Length + 64);
+
+        for (var i = 0; i < input.Length; i++)
+        {
+            output.Add(input[i]);
+
+            if (input[i] == 0xFF && i + 1 < input.Length && (input[i + 1] == 0x00 || input[i + 1] >= 0xE0))
+            {
+                output.Add(0x00);
+            }
+        }
+
+        return [.. output];
     }
 
     /// <summary>
@@ -296,12 +402,13 @@ public static class Corpus
         string Empty,
         string NotAudio,
         string AwkwardName,
-        string NonAscii)
+        string NonAscii,
+        string Id3Prefixed)
     {
         public IReadOnlyList<string> All =>
         [
             Flac, Mp3, M4a, Ogg, FlacWithArtwork, AlreadyTagged,
-            Truncated, Empty, NotAudio, AwkwardName, NonAscii,
+            Truncated, Empty, NotAudio, AwkwardName, NonAscii, Id3Prefixed,
         ];
     }
 }

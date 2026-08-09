@@ -382,6 +382,38 @@ Adding a component means adding stories, because that is what tests it.
 
 ## Gotchas already paid for
 
+- **Two stages joined by a bounded channel and a `Task.WhenAll` deadlock when
+  the consumer dies.** The producer blocks in `WriteAsync` on a channel nobody
+  will drain again, so `WhenAll` waits on the producer forever and *never
+  observes the consumer's exception*. No stack trace, no log line, no summary —
+  the pass simply stops, and the status endpoint goes on reporting "running" at
+  the file it reached. It cost twenty-five minutes of a live run before anyone
+  noticed, and diagnosing it needed a process dump: `dotnet-dump collect` then
+  `dumpasync`, where the producer sat under a `WhenAllPromise` with
+  `_remainingToComplete = 1` and the consumer was simply absent.
+  `IdentificationService.RunAsync` now runs the consumer through
+  `ConsumeThenReleaseAsync`, whose `finally` cancels a linked CTS that the
+  producer's token comes from. **Any pipeline added here needs the same
+  release.** A test with one or two files cannot catch this — the producer
+  finishes before the channel fills, which is exactly why every existing test
+  stayed green while the bug was live. `AFatalErrorEndsThePassInsteadOf`
+  `LeavingItRunningForever` uses eight.
+- **Tag parsers throw whatever they like, and forty files in the target library
+  make ATL throw `NullReferenceException`.** They are FLACs with an ID3v2 tag
+  prepended — illegal, since a FLAC begins with `fLaC`, but several taggers did
+  it anyway. The trigger is specifically **unsynchronisation**: a prepended tag
+  alone is harmless and so is the flag on its own, but a tag whose bytes are
+  genuinely unsynchronised shifts every offset after the picture when undone,
+  and `Track.EmbeddedPictures` then dereferences null. Reading ordinary fields
+  still works, which is why stage A sails past these files and only stage B
+  falls over — the failure lands hundreds of files into a run, nowhere near the
+  cause. `TagReader` now converts any parser failure into
+  `TagReadFailedException`, and the pass reads that as **do not write to this
+  file** rather than as something to tolerate: on these files ATL reports zero
+  pictures where TagLib# finds one, so a forgiving read would have let the
+  artwork check compare nothing to nothing and pass. `Corpus.Id3PrefixedFlac`
+  builds one, and the recipe is spelled out there because four near-miss
+  variants do *not* reproduce it.
 - **A running `dotnet run` API stalls `dotnet test`.** The test build wants to
   write `Fonoteca.Api.dll`, the running host holds it, and MSBuild waits rather
   than failing — so the run sits at zero output for as long as you let it. Stop

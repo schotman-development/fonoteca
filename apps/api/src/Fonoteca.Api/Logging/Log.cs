@@ -215,4 +215,40 @@ internal static partial class Log
         string path,
         AcoustIdOutcome outcome,
         double? score);
+
+    /// <summary>
+    /// A file identified but deliberately left alone.
+    /// </summary>
+    /// <remarks>
+    /// Information rather than Warning: nothing failed, and the pass did the
+    /// right thing. It is still one line per file rather than a summary count,
+    /// because the list is the actionable part — the user needs to know which
+    /// files to repair, and there are few enough of them to name.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1229,
+        Level = LogLevel.Information,
+        Message = "{Path} was identified but not tagged: {Library} could not read its tags "
+            + "({Cause}). The file is left untouched; repair it and run again, at no further "
+            + "lookup cost.")]
+    public static partial void FileTagUnreadable(
+        ILogger logger,
+        string path,
+        string library,
+        string? cause);
+
+    /// <summary>
+    /// The backstop, with the exception attached on purpose.
+    /// </summary>
+    /// <remarks>
+    /// Anything reaching this is by definition unforeseen, so the stack trace is
+    /// the only thing that will identify it. The pass carries on; this line is
+    /// how the file it skipped stops being invisible.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1230,
+        Level = LogLevel.Warning,
+        Message = "{Path} was skipped: the pass hit an unexpected error on this file and "
+            + "continued with the next.")]
+    public static partial void FileFailed(ILogger logger, string path, Exception cause);
 }

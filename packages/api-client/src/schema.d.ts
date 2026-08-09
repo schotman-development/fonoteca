@@ -140,6 +140,8 @@ export interface components {
             /** Format: int32 */
             writeRefused: number;
             /** Format: int32 */
+            tagUnreadable: number;
+            /** Format: int32 */
             failed: number;
             cancelled: boolean;
         };

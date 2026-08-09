@@ -221,6 +221,17 @@ function Result({ summary }: { readonly summary: Summary }) {
         </Text>
       ) : null}
 
+      {summary.tagUnreadable > 0 ? (
+        <Text size="sm" tone="warning">
+          {summary.tagUnreadable.toLocaleString()} file
+          {summary.tagUnreadable === 1 ? ' was' : 's were'} identified but left untouched, because
+          {summary.tagUnreadable === 1 ? ' its' : ' their'} existing tags could not be read. A file
+          that cannot be described safely is not one to rewrite. The AcoustID is stored either way,
+          so repairing {summary.tagUnreadable === 1 ? 'it' : 'them'} and running again costs no
+          further lookups. See the log for which files.
+        </Text>
+      ) : null}
+
       {summary.failed > 0 ? (
         <Text size="sm" tone="tertiary">
           {summary.failed.toLocaleString()} failed transiently and stayed on the list; running again
