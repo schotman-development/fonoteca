@@ -205,6 +205,71 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
+    /// A long album reached sideways, through a compilation that shares a few of
+    /// its songs.
+    /// </summary>
+    /// <remarks>
+    /// The <i>Muddy Wolf at Red Rocks</i> shape, and the third prune bug. The
+    /// component is seeded from a compilation track, so the album is not in the
+    /// opening round — it arrives in the second with only the shared songs
+    /// counted against it. Judged as a fraction that is 5/25, under the floor,
+    /// and the album is discarded: the compilation keeps the five files it
+    /// shares and the album's other twenty sit unattributed.
+    ///
+    /// The whole point of expanding is that those counts are still arriving, so
+    /// the test is "does this library plausibly own a chunk of it" rather than
+    /// "could it already clear the gate".
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumReachedThroughACompilationIsStillFetchedAndStillWins()
+    {
+        // Twenty-five songs of a live album, five of which a thirty-track
+        // compilation also carries.
+        var albumFiles = Enumerable.Range(1, 25)
+            .Select(index => ($"live/{index:D2}.flac", Song(index), 200 + index))
+            .ToArray();
+
+        await SeedAsync(albumFiles);
+
+        var live = Album() with
+        {
+            Id = VinylId,
+            Title = "Live at Red Rocks",
+            Tracks = [.. Enumerable.Range(1, 25).Select(index => Track(index, Song(index), 200 + index))],
+        };
+
+        var compilation = Album() with
+        {
+            Id = CompilationId,
+            Title = "30 Most Slow Blues",
+            ReleaseGroupId = Mb("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+            Tracks =
+            [
+                .. Enumerable.Range(1, 5).Select(index => Track(index, Song(index), 200 + index)),
+                .. Enumerable.Range(6, 25).Select(index => Track(index, Song(900 + index), 200)),
+            ],
+        };
+
+        var catalogue = new StubCatalogue().With(live).With(compilation);
+
+        // The five shared songs are on both; the other twenty only on the album.
+        // The seed is song 1, so the opening round sees both — and the album's
+        // remaining twenty only arrive in the round after.
+        for (var index = 1; index <= 5; index++) catalogue.On(Song(index), CompilationId, VinylId);
+        for (var index = 6; index <= 25; index++) catalogue.On(Song(index), VinylId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var release = Assert.Single(await db.Releases.ToListAsync(Token));
+        Assert.Equal("Live at Red Rocks", release.Title);
+
+        // All twenty-five, not the twenty the compilation left behind.
+        Assert.Equal(25, await db.MediaFiles.CountAsync(f => f.ReleaseId == release.Id, Token));
+    }
+
+    /// <summary>
     /// Two pressings of one album, both filed under, sharing a release group.
     /// </summary>
     /// <remarks>

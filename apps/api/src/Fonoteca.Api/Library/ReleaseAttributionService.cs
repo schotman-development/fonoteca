@@ -495,16 +495,9 @@ public sealed class ReleaseAttributionService(
             {
                 if (confirmed.ContainsKey(id)) continue;
 
-                // The prune is deliberately not applied on the opening round.
-                // It bounds coverage by the recordings a browse has *placed* on
-                // a release, and after one browse that is exactly one — so a
-                // twelve-track album scores 1/12, falls under the floor, and is
-                // discarded before its track list is ever read. Every album in
-                // the library would be, which is what the first live run showed:
-                // 1,149 of 1,247 files refused. The bound only means anything
-                // once the component's membership is known, and the opening
-                // round is what discovers it.
-                if (browsed.Count > 1 && !CouldReachAGate(summaries[id], holding.Count)) continue;
+                // Not applied on the opening round, where every release has
+                // exactly one hit and a twelve-track album would score 1/12.
+                if (browsed.Count > 1 && !WorthFetching(summaries[id], holding.Count)) continue;
 
                 var release = await LookupAsync(id, memo, cancellationToken).ConfigureAwait(false);
                 if (release is null) continue;
@@ -541,26 +534,42 @@ public sealed class ReleaseAttributionService(
     }
 
     /// <summary>
-    /// Could this release still clear the loosest gate, given what we hold?
+    /// Is this release worth a request, given what the component knows so far?
     /// </summary>
     /// <remarks>
-    /// An exact bound, not a heuristic, and that is what makes it safe to prune
-    /// on. Coverage is filled slots over total slots, and the slots this
-    /// component could possibly fill are at most the distinct recordings it is
-    /// known to hold — so a release whose best case is already under the floor
-    /// cannot win however the assignment falls, and fetching its track list would
-    /// cost a request to learn nothing.
+    /// <b>Not a bound on the final coverage, and treating it as one was a bug
+    /// that reached live data twice.</b> The tempting formulation —
+    /// <c>hits / trackCount</c> must already clear the floor — reads like an
+    /// exact bound and is not one: <c>hits</c> counts only the recordings a
+    /// browse has <i>so far</i> placed on the release, and the whole point of
+    /// the expansion is that more are still arriving. A 25-track live album
+    /// sharing five songs with a compilation scores 5/25, falls under a floor of
+    /// 0.25, and is discarded — so the compilation keeps those five files and the
+    /// other twenty sit unattributed. That is exactly what happened to
+    /// <i>Muddy Wolf at Red Rocks</i>.
     ///
-    /// A release with no track count admits itself. Never seen in practice, and
-    /// the alternative is to discard a release because MusicBrainz did not say
-    /// how long it was.
+    /// So the test is deliberately generous, and the two clauses cover different
+    /// shapes:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Two or more shared recordings</b> means a release this library
+    /// plausibly owns a chunk of. Fetching its track list is what lets the rest
+    /// of that chunk be found — the five hits become twenty-five once its own
+    /// files are admitted and browsed.</item>
+    /// <item><b>One shared recording</b> is only worth fetching when the release
+    /// is small enough for one track to matter: a two-track single at 1/2 clears
+    /// any floor, a 150-track anthology at 1/150 never will.</item>
+    /// </list>
+    ///
+    /// What is discarded is therefore only the long anthology contributing a
+    /// single song, which is the case the prune was for. Nothing is lost even
+    /// then: files it would have claimed stay on the worklist and get a component
+    /// of their own, seeded from a file whose album is in the opening round.
     /// </remarks>
-    /// <remarks>
-    /// Sound only once the component has stopped growing in a given direction,
-    /// which is why the caller skips it on the opening round — see there.
-    /// </remarks>
-    private bool CouldReachAGate(MusicBrainzReleaseCandidate candidate, int held)
+    private bool WorthFetching(MusicBrainzReleaseCandidate candidate, int held)
     {
+        if (held >= 2) return true;
+
         var total = candidate.TrackCount;
         return total <= 0 || (double)held / total >= options.Value.ReleaseMinimumCoverage;
     }
