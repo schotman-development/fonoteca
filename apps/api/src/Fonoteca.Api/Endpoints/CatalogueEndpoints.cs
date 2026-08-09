@@ -71,6 +71,33 @@ public static class CatalogueEndpoints
             .WithSummary("One artist and every track of theirs in the library.")
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        group.MapGet("/releases", GetReleases)
+            .WithName("GetReleases")
+            .WithSummary("Albums the library holds at least one track of.")
+            .WithDescription(
+                "Ordered by title. `query` filters on the release title, case-insensitively, "
+                + "anywhere in the string. `held` against `trackCount` is what an incomplete rip "
+                + "looks like — though a CD+DVD-Video release is legitimately half missing on an "
+                + "audio-only library, which is why the medium formats are returned beside them.");
+
+        group.MapGet("/releases/{id:guid}", GetRelease)
+            .WithName("GetRelease")
+            .WithSummary("One release and its whole track list, held or not.")
+            .WithDescription(
+                "The entire track list as MusicBrainz prints it, with each track flagged for "
+                + "whether the library holds it — so a missing track is visible as a gap rather "
+                + "than as an absence.")
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapGet("/attribution", GetAttributionReport)
+            .WithName("GetAttributionReport")
+            .WithSummary("How the attributed albums compare with the folders on disk.")
+            .WithDescription(
+                "The folders play no part in deciding which release a file came from. This is "
+                + "where they are used instead: as an independent second opinion. A folder split "
+                + "across releases, or a release spanning folders, is a disagreement worth a "
+                + "person's attention — and either side may be the wrong one.");
+
         return app;
     }
 
@@ -184,7 +211,14 @@ public static class CatalogueEndpoints
                         .ToList(),
                 Files = recording.Files
                     .OrderBy(f => f.Path)
-                    .Select(f => new { f.Path, f.SizeBytes })
+                    .Select(f => new
+                    {
+                        f.Path,
+                        f.SizeBytes,
+                        f.ReleaseId,
+                        ReleaseTitle = f.Release == null ? null : f.Release.Title,
+                        ReleaseYear = f.Release == null ? null : f.Release.ReleasedYear,
+                    })
                     .ToList(),
             })
             .OrderBy(row => row.Title)
@@ -202,6 +236,13 @@ public static class CatalogueEndpoints
                 // — puts the same decision in a second place.
                 Duration: Format(row.Duration),
                 Roles: Roles(row.Billed, row.Roles, row.WorkRoles),
+                Album: row.Files
+                    .Where(file => file.ReleaseId != null)
+                    .Select(file => new TrackAlbum(
+                        file.ReleaseId!.Value.Value,
+                        file.ReleaseTitle!,
+                        file.ReleaseYear))
+                    .FirstOrDefault(),
                 Folder: FolderOf(row.Files[0].Path),
                 Files: [.. row.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
             .ToList();
@@ -215,6 +256,303 @@ public static class CatalogueEndpoints
                 artist.Type,
                 rows.Count),
             rows));
+    }
+
+    private static async Task<Ok<ReleaseListResponse>> GetReleases(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken,
+        string? query = null,
+        int skip = 0,
+        int take = DefaultTake)
+    {
+        take = Math.Clamp(take, 1, MaxTake);
+        skip = Math.Max(skip, 0);
+
+        // Only releases something was actually filed under. The attribution pass
+        // writes no others, so this is belt and braces — but a release whose only
+        // files were later removed by a scan would otherwise linger as an album
+        // the library does not have.
+        var releases = db.Releases.AsNoTracking().Where(release => release.Files.Any());
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var pattern = $"%{Escape(query.Trim())}%";
+            releases = releases.Where(release => EF.Functions.ILike(release.Title, pattern, "\\"));
+        }
+
+        var total = await releases.CountAsync(cancellationToken).ConfigureAwait(false);
+
+        var rows = await releases
+            .OrderBy(release => release.Title)
+            .ThenBy(release => release.Id)
+            .Skip(skip)
+            .Take(take)
+            .Select(release => new
+            {
+                release.Id,
+                release.Title,
+                release.ReleasedYear,
+                release.Country,
+                release.Status,
+                release.MediumFormats,
+                release.DiscCount,
+                TrackCount = release.TrackCount ?? release.Tracks.Count,
+                Held = release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
+                Files = release.Files.Count,
+                Artists = release.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new { credit.CreditedAs, credit.JoinPhrase, credit.Artist!.Name })
+                    .ToList(),
+
+                // The weakest claim any of its files carries, so a release with
+                // one coin-flip in it does not read as certain.
+                Certainty = release.Files.Max(file => (int)file.AttributionOutcome),
+                Alternatives = release.Files.Max(file => file.EditionAlternatives),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var items = rows
+            .Select(row => new ReleaseSummary(
+                row.Id.Value,
+                row.Title,
+                CreditLine(row.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
+                row.ReleasedYear,
+                row.Country,
+                row.Status,
+                row.MediumFormats,
+                row.DiscCount,
+                row.TrackCount,
+                row.Held,
+                row.Files,
+                ((ReleaseAttributionOutcome)row.Certainty).ToString(),
+                row.Alternatives))
+            .ToList();
+
+        return TypedResults.Ok(new ReleaseListResponse(total, items));
+    }
+
+    private static async Task<Results<Ok<ReleaseDetailResponse>, ProblemHttpResult>> GetRelease(
+        Guid id,
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var releaseId = new ReleaseId(id);
+
+        var release = await db.Releases
+            .AsNoTracking()
+            .Where(r => r.Id == releaseId)
+            .Select(r => new
+            {
+                r.Id,
+                r.Title,
+                r.ReleasedYear,
+                r.Country,
+                r.Status,
+                r.MediumFormats,
+                r.DiscCount,
+                TrackCount = r.TrackCount ?? r.Tracks.Count,
+                Held = r.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
+                Files = r.Files.Count,
+                Artists = r.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new { credit.CreditedAs, credit.JoinPhrase, credit.Artist!.Name })
+                    .ToList(),
+                Certainty = r.Files.Max(file => (int)file.AttributionOutcome),
+                Alternatives = r.Files.Max(file => file.EditionAlternatives),
+            })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (release is null)
+        {
+            return TypedResults.Problem(
+                title: "No such release",
+                detail: $"The catalogue has no release with id {id}.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var tracks = await db.Tracks
+            .AsNoTracking()
+            .Where(track => track.ReleaseId == releaseId)
+            .OrderBy(track => track.DiscNumber)
+            .ThenBy(track => track.Position)
+            .Select(track => new
+            {
+                track.DiscNumber,
+                track.Position,
+                track.Number,
+                track.Title,
+                track.Length,
+                RecordingId = track.RecordingId,
+
+                // Files linked to *this track*, not merely holding the same
+                // recording. A recording the library owns twice — once here and
+                // once on a compilation — must not make both look held.
+                Files = db.MediaFiles
+                    .Where(file => file.TrackId == track.Id)
+                    .OrderBy(file => file.Path)
+                    .Select(file => new { file.Path, file.SizeBytes })
+                    .ToList(),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var rows = tracks
+            .Select(track => new ReleaseTrackRow(
+                track.DiscNumber,
+                track.Position,
+                track.Number,
+                track.Title ?? string.Empty,
+                Format(track.Length),
+                track.RecordingId.Value,
+                track.Files.Count > 0,
+                [.. track.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
+            .ToList();
+
+        return TypedResults.Ok(new ReleaseDetailResponse(
+            new ReleaseSummary(
+                release.Id.Value,
+                release.Title,
+                CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
+                release.ReleasedYear,
+                release.Country,
+                release.Status,
+                release.MediumFormats,
+                release.DiscCount,
+                release.TrackCount,
+                release.Held,
+                release.Files,
+                ((ReleaseAttributionOutcome)release.Certainty).ToString(),
+                release.Alternatives),
+            rows));
+    }
+
+    /// <summary>
+    /// The one place the folders are read: to disagree with the answer.
+    /// </summary>
+    /// <remarks>
+    /// Attribution never looks at a directory, so the two groupings are genuinely
+    /// independent and a disagreement is real evidence rather than a tautology.
+    /// It is deliberately not stated which side is wrong. Measured against a real
+    /// library, both happen: a folder named "Live From the Royal Albert Hall
+    /// (2009)" holds a release MusicBrainz dates to 2010, and a folder named for
+    /// a 1979 album holds the audio of its 2015 remaster — while elsewhere a
+    /// CD+DVD-Video release really does split a folder in two because three of
+    /// its tracks are on the video disc.
+    ///
+    /// Done in memory over paths, because the folder is not a column: it is the
+    /// leading part of <c>MediaFile.Path</c>, and teaching PostgreSQL to group by
+    /// it would mean an expression index for a report nobody runs in a loop.
+    /// </remarks>
+    private static async Task<Ok<AttributionReportResponse>> GetAttributionReport(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var outcomes = await db.MediaFiles
+            .AsNoTracking()
+            .GroupBy(file => file.AttributionOutcome)
+            .Select(group => new { Outcome = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var placed = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.ReleaseId != null)
+            .Select(file => new
+            {
+                file.Path,
+                ReleaseId = file.ReleaseId!.Value,
+                ReleaseTitle = file.Release!.Title,
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var byFolder = placed
+            .GroupBy(file => FolderOf(file.Path))
+            .Select(folder => new
+            {
+                Folder = folder.Key,
+                Releases = folder
+                    .GroupBy(file => (file.ReleaseId, file.ReleaseTitle))
+                    .Select(release => new AttributionShare(
+                        release.Key.ReleaseId.Value,
+                        release.Key.ReleaseTitle,
+                        release.Count()))
+                    .OrderByDescending(share => share.Files)
+                    .ThenBy(share => share.Title, StringComparer.Ordinal)
+                    .ToList(),
+            })
+            .ToList();
+
+        var split = byFolder
+            .Where(folder => folder.Releases.Count > 1)
+            .OrderByDescending(folder => folder.Releases.Count)
+            .ThenBy(folder => folder.Folder, StringComparer.Ordinal)
+            .Select(folder => new FolderDisagreement(folder.Folder, folder.Releases))
+            .ToList();
+
+        var spanning = placed
+            .GroupBy(file => (file.ReleaseId, file.ReleaseTitle))
+            .Select(release => new
+            {
+                release.Key,
+                Folders = release
+                    .GroupBy(file => FolderOf(file.Path))
+                    .Select(folder => new AttributionShare(
+                        release.Key.ReleaseId.Value,
+                        folder.Key,
+                        folder.Count()))
+                    .OrderByDescending(share => share.Files)
+                    .ThenBy(share => share.Title, StringComparer.Ordinal)
+                    .ToList(),
+            })
+            .Where(release => release.Folders.Count > 1)
+            .OrderByDescending(release => release.Folders.Count)
+            .Select(release => new ReleaseDisagreement(
+                release.Key.ReleaseId.Value,
+                release.Key.ReleaseTitle,
+                release.Folders))
+            .ToList();
+
+        var incomplete = await db.Releases
+            .AsNoTracking()
+            .Where(release => release.Files.Any()
+                && release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count()
+                    < (release.TrackCount ?? 0))
+            .OrderBy(release => release.Title)
+            .Select(release => new IncompleteRelease(
+                release.Id.Value,
+                release.Title,
+                release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
+                release.TrackCount ?? 0,
+                release.MediumFormats))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(new AttributionReportResponse(
+            Outcomes: [.. outcomes
+                .OrderBy(entry => entry.Outcome)
+                .Select(entry => new OutcomeCount(entry.Outcome.ToString(), entry.Count))],
+            Folders: byFolder.Count,
+            FoldersAgreeing: byFolder.Count - split.Count,
+            FoldersSplit: split,
+            ReleasesSpanningFolders: spanning,
+            Incomplete: incomplete));
+    }
+
+    /// <summary>
+    /// "Beth Hart &amp; Joe Bonamassa" from the parts that printed it.
+    /// </summary>
+    /// <remarks>
+    /// The join phrase belongs to the credit before the gap, so it is appended
+    /// rather than inserted between — which is what keeps "feat." and "&amp;" and
+    /// ", " each in the place the sleeve put them.
+    /// </remarks>
+    private static string? CreditLine(IEnumerable<(string Name, string? JoinPhrase)> credits)
+    {
+        var line = string.Concat(credits.Select(credit => credit.Name + credit.JoinPhrase));
+        return string.IsNullOrWhiteSpace(line) ? null : line;
     }
 
     /// <summary>
@@ -419,9 +757,15 @@ public sealed record ArtistDetailResponse(ArtistSummary Artist, IReadOnlyList<Tr
 /// <param name="WorkTitle">The composition, when MusicBrainz links one. Usually null outside classical.</param>
 /// <param name="Duration">Pre-formatted for display; null when MusicBrainz does not know it.</param>
 /// <param name="Roles">Why this artist has this track: "billed", "conductor", "ensemble", "composer".</param>
+/// <param name="Album">
+/// The release this track was attributed to, when one was. Null where attribution
+/// declined, which is a real answer and not a gap to be papered over — the page
+/// falls back to <paramref name="Folder"/> there and says which it is showing.
+/// </param>
 /// <param name="Folder">
-/// The directory the files sit in. The filesystem's idea of the album, not
-/// MusicBrainz's — releases are not attributed yet.
+/// The directory the files sit in: the filesystem's claim about the album, which
+/// attribution deliberately never reads. Still returned, because where the
+/// catalogue has no answer it is the only one there is.
 /// </param>
 /// <param name="Files">
 /// Every file holding this recording. More than one is the point rather than a
@@ -434,7 +778,106 @@ public sealed record TrackRow(
     string? WorkTitle,
     string? Duration,
     IReadOnlyList<string> Roles,
+    TrackAlbum? Album,
     string Folder,
     IReadOnlyList<FileRow> Files);
 
+/// <summary>The album a track was attributed to, as much of it as a row needs.</summary>
+public sealed record TrackAlbum(Guid ReleaseId, string Title, int? Year);
+
 public sealed record FileRow(string Path, long SizeBytes);
+
+/// <summary>A page of releases, with the total the filter matched.</summary>
+public sealed record ReleaseListResponse(int Total, IReadOnlyList<ReleaseSummary> Items);
+
+/// <param name="Artist">The release's own billing line, which a compilation's tracks do not share.</param>
+/// <param name="Year">
+/// The release year alone. MusicBrainz knows no more than that for about half of
+/// a real library, and a full date was never available to invent.
+/// </param>
+/// <param name="Formats">CD, Digital Media, CD+DVD-Video. Why a rip may be legitimately partial.</param>
+/// <param name="TrackCount">Tracks MusicBrainz prints. The number a rip is measured against.</param>
+/// <param name="Held">
+/// Distinct tracks of this release the library holds. Tracks, not files: five
+/// encodings of one song are one track of the album, and counting files makes a
+/// half-ripped album read as complete.
+/// </param>
+/// <param name="Files">Files filed under it, which exceeds <paramref name="Held"/> where a track is held twice.</param>
+/// <param name="Certainty">
+/// The weakest claim any of its files carries — <c>Attributed</c>,
+/// <c>AttributedAmbiguously</c> or <c>GroupOnly</c>. Weakest rather than
+/// commonest, so one coin-flip in an album does not read as certainty.
+/// </param>
+/// <param name="EditionAlternatives">How many other pressings fitted exactly as well.</param>
+public sealed record ReleaseSummary(
+    Guid Id,
+    string Title,
+    string? Artist,
+    int? Year,
+    string? Country,
+    string? Status,
+    string? Formats,
+    int? DiscCount,
+    int TrackCount,
+    int Held,
+    int Files,
+    string Certainty,
+    int EditionAlternatives);
+
+/// <summary>One release and every track on it, held or not.</summary>
+public sealed record ReleaseDetailResponse(ReleaseSummary Release, IReadOnlyList<ReleaseTrackRow> Tracks);
+
+/// <param name="Number">The printed number, which is not always the position: "A1", "12a".</param>
+/// <param name="Held">Whether the library has a file filed under this track.</param>
+public sealed record ReleaseTrackRow(
+    int DiscNumber,
+    int Position,
+    string? Number,
+    string Title,
+    string? Duration,
+    Guid RecordingId,
+    bool Held,
+    IReadOnlyList<FileRow> Files);
+
+/// <summary>
+/// What the folders make of the attribution.
+/// </summary>
+/// <remarks>
+/// A second opinion, not a correction. Attribution never reads a directory, so
+/// the two groupings are independent — which is what makes a disagreement worth
+/// looking at, and also why neither side is presented as the right one.
+/// </remarks>
+public sealed record AttributionReportResponse(
+    IReadOnlyList<OutcomeCount> Outcomes,
+
+    /// <summary>Folders holding at least one attributed file.</summary>
+    int Folders,
+
+    /// <summary>Folders whose files all landed on one release.</summary>
+    int FoldersAgreeing,
+
+    IReadOnlyList<FolderDisagreement> FoldersSplit,
+    IReadOnlyList<ReleaseDisagreement> ReleasesSpanningFolders,
+    IReadOnlyList<IncompleteRelease> Incomplete);
+
+public sealed record OutcomeCount(string Outcome, int Files);
+
+/// <summary>One folder whose files were filed under more than one release.</summary>
+public sealed record FolderDisagreement(string Folder, IReadOnlyList<AttributionShare> Releases);
+
+/// <summary>One release whose files came from more than one folder.</summary>
+public sealed record ReleaseDisagreement(Guid ReleaseId, string Title, IReadOnlyList<AttributionShare> Folders);
+
+/// <summary>How many files one side of a disagreement accounts for.</summary>
+public sealed record AttributionShare(Guid ReleaseId, string Title, int Files);
+
+/// <param name="Formats">
+/// Read this before treating the gap as damage: a CD+DVD-Video release is
+/// legitimately half missing on a library that holds only the audio.
+/// </param>
+public sealed record IncompleteRelease(
+    Guid ReleaseId,
+    string Title,
+    int Held,
+    int TrackCount,
+    string? Formats);

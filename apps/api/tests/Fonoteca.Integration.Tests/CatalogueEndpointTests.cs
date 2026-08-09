@@ -5,6 +5,7 @@ using System.Text.Json;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
 using Fonoteca.Data;
+using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -213,9 +214,11 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             ["Hart & Bonamassa/Seesaw/01 - Nutbush.flac", "Hart & Bonamassa/Seesaw/01 - Nutbush.mp3"],
             track.Files.Select(f => f.Path));
 
-        // The filesystem's idea of the album, which is all the catalogue has
-        // until releases are attributed.
+        // The folder is still returned, but it is no longer the answer: the
+        // track now names the release attribution decided on.
         Assert.Equal("Hart & Bonamassa/Seesaw", track.Folder);
+        Assert.Equal("Seesaw", track.Album?.Title);
+        Assert.Equal(2013, track.Album?.Year);
 
         Assert.Equal("4:12", track.Duration);
         Assert.Null(track.WorkTitle);
@@ -326,6 +329,108 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     /// piece fail both suites, and what these tests are about is the query, not
     /// how the rows got there.
     /// </remarks>
+
+    [Fact]
+    public async Task AReleaseListsWhatTheLibraryHoldsOfIt()
+    {
+        using var client = _factory!.CreateClient();
+
+        var list = await client.GetFromJsonAsync<ReleaseListResponse>(
+            new Uri("/api/catalogue/releases", UriKind.Relative), Token);
+
+        Assert.NotNull(list);
+
+        var release = Assert.Single(list.Items);
+
+        Assert.Equal("Seesaw", release.Title);
+
+        // The release's own billing line, rebuilt with its join phrase intact.
+        Assert.Equal("Beth Hart & Joe Bonamassa", release.Artist);
+
+        Assert.Equal(2013, release.Year);
+        Assert.Equal("Digital Media", release.Formats);
+
+        // Two of three tracks held, across three files: one track is held in two
+        // encodings. Held counts tracks, so an album ripped twice at two thirds
+        // of its length does not read as complete.
+        Assert.Equal(3, release.TrackCount);
+        Assert.Equal(2, release.Held);
+        Assert.Equal(3, release.Files);
+        Assert.Equal("Attributed", release.Certainty);
+    }
+
+    /// <summary>
+    /// A track the library does not hold is a gap on the page, not an absence
+    /// from it — which is the whole reason the full track list is persisted.
+    /// </summary>
+    [Fact]
+    public async Task AReleasePageShowsTheTracksTheLibraryIsMissing()
+    {
+        using var client = _factory!.CreateClient();
+
+        var release = await client.GetFromJsonAsync<ReleaseDetailResponse>(
+            new Uri($"/api/catalogue/releases/{_seed.Seesaw}", UriKind.Relative), Token);
+
+        Assert.NotNull(release);
+        Assert.Equal(3, release.Tracks.Count);
+
+        var held = release.Tracks[0];
+        Assert.True(held.Held);
+        Assert.Equal("Nutbush City Limits", held.Title);
+        Assert.Equal("4:12", held.Duration);
+        Assert.Equal(2, held.Files.Count);
+
+        var missing = release.Tracks[2];
+        Assert.False(missing.Held);
+        Assert.Equal("I'd Rather Go Blind", missing.Title);
+        Assert.Empty(missing.Files);
+    }
+
+    [Fact]
+    public async Task AnUnknownReleaseIsAProblemDocument()
+    {
+        using var client = _factory!.CreateClient();
+
+        using var response = await client.GetAsync(
+            new Uri($"/api/catalogue/releases/{Guid.CreateVersion7()}", UriKind.Relative), Token);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    /// <summary>
+    /// The folders are read exactly here and nowhere else, and they disagree.
+    /// </summary>
+    /// <remarks>
+    /// The seed puts two encodings of one track in two directories, which is a
+    /// release spanning folders — the shape a report reading only the folders
+    /// could never notice, because each folder on its own looks consistent.
+    /// </remarks>
+    [Fact]
+    public async Task TheReportNamesWhereTheFoldersAndTheCatalogueDisagree()
+    {
+        using var client = _factory!.CreateClient();
+
+        var report = await client.GetFromJsonAsync<AttributionReportResponse>(
+            new Uri("/api/catalogue/attribution", UriKind.Relative), Token);
+
+        Assert.NotNull(report);
+
+        // Two folders, each internally consistent, both naming one release.
+        Assert.Equal(2, report.Folders);
+        Assert.Equal(2, report.FoldersAgreeing);
+        Assert.Empty(report.FoldersSplit);
+
+        var spanning = Assert.Single(report.ReleasesSpanningFolders);
+        Assert.Equal("Seesaw", spanning.Title);
+        Assert.Equal(2, spanning.Folders.Count);
+
+        // And the release is short a track, with the format beside it so the gap
+        // can be judged rather than merely counted.
+        var incomplete = Assert.Single(report.Incomplete);
+        Assert.Equal(2, incomplete.Held);
+        Assert.Equal(3, incomplete.TrackCount);
+    }
+
     private async Task<Seeded> SeedAsync()
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
@@ -370,8 +475,67 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         db.ArtistCredits.Add(Credit(hart, duet, 0, " & "));
         db.ArtistCredits.Add(Credit(bonamassa, duet, 1, null));
 
-        db.MediaFiles.Add(File("Hart & Bonamassa/Seesaw/01 - Nutbush.flac", duet));
-        db.MediaFiles.Add(File("Hart & Bonamassa/Seesaw/01 - Nutbush.mp3", duet));
+        var elsewhere = new Recording
+        {
+            Id = RecordingId.New(),
+            Title = "Close to My Fire",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Duration = TimeSpan.FromSeconds(280),
+        };
+
+        var missing = new Recording
+        {
+            Id = RecordingId.New(),
+            Title = "I'd Rather Go Blind",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Duration = TimeSpan.FromSeconds(300),
+        };
+
+        db.Recordings.AddRange(elsewhere, missing);
+
+        var group = new ReleaseGroup
+        {
+            Id = ReleaseGroupId.New(),
+            Title = "Seesaw",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PrimaryType = "Album",
+        };
+
+        var seesaw = new Release
+        {
+            Id = ReleaseId.New(),
+            Title = "Seesaw",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            ReleaseGroupId = group.Id,
+            Released = new ReleaseDate(2013, null, null),
+            Country = "XW",
+            Status = "Official",
+            MediumFormats = "Digital Media",
+            TrackCount = 3,
+            DiscCount = 1,
+        };
+
+        db.ReleaseGroups.Add(group);
+        db.Releases.Add(seesaw);
+        db.ArtistCredits.Add(ReleaseCredit(hart, seesaw, 0, " & "));
+        db.ArtistCredits.Add(ReleaseCredit(bonamassa, seesaw, 1, null));
+
+        var held = TrackOn(db, seesaw, duet, 1, "Nutbush City Limits", 252);
+        var strayTrack = TrackOn(db, seesaw, elsewhere, 2, "Close to My Fire", 280);
+
+        // A track of the release the library does not hold, so "what am I
+        // missing" has something to answer with.
+        TrackOn(db, seesaw, missing, 3, "I'd Rather Go Blind", 300);
+
+        // The same recording in two encodings, in one folder.
+        db.MediaFiles.Add(Attributed(File("Hart & Bonamassa/Seesaw/01 - Nutbush.flac", duet), seesaw, group, held));
+        db.MediaFiles.Add(Attributed(File("Hart & Bonamassa/Seesaw/01 - Nutbush.mp3", duet), seesaw, group, held));
+
+        // And one track of the same release filed somewhere else entirely, which
+        // is the disagreement the report exists to surface — a shape no report
+        // reading only folders could notice, since each folder looks consistent.
+        db.MediaFiles.Add(Attributed(
+            File("Singles/Close to My Fire.flac", elsewhere), seesaw, group, strayTrack));
 
         // Credited on a recording the library does not hold. Enrichment cannot
         // produce this, but a rescan that unlinks every file of a recording can.
@@ -391,8 +555,53 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Orphan = orphan.Id.Value,
             FirstMovement = first.Id.Value,
             Duet = duet.Id.Value,
+            Seesaw = seesaw.Id.Value,
         };
     }
+
+    private static Track TrackOn(
+        FonotecaDbContext db,
+        Release release,
+        Recording recording,
+        int position,
+        string title,
+        int seconds)
+    {
+        var track = new Track
+        {
+            Id = TrackId.New(),
+            ReleaseId = release.Id,
+            RecordingId = recording.Id,
+            Position = position,
+            DiscNumber = 1,
+            Number = position.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Title = title,
+            Length = TimeSpan.FromSeconds(seconds),
+        };
+
+        db.Tracks.Add(track);
+        return track;
+    }
+
+    private static MediaFile Attributed(MediaFile file, Release release, ReleaseGroup group, Track track)
+    {
+        file.ReleaseId = release.Id;
+        file.ReleaseGroupId = group.Id;
+        file.TrackId = track.Id;
+        file.AttributionOutcome = ReleaseAttributionOutcome.Attributed;
+        return file;
+    }
+
+    private static ArtistCredit ReleaseCredit(Artist artist, Release release, int position, string? join) =>
+        new()
+        {
+            Id = Guid.CreateVersion7(),
+            ArtistId = artist.Id,
+            ReleaseId = release.Id,
+            Position = position,
+            JoinPhrase = join,
+            CreditedAs = artist.Name,
+        };
 
     private static Recording Movement(
         FonotecaDbContext db,
@@ -484,5 +693,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         public Guid FirstMovement { get; init; }
 
         public Guid Duet { get; init; }
+
+        public Guid Seesaw { get; init; }
     }
 }

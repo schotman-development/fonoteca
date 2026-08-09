@@ -162,6 +162,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Albums the library holds at least one track of.
+         * @description Ordered by title. `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
+         */
+        get: operations["GetReleases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/releases/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One release and its whole track list, held or not.
+         * @description The entire track list as MusicBrainz prints it, with each track flagged for whether the library holds it — so a missing track is visible as a gap rather than as an absence.
+         */
+        get: operations["GetRelease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How the attributed albums compare with the folders on disk.
+         * @description The folders play no part in deciding which release a file came from. This is where they are used instead: as an independent second opinion. A folder split across releases, or a release spanning folders, is a disagreement worth a person's attention — and either side may be the wrong one.
+         */
+        get: operations["GetAttributionReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -184,6 +244,23 @@ export interface components {
             type: null | string;
             /** Format: int32 */
             trackCount: number;
+        };
+        AttributionReportResponse: {
+            outcomes: components["schemas"]["OutcomeCount"][];
+            /** Format: int32 */
+            folders: number;
+            /** Format: int32 */
+            foldersAgreeing: number;
+            foldersSplit: components["schemas"]["FolderDisagreement"][];
+            releasesSpanningFolders: components["schemas"]["ReleaseDisagreement"][];
+            incomplete: components["schemas"]["IncompleteRelease"][];
+        };
+        AttributionShare: {
+            /** Format: uuid */
+            releaseId: string;
+            title: string;
+            /** Format: int32 */
+            files: number;
         };
         AttributionStartedResponse: {
             jobId: string;
@@ -288,6 +365,10 @@ export interface components {
             /** Format: int64 */
             sizeBytes: number;
         };
+        FolderDisagreement: {
+            folder: string;
+            releases: components["schemas"]["AttributionShare"][];
+        };
         IdentificationStartedResponse: {
             jobId: string;
             /** Format: int32 */
@@ -340,6 +421,16 @@ export interface components {
             failed: number;
             cancelled: boolean;
         };
+        IncompleteRelease: {
+            /** Format: uuid */
+            releaseId: string;
+            title: string;
+            /** Format: int32 */
+            held: number;
+            /** Format: int32 */
+            trackCount: number;
+            formats: null | string;
+        };
         LibraryScanStatusResponse: {
             running: boolean;
             lastCompleted: null | components["schemas"]["LibraryScanSummary"];
@@ -379,6 +470,11 @@ export interface components {
         };
         /** @enum {unknown} */
         MusicBrainzReachability: "NotConfigured" | "Reachable" | "Unreachable" | "Rejected";
+        OutcomeCount: {
+            outcome: string;
+            /** Format: int32 */
+            files: number;
+        };
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
@@ -386,6 +482,56 @@ export interface components {
             status?: null | number;
             detail?: null | string;
             instance?: null | string;
+        };
+        ReleaseDetailResponse: {
+            release: components["schemas"]["ReleaseSummary"];
+            tracks: components["schemas"]["ReleaseTrackRow"][];
+        };
+        ReleaseDisagreement: {
+            /** Format: uuid */
+            releaseId: string;
+            title: string;
+            folders: components["schemas"]["AttributionShare"][];
+        };
+        ReleaseListResponse: {
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["ReleaseSummary"][];
+        };
+        ReleaseSummary: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            country: null | string;
+            status: null | string;
+            formats: null | string;
+            /** Format: int32 */
+            discCount: null | number;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: int32 */
+            held: number;
+            /** Format: int32 */
+            files: number;
+            certainty: string;
+            /** Format: int32 */
+            editionAlternatives: number;
+        };
+        ReleaseTrackRow: {
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            position: number;
+            number: null | string;
+            title: string;
+            duration: null | string;
+            /** Format: uuid */
+            recordingId: string;
+            held: boolean;
+            files: components["schemas"]["FileRow"][];
         };
         SystemInfoResponse: {
             version: string;
@@ -395,6 +541,13 @@ export interface components {
             fileMutationAllowed: boolean;
             counts: components["schemas"]["CatalogueCounts"];
         };
+        TrackAlbum: {
+            /** Format: uuid */
+            releaseId: string;
+            title: string;
+            /** Format: int32 */
+            year: null | number;
+        };
         TrackRow: {
             /** Format: uuid */
             recordingId: string;
@@ -402,6 +555,7 @@ export interface components {
             workTitle: null | string;
             duration: null | string;
             roles: string[];
+            album: null | components["schemas"]["TrackAlbum"];
             folder: string;
             files: components["schemas"]["FileRow"][];
         };
@@ -800,6 +954,81 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetReleases: {
+        parameters: {
+            query?: {
+                query?: string;
+                skip?: number;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseListResponse"];
+                };
+            };
+        };
+    };
+    GetRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetAttributionReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionReportResponse"];
                 };
             };
         };

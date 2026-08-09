@@ -427,6 +427,120 @@
           }
         }
       }
+    },
+    "/api/catalogue/releases": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Albums the library holds at least one track of.",
+        "description": "Ordered by title. `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.",
+        "operationId": "GetReleases",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 10000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/releases/{id}": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "One release and its whole track list, held or not.",
+        "description": "The entire track list as MusicBrainz prints it, with each track flagged for whether the library holds it — so a missing track is visible as a gap rather than as an absence.",
+        "operationId": "GetRelease",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/attribution": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "How the attributed albums compare with the folders on disk.",
+        "description": "The folders play no part in deciding which release a file came from. This is where they are used instead: as an independent second opinion. A folder split across releases, or a release spanning folders, is a disagreement worth a person's attention — and either side may be the wrong one.",
+        "operationId": "GetAttributionReport",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttributionReportResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -505,6 +619,72 @@
             ]
           },
           "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AttributionReportResponse": {
+        "required": [
+          "outcomes",
+          "folders",
+          "foldersAgreeing",
+          "foldersSplit",
+          "releasesSpanningFolders",
+          "incomplete"
+        ],
+        "type": "object",
+        "properties": {
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutcomeCount"
+            }
+          },
+          "folders": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "foldersAgreeing": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "foldersSplit": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FolderDisagreement"
+            }
+          },
+          "releasesSpanningFolders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseDisagreement"
+            }
+          },
+          "incomplete": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IncompleteRelease"
+            }
+          }
+        }
+      },
+      "AttributionShare": {
+        "required": [
+          "releaseId",
+          "title",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "files": {
             "type": "integer",
             "format": "int32"
           }
@@ -832,6 +1012,24 @@
           }
         }
       },
+      "FolderDisagreement": {
+        "required": [
+          "folder",
+          "releases"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttributionShare"
+            }
+          }
+        }
+      },
       "IdentificationStartedResponse": {
         "required": [
           "jobId",
@@ -993,6 +1191,39 @@
           }
         }
       },
+      "IncompleteRelease": {
+        "required": [
+          "releaseId",
+          "title",
+          "held",
+          "trackCount",
+          "formats"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "held": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "formats": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "LibraryScanStatusResponse": {
         "required": [
           "running",
@@ -1123,6 +1354,22 @@
           "Rejected"
         ]
       },
+      "OutcomeCount": {
+        "required": [
+          "outcome",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "properties": {
@@ -1159,6 +1406,201 @@
           }
         }
       },
+      "ReleaseDetailResponse": {
+        "required": [
+          "release",
+          "tracks"
+        ],
+        "type": "object",
+        "properties": {
+          "release": {
+            "$ref": "#/components/schemas/ReleaseSummary"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseTrackRow"
+            }
+          }
+        }
+      },
+      "ReleaseDisagreement": {
+        "required": [
+          "releaseId",
+          "title",
+          "folders"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttributionShare"
+            }
+          }
+        }
+      },
+      "ReleaseListResponse": {
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseSummary"
+            }
+          }
+        }
+      },
+      "ReleaseSummary": {
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "year",
+          "country",
+          "status",
+          "formats",
+          "discCount",
+          "trackCount",
+          "held",
+          "files",
+          "certainty",
+          "editionAlternatives"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "country": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formats": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "discCount": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "held": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "certainty": {
+            "type": "string"
+          },
+          "editionAlternatives": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ReleaseTrackRow": {
+        "required": [
+          "discNumber",
+          "position",
+          "number",
+          "title",
+          "duration",
+          "recordingId",
+          "held",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "discNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "number": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recordingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "held": {
+            "type": "boolean"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileRow"
+            }
+          }
+        }
+      },
       "SystemInfoResponse": {
         "required": [
           "version",
@@ -1187,6 +1629,30 @@
           }
         }
       },
+      "TrackAlbum": {
+        "required": [
+          "releaseId",
+          "title",
+          "year"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "TrackRow": {
         "required": [
           "recordingId",
@@ -1194,6 +1660,7 @@
           "workTitle",
           "duration",
           "roles",
+          "album",
           "folder",
           "files"
         ],
@@ -1223,6 +1690,16 @@
             "items": {
               "type": "string"
             }
+          },
+          "album": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrackAlbum"
+              }
+            ]
           },
           "folder": {
             "type": "string"
