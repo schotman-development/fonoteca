@@ -85,21 +85,27 @@ public sealed class ReleaseAttributionService(
     private const int MaximumComponentFiles = 600;
 
     /// <summary>
-    /// How many candidate releases one component may confirm.
+    /// Where a component stops fetching the long tail of one-song appearances.
     /// </summary>
     /// <remarks>
-    /// Generous, because the cost of being wrong here is asymmetric. Cutting the
-    /// list truncates it in hits order, and everything below the line is treated
-    /// as though it did not exist — so a perfect-fitting album can be discarded
-    /// while a box set that merely reprints it survives, which is what happened
-    /// to <i>Off the Wall</i> at a ceiling of 400. A lookup against a local
-    /// mirror is about 45ms and memoised for the whole run, so the ceiling costs
-    /// seconds where it binds; a wrong album costs somebody's library.
+    /// A flat ceiling is the wrong shape here and both settings of one proved it.
+    /// Candidates are confirmed in order of how many of the component's
+    /// recordings each holds, so a flat cut takes the tail — but at 400 the tail
+    /// reached up into releases the library owns whole, and <i>Off the Wall</i>
+    /// was discarded in favour of a box set that merely reprints it. Raising the
+    /// number to 2,000 fixed that and made one component spend 1,662 requests on
+    /// 21 files, which is the same mistake pointed the other way.
     ///
-    /// It is still a ceiling rather than no ceiling: one jazz standard reaches
-    /// hundreds of anthologies, each naming hundreds more, and something has to
-    /// stop that walking the entire catalogue.
+    /// So the cut is by <i>kind</i> rather than by count. A release sharing two
+    /// or more recordings with the component is one the library plausibly owns
+    /// part of, and is always fetched — that is the same judgement
+    /// <see cref="WorthFetching"/> makes, applied to the ceiling as well. A
+    /// release sharing exactly one is a long-tail appearance, and past this many
+    /// confirmations those stop being worth a request.
     /// </remarks>
+    private const int SoftCandidateCap = 300;
+
+    /// <summary>The backstop, for a component where even the plausible releases run away.</summary>
     private const int MaximumComponentCandidates = 2_000;
 
     private readonly SemaphoreSlim _finished = new(0, 1);
@@ -518,7 +524,11 @@ public sealed class ReleaseAttributionService(
                 confirmed[release.Id] = release;
                 formats[release.Id] = Formats(summaries[id]);
 
-                if (confirmed.Count >= MaximumComponentCandidates)
+                // Sorted by hits descending, so once the one-hit tail is reached
+                // everything after it is tail too, and breaking here loses
+                // nothing the library plausibly owns.
+                if (confirmed.Count >= MaximumComponentCandidates
+                    || (confirmed.Count >= SoftCandidateCap && holding.Count < 2))
                 {
                     capped = true;
                     break;
