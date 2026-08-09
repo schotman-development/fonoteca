@@ -95,6 +95,83 @@ public sealed class ReleaseAttributionTests
     }
 
     /// <summary>
+    /// A box set explaining more files does not beat an album explaining itself.
+    /// </summary>
+    /// <remarks>
+    /// Measured on real data, and the reason the ranking is a product rather than
+    /// a count. Michael Jackson's <i>The Collection</i> is five discs and 76
+    /// tracks; a library holding <i>Off the Wall</i> and <i>Bad</i> whole gives it
+    /// twenty files at coverage 0.26, against ten files at coverage 1.00 for
+    /// <i>Off the Wall</i> itself. Both clear the loosest rung, so on a
+    /// files-first ranking the box set takes them and two albums disappear into a
+    /// compilation nobody owns — which is exactly what a live run produced.
+    /// </remarks>
+    [Fact]
+    public void ABoxSetDoesNotSwallowTheAlbumsItReprints()
+    {
+        // Two albums of five, held whole; the box set reprints both among its
+        // twenty tracks and its printed lengths are a shade out, as a remaster's
+        // are — enough to keep it off the strict rungs but not out of the last.
+        var files = Library(
+            ("a1", 180), ("a2", 200), ("a3", 220), ("a4", 240), ("a5", 260),
+            ("b1", 300), ("b2", 320), ("b3", 340), ("b4", 360), ("b5", 380));
+
+        var boxSet = Release(
+            CompilationId,
+            "The Collection",
+            tracks:
+            [
+                ("a1", 182), ("a2", 202), ("a3", 222), ("a4", 242), ("a5", 262),
+                ("b1", 302), ("b2", 322), ("b3", 342), ("b4", 362), ("b5", 382),
+                .. Filler(10),
+            ],
+            group: OtherGroupId);
+
+        var result = ReleaseAttribution.Assign(
+            files,
+            [
+                Release(AlbumId, "One", tracks: [("a1", 180), ("a2", 200), ("a3", 220), ("a4", 240), ("a5", 260)]),
+                Release(VinylId, "Two", tracks: [("b1", 300), ("b2", 320), ("b3", 340), ("b4", 360), ("b5", 380)],
+                    group: OtherGroupId),
+                boxSet,
+            ]);
+
+        Assert.All(result, assignment => Assert.NotEqual(CompilationId, assignment.Release));
+
+        Assert.Equal(5, result.Count(a => a.Release == AlbumId));
+        Assert.Equal(5, result.Count(a => a.Release == VinylId));
+    }
+
+    /// <summary>
+    /// And the mirror image: a small release covering itself perfectly does not
+    /// outrank the album it was lifted from.
+    /// </summary>
+    [Fact]
+    public void ASingleDoesNotOutrankTheAlbumItWasLiftedFrom()
+    {
+        // Eleven of a twelve-track album, so the album cannot reach 1.00 — which
+        // is what a coverage-first ranking would need to survive this.
+        var files = Library(
+            ("t1", 180), ("t2", 190), ("t3", 200), ("t4", 210), ("t5", 220), ("t6", 230),
+            ("t7", 240), ("t8", 250), ("t9", 260), ("t10", 270), ("t11", 280));
+
+        var album = Release(
+            AlbumId,
+            "Album",
+            tracks:
+            [
+                ("t1", 180), ("t2", 190), ("t3", 200), ("t4", 210), ("t5", 220), ("t6", 230),
+                ("t7", 240), ("t8", 250), ("t9", 260), ("t10", 270), ("t11", 280), ("t12", 290),
+            ]);
+
+        var single = Release(VinylId, "Single", tracks: [("t3", 200), ("t4", 210)], group: OtherGroupId);
+
+        var result = ReleaseAttribution.Assign(files, [album, single]);
+
+        Assert.All(result, assignment => Assert.Equal(AlbumId, assignment.Release));
+    }
+
+    /// <summary>
     /// Duration is what separates two editions that a track list cannot.
     /// </summary>
     /// <remarks>

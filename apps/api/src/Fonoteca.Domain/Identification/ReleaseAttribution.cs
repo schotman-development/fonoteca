@@ -94,7 +94,7 @@ public static class ReleaseAttribution
 
                 if (ranked.Count == 0) break;
 
-                var winner = ranked.OrderByDescending(fit => fit.FilesExplained)
+                var winner = ranked.OrderByDescending(Weight)
                     .ThenByDescending(fit => fit.Coverage)
                     .ThenBy(fit => fit.MeanDrift ?? TimeSpan.MaxValue)
                     .ThenByDescending(fit => fit.IsOfficial)
@@ -206,6 +206,31 @@ public static class ReleaseAttribution
         }
     }
 
+    /// <summary>
+    /// How much a fit is worth: how much of itself it explains, times how much of
+    /// ours it explains.
+    /// </summary>
+    /// <remarks>
+    /// Ranking on files alone was wrong and a box set is what proved it.
+    /// <i>The Collection</i> is five discs and 76 tracks, of which this library
+    /// holds two whole albums — 20 files, coverage 0.26. <i>Off the Wall</i> is
+    /// ten tracks and the library holds all ten, coverage 1.00. Both clear the
+    /// loosest rung; the box set explains twice as many files, so on a
+    /// files-first ranking it takes them, and two albums vanish into a
+    /// compilation nobody owns.
+    ///
+    /// Ranking on coverage alone is wrong in the mirror image: a two-track single
+    /// holding tracks 3 and 4 of an album covers itself perfectly and would
+    /// outrank an album missing one song, taking two files out of it.
+    ///
+    /// The product answers both, because it asks both questions at once. The box
+    /// set scores 5.2 against the album's 10.0; the single scores 2.0 against the
+    /// album's 10.1; and the bootleg that started all this scores 9.4 against
+    /// <i>Sloe Gin</i>'s 11.0. Every one of the measured failures comes out the
+    /// right way round, which is more than any single term manages.
+    /// </remarks>
+    private static double Weight(ReleaseFit fit) => fit.Coverage * fit.FilesExplained;
+
     /// <summary>Do all the tied editions put all of this music in the same places?</summary>
     private static bool AgreeOnEverySlot(ReleaseFit chosen, List<ReleaseFit> tied) =>
         chosen.Matches.All(match => tied.All(fit => fit.Matches
@@ -258,8 +283,25 @@ public static class ReleaseAttribution
         // test that was never run. Coverage still has to carry it.
         && (fit.MeanDrift is not { } drift || drift <= gate.MaximumDrift);
 
+    /// <summary>
+    /// Is this the same answer as the winner, or a different one that scores alike?
+    /// </summary>
+    /// <remarks>
+    /// The file set has to match, and leaving that out was a real bug. Two albums
+    /// of five tracks, each held whole, score identically on every number here —
+    /// same file count, same coverage, same drift — while explaining completely
+    /// different music. Treated as tied editions they are then asked whether they
+    /// agree about where each track sits, which of course they do not, and both
+    /// albums are refused for disagreeing about songs neither of them contains.
+    ///
+    /// "Tied" means one answer arriving twice: the same files, placed the same
+    /// way, by two pressings of one record.
+    /// </remarks>
     private static bool Indistinguishable(ReleaseFit fit, ReleaseFit winner) =>
         fit.FilesExplained == winner.FilesExplained
+        && fit.Matches.Select(match => match.File)
+            .ToHashSet()
+            .SetEquals(winner.Matches.Select(match => match.File))
         && Math.Abs(fit.Coverage - winner.Coverage) < 1e-9
         && (fit.MeanDrift, winner.MeanDrift) switch
         {
