@@ -111,10 +111,12 @@ builder.Services.AddScoped<AcoustIdTagWriter>();
 // identification pass is filling in, so the two must not overlap.
 builder.Services.AddSingleton<LibraryWorkGate>();
 builder.Services.AddSingleton<IdentificationService>();
+builder.Services.AddSingleton<EnrichmentService>();
 
 // Registered as a hosted service as well as a singleton, so shutdown cancels a
 // running pass and waits for it rather than severing it mid-write.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EnrichmentService>());
 
 // ---------------------------------------------------------------------------
 // External services. Both are registered unconditionally, including when the

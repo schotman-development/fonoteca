@@ -190,6 +190,79 @@
           }
         }
       }
+    },
+    "/api/library/enrich": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask MusicBrainz what the identified files are, and file them under artists.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. Takes each identified file's stored fingerprint back to AcoustID for the MusicBrainz recording it names, then fetches that recording and its work — so a first pass over a large library is tens of minutes, paced by AcoustID's three requests a second. Opens no file and modifies none, so it runs even with the library volume unmounted.",
+        "operationId": "StartLibraryEnrichment",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentStartedResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "How many identified files have no recording yet, and how the last pass went.",
+        "operationId": "GetLibraryEnrichmentStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask the running pass to stop after the file it is on.",
+        "operationId": "CancelLibraryEnrichment",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -218,6 +291,143 @@
           "artists": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "EnrichmentStartedResponse": {
+        "required": [
+          "jobId",
+          "pending"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "EnrichmentStatusResponse": {
+        "required": [
+          "running",
+          "jobId",
+          "processed",
+          "total",
+          "currentFile",
+          "pending",
+          "lastCompleted"
+        ],
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentFile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastCompleted": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EnrichmentSummary"
+              }
+            ]
+          }
+        }
+      },
+      "EnrichmentSummary": {
+        "required": [
+          "jobId",
+          "startedAtUtc",
+          "completedAtUtc",
+          "durationMilliseconds",
+          "examined",
+          "linked",
+          "noRecording",
+          "recordingNotFound",
+          "failed",
+          "recordings",
+          "works",
+          "artists",
+          "cancelled"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMilliseconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "examined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "linked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "noRecording": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recordingNotFound": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recordings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "works": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "artists": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cancelled": {
+            "type": "boolean"
           }
         }
       },

@@ -285,6 +285,17 @@ public sealed class LibraryScanService(
                 row.AcoustIdCheckedUtc = null;
                 row.AcoustIdTaggedUtc = null;
                 row.AcoustIdOutcome = AcoustIdOutcome.NotAttempted;
+
+                // And what the identification was turned into. The link to a
+                // recording rests entirely on the AcoustID cleared above, so
+                // leaving it would keep the file filed under an artist on the
+                // strength of evidence that has just been withdrawn. The
+                // Recording, Artist and Work rows themselves stay — they are
+                // shared with every other file that resolved to them, and are
+                // facts about MusicBrainz rather than about this file.
+                row.RecordingId = null;
+                row.RecordingLookupUtc = null;
+                row.EnrichmentOutcome = EnrichmentOutcome.NotAttempted;
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

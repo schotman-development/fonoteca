@@ -17,6 +17,7 @@ namespace Fonoteca.Api.Logging;
 ///   1100-1199  realtime / SignalR
 ///   1200-1219  library scanning
 ///   1220-1249  identification — fingerprinting, AcoustID, tag writing
+///   1250-1279  enrichment — recordings, works and artists from MusicBrainz
 ///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
 ///              another assembly, but the same numbering
 /// </remarks>
@@ -251,4 +252,59 @@ internal static partial class Log
         Message = "{Path} was skipped: the pass hit an unexpected error on this file and "
             + "continued with the next.")]
     public static partial void FileFailed(ILogger logger, string path, Exception cause);
+
+    [LoggerMessage(
+        EventId = 1250,
+        Level = LogLevel.Information,
+        Message = "Enrichment started ({JobId}): {Pending} identified files have no recording yet.")]
+    public static partial void EnrichmentStarted(ILogger logger, string jobId, int pending);
+
+    [LoggerMessage(
+        EventId = 1251,
+        Level = LogLevel.Information,
+        Message = "Enrichment finished ({JobId}): {Linked} linked, {NoRecording} clusters with no "
+            + "MusicBrainz recording, {NotFound} recordings merged away, {Failed} failed; "
+            + "{Recordings} recordings and {Artists} artists looked up, in {ElapsedMs}ms")]
+    public static partial void EnrichmentCompleted(
+        ILogger logger,
+        string jobId,
+        int linked,
+        int noRecording,
+        int notFound,
+        int failed,
+        int recordings,
+        int artists,
+        long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1252,
+        Level = LogLevel.Information,
+        Message = "Enrichment requested while {ActiveKind} is running; the request was rejected.")]
+    public static partial void EnrichmentBusy(ILogger logger, string activeKind);
+
+    [LoggerMessage(
+        EventId = 1253,
+        Level = LogLevel.Warning,
+        Message = "Enrichment stopped early: {Reason}")]
+    public static partial void EnrichmentAborted(ILogger logger, string reason);
+
+    /// <summary>
+    /// One file that did not resolve.
+    /// </summary>
+    /// <remarks>
+    /// Debug, for the same reason <see cref="FileNotIdentified"/> is: on a first
+    /// pass this fires for every file AcoustID has not linked to MusicBrainz, and
+    /// the proportions belong in the summary rather than in thousands of lines.
+    /// The outcome is on the row either way, so the question is answerable in SQL
+    /// afterwards — which is the lesson the identification pass paid for.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1254,
+        Level = LogLevel.Debug,
+        Message = "{Path}: {Outcome} ({Detail})")]
+    public static partial void FileNotEnriched(
+        ILogger logger,
+        string path,
+        EnrichmentOutcome outcome,
+        string? detail);
 }

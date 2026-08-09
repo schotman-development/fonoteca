@@ -75,6 +75,27 @@ public static class LibraryEndpoints
             .WithSummary("Ask the running pass to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/enrich", StartEnrichment)
+            .WithName("StartLibraryEnrichment")
+            .WithSummary("Ask MusicBrainz what the identified files are, and file them under artists.")
+            .WithDescription(
+                "Returns immediately with a job id; progress arrives on the jobs hub. Takes each "
+                + "identified file's stored fingerprint back to AcoustID for the MusicBrainz "
+                + "recording it names, then fetches that recording and its work — so a first pass "
+                + "over a large library is tens of minutes, paced by AcoustID's three requests a "
+                + "second. Opens no file and modifies none, so it runs even with the library "
+                + "volume unmounted.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/enrich", GetEnrichmentStatus)
+            .WithName("GetLibraryEnrichmentStatus")
+            .WithSummary("How many identified files have no recording yet, and how the last pass went.");
+
+        group.MapDelete("/enrich", CancelEnrichment)
+            .WithName("CancelLibraryEnrichment")
+            .WithSummary("Ask the running pass to stop after the file it is on.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         return app;
     }
 
@@ -183,6 +204,64 @@ public static class LibraryEndpoints
                 title: "Nothing to cancel",
                 detail: "No identification pass is running.",
                 statusCode: StatusCodes.Status409Conflict);
+
+    /// <summary>
+    /// Starts the enrichment pass. A third endpoint rather than a phase of
+    /// identification, and for a reason that is not symmetry.
+    /// </summary>
+    /// <remarks>
+    /// Identification writes to the user's files; this only reads the catalogue
+    /// and talks to two web services. Keeping them apart means the safe half can
+    /// be re-run after a rule change without the dangerous half running again —
+    /// and a library whose volume is unmounted can still be enriched, because
+    /// every fingerprint it needs is already stored.
+    ///
+    /// No 503 arm: unlike the other two, this pass never touches the library
+    /// root, so its absence is not a reason to refuse.
+    /// </remarks>
+    private static async Task<Results<Accepted<EnrichmentStartedResponse>, ProblemHttpResult>>
+        StartEnrichment(EnrichmentService enrichment, CancellationToken cancellationToken)
+    {
+        var pending = await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false);
+        var outcome = enrichment.Start();
+
+        return outcome switch
+        {
+            { Status: EnrichmentStatus.Started, JobId: { } jobId } => TypedResults.Accepted(
+                "/api/library/enrich",
+                new EnrichmentStartedResponse(jobId, pending)),
+
+            _ => TypedResults.Problem(
+                title: "The library is already busy",
+                detail: "A scan, an identification pass or an enrichment pass is running. Only one "
+                    + "at a time touches the catalogue. Poll GET /api/library/enrich.",
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    private static async Task<Ok<EnrichmentStatusResponse>> GetEnrichmentStatus(
+        EnrichmentService enrichment,
+        CancellationToken cancellationToken)
+    {
+        var progress = enrichment.Progress;
+
+        return TypedResults.Ok(new EnrichmentStatusResponse(
+            Running: enrichment.IsRunning,
+            JobId: progress?.JobId,
+            Processed: progress?.Processed ?? 0,
+            Total: progress?.Total ?? 0,
+            CurrentFile: progress?.CurrentFile,
+            Pending: await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false),
+            LastCompleted: enrichment.LastCompleted));
+    }
+
+    private static Results<Accepted, ProblemHttpResult> CancelEnrichment(EnrichmentService enrichment) =>
+        enrichment.Cancel()
+            ? TypedResults.Accepted("/api/library/enrich")
+            : TypedResults.Problem(
+                title: "Nothing to cancel",
+                detail: "No enrichment pass is running.",
+                statusCode: StatusCodes.Status409Conflict);
 }
 
 /// <summary>Current scan state. <c>LastCompleted</c> is null until one has run.</summary>
@@ -214,3 +293,19 @@ public sealed record IdentificationStatusResponse(
     bool WritesTags,
 
     IdentificationSummary? LastCompleted);
+
+/// <summary>An enrichment pass was accepted, with the size of the job it took on.</summary>
+public sealed record EnrichmentStartedResponse(string JobId, int Pending);
+
+/// <summary>Everything the enrichment card needs, in one read.</summary>
+public sealed record EnrichmentStatusResponse(
+    bool Running,
+    string? JobId,
+    int Processed,
+    int Total,
+    string? CurrentFile,
+
+    /// <summary>Identified files that have never been asked what they are.</summary>
+    int Pending,
+
+    EnrichmentSummary? LastCompleted);

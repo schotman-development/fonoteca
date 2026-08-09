@@ -166,6 +166,13 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // this answers exactly.
             e.HasIndex(x => x.AcoustId).HasFilter("\"AcoustId\" IS NOT NULL");
 
+            // The enrichment worklist: identified, but nobody has asked yet what
+            // recording that identity names. Partial and named for the same two
+            // reasons as the pair above — it is meant to shrink to nothing, and a
+            // third unnamed HasIndex on Id would silently replace one of them.
+            e.HasIndex(x => x.Id, "IX_MediaFiles_RecordingPending")
+                .HasFilter("\"AcoustId\" IS NOT NULL AND \"RecordingLookupUtc\" IS NULL");
+
             e.HasOne(x => x.Recording)
                 .WithMany(r => r.Files)
                 .HasForeignKey(x => x.RecordingId)

@@ -208,6 +208,22 @@ public sealed class MediaFile
     /// <summary>What the last identification attempt concluded. For display, not for the worklist.</summary>
     public AcoustIdOutcome AcoustIdOutcome { get; set; } = AcoustIdOutcome.NotAttempted;
 
+    /// <summary>
+    /// When this file was last asked what recording it holds.
+    /// </summary>
+    /// <remarks>
+    /// The enrichment worklist, and a timestamp rather than
+    /// <c>RecordingId IS NULL</c> for exactly the reason
+    /// <see cref="AcoustIdCheckedUtc"/> is not <c>AcoustId IS NULL</c>: a library
+    /// contains audio AcoustID knows and MusicBrainz has since merged away, and
+    /// keying the worklist on the answer re-asks about every one of them on every
+    /// pass forever, at a third of a second each.
+    /// </remarks>
+    public DateTimeOffset? RecordingLookupUtc { get; set; }
+
+    /// <summary>What the last enrichment attempt concluded. For display, not for the worklist.</summary>
+    public EnrichmentOutcome EnrichmentOutcome { get; set; } = EnrichmentOutcome.NotAttempted;
+
     public AudioQuality? Quality { get; set; }
 
     public IntegrityState Integrity { get; set; } = IntegrityState.Unchecked;
@@ -259,6 +275,42 @@ public enum AcoustIdOutcome
     /// existed still read <see cref="Ambiguous"/> until they are asked again.
     /// </remarks>
     BelowThreshold = 5,
+}
+
+/// <summary>
+/// What enrichment concluded about a file.
+/// </summary>
+/// <remarks>
+/// The sibling of <see cref="AcoustIdOutcome"/> and there for the same reason:
+/// four ways of having no artist that invite four different follow-ups. "The
+/// cluster names no recording" is a gap in AcoustID's links that submitting to
+/// them would fix; "MusicBrainz has no such recording" is an MBID merged away
+/// since AcoustID last saw it; "the lookup failed" is transient and will retry.
+/// One null <c>RecordingId</c> answers none of those, and on a library where
+/// most files resolve, the ones that do not are the only interesting rows.
+/// </remarks>
+public enum EnrichmentOutcome
+{
+    NotAttempted = 0,
+
+    /// <summary>Linked to a recording, with its artists.</summary>
+    Linked = 1,
+
+    /// <summary>
+    /// AcoustID knows the audio but links it to no MusicBrainz recording.
+    /// </summary>
+    /// <remarks>
+    /// Ordinary rather than broken. An AcoustID cluster is a fingerprint
+    /// grouping; whether anybody has connected it to MusicBrainz is a separate
+    /// act of curation, and plenty of clusters are waiting for one.
+    /// </remarks>
+    NoRecording = 2,
+
+    /// <summary>The recording MBID exists in AcoustID but no longer in MusicBrainz.</summary>
+    RecordingNotFound = 3,
+
+    /// <summary>A provider did not answer. Stays on the worklist.</summary>
+    LookupFailed = 4,
 }
 
 /// <summary>Result of decode-testing a file.</summary>

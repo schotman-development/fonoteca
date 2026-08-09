@@ -125,12 +125,20 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
+            var recording = new Recording { Id = RecordingId.New(), Title = "Something" };
+            db.Recordings.Add(recording);
+
             var row = await db.MediaFiles.SingleAsync(TestContext.Current.CancellationToken);
             row.ContentHash = "content";
             row.AudioHash = "audio";
             row.Fingerprint = "AQAAxx";
             row.Integrity = IntegrityState.Intact;
             row.LastVerifiedUtc = DateTimeOffset.UtcNow;
+            row.AcoustId = new AcoustId(Guid.CreateVersion7());
+            row.AcoustIdCheckedUtc = DateTimeOffset.UtcNow;
+            row.RecordingId = recording.Id;
+            row.RecordingLookupUtc = DateTimeOffset.UtcNow;
+            row.EnrichmentOutcome = EnrichmentOutcome.Linked;
             row.Quality = new AudioQuality
             {
                 Codec = "flac",
@@ -165,6 +173,18 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Null(updated.LastVerifiedUtc);
         Assert.Equal(IntegrityState.Unchecked, updated.Integrity);
         Assert.Equal(new FileInfo(absolute).Length, updated.SizeBytes);
+
+        // And the link to a recording, which rests entirely on the AcoustID
+        // cleared beside it. Leaving it would keep the file filed under an artist
+        // on the strength of evidence that has just been withdrawn.
+        Assert.Null(updated.AcoustId);
+        Assert.Null(updated.RecordingId);
+        Assert.Null(updated.RecordingLookupUtc);
+        Assert.Equal(EnrichmentOutcome.NotAttempted, updated.EnrichmentOutcome);
+
+        // The Recording row itself survives. It is a fact about MusicBrainz,
+        // shared with every other file that resolved to it.
+        Assert.Equal(1, await check.Recordings.CountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]

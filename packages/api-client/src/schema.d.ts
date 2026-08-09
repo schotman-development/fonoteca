@@ -81,6 +81,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/enrich": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many identified files have no recording yet, and how the last pass went. */
+        get: operations["GetLibraryEnrichmentStatus"];
+        put?: never;
+        /**
+         * Ask MusicBrainz what the identified files are, and file them under artists.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. Takes each identified file's stored fingerprint back to AcoustID for the MusicBrainz recording it names, then fetches that recording and its work — so a first pass over a large library is tens of minutes, paced by AcoustID's three requests a second. Opens no file and modifies none, so it runs even with the library volume unmounted.
+         */
+        post: operations["StartLibraryEnrichment"];
+        /** Ask the running pass to stop after the file it is on. */
+        delete: operations["CancelLibraryEnrichment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -94,6 +116,49 @@ export interface components {
             releases: number;
             /** Format: int32 */
             artists: number;
+        };
+        EnrichmentStartedResponse: {
+            jobId: string;
+            /** Format: int32 */
+            pending: number;
+        };
+        EnrichmentStatusResponse: {
+            running: boolean;
+            jobId: null | string;
+            /** Format: int32 */
+            processed: number;
+            /** Format: int32 */
+            total: number;
+            currentFile: null | string;
+            /** Format: int32 */
+            pending: number;
+            lastCompleted: null | components["schemas"]["EnrichmentSummary"];
+        };
+        EnrichmentSummary: {
+            jobId: string;
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number;
+            /** Format: int32 */
+            examined: number;
+            /** Format: int32 */
+            linked: number;
+            /** Format: int32 */
+            noRecording: number;
+            /** Format: int32 */
+            recordingNotFound: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            recordings: number;
+            /** Format: int32 */
+            works: number;
+            /** Format: int32 */
+            artists: number;
+            cancelled: boolean;
         };
         IdentificationStartedResponse: {
             jobId: string;
@@ -368,6 +433,82 @@ export interface operations {
         };
     };
     CancelLibraryIdentification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryEnrichmentStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentStatusResponse"];
+                };
+            };
+        };
+    };
+    StartLibraryEnrichment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentStartedResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelLibraryEnrichment: {
         parameters: {
             query?: never;
             header?: never;
