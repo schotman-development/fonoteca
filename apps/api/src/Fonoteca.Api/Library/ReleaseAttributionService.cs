@@ -48,7 +48,8 @@ namespace Fonoteca.Api.Library;
 /// 150-track anthology contributing two songs is discarded before a request is
 /// spent on it. Measured at 58-60% of the shortlist on deep back catalogue and
 /// nothing at all on straightforward artists, which is the right shape for a
-/// prune — it costs nothing where it does not help.
+/// prune — it costs nothing where it does not help. It is skipped on the opening
+/// round, where it would prune everything; see <c>GatherAsync</c>.
 ///
 /// <b>Everything is memoised for the whole run.</b> The same compilations recur
 /// across every artist in a library, and one browse per <i>recording</i> would
@@ -493,7 +494,17 @@ public sealed class ReleaseAttributionService(
             foreach (var (id, holding) in hits.OrderByDescending(entry => entry.Value.Count))
             {
                 if (confirmed.ContainsKey(id)) continue;
-                if (!CouldReachAGate(summaries[id], holding.Count)) continue;
+
+                // The prune is deliberately not applied on the opening round.
+                // It bounds coverage by the recordings a browse has *placed* on
+                // a release, and after one browse that is exactly one — so a
+                // twelve-track album scores 1/12, falls under the floor, and is
+                // discarded before its track list is ever read. Every album in
+                // the library would be, which is what the first live run showed:
+                // 1,149 of 1,247 files refused. The bound only means anything
+                // once the component's membership is known, and the opening
+                // round is what discovers it.
+                if (browsed.Count > 1 && !CouldReachAGate(summaries[id], holding.Count)) continue;
 
                 var release = await LookupAsync(id, memo, cancellationToken).ConfigureAwait(false);
                 if (release is null) continue;
@@ -543,6 +554,10 @@ public sealed class ReleaseAttributionService(
     /// A release with no track count admits itself. Never seen in practice, and
     /// the alternative is to discard a release because MusicBrainz did not say
     /// how long it was.
+    /// </remarks>
+    /// <remarks>
+    /// Sound only once the component has stopped growing in a given direction,
+    /// which is why the caller skips it on the opening round — see there.
     /// </remarks>
     private bool CouldReachAGate(MusicBrainzReleaseCandidate candidate, int held)
     {
@@ -712,6 +727,31 @@ public sealed class ReleaseAttributionService(
     {
         private readonly Dictionary<(ReleaseId, int, int), TrackId> _tracks = [];
 
+        /// <summary>
+        /// Recordings minted in this unit of work, by MBID.
+        /// </summary>
+        /// <remarks>
+        /// EF queries the database, not the change tracker, so a recording added
+        /// for one release's track list is invisible to the next release that
+        /// names it — and two releases in one component sharing a track the
+        /// library does not own is completely ordinary. Without this the second
+        /// adds a duplicate and the whole component fails on
+        /// <c>IX_Recordings_Mbid</c>.
+        /// </remarks>
+        private readonly Dictionary<Mbid, Recording> _minted = [];
+
+        /// <summary>
+        /// Release groups touched in this unit of work, by MBID.
+        /// </summary>
+        /// <remarks>
+        /// The same trap as <see cref="_minted"/>, and it fires far more often:
+        /// two pressings of one album share a release group by definition, and a
+        /// component that files anything under both adds the group twice and
+        /// dies on <c>IX_ReleaseGroups_Mbid</c> — taking every file in the
+        /// component with it. 51 components in one live run.
+        /// </remarks>
+        private readonly Dictionary<Mbid, ReleaseGroup> _groups = [];
+
         public async Task<(ReleaseId Release, ReleaseGroupId? Group)> UpsertAsync(
             MusicBrainzRelease source,
             string? mediumFormats,
@@ -770,19 +810,22 @@ public sealed class ReleaseAttributionService(
             string? primaryType = null,
             IReadOnlyList<string>? secondaryTypes = null)
         {
-            var group = await db.ReleaseGroups
-                .FirstOrDefaultAsync(g => g.Mbid == mbid, cancellationToken)
-                .ConfigureAwait(false);
+            if (!_groups.TryGetValue(mbid, out var group))
+            {
+                group = await db.ReleaseGroups
+                    .FirstOrDefaultAsync(g => g.Mbid == mbid, cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (group is null)
-            {
-                group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = title, Mbid = mbid };
-                db.ReleaseGroups.Add(group);
+                if (group is null)
+                {
+                    group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = title, Mbid = mbid };
+                    db.ReleaseGroups.Add(group);
+                }
+
+                _groups[mbid] = group;
             }
-            else
-            {
-                group.Title = title;
-            }
+
+            group.Title = title;
 
             // Coalesced rather than assigned: a group first written by a
             // GroupOnly file knows only its title, and the release that later
@@ -887,9 +930,12 @@ public sealed class ReleaseAttributionService(
             {
                 if (track.RecordingId is not { } mbid) continue;
 
-                var recording = await db.Recordings
-                    .FirstOrDefaultAsync(r => r.Mbid == mbid, cancellationToken)
-                    .ConfigureAwait(false);
+                if (!_minted.TryGetValue(mbid, out var recording))
+                {
+                    recording = await db.Recordings
+                        .FirstOrDefaultAsync(r => r.Mbid == mbid, cancellationToken)
+                        .ConfigureAwait(false);
+                }
 
                 // Recordings this library has never identified are real tracks on
                 // a real release, so they are written: that is what makes a
@@ -907,6 +953,8 @@ public sealed class ReleaseAttributionService(
 
                     db.Recordings.Add(recording);
                 }
+
+                _minted[mbid] = recording;
 
                 var row = new Track
                 {

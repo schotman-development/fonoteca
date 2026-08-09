@@ -107,6 +107,156 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
+    /// A long album is found from one file, which the prune very nearly made
+    /// impossible.
+    /// </summary>
+    /// <remarks>
+    /// The regression test for the first live run, which refused 1,149 of 1,247
+    /// files. The prune bounds a release's coverage by the recordings a browse
+    /// has placed on it, and after the opening browse that is one — so a
+    /// twelve-track album scores 1/12, falls under the floor, and is discarded
+    /// before its track list is ever fetched. Every album in the library was.
+    ///
+    /// Three tracks was not enough to catch it: 1/3 clears a floor of 0.25. It
+    /// takes an album long enough for one track to be a small fraction of it,
+    /// which is to say an album of an ordinary length.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumTooLongForOneTrackToClearThePruneIsStillFound()
+    {
+        var files = Enumerable.Range(1, 12)
+            .Select(index => ($"a/{index:D2}.flac", Song(index), 180 + index))
+            .ToArray();
+
+        await SeedAsync(files);
+
+        var album = Album() with
+        {
+            Tracks = [.. Enumerable.Range(1, 12).Select(index => Track(index, Song(index), 180 + index))],
+        };
+
+        var catalogue = new StubCatalogue().With(album);
+
+        foreach (var (_, recording, _) in files) catalogue.On(recording, AlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Equal(1, await db.Releases.CountAsync(Token));
+        Assert.Equal(12, await db.MediaFiles.CountAsync(f => f.ReleaseId != null, Token));
+
+        Assert.Equal(
+            12,
+            await db.MediaFiles.CountAsync(
+                f => f.AttributionOutcome == ReleaseAttributionOutcome.Attributed, Token));
+    }
+
+    /// <summary>
+    /// Two releases in one component that both list a track nobody owns.
+    /// </summary>
+    /// <remarks>
+    /// The other regression from the first live run. EF queries the database
+    /// rather than the change tracker, so the recording minted for the first
+    /// release's track list is invisible to the second — and the component dies
+    /// on IX_Recordings_Mbid, taking every file in it down with it.
+    /// </remarks>
+    [Fact]
+    public async Task TwoReleasesSharingATrackNobodyOwnsDoNotCollide()
+    {
+        await SeedAsync(
+            ("a/1.flac", Song(1), 180),
+            ("a/2.flac", Song(2), 200),
+            ("a/3.flac", Song(3), 220));
+
+        // A second edition listing the same unowned bonus track as the first.
+        var bonus = Song(500);
+
+        var first = Album() with
+        {
+            Tracks = [Track(1, Song(1), 180), Track(2, Song(2), 200), Track(3, bonus, 240)],
+        };
+
+        var second = Album() with
+        {
+            Id = RemasterId,
+            Status = "Promotion",
+            Tracks = [Track(1, Song(1), 181), Track(2, Song(3), 220), Track(3, bonus, 241)],
+        };
+
+        var catalogue = new StubCatalogue()
+            .With(first)
+            .With(second)
+            .On(Song(1), AlbumId, RemasterId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), RemasterId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        // Nothing failed, and the shared unowned recording exists exactly once.
+        Assert.Equal(
+            0,
+            await db.MediaFiles.CountAsync(
+                f => f.AttributionOutcome == ReleaseAttributionOutcome.LookupFailed, Token));
+
+        Assert.Equal(1, await db.Recordings.CountAsync(r => r.Mbid == bonus, Token));
+    }
+
+    /// <summary>
+    /// Two pressings of one album, both filed under, sharing a release group.
+    /// </summary>
+    /// <remarks>
+    /// The third regression from the live runs and the most common of them: two
+    /// editions of an album share a release group by definition, and EF queries
+    /// the database rather than the change tracker — so the group added for the
+    /// first is invisible to the second, and the component dies on
+    /// IX_ReleaseGroups_Mbid taking every one of its files with it. 51
+    /// components in one run.
+    /// </remarks>
+    [Fact]
+    public async Task TwoEditionsSharingAReleaseGroupDoNotCollide()
+    {
+        await SeedAsync(
+            ("a/1.flac", Song(1), 180),
+            ("a/2.flac", Song(2), 200),
+            ("a/3.flac", Song(3), 220),
+            ("b/1.flac", Song(4), 300),
+            ("b/2.flac", Song(5), 320));
+
+        // Same release group, different track lists, so both are filed under.
+        var deluxe = Album() with
+        {
+            Id = RemasterId,
+            Title = "Album (deluxe)",
+            Tracks = [Track(1, Song(4), 300), Track(2, Song(5), 320)],
+        };
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .With(deluxe)
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId)
+            .On(Song(4), RemasterId)
+            .On(Song(5), RemasterId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Equal(
+            0,
+            await db.MediaFiles.CountAsync(
+                f => f.AttributionOutcome == ReleaseAttributionOutcome.LookupFailed, Token));
+
+        Assert.Equal(2, await db.Releases.CountAsync(Token));
+        Assert.Equal(1, await db.ReleaseGroups.CountAsync(Token));
+        Assert.Equal(5, await db.MediaFiles.CountAsync(f => f.ReleaseId != null, Token));
+    }
+
+    /// <summary>
     /// The whole track list is written, not only the part the library holds —
     /// which is what makes a missing track visible as missing.
     /// </summary>
