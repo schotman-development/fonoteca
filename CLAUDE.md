@@ -294,11 +294,16 @@ remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
   `release-count` goes on claiming 40. Track lists come from `GetReleaseAsync`,
   one release at a time. This forces the two-stage shape and there is no way
   around it.
-- **The prune is exact, and unsound on the opening round.** Coverage cannot
-  exceed the share of a release's track count the library holds — but after one
-  browse that share is 1/12 for any ordinary album, so applying it in round one
-  discards every album in the library before its track list is read. It cost a
-  live run of 1,149 refusals out of 1,247. Skipped on round one, applied after.
+- **The prune looks like an exact bound and is not one.** "Coverage cannot
+  exceed the share of a release's track count the library holds" is true only if
+  you already know what the library holds — and `hits` counts the recordings a
+  browse has placed *so far*, while the whole point of the expansion is that more
+  are still arriving. Two live runs died on this: applied in the opening round it
+  discards every album (1/12 for an ordinary one, 1,149 refusals out of 1,247),
+  and applied in later rounds it discarded a 25-track live album for sharing only
+  5 songs with the compilation that seeded the component. It is now a stated
+  heuristic — two shared recordings, or small enough for one to matter — and
+  skipped entirely on the opening round.
 - **Gates come before size.** The obvious greedy — take the release explaining
   the most files — let a 31-track bootleg *Greatest Hits* (coverage 0.55, drift
   1.99s) claim seventeen files out of four albums before any of them was

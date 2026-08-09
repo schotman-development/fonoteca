@@ -43,13 +43,10 @@ namespace Fonoteca.Api.Library;
 /// lists (asking for them makes it silently drop releases — see
 /// <c>MusicBrainzCatalogue.BrowseIncludes</c>), and a lookup cannot carry the
 /// full candidate set (it caps at 25). So candidates come from a browse and
-/// track lists from a lookup, with an exact prune in between: coverage can never
-/// exceed the share of a release's track count the library already holds, so a
-/// 150-track anthology contributing two songs is discarded before a request is
-/// spent on it. Measured at 58-60% of the shortlist on deep back catalogue and
-/// nothing at all on straightforward artists, which is the right shape for a
-/// prune — it costs nothing where it does not help. It is skipped on the opening
-/// round, where it would prune everything; see <c>GatherAsync</c>.
+/// track lists from a lookup, with a prune in between so that a 150-track
+/// anthology contributing one song is not worth a request. The prune is a
+/// heuristic and calling it a bound was worth two failed live runs — see
+/// <see cref="WorthFetching"/>.
 ///
 /// <b>Everything is memoised for the whole run.</b> The same compilations recur
 /// across every artist in a library, and one browse per <i>recording</i> would
