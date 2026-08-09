@@ -1,3 +1,5 @@
+using Fonoteca.Domain.Abstractions;
+
 namespace Fonoteca.Domain.Catalogue;
 
 /*
@@ -78,6 +80,18 @@ public sealed class ReleaseGroup
     /// <summary>Album, EP, Single, Compilation, Live, Soundtrack.</summary>
     public string? PrimaryType { get; set; }
 
+    /// <summary>
+    /// Live, Compilation, Remix, Soundtrack — comma-separated, because a group
+    /// can carry several and none of them is worth its own table yet.
+    /// </summary>
+    /// <remarks>
+    /// What tells a rip of an album from a rip of an anthology after the fact.
+    /// Attribution does not gate on it — a compilation is a real release and
+    /// somebody owns it — but a reviewer asking why forty tracks landed
+    /// somewhere unexpected wants to see "Compilation" without another lookup.
+    /// </remarks>
+    public string? SecondaryTypes { get; set; }
+
     public int? FirstReleaseYear { get; set; }
 
     public ICollection<Release> Releases { get; init; } = [];
@@ -95,7 +109,53 @@ public sealed class Release
     public ReleaseGroup? ReleaseGroup { get; set; }
 
     public string? Country { get; set; }
-    public DateOnly? ReleasedOn { get; set; }
+
+    /// <summary>
+    /// When this edition came out, to whatever precision MusicBrainz knows.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="ReleaseDate"/> rather than a <see cref="DateOnly"/>, and the
+    /// distinction is not pedantry: MusicBrainz dates a great many releases to a
+    /// year alone, and a <c>DateOnly</c> column can hold none of them. Half the
+    /// author's library is in that position — <i>Sloe Gin</i> 2007, <i>Royal
+    /// Tea</i> 2020 — so the old column silently discarded the date for every one
+    /// of them, and the alternative, widening 2007 to the 1st of January, invents
+    /// a claim nobody made and then sorts a reissue ahead of the original on the
+    /// strength of it.
+    ///
+    /// Stored as three plain columns and read back through here, which also
+    /// makes the year something the database can sort and filter on — the one
+    /// part of a release date anybody browsing albums actually asks for.
+    /// </remarks>
+    public ReleaseDate? Released
+    {
+        get => ReleasedYear is { } year ? new ReleaseDate(year, ReleasedMonth, ReleasedDay) : null;
+        set
+        {
+            ReleasedYear = value?.Year;
+            ReleasedMonth = value?.Month;
+            ReleasedDay = value?.Day;
+        }
+    }
+
+    /// <summary>The year, present whenever anything about the date is.</summary>
+    public int? ReleasedYear { get; set; }
+
+    /// <summary>The month, when MusicBrainz knows it. Null means unknown, never January.</summary>
+    public int? ReleasedMonth { get; set; }
+
+    public int? ReleasedDay { get; set; }
+
+    /// <summary>Official, Promotion, Bootleg, Pseudo-Release.</summary>
+    /// <remarks>
+    /// The stated tie-break when two editions fit a set of files identically,
+    /// and the first thing to look at when an attribution seems wrong.
+    /// </remarks>
+    public string? Status { get; set; }
+
+    /// <summary>MusicBrainz's own note, where two editions share a title.</summary>
+    public string? Disambiguation { get; set; }
+
     public string? Label { get; set; }
     public string? CatalogNumber { get; set; }
     public string? Barcode { get; set; }
@@ -103,8 +163,22 @@ public sealed class Release
     /// <summary>Expected track count, for detecting an incomplete rip.</summary>
     public int? TrackCount { get; set; }
 
+    /// <summary>How many discs, so a one-of-two rip is visible as one.</summary>
+    public int? DiscCount { get; set; }
+
+    /// <summary>
+    /// CD, Digital Media, 12" Vinyl — joined with "+" for a mixed release.
+    /// </summary>
+    /// <remarks>
+    /// Carried because it is the honest explanation for a partial rip: a
+    /// <c>CD+DVD-Video</c> release is missing half its track list on any library
+    /// that holds only the audio, and without the format that reads as damage.
+    /// </remarks>
+    public string? MediumFormats { get; set; }
+
     public ICollection<Track> Tracks { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
+    public ICollection<MediaFile> Files { get; init; } = [];
 }
 
 /// <summary>A recording's position on a release. The join, with its own identity.</summary>
@@ -121,8 +195,27 @@ public sealed class Track
     public required int Position { get; set; }
     public int DiscNumber { get; set; } = 1;
 
+    /// <summary>
+    /// The number as printed, which is not always the position: "A1", "12a".
+    /// </summary>
+    public string? Number { get; set; }
+
     /// <summary>Track title as printed on this release, which can differ from the recording's.</summary>
     public string? Title { get; set; }
+
+    /// <summary>
+    /// How long this track runs <i>on this release</i>.
+    /// </summary>
+    /// <remarks>
+    /// Not the same number as <see cref="Recording.Duration"/>, and the
+    /// difference is the whole reason attribution can tell one edition from
+    /// another. A recording has one canonical length; each release prints its
+    /// own, and a remaster's differs from the original's by a second or two.
+    /// Comparing a file's measured length against <i>this</i> is what picked the
+    /// 2015 remaster of <i>Off the Wall</i> over three earlier pressings that
+    /// covered the track list equally well.
+    /// </remarks>
+    public TimeSpan? Length { get; set; }
 }
 
 /// <summary>Bytes on disk. One recording may have many.</summary>
@@ -224,6 +317,53 @@ public sealed class MediaFile
     /// <summary>What the last enrichment attempt concluded. For display, not for the worklist.</summary>
     public EnrichmentOutcome EnrichmentOutcome { get; set; } = EnrichmentOutcome.NotAttempted;
 
+    /// <summary>The edition this file came from, once one has been decided.</summary>
+    public ReleaseId? ReleaseId { get; set; }
+    public Release? Release { get; set; }
+
+    /// <summary>Where on that edition — the disc, the position, the printed number.</summary>
+    public TrackId? TrackId { get; set; }
+    public Track? Track { get; set; }
+
+    /// <summary>
+    /// The album, when the edition could not be settled but the album could.
+    /// </summary>
+    /// <remarks>
+    /// Set on its own only for <see cref="ReleaseAttributionOutcome.GroupOnly"/>,
+    /// where the editions that fitted disagreed about which disc and position the
+    /// music sits at. Naming one of them would write a track number the evidence
+    /// contradicts, so the specific claim is dropped and the general one kept.
+    /// Otherwise it mirrors the chosen release's group, so "everything on this
+    /// album" is one query whether or not the pressing is known.
+    /// </remarks>
+    public ReleaseGroupId? ReleaseGroupId { get; set; }
+    public ReleaseGroup? ReleaseGroup { get; set; }
+
+    /// <summary>
+    /// When a release was last decided for this file, answer or not.
+    /// </summary>
+    /// <remarks>
+    /// The worklist column, for the reason <see cref="AcoustIdCheckedUtc"/> is:
+    /// selecting on a null <see cref="ReleaseId"/> would re-ask about every
+    /// unattributable file on every pass, and the files that fit nothing are
+    /// exactly the ones whose candidate sets are largest and slowest to fetch.
+    /// </remarks>
+    public DateTimeOffset? ReleaseLookupUtc { get; set; }
+
+    /// <summary>What the last attribution attempt concluded, and how firmly.</summary>
+    public ReleaseAttributionOutcome AttributionOutcome { get; set; } =
+        ReleaseAttributionOutcome.NotAttempted;
+
+    /// <summary>
+    /// How many other editions fitted this file exactly as well as the one chosen.
+    /// </summary>
+    /// <remarks>
+    /// Zero when the answer was unambiguous. Non-zero is not an error — it is a
+    /// coin flip that has been recorded as one, which is the only way a reviewer
+    /// can tell a decided answer from a defaulted one after the fact.
+    /// </remarks>
+    public int EditionAlternatives { get; set; }
+
     public AudioQuality? Quality { get; set; }
 
     public IntegrityState Integrity { get; set; } = IntegrityState.Unchecked;
@@ -311,6 +451,37 @@ public enum EnrichmentOutcome
 
     /// <summary>A provider did not answer. Stays on the worklist.</summary>
     LookupFailed = 4,
+}
+
+/// <summary>What was decided about a file, and how firmly.</summary>
+public enum ReleaseAttributionOutcome
+{
+    /// <summary>Nothing has asked yet.</summary>
+    NotAttempted = 0,
+
+    /// <summary>One release fitted, and nothing else fitted as well.</summary>
+    Attributed = 1,
+
+    /// <summary>
+    /// Several editions fitted identically and agreed on where this track sits,
+    /// so one was chosen by the stated tie-break and the rest counted.
+    /// </summary>
+    AttributedAmbiguously = 2,
+
+    /// <summary>
+    /// The album is known and the pressing is not, because the editions that
+    /// fitted disagree about this track's disc or position.
+    /// </summary>
+    GroupOnly = 3,
+
+    /// <summary>Releases existed, and none of them explained this file well enough.</summary>
+    NoConfidentFit = 4,
+
+    /// <summary>MusicBrainz holds no release containing this recording at all.</summary>
+    NoCandidate = 5,
+
+    /// <summary>The lookup did not answer. Transient; the file stays on the worklist.</summary>
+    LookupFailed = 6,
 }
 
 /// <summary>Result of decode-testing a file.</summary>

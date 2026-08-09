@@ -296,6 +296,19 @@ public sealed class LibraryScanService(
                 row.RecordingId = null;
                 row.RecordingLookupUtc = null;
                 row.EnrichmentOutcome = EnrichmentOutcome.NotAttempted;
+
+                // And the album, which rests on the recording in turn. It also
+                // rests on something the other resets do not: attribution chose
+                // this edition by comparing the file's *measured length* against
+                // each edition's printed one. New bytes are a new length, so the
+                // evidence that picked this pressing over its remaster is
+                // precisely what has just been invalidated.
+                row.ReleaseId = null;
+                row.TrackId = null;
+                row.ReleaseGroupId = null;
+                row.ReleaseLookupUtc = null;
+                row.AttributionOutcome = ReleaseAttributionOutcome.NotAttempted;
+                row.EditionAlternatives = 0;
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

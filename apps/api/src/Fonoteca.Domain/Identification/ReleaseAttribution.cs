@@ -339,34 +339,3 @@ public sealed record ReleaseAssignment(
     internal static ReleaseAssignment Refused(MediaFileId file, ReleaseAttributionOutcome outcome) =>
         new(file, null, null, null, null, outcome, 0);
 }
-
-/// <summary>What was decided about a file, and how firmly.</summary>
-public enum ReleaseAttributionOutcome
-{
-    /// <summary>Nothing has asked yet.</summary>
-    NotAttempted = 0,
-
-    /// <summary>One release fitted, and nothing else fitted as well.</summary>
-    Attributed = 1,
-
-    /// <summary>
-    /// Several editions fitted identically and agreed on where this track sits,
-    /// so one was chosen by the stated tie-break and the rest counted.
-    /// </summary>
-    AttributedAmbiguously = 2,
-
-    /// <summary>
-    /// The album is known and the pressing is not, because the editions that
-    /// fitted disagree about this track's disc or position.
-    /// </summary>
-    GroupOnly = 3,
-
-    /// <summary>Releases existed, and none of them explained this file well enough.</summary>
-    NoConfidentFit = 4,
-
-    /// <summary>MusicBrainz holds no release containing this recording at all.</summary>
-    NoCandidate = 5,
-
-    /// <summary>The lookup did not answer. Transient; the file stays on the worklist.</summary>
-    LookupFailed = 6,
-}

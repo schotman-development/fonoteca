@@ -76,6 +76,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
             e.Property(x => x.PrimaryType).HasMaxLength(100);
+            e.Property(x => x.SecondaryTypes).HasMaxLength(500);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
         });
@@ -88,18 +89,31 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Label).HasMaxLength(500);
             e.Property(x => x.CatalogNumber).HasMaxLength(200);
             e.Property(x => x.Barcode).HasMaxLength(50);
+            e.Property(x => x.Status).HasMaxLength(50);
+            e.Property(x => x.Disambiguation).HasMaxLength(1000);
+            e.Property(x => x.MediumFormats).HasMaxLength(200);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Barcode);
+            e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
             e.HasOne(x => x.ReleaseGroup)
                 .WithMany(g => g.Releases)
                 .HasForeignKey(x => x.ReleaseGroupId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // Three columns rather than a date, because MusicBrainz dates plenty
+            // of releases to a year alone and a `date` can hold none of them —
+            // the old DateOnly column silently discarded every year-only release,
+            // which in this library is about half of them. `Released` is the
+            // view over the three and belongs to the domain, not the schema.
+            e.Ignore(x => x.Released);
+            e.HasIndex(x => x.ReleasedYear);
         });
 
         modelBuilder.Entity<Track>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000);
+            e.Property(x => x.Number).HasMaxLength(50);
             e.HasOne(x => x.Release)
                 .WithMany(r => r.Tracks)
                 .HasForeignKey(x => x.ReleaseId)
@@ -173,9 +187,38 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.Id, "IX_MediaFiles_RecordingPending")
                 .HasFilter("\"AcoustId\" IS NOT NULL AND \"RecordingLookupUtc\" IS NULL");
 
+            // The attribution worklist. Fourth named partial index on Id, and the
+            // naming matters here for the same reason it did for the other three.
+            e.HasIndex(x => x.Id, "IX_MediaFiles_ReleasePending")
+                .HasFilter("\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL");
+
+            // "Everything on this album" has to be one indexed read whether or
+            // not the pressing was decided, so both links are indexed.
+            e.HasIndex(x => x.ReleaseId);
+            e.HasIndex(x => x.ReleaseGroupId);
+
             e.HasOne(x => x.Recording)
                 .WithMany(r => r.Files)
                 .HasForeignKey(x => x.RecordingId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // SetNull throughout: losing a release must not take the files with
+            // it. They are still on disk, still identified, and still worth
+            // re-attributing — a cascade here would delete somebody's library
+            // because a MusicBrainz edit merged two pressings.
+            e.HasOne(x => x.Release)
+                .WithMany(r => r.Files)
+                .HasForeignKey(x => x.ReleaseId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(x => x.ReleaseGroup)
+                .WithMany()
+                .HasForeignKey(x => x.ReleaseGroupId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(x => x.Track)
+                .WithMany()
+                .HasForeignKey(x => x.TrackId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Quality travels with the file and is never queried independently,
