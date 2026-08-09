@@ -503,6 +503,29 @@ Adding a component means adding stories, because that is what tests it.
   artwork check compare nothing to nothing and pass. `Corpus.Id3PrefixedFlac`
   builds one, and the recipe is spelled out there because four near-miss
   variants do *not* reproduce it.
+- **`pnpm api:test` hangs about one run in three, and the tests have already
+  passed when it does.** The hang is in `Fonoteca.Integration.Tests` at process
+  exit, *after* the run reports success. Under `dotnet test` the symptom is a
+  console that stops producing output for as long as you let it — seventeen
+  minutes, in one case, before anyone looked; `dotnet test`'s output is buffered,
+  so "no output" and "no progress" are indistinguishable from outside. A stack of
+  the VSTest host shows it parked in `Xunit.v3.LocalTestProcess.WaitForExit`,
+  waiting on the xUnit v3 test executable it spawned, and that executable's own
+  `Main` is still awaiting the run task with **no Fonoteca frames anywhere on any
+  thread**. The last two lines it logs are always the same pair:
+  `Identification stopped early: The operation was canceled.` then
+  `Hosting stopped` — so it correlates with the pass that
+  `Fonoteca:IdentifyAfterScan` starts inside `LibraryScanEndpointTests`, and it
+  survives the host shutting down cleanly. **It predates the enrichment work**
+  (reproduced at `a1767c1`, three runs in four), so a bisect will not find it in
+  recent commits. What is *not* yet established is which foreground thread keeps
+  the process alive.
+  **The workaround, and it is a good one:** xUnit v3 projects are executables, so
+  run the test binary directly and skip the VSTest bridge entirely —
+  `./apps/api/tests/Fonoteca.Integration.Tests/bin/Debug/net10.0/Fonoteca.Integration.Tests`
+  runs all 103 integration tests in **18 seconds** against `dotnet test`'s
+  several minutes. It still hangs occasionally, for the same reason, but it fails
+  fast enough to just re-run. Per-class `--filter` runs are reliable.
 - **A running `dotnet run` API stalls `dotnet test`.** The test build wants to
   write `Fonoteca.Api.dll`, the running host holds it, and MSBuild waits rather
   than failing — so the run sits at zero output for as long as you let it. Stop
