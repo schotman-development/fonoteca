@@ -35,6 +35,31 @@ public interface IMusicBrainzCatalogue
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Every release a recording appears on, without the lookup's silent cap.
+    /// </summary>
+    /// <remarks>
+    /// The candidate set release attribution starts from, and a separate call
+    /// from <see cref="GetRecordingAsync"/> because that one cannot answer it.
+    /// A recording lookup asked for <c>inc=releases</c> returns <b>at most 25</b>
+    /// and says nothing about having stopped: <i>Don't Rock the Jukebox</i> comes
+    /// back with 25 where a browse reports 40. Choosing an album from a truncated
+    /// list is how a file ends up on whichever pressing happened to sort first.
+    ///
+    /// Paged internally to exhaustion, so the answer is the whole set or an
+    /// exception — never a quiet prefix of one.
+    ///
+    /// The medium summaries are what make the caller's shortlist cheap. A
+    /// release's coverage can never exceed the share of its track count the
+    /// caller already holds, so a 150-track compilation contributing two tracks
+    /// can be ruled out without ever fetching its track list.
+    /// </remarks>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">The request was refused.</exception>
+    Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
+        Mbid recording,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// One release, with its full track list.
     /// </summary>
     /// <remarks>
@@ -112,6 +137,17 @@ public sealed record MusicBrainzRecording(
     /// </remarks>
     IReadOnlyList<string> Isrcs,
 
+    /// <summary>
+    /// Releases this recording appears on — <b>at most 25 of them</b>.
+    /// </summary>
+    /// <remarks>
+    /// WS/2 caps <c>inc=releases</c> on a recording lookup at 25 and reports no
+    /// total, so a full list and a truncated one are indistinguishable here.
+    /// Measured: <i>Don't Rock the Jukebox</i> returns 25, and a browse of the
+    /// same recording reports 40. Enough to show a file's context; <b>not</b>
+    /// enough to choose a release from, which is what
+    /// <see cref="IMusicBrainzCatalogue.BrowseReleasesForRecordingAsync"/> is for.
+    /// </remarks>
     IReadOnlyList<MusicBrainzAppearance> Appearances,
 
     /// <summary>
@@ -233,6 +269,59 @@ public sealed record MusicBrainzAppearance(
 
     /// <summary>Tracks on that disc. The count an incomplete rip is measured against.</summary>
     int? TrackCount);
+
+/// <summary>
+/// A release a recording might have come from, before its track list is known.
+/// </summary>
+/// <remarks>
+/// Everything a browse can say in one page, which is everything needed to decide
+/// whether the release is worth a second round trip. <see cref="Media"/> is the
+/// load-bearing part: it gives the track count without the tracks, and a release
+/// whose track count dwarfs what the caller holds cannot be the answer no matter
+/// what its track list turns out to say.
+///
+/// Deliberately not a <see cref="MusicBrainzRelease"/> with an empty track list.
+/// The two would be indistinguishable at the type level, and "this release has no
+/// tracks" is a very different claim from "nobody has asked yet" — one of them
+/// scores zero coverage and the other is a bug.
+/// </remarks>
+public sealed record MusicBrainzReleaseCandidate(
+    Mbid Id,
+    string Title,
+    ReleaseDate? ReleasedOn,
+
+    /// <summary>ISO 3166-1 country code of the release event, when there is one.</summary>
+    string? Country,
+
+    /// <summary>Official, Promotion, Bootleg, Pseudo-Release.</summary>
+    string? Status,
+
+    string? Barcode,
+    Mbid? ReleaseGroupId,
+    string? ReleaseGroupTitle,
+
+    /// <summary>Album, EP, Single, Broadcast, Other.</summary>
+    string? PrimaryType,
+
+    /// <summary>Live, Compilation, Remix, Soundtrack. A release can carry several.</summary>
+    IReadOnlyList<string> SecondaryTypes,
+
+    /// <summary>The discs, with their track counts but not their tracks.</summary>
+    IReadOnlyList<MusicBrainzMediumSummary> Media)
+{
+    /// <summary>Tracks across every disc — the denominator of any coverage estimate.</summary>
+    public int TrackCount => Media.Sum(medium => medium.TrackCount);
+}
+
+/// <summary>One disc of a release, counted rather than listed.</summary>
+public sealed record MusicBrainzMediumSummary(
+    /// <summary>1-based position of this disc within the release.</summary>
+    int Position,
+
+    /// <summary>CD, Digital Media, 12" Vinyl, SHM-CD.</summary>
+    string? Format,
+
+    int TrackCount);
 
 /// <summary>A release and its whole track list.</summary>
 public sealed record MusicBrainzRelease(

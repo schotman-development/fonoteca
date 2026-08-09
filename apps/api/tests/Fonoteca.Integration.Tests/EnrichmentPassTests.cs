@@ -509,7 +509,13 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             Mbid id,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(
-                "Enrichment does not attribute releases yet; nothing should call this.");
+                "Enrichment does not attribute releases; nothing here should call this.");
+
+        public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
+            Mbid recording,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "Enrichment does not attribute releases; nothing here should call this.");
 
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default)
         {

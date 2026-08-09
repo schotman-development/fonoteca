@@ -66,6 +66,31 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         | Include.Media
         | Include.Labels;
 
+    /// <summary>
+    /// What a browse asks for about each candidate release.
+    /// </summary>
+    /// <remarks>
+    /// Notably <b>not</b> <c>Include.Recordings</c>. Adding it does not merely
+    /// enlarge the response, it silently shrinks the result: browsing the releases
+    /// of <i>Don't Rock the Jukebox</i> returns all 40 without it and <b>15</b>
+    /// with it, at every page size, while <c>release-count</c> goes on saying 40
+    /// either way. Nothing downstream could detect that loss. Track lists come
+    /// from <see cref="GetReleaseAsync"/> instead, one release at a time, where
+    /// the answer is whole.
+    ///
+    /// <c>Media</c> earns its place by carrying track counts without tracks,
+    /// which is what lets a caller rule a release out before spending a second
+    /// request on it.
+    /// </remarks>
+    private const Include BrowseIncludes =
+        Include.Media | Include.ReleaseGroups | Include.Labels;
+
+    /// <summary>
+    /// Releases per browse page. MusicBrainz caps this at 100 and clamps anything
+    /// larger, so asking for more would page in silent hundreds anyway.
+    /// </summary>
+    private const int BrowsePageSize = 100;
+
     private readonly Query _query;
     private readonly MusicBrainzOptions _config;
     private readonly ILogger<MusicBrainzCatalogue> _logger;
@@ -140,6 +165,55 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                 await _query.LookupReleaseAsync(id.Value, ReleaseIncludes, token)
                     .ConfigureAwait(false)),
             cancellationToken);
+
+    public async Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
+        Mbid recording,
+        CancellationToken cancellationToken = default)
+    {
+        var candidates = await LookupAsync(
+            "recording releases",
+            recording,
+            async token =>
+            {
+                var collected = new List<MusicBrainzReleaseCandidate>();
+                var offset = 0;
+
+                while (true)
+                {
+                    var page = await _query.BrowseRecordingReleasesAsync(
+                            recording.Value,
+                            BrowsePageSize,
+                            offset,
+                            BrowseIncludes,
+                            cancellationToken: token)
+                        .ConfigureAwait(false);
+
+                    var results = page.Results;
+
+                    // An empty page ends the loop whatever the count claims.
+                    // Trusting TotalResults alone would spin forever against a
+                    // server whose count and contents disagree, and a mirror
+                    // mid-replication is exactly where that happens.
+                    if (results.Count == 0) break;
+
+                    foreach (var release in results)
+                    {
+                        collected.Add(MusicBrainzMapper.ToReleaseCandidate(release));
+                    }
+
+                    offset += results.Count;
+                    if (offset >= page.TotalResults) break;
+                }
+
+                return collected;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        // Null is the 404 arm, which for a browse means the recording itself is
+        // gone — indistinguishable from it being on nothing, and the caller
+        // treats both the same way.
+        return candidates ?? [];
+    }
 
     public Task<MusicBrainzWork?> GetWorkAsync(
         Mbid id,

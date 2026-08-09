@@ -94,6 +94,40 @@ internal static class MusicBrainzMapper
             Tracks: tracks);
     }
 
+    /// <summary>A browse result: a release, counted but not listed.</summary>
+    /// <remarks>
+    /// The media are mapped for their <c>TrackCount</c> alone — a browse carries
+    /// no tracks, and asking for them is what makes the browse start dropping
+    /// releases (see <c>MusicBrainzCatalogue.BrowseIncludes</c>).
+    /// </remarks>
+    public static MusicBrainzReleaseCandidate ToReleaseCandidate(IRelease source)
+    {
+        var media = new List<MusicBrainzMediumSummary>(source.Media?.Count ?? 0);
+
+        foreach (var medium in source.Media ?? [])
+        {
+            media.Add(new MusicBrainzMediumSummary(
+                Position: medium.Position,
+                Format: NullIfBlank(medium.Format),
+                TrackCount: medium.TrackCount));
+        }
+
+        var group = source.ReleaseGroup;
+
+        return new MusicBrainzReleaseCandidate(
+            Id: new Mbid(source.Id),
+            Title: source.Title ?? string.Empty,
+            ReleasedOn: ToReleaseDate(source.Date),
+            Country: NullIfBlank(source.Country),
+            Status: NullIfBlank(source.Status),
+            Barcode: NullIfBlank(source.Barcode),
+            ReleaseGroupId: group is null ? null : new Mbid(group.Id),
+            ReleaseGroupTitle: NullIfBlank(group?.Title),
+            PrimaryType: NullIfBlank(group?.PrimaryType),
+            SecondaryTypes: group?.SecondaryTypes ?? [],
+            Media: media);
+    }
+
     /// <summary>Every release the recording appears on, and where on it.</summary>
     /// <remarks>
     /// A recording lookup that includes media gets back only the medium and the

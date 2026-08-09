@@ -42,6 +42,13 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     private static readonly Mbid CollaborationId =
         new(Guid.Parse("b161074b-1b43-4559-bd6f-0a106a2c7547"));
 
+    /// <summary>
+    /// The recording that proved the lookup's cap: 25 releases from
+    /// <c>inc=releases</c>, 40 from a browse of the same recording.
+    /// </summary>
+    private static readonly Mbid JukeboxRecordingId =
+        new(Guid.Parse("c0035654-9b35-482d-ae42-5b3455c9b661"));
+
     private readonly List<ServiceProvider> _providers = [];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -332,6 +339,89 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     }
 
     /// <summary>
+    /// A browse is followed to its end, not to the end of its first page.
+    /// </summary>
+    /// <remarks>
+    /// The fixtures are two consecutive pages of a real browse, both announcing
+    /// <c>release-count: 40</c> while carrying three releases each. Stopping at
+    /// the first would look entirely successful and quietly hide 37 of the
+    /// candidate albums a file might have come from.
+    /// </remarks>
+    [Fact]
+    public async Task ABrowseIsPagedToTheEndRatherThanTrustedAtItsFirstPage()
+    {
+        var pages = new[]
+        {
+            ReadFixture("browse-releases-page1.json"),
+            ReadFixture("browse-releases-page2.json"),
+        };
+
+        // The second page is served twice: MusicBrainz answers an offset past
+        // the end with an empty list, which is what actually terminates a browse
+        // whose count and contents disagree.
+        var empty = """{"release-count":40,"release-offset":6,"releases":[]}""";
+        var served = 0;
+
+        var (catalogue, stub) = Build(_ =>
+        {
+            var index = served++;
+            return StubHttpHandler.Json(
+                HttpStatusCode.OK,
+                index < pages.Length ? pages[index] : empty);
+        });
+
+        var candidates = await catalogue.BrowseReleasesForRecordingAsync(JukeboxRecordingId, Token);
+
+        Assert.Equal(6, candidates.Count);
+        Assert.Equal(3, stub.Requests.Count);
+
+        // Offsets advance by what arrived, not by what was asked for. The first
+        // page carries none: MetaBrainz omits an offset of zero.
+        Assert.DoesNotContain("offset=", stub.Requests[0].Uri.Query, StringComparison.Ordinal);
+        Assert.Contains("offset=3", stub.Requests[1].Uri.Query, StringComparison.Ordinal);
+        Assert.Contains("offset=6", stub.Requests[2].Uri.Query, StringComparison.Ordinal);
+
+        // Both pages are present, in order, with no page boundary visible.
+        Assert.Equal(
+            ["Don't Rock the Jukebox", "The Ultimate Country Collection", "Picked to Click"],
+            candidates.Select(c => c.Title).Distinct().Select(t => t.Split(':')[0]).ToArray());
+    }
+
+    /// <summary>
+    /// The counts a shortlist is built from survive the mapping.
+    /// </summary>
+    /// <remarks>
+    /// A candidate's whole job is to be rejected cheaply. Coverage cannot exceed
+    /// the share of a release's tracks that the library already holds, so the
+    /// track count is what lets a forty-track compilation contributing one song
+    /// be ruled out without ever fetching its track list — and a zero here would
+    /// silently rule out everything instead.
+    /// </remarks>
+    [Fact]
+    public async Task ACandidateCarriesTheTrackCountsThatRuleItOut()
+    {
+        // One page then nothing: `Recorded` would serve the same page at every
+        // offset, and a browse that pages to exhaustion would read it fourteen
+        // times over.
+        var (catalogue, _) = Build(Once(ReadFixture("browse-releases-page2.json")));
+
+        var candidates = await catalogue.BrowseReleasesForRecordingAsync(JukeboxRecordingId, Token);
+
+        var compilation = candidates.Single(c => c.Title == "The Ultimate Country Collection");
+
+        Assert.Equal(40, compilation.TrackCount);
+        Assert.Equal(2, compilation.Media.Count);
+        Assert.All(compilation.Media, medium => Assert.Equal("CD", medium.Format));
+        Assert.Equal([1, 2], compilation.Media.Select(m => m.Position).ToArray());
+
+        // Status and date are the stated tie-break between editions that fit
+        // equally well, so a promotional pressing has to be distinguishable.
+        var promotion = candidates.Single(c => c.Status == "Promotion");
+        Assert.Equal(1991, promotion.ReleasedOn?.Year);
+        Assert.Null(promotion.ReleasedOn?.Month);
+    }
+
+    /// <summary>
     /// Configuration that would get the address blocked is refused rather than
     /// obeyed. The public instance is the only server this applies to.
     /// </summary>
@@ -346,6 +436,23 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     public void Dispose()
     {
         foreach (var provider in _providers) provider.Dispose();
+    }
+
+    /// <summary>
+    /// Serves one page and then an empty one, which is how a browse ends.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Recorded"/> answers every request with the same body, and a
+    /// browse reads until the pages run out — so a recorded page whose
+    /// <c>release-count</c> exceeds its contents would be served over and over
+    /// until the offset caught up with the count.
+    /// </remarks>
+    private static Func<RecordedRequest, HttpResponseMessage> Once(string page)
+    {
+        var served = 0;
+        return _ => StubHttpHandler.Json(
+            HttpStatusCode.OK,
+            served++ == 0 ? page : """{"release-count":40,"release-offset":3,"releases":[]}""");
     }
 
     private static Func<RecordedRequest, HttpResponseMessage> Recorded(string fixture)
