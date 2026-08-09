@@ -336,6 +336,19 @@ remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
   kept is what makes "you are missing track 7" answerable.
 - **`held` counts distinct tracks, not files.** Five encodings of one song are
   one track of the album; counting files makes a half-ripped album read complete.
+- **Known failure: heavily anthologised catalogue.** Michael Jackson's albums do
+  not attribute correctly. `Off the Wall` — ten tracks, all ten held, with a 2015
+  remaster matching to the millisecond — never enters the component's candidate
+  set, so the files land on whichever compilation did: a five-disc box set at one
+  setting of the cap, a greatest-hits and a two-in-one at another. All 31 files
+  are decided in a *single* component (`count(DISTINCT ReleaseLookupUtc) = 1`),
+  so this is not fragmentation across components, and no cap is logged for it.
+  Reproducing the gather in Python against the same mirror *does* confirm
+  `Off the Wall` among the candidates at coverage 1.00 and drift 0.00, so the
+  rule would pick it if it arrived — which means the loss is in `GatherAsync`
+  and has not been isolated by reading. It needs a debugger and a
+  candidate-by-candidate trace, not more inference. Artists with a shallower
+  compilation history (Bonamassa, Ella Fitzgerald's albums) come out right.
 
 ### The identification providers, and what they refuse to do
 
