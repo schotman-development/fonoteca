@@ -220,11 +220,11 @@ public sealed class MediaFile
 /// </summary>
 /// <remarks>
 /// Not the worklist — <c>AcoustIdCheckedUtc IS NULL</c> is. This exists so the
-/// three ways of not being identified can be told apart when reporting: "nobody
+/// four ways of not being identified can be told apart when reporting: "nobody
 /// has ever submitted this audio" invites submitting it, "two clusters were too
-/// close to call" invites a human look, and "the decoder refused the file"
-/// invites checking whether the file is intact. One null column answers none of
-/// those.
+/// close to call" invites a human look, "nothing matched well enough" invites
+/// looking at the audio itself, and "the decoder refused the file" invites
+/// checking whether the file is intact. One null column answers none of those.
 /// </remarks>
 public enum AcoustIdOutcome
 {
@@ -236,11 +236,29 @@ public enum AcoustIdOutcome
     /// <summary>AcoustID has never heard this audio.</summary>
     Unknown = 2,
 
-    /// <summary>Clusters matched, but none clearly enough to write into a file.</summary>
+    /// <summary>Two clusters meant different audio and neither won clearly.</summary>
     Ambiguous = 3,
 
     /// <summary>The decoder could not produce a fingerprint at all.</summary>
     Unfingerprintable = 4,
+
+    /// <summary>
+    /// Something matched, but too weakly to write into a file.
+    /// </summary>
+    /// <remarks>
+    /// Split out of <see cref="Ambiguous"/>, which used to mean both and so
+    /// meant neither — and hid the proportions badly. When this was separated,
+    /// what had been reported as 951 ambiguous files turned out to be 925
+    /// clustering artefacts and 23 genuinely weak matches, which need opposite
+    /// follow-ups: the first has a right answer a rule declined to pick, the
+    /// second has no answer worth having. Old, noisy or sparsely-submitted audio
+    /// lands here, and no margin will help it.
+    ///
+    /// Numbered after <see cref="Unfingerprintable"/> rather than beside its
+    /// sibling because the column stores the number. Rows written before this
+    /// existed still read <see cref="Ambiguous"/> until they are asked again.
+    /// </remarks>
+    BelowThreshold = 5,
 }
 
 /// <summary>Result of decode-testing a file.</summary>

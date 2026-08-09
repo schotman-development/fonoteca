@@ -382,6 +382,29 @@ Adding a component means adding stories, because that is what tests it.
 
 ## Gotchas already paid for
 
+- **AcoustID returns clusters, not answers, and one recording routinely spans
+  several of them.** A lossless rip and a 128kbps rip of the same track can sit
+  in separate clusters that were never merged, so a lookup answering `0.957` and
+  `0.939` is usually *one* answer arriving twice. `AcoustIdSelection` originally
+  read any near-tied cluster as a disagreement and refused to tag the file;
+  measured against the real library, **925 of the 951 files it had withheld were
+  this**, and in 794 of them the rival named the same MusicBrainz recording.
+  The rule now compares each near-tied rival's *dominant recording* against the
+  winner's, and a cluster with no MusicBrainz link cannot contradict one that
+  has. **Do not reach for `RecordingCandidates` here** — it collapses the other
+  way, onto recordings, so one cluster legitimately linked to several recordings
+  becomes a zero margin: measured, it breaks 64 of 200 files that identify
+  confidently today. **And do not let `Sources` outvote a near-tied rival**; it
+  recovers 36 more files and decides live-against-studio by popularity, tagging
+  a track from an album called *Live* with the studio recording. Both wrong
+  turns are pinned by tests that name them.
+- **The catalogue records identification outcomes but not the evidence**, and
+  `Log.FileNotIdentified` is `Debug`. Working out what those 951 files actually
+  were meant re-asking AcoustID for every one of them. The fingerprints are
+  stored, so it cost 951 turns at the rate limit and no decoding — but budget
+  ~6 minutes and a script, not a SQL query, for any question of this shape.
+  `AcoustIdCheckedUtc IS NULL` is the worklist and **no endpoint clears it**, so
+  re-asking after a rule change is a hand-written `UPDATE`.
 - **Two stages joined by a bounded channel and a `Task.WhenAll` deadlock when
   the consumer dies.** The producer blocks in `WriteAsync` on a channel nobody
   will drain again, so `WhenAll` waits on the producer forever and *never

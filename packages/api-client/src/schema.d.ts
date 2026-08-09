@@ -134,6 +134,8 @@ export interface components {
             /** Format: int32 */
             ambiguous: number;
             /** Format: int32 */
+            belowThreshold: number;
+            /** Format: int32 */
             unfingerprintable: number;
             /** Format: int32 */
             tagged: number;

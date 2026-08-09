@@ -189,8 +189,13 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
     }
 
     /// <summary>
-    /// Two close clusters leave the file alone rather than guessing at it.
+    /// Two close clusters, neither linked to MusicBrainz, leave the file alone.
     /// </summary>
+    /// <remarks>
+    /// Nothing here says whether the two clusters are the same audio or not, so
+    /// the plain margin applies and the pass declines to guess. The two tests
+    /// below are the cases where something <i>does</i> say.
+    /// </remarks>
     [Fact]
     public async Task AnAmbiguousMatchIsRecordedAndNothingIsWritten()
     {
@@ -215,6 +220,116 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
 
         var reader = new TagReader(new FileSystemAudioFileStore(_root));
         Assert.Null(await reader.ReadAcoustIdAsync(new LibraryPath("compilation.flac"), Token));
+    }
+
+    /// <summary>
+    /// One recording split across two clusters is one answer, and gets written.
+    /// </summary>
+    /// <remarks>
+    /// End to end, the case that had 925 of this library's files sitting
+    /// untagged: AcoustID clusters fingerprints, so a lossless rip and a 128kbps
+    /// rip of one track can live in separate clusters that both name the same
+    /// recording. The old rule read the near-tie as a disagreement. Here the
+    /// tag really does land in the file, which is the part a domain test cannot
+    /// show.
+    /// </remarks>
+    [Fact]
+    public async Task AClusterSplitAcrossTwoEntriesIsStillOneAnswer()
+    {
+        SkipWithoutTools();
+        Copy(Corpus.Flac, "split.flac");
+
+        var recording = new Mbid(Guid.NewGuid());
+
+        var services = Build(
+            allowMutation: true,
+            new StubLookup([
+                new AcoustIdMatch(Cluster, 0.9575, [new AcoustIdRecordingRef(recording, 8961)]),
+                new AcoustIdMatch(Guid.NewGuid(), 0.9391, [new AcoustIdRecordingRef(recording, 210)]),
+            ]));
+
+        await ScanAsync(services);
+        var summary = await IdentifyAsync(services);
+
+        var row = await RowAsync("split.flac");
+
+        Assert.Equal(AcoustIdOutcome.Identified, row.AcoustIdOutcome);
+        Assert.Equal(new AcoustId(Cluster), row.AcoustId);
+        Assert.Equal(0, summary.Ambiguous);
+        Assert.NotNull(row.AcoustIdTaggedUtc);
+
+        var reader = new TagReader(new FileSystemAudioFileStore(_root));
+        Assert.Equal(
+            Cluster.ToString(),
+            await reader.ReadAcoustIdAsync(new LibraryPath("split.flac"), Token),
+            ignoreCase: true);
+    }
+
+    /// <summary>
+    /// Two clusters naming different recordings still stop the pass writing.
+    /// </summary>
+    /// <remarks>
+    /// The live-against-studio case, which is what the margin is actually for.
+    /// Loosening the rule for split clusters must not loosen it for this.
+    /// </remarks>
+    [Fact]
+    public async Task TwoClustersNamingDifferentRecordingsStillLeaveTheFileAlone()
+    {
+        SkipWithoutTools();
+        Copy(Corpus.Flac, "live-or-studio.flac");
+
+        var services = Build(
+            allowMutation: true,
+            new StubLookup([
+                new AcoustIdMatch(Cluster, 0.9653, [new AcoustIdRecordingRef(new Mbid(Guid.NewGuid()), 73)]),
+                new AcoustIdMatch(Guid.NewGuid(), 0.9605, [new AcoustIdRecordingRef(new Mbid(Guid.NewGuid()), 6)]),
+            ]));
+
+        await ScanAsync(services);
+        var summary = await IdentifyAsync(services);
+
+        var row = await RowAsync("live-or-studio.flac");
+
+        Assert.Equal(AcoustIdOutcome.Ambiguous, row.AcoustIdOutcome);
+        Assert.Null(row.AcoustId);
+        Assert.Equal(1, summary.Ambiguous);
+
+        var reader = new TagReader(new FileSystemAudioFileStore(_root));
+        Assert.Null(await reader.ReadAcoustIdAsync(new LibraryPath("live-or-studio.flac"), Token));
+    }
+
+    /// <summary>
+    /// A weak match is reported as weak, not as a disagreement.
+    /// </summary>
+    /// <remarks>
+    /// The two used to share one outcome and one counter, which hid their
+    /// proportions: a run reporting 951 ambiguous files was 925 clustering
+    /// artefacts and 23 of these. They deserve opposite follow-ups — one is a
+    /// rule declining to pick between real answers, the other is audio too
+    /// obscure or too noisy to have a good answer at all.
+    /// </remarks>
+    [Fact]
+    public async Task AWeakMatchIsReportedApartFromAnAmbiguousOne()
+    {
+        SkipWithoutTools();
+        Copy(Corpus.Flac, "noisy.flac");
+
+        var services = Build(allowMutation: true, Answering(0.62));
+
+        await ScanAsync(services);
+        var summary = await IdentifyAsync(services);
+
+        var row = await RowAsync("noisy.flac");
+
+        Assert.Equal(AcoustIdOutcome.BelowThreshold, row.AcoustIdOutcome);
+        Assert.Equal(1, summary.BelowThreshold);
+        Assert.Equal(0, summary.Ambiguous);
+        Assert.Null(row.AcoustId);
+
+        // Asked and answered: the row leaves the worklist so the next run does
+        // not spend another turn at the rate limit on the same weak answer.
+        Assert.NotNull(row.AcoustIdCheckedUtc);
+        Assert.Equal(0, await PendingAsync(services));
     }
 
     /// <summary>

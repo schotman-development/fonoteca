@@ -287,6 +287,7 @@ public sealed class IdentificationService(
             Identified: counts.Identified,
             Unknown: counts.Unknown,
             Ambiguous: counts.Ambiguous,
+            BelowThreshold: counts.BelowThreshold,
             Unfingerprintable: counts.Unfingerprintable,
             Tagged: counts.Tagged,
             WriteRefused: counts.WriteRefused,
@@ -633,17 +634,25 @@ public sealed class IdentificationService(
         var choice = AcoustIdSelection.Choose(
             matches, config.AcoustIdMinimumScore, config.AcoustIdMinimumMargin);
 
+        // One arm per reason and no catch-all. The two failures used to share a
+        // `_`, which is how "ambiguous" came to mean both "two candidate answers"
+        // and "no good answer" — and hid that the first outnumbered the second
+        // forty to one. The silent default is what allowed that; naming each
+        // reason means the compiler asks about the next one somebody adds.
         var outcome = choice.Reason switch
         {
             AcoustIdChoiceReason.Confident => AcoustIdOutcome.Identified,
             AcoustIdChoiceReason.NoMatch => AcoustIdOutcome.Unknown,
-            _ => AcoustIdOutcome.Ambiguous,
+            AcoustIdChoiceReason.Ambiguous => AcoustIdOutcome.Ambiguous,
+            AcoustIdChoiceReason.BelowThreshold => AcoustIdOutcome.BelowThreshold,
+            _ => throw new InvalidOperationException($"Unhandled choice reason {choice.Reason}."),
         };
 
         switch (outcome)
         {
             case AcoustIdOutcome.Unknown: counts.Unknown++; break;
             case AcoustIdOutcome.Ambiguous: counts.Ambiguous++; break;
+            case AcoustIdOutcome.BelowThreshold: counts.BelowThreshold++; break;
             default: counts.Identified++; break;
         }
 
@@ -747,6 +756,7 @@ public sealed class IdentificationService(
         public int Identified;
         public int Unknown;
         public int Ambiguous;
+        public int BelowThreshold;
         public int Unfingerprintable;
         public int Tagged;
         public int WriteRefused;
@@ -822,8 +832,26 @@ public sealed record IdentificationSummary(
     /// <summary>Audio AcoustID has never heard. Not asked about again.</summary>
     int Unknown,
 
-    /// <summary>Clusters too close together to choose between, so nothing was written.</summary>
+    /// <summary>
+    /// Two clusters meant different audio and neither won clearly.
+    /// </summary>
+    /// <remarks>
+    /// A right answer exists and the rule declined to pick it — typically a live
+    /// take against a studio one. The follow-up is a human ear, not a knob.
+    /// </remarks>
     int Ambiguous,
+
+    /// <summary>
+    /// Nothing matched well enough to be worth writing down.
+    /// </summary>
+    /// <remarks>
+    /// Reported apart from <see cref="Ambiguous"/> because the remedies have
+    /// nothing in common, and because together they hid their own proportions:
+    /// the author's library reported 951 ambiguous files, of which 23 were
+    /// actually this. Old, noisy or sparsely-submitted audio, where the
+    /// fingerprint is weak rather than contested.
+    /// </remarks>
+    int BelowThreshold,
 
     int Unfingerprintable,
 

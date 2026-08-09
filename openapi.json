@@ -304,6 +304,7 @@
           "identified",
           "unknown",
           "ambiguous",
+          "belowThreshold",
           "unfingerprintable",
           "tagged",
           "writeRefused",
@@ -349,6 +350,10 @@
             "format": "int32"
           },
           "ambiguous": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "belowThreshold": {
             "type": "integer",
             "format": "int32"
           },

@@ -203,7 +203,25 @@ function Result({ summary }: { readonly summary: Summary }) {
         />
         <Stat label="Unknown" value={summary.unknown} />
         <Stat label="Ambiguous" value={summary.ambiguous} />
+        <Stat label="Weak match" value={summary.belowThreshold} />
       </Stack>
+
+      {/*
+        Two ways of not being identified that used to share one number, and
+        they lead opposite ways: an ambiguous file has a right answer nobody
+        should guess at, while a weak match has no answer worth having. Saying
+        so here is the difference between "go and look" and "leave it".
+      */}
+      {summary.ambiguous > 0 || summary.belowThreshold > 0 ? (
+        <Text size="xs" tone="tertiary">
+          {summary.ambiguous > 0
+            ? `${summary.ambiguous.toLocaleString()} matched two recordings too closely to choose between — a live take against a studio one, typically. `
+            : ''}
+          {summary.belowThreshold > 0
+            ? `${summary.belowThreshold.toLocaleString()} matched nothing well enough to be worth writing down.`
+            : ''}
+        </Text>
+      ) : null}
 
       <Text size="xs" tone="tertiary">
         {summary.alreadyTagged.toLocaleString()} already tagged ·{' '}
