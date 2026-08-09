@@ -1,0 +1,80 @@
+.root {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.root thead tr {
+  height: var(--density-header-height);
+}
+
+/*
+ * Row height as a fixed track rather than as padding.
+ *
+ * A virtualizer has to know a row's height as a number before it renders
+ * anything, and a height that emerges from padding plus line-height plus
+ * whatever the tallest cell contains is not a number anybody can know. These
+ * are the same tokens that value will come from.
+ *
+ * Declared after the header rule, which is less specific: source order has to
+ * follow specificity, or a later rule that loses to an earlier one becomes a
+ * puzzle to debug rather than a cascade to read.
+ */
+.root[data-density="compact"] tbody tr {
+  height: var(--density-row-compact);
+}
+
+.root[data-density="cozy"] tbody tr {
+  height: var(--density-row-cozy);
+}
+
+.root[data-density="comfortable"] tbody tr {
+  height: var(--density-row-comfortable);
+}
+
+.headerCell {
+  padding-inline: var(--space-8);
+  border-block-end: var(--border-width-thin) solid var(--color-border-default);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.root[data-sticky] thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-index-sticky);
+  background-color: var(--color-surface-raised);
+}
+
+.cell {
+  padding-inline: var(--space-8);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+.root tbody tr:last-child .cell {
+  border-block-end: none;
+}
+
+/*
+ * Tabular numerals and end alignment for anything countable. Proportional
+ * digits make a column of durations impossible to compare at a glance, which is
+ * the only reason to put them in a column.
+ */
+.cell[data-numeric],
+.headerCell[data-numeric] {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.cell[data-truncate] {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

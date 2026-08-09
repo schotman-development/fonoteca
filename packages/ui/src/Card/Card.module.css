@@ -1,0 +1,42 @@
+.root {
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.root[data-padding="md"] {
+  padding: var(--space-16);
+}
+
+.root[data-padding="lg"] {
+  padding: var(--space-24);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-12);
+  margin-block-end: var(--space-12);
+  padding-block-end: var(--space-8);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+/*
+ * The heading is here for semantics only; its type comes from the Text inside
+ * it. Without these three resets the browser's own h2 styling would fight the
+ * token scale and reintroduce the margin the header row already owns.
+ */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.aside {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-shrink: 0;
+}

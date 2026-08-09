@@ -29,9 +29,17 @@ Four pillars, none of them built yet:
 > is careful (see [ADR 0002](docs/adr/0002-two-tag-libraries.md)) and it is still
 > the only operation here that can destroy anything.
 >
-> Nothing hashes, probes, downloads, or reads the catalogue back out. MusicBrainz
-> enrichment is the next slice and does not exist — the adapter does, and is
-> verified against the live service, but only the health probe calls it.
+> **`POST /api/library/enrich`** is the pass after that, and the one that makes
+> a library browsable. It takes each identified file's *stored* fingerprint back
+> to AcoustID for the MusicBrainz recording it names, then asks MusicBrainz who
+> made it — so it opens no file, decodes nothing, and runs with the library
+> volume unmounted. `GET /api/catalogue/artists` and the `/library` page are what
+> come out: everyone credited on something you own, including the conductors,
+> orchestras and composers a credit line never mentions.
+>
+> Nothing hashes, probes or downloads, and **releases are not attributed** —
+> which of the thirty releases a recording appears on a given file came from is
+> a rule of its own, and until it exists a track names the folder it sits in.
 
 ## Layout
 
@@ -133,6 +141,7 @@ rather than returning `undefined` in a browser.
 | [0005](docs/adr/0005-typescript-7.md) | TypeScript 7, with the OpenAPI generator isolated on 5.9 |
 | [0006](docs/adr/0006-musicbrainz-mirror.md) | Mirror MusicBrainz locally, without a search index — and don't try to mirror AcoustID |
 | [0007](docs/adr/0007-identification-in-process.md) | Identification runs in-process, not on a durable queue — the catalogue *is* the worklist |
+| [0008](docs/adr/0008-tanstack-router.md) | TanStack Router, routes in code — a route rename should be a build failure |
 
 ## Credentials
 
@@ -177,12 +186,19 @@ the reasoning, including why AcoustID does *not* get the same treatment, in
 
 ## Still open
 
-- **Router and server-state for `apps/web`.** The zero-dependency rule was
-  scoped to the design system; the app shell currently uses plain `useState` and
-  `useEffect` so this stays an open choice rather than being settled by default.
+- **Server-state for `apps/web`.** The router question is settled (ADR 0008);
+  this one is not. `useApiQuery` is the shared version of the plain
+  `useState`/`useEffect` the panels already used — no deduplication, no
+  background refetch, no invalidation — so adopting TanStack Query stays a
+  decision to take on evidence rather than one taken by association.
 - **The catalogue virtualizer.** Excluding `@tanstack/react-virtual` from the
   design system means writing one. The largest piece of unplanned frontend work.
-- **Run history is not persisted.** `LastCompleted` for both the scan and the
-  identification pass is an in-memory field, forgotten on restart. Making it
+- **Releases are not attributed.** Enrichment writes recordings, works and
+  artists; `Releases`, `ReleaseGroups` and `Tracks` stay empty, because deciding
+  which of the thirty releases a recording appears on a given file came from is
+  a rule of its own. Until then a track names the folder it sits in, which is
+  the filesystem's claim rather than MusicBrainz's, and is labelled as such.
+- **Run history is not persisted.** `LastCompleted` for the scan and both passes
+  is an in-memory field, forgotten on restart. Making it
   durable means deciding what a run *is* as an entity, which ADR 0007 defers
   along with the job queue.

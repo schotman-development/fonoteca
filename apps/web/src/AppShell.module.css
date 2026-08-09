@@ -37,30 +37,47 @@
   gap: var(--space-8);
 }
 
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-inline-end: auto;
+  margin-inline-start: var(--space-16);
+}
+
+/*
+ * The current page is marked by a rule under it AND by aria-current, not by
+ * colour alone — the same discipline as Badge. A 2px underline survives
+ * greyscale, a slightly darker grey does not.
+ */
+.navLink {
+  padding: var(--space-6) var(--space-8);
+  border-block-end: var(--border-width-thick) solid transparent;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+}
+
+.navLink:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-surface-inset);
+}
+
+.navLink[data-current="page"] {
+  color: var(--color-text-primary);
+  border-block-end-color: var(--color-accent-solid);
+}
+
+.navLink:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
 .main {
   padding: var(--space-24) var(--space-16);
   overflow-y: auto;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: var(--space-16);
-  max-width: 1100px;
-}
-
-.card {
-  padding: var(--space-16);
-  border: var(--border-width-thin) solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface-raised);
-  box-shadow: var(--shadow-sm);
-}
-
-.cardTitle {
-  margin-block-end: var(--space-12);
-  padding-block-end: var(--space-8);
-  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
 }
 
 /*

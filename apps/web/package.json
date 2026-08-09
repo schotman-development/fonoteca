@@ -16,6 +16,7 @@
     "@fonoteca/tokens": "workspace:*",
     "@fonoteca/ui": "workspace:*",
     "@microsoft/signalr": "10.0.11",
+    "@tanstack/react-router": "1.170.23",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

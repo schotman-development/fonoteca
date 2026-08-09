@@ -7,17 +7,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A self-hosted music library manager for 100,000+ track libraries: catalogue and
 dedupe, acquisition (Qobuz/Deezer), *arr-style upgrade monitoring, tag editing.
 
-**Status: scaffold, two features.** The library scan walks the root and
-reconciles `MediaFiles` with what is on disk. The **identification pass** then
-fingerprints every file that has no AcoustID, looks it up, and writes the result
-into the file's tags — so `Fonoteca.Tagging` is real, `IStagedWrite` is
+**Status: scaffold, three passes and one browse screen.** The library scan walks
+the root and reconciles `MediaFiles` with what is on disk. The **identification
+pass** then fingerprints every file that has no AcoustID, looks it up, and writes
+the result into the file's tags — so `Fonoteca.Tagging` is real, `IStagedWrite` is
 implemented, and there *is* now a code path that modifies audio files. It is
 behind `Fonoteca:AllowFileMutation`, which still defaults to `false`; with it off
 the pass does everything except the write. **Read `docs/adr/0002` before touching
-that path.**
+that path.** The **enrichment pass** turns those identities into a catalogue —
+recordings, works, artists — and `/library` browses it.
 
 Still missing: hashing, probing (`AudioQuality` is never populated), downloading,
-MusicBrainz enrichment, and anything that reads the catalogue back out.
+and **release attribution** — `Releases`, `ReleaseGroups` and `Tracks` are still
+empty tables, because deciding which of the thirty releases a recording appears
+on a given file actually came from is a rule of its own.
 
 ## Toolchain
 
@@ -205,6 +208,61 @@ The rest, in the same spirit as the scan's list:
 Not on a durable queue, and `Fonoteca.Jobs` is still empty — see ADR 0007, which
 records what would reopen that.
 
+### The enrichment pass, and why it is not a pipeline
+
+| | |
+| --- | --- |
+| `Domain/Catalogue/PrimaryCredits.cs` | the rule — which artists a track is browsable under. Pure |
+| `Api/Library/EnrichmentService.cs` | the pass: cluster → recording → rows, one file at a time |
+| `Api/Endpoints/CatalogueEndpoints.cs` | `GET /api/catalogue/artists`, `…/artists/{id}` |
+
+A fully identified library still has **zero artists**: identification decides an
+AcoustID cluster, writes it into the file's tags and discards the MusicBrainz
+recording MBIDs `AcoustIdSelection` looked at on the way past. This pass is the
+other half, and its own list of paid-for edges:
+
+- **It opens no files.** Fingerprints are already in the catalogue, so a lookup
+  is a database read and an HTTP request. That is what makes re-asking after a
+  rule change cost turns at the rate limit rather than hours of fpcalc, and what
+  lets the pass run with the library volume unmounted.
+- **Sequential on purpose, and the absence of a channel is the design.** Both
+  halves are gated network calls — AcoustID at 340ms, MusicBrainz at whatever the
+  server earns — so concurrency buys nothing that `RequestGate` would not
+  serialise again one layer down. No producer, no consumer, nothing to deadlock.
+  Identification's two-stage split exists because *its* halves have different
+  costs; copying it here would import the hazard and none of the benefit.
+- **Three memoisations, per run.** By cluster (five encodings of one track cost
+  one lookup), by recording MBID, and by work MBID — the last is the big one on a
+  classical library, where a symphony is four movements across a dozen recordings
+  and one work. The dictionaries store nulls too: "we asked and MusicBrainz said
+  no" is as worth remembering as an answer.
+- **`RecordingLookupUtc IS NULL` is the worklist**, not `RecordingId IS NULL` —
+  the same lesson `AcoustIdCheckedUtc` already paid for.
+- **A credit line is not the whole story, and on classical it is barely any of
+  it.** MusicBrainz bills a Karajan reading of Beethoven's Fifth to *Beethoven*
+  and leaves the conductor and the orchestra in relationships, with the composer
+  link one hop further out on the work. `PrimaryCredits` unions four sources;
+  reading `ArtistCredits` alone files every symphony under a man who died in 1827.
+  Individual instrument and vocal performers are deliberately excluded (a jazz
+  quintet's sidemen would be most of the artist list) and so are production roles
+  — the data is stored either way, so widening it later is a query change.
+- **An ensemble is recognised by the artist's type OR by the relation.**
+  MusicBrainz links the Berliner Philharmoniker with a plain `performer` relation
+  about as often as with `performing orchestra`, and types most ensembles `Group`.
+- **Billed credits go to `ArtistCredit`; everything else goes to
+  `Relationship`.** `Position` and `JoinPhrase` describe a printed billing line,
+  and inserting a conductor into that sequence corrupts it for every consumer.
+- **`Relationship.ArtistId` is a typed column beside the generic
+  `SourceType`/`SourceId` pair**, because a join from `Artists` cannot be written
+  over a bare `Guid`: the strongly-typed ids are value-converted and EF translates
+  no member access on them into SQL.
+- **`CatalogueEndpoints` holds the browse rule twice, and that is EF's choice.**
+  A helper taking the artist as an argument cannot be used inside a projection —
+  EF reads it as a closure over the row and fails at runtime with a 500 — and
+  expressing it as a union of `(artist, recording)` pairs is refused too
+  ("unable to translate set operation after client projection has been applied").
+  `TheListAndTheDetailPageAgree` is what stops the two copies drifting.
+
 ### The identification providers, and what they refuse to do
 
 | | |
@@ -329,10 +387,18 @@ the same reason on the EF side. Don't move startup work into `Program.cs`.
   (ADR 0003). Components are a `.tsx` + colocated `.module.css`, variants
   selected via `data-*` attributes rather than class concatenation. React 19,
   so `ref` is an ordinary prop — no `forwardRef`.
-- `packages/api-client` — generated types plus a ~30-line hand-written `fetch`
-  wrapper. Zero runtime dependencies.
-- `apps/web` — Vite + React 19. Router and server-state library are still an
-  open choice; the shell uses plain `useState`/`useEffect` on purpose.
+- `packages/api-client` — generated types plus a hand-written `fetch` wrapper.
+  Zero runtime dependencies. `get` takes the route's own parameters, derived from
+  the generated `parameters` map, and a route with a `{segment}` makes that
+  argument **mandatory** — a rest tuple rather than an optional parameter,
+  because an optional one cannot be made required by a condition and a call that
+  forgot `{ id }` would happily request a URL containing a literal `{id}`.
+- `apps/web` — Vite + React 19, **TanStack Router** with routes defined in code
+  (ADR 0008); `AppShell` is the root route and the transport row sits outside the
+  outlet. The **server-state** choice is still open: `useApiQuery` is the shared
+  version of the throwaway `useState`/`useEffect`, with no cache, no dedup and no
+  invalidation, so adopting TanStack Query stays a decision to take on evidence
+  rather than one taken by association with the router's name.
 
 Three theme states, not two: `data-theme="light"`, `data-theme="dark"`, and
 **no attribute at all** (follow the system). `ThemeProvider` removes the

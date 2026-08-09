@@ -1,0 +1,65 @@
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.back {
+  align-self: flex-start;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.back:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * The table gets its own scroller so a long track title cannot push the page
+ * sideways. Five columns fit comfortably on a laptop and not at all on a phone,
+ * and a horizontal scrollbar on the table is far better than one on the body.
+ */
+.tracks {
+  max-width: 1100px;
+  overflow-x: auto;
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  padding: var(--space-8) var(--space-8) var(--space-4);
+}
+
+/*
+ * A caption is the table's accessible name. Visible rather than hidden: it
+ * repeats the artist, which is worth a line when the table is scrolled and the
+ * heading has left the viewport.
+ */
+/*
+ * Explicit widths on the two truncating columns.
+ *
+ * A truncating cell is `max-width: 0`, which is the trick that makes an ellipsis
+ * work inside an auto-layout table — but it also means the column has no
+ * intrinsic width to negotiate with, so the browser gives it the minimum and the
+ * title is clipped on a screen with room to spare. The header cell is what
+ * carries the width in that arrangement.
+ */
+.trackCol {
+  width: 42%;
+}
+
+.folderCol {
+  width: 30%;
+}
+
+.caption {
+  caption-side: top;
+  text-align: start;
+  padding: var(--space-4) var(--space-8) var(--space-8);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}

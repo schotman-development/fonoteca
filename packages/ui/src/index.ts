@@ -19,8 +19,10 @@
 
 export * from './Badge/index.ts'
 export * from './Button/index.ts'
+export * from './Card/index.ts'
 export * from './Input/index.ts'
 export * from './Stack/index.ts'
+export * from './Table/index.ts'
 export * from './Text/index.ts'
 export * from './ThemeSwitch/index.ts'
 export * from './theme/index.ts'
