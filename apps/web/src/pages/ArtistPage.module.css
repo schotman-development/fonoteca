@@ -64,8 +64,11 @@
   font-size: var(--font-size-xs);
 }
 
+/*
+ * No colour here: the Text inside carries it, since Text sets its own and would
+ * win. This rule owns the decoration and the focus ring only.
+ */
 .album {
-  color: var(--color-text-accent);
   text-decoration: none;
 }
 

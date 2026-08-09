@@ -163,7 +163,13 @@ function Row({ track }: { readonly track: TrackRow }) {
             params={{ releaseId: track.album.releaseId }}
             className={styles.album}
           >
-            <Text size="sm" truncate>
+            {/*
+              The tone goes on the Text, not on the anchor. Text sets its own
+              colour, so a colour on the link is overridden by the span inside it
+              and the album reads as plain text while the folder fallback beside
+              it looks like the link.
+            */}
+            <Text size="sm" tone="accent" truncate>
               {track.album.title}
             </Text>
           </Link>
