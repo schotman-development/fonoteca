@@ -90,7 +90,7 @@ export function ArtistPage() {
                   <tr>
                     <TableHeaderCell className={styles.trackCol}>Track</TableHeaderCell>
                     <TableHeaderCell>Credited as</TableHeaderCell>
-                    <TableHeaderCell className={styles.folderCol}>Folder</TableHeaderCell>
+                    <TableHeaderCell className={styles.folderCol}>Album</TableHeaderCell>
                     <TableHeaderCell numeric>Length</TableHeaderCell>
                     <TableHeaderCell numeric>Files</TableHeaderCell>
                   </tr>
@@ -145,21 +145,42 @@ function Row({ track }: { readonly track: TrackRow }) {
       </TableCell>
 
       {/*
-        The directory, and the header says "Folder" rather than "Album" on
-        purpose: this is the filesystem's claim, not MusicBrainz's. Releases are
-        not attributed yet, and labelling a guess as an album would be the kind
-        of quiet lie that survives into every screen built on top of it.
+        The album attribution decided on — and where it declined, the directory,
+        shown as the directory rather than dressed up as an album. That
+        distinction is the whole reason the API returns both: a folder name is
+        the filesystem's claim, and presenting one as a catalogue answer is the
+        kind of quiet lie that survives into every screen built on top of it.
 
-        Only the last segment is shown. An ellipsis can only eat the *end* of a
-        string, and these paths are "Artist/Album" — so the full value truncates
-        every row of a soundtrack composer's page to the same forty characters
-        of orchestra name. The whole path stays in the title attribute.
+        Only the last segment of a path is shown. An ellipsis can only eat the
+        *end* of a string, and these paths are "Artist/Album", so the full value
+        truncates every row of a soundtrack composer's page to the same forty
+        characters of orchestra name. The whole path stays in the title.
       */}
-      <TableCell truncate title={track.folder}>
-        <Text size="sm" tone="tertiary" truncate>
-          {leaf(track.folder)}
-        </Text>
-      </TableCell>
+      {track.album != null ? (
+        <TableCell truncate title={track.album.title}>
+          <Link
+            to="/library/releases/$releaseId"
+            params={{ releaseId: track.album.releaseId }}
+            className={styles.album}
+          >
+            <Text size="sm" truncate>
+              {track.album.title}
+            </Text>
+          </Link>
+        </TableCell>
+      ) : (
+        <TableCell truncate title={`No album attributed. Folder: ${track.folder}`}>
+          {/*
+            "(folder)" in visible words rather than a tone or an aria-label. The
+            distinction it carries — a directory name standing in for an album
+            nobody worked out — has to reach every reader, and a greyer grey
+            reaches none of them.
+          */}
+          <Text size="sm" tone="tertiary" truncate>
+            {leaf(track.folder)} (folder)
+          </Text>
+        </TableCell>
+      )}
 
       <TableCell numeric>
         <Text size="sm" family="mono" tone={track.duration == null ? 'tertiary' : 'primary'}>

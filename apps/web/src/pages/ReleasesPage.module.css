@@ -1,0 +1,63 @@
+/*
+ * The heading exists for semantics; its type comes from the Text inside it.
+ * Same three resets as the artist list, for the same reason.
+ */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 360px;
+}
+
+/*
+ * The folder comparison, given a surface of its own so it reads as a finding
+ * about the whole page rather than as more prose above the filter.
+ */
+.validation {
+  max-width: 1100px;
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+/*
+ * Wider rows than the artist list: an album row carries a title, an artist, a
+ * year and a format, and 320px turns all four into ellipses.
+ */
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: var(--space-4) var(--space-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: 1100px;
+}
+
+.release {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-height: var(--density-row-comfortable);
+  padding-inline: var(--space-8);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+}
+
+.release:hover {
+  background-color: var(--color-surface-raised);
+}
+
+.release:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: -2px;
+}

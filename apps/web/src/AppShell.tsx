@@ -41,12 +41,25 @@ export function AppShell() {
           >
             Foundation
           </Link>
+          {/*
+            "Artists" is exact for the same reason "/" is: /library/releases
+            starts with /library, so without it both nav links would light up on
+            the albums page.
+          */}
           <Link
             to="/library"
             className={styles.navLink}
             activeProps={{ 'data-current': 'page', 'aria-current': 'page' }}
+            activeOptions={{ exact: true }}
           >
-            Library
+            Artists
+          </Link>
+          <Link
+            to="/library/releases"
+            className={styles.navLink}
+            activeProps={{ 'data-current': 'page', 'aria-current': 'page' }}
+          >
+            Albums
           </Link>
         </nav>
 

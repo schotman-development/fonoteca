@@ -63,3 +63,18 @@
   color: var(--color-text-tertiary);
   font-size: var(--font-size-xs);
 }
+
+.album {
+  color: var(--color-text-accent);
+  text-decoration: none;
+}
+
+.album:hover {
+  text-decoration: underline;
+}
+
+.album:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}

@@ -1,0 +1,61 @@
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.back {
+  align-self: flex-start;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.back:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.tracks {
+  max-width: 900px;
+  overflow-x: auto;
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  padding: var(--space-8) var(--space-8) var(--space-4);
+}
+
+/*
+ * A missing track stays in place and recedes, rather than being dropped. The
+ * gap is the information: track 7 absent between 6 and 8 is a rip that stopped,
+ * and a list that silently renumbered would hide exactly that.
+ *
+ * Dimming alone would carry it for a sighted reader and nobody else, so the
+ * row also says "missing" in words — the stripe is the redundant cue, not the
+ * only one.
+ */
+.tracks tbody tr[data-missing] {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 6px,
+    var(--color-surface-sunken) 6px,
+    var(--color-surface-sunken) 7px
+  );
+}
+
+.titleCol {
+  width: 60%;
+}
+
+.caption {
+  caption-side: top;
+  text-align: start;
+  padding: var(--space-4) var(--space-8) var(--space-8);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}

@@ -1,6 +1,7 @@
 import { Badge, Card, Stack, Text } from '@fonoteca/ui'
 import { useReducer } from 'react'
 
+import { AttributionPanel } from '../components/AttributionPanel.tsx'
 import { EnrichmentPanel } from '../components/EnrichmentPanel.tsx'
 import { HealthPanel } from '../components/HealthPanel.tsx'
 import { IdentificationPanel } from '../components/IdentificationPanel.tsx'
@@ -50,6 +51,10 @@ export function DashboardPage() {
         {/* And the one after that: what they are, in somebody's catalogue. */}
         <Card title="Library — enrich">
           <EnrichmentPanel onEnriched={catalogueChanged} />
+        </Card>
+
+        <Card title="Library — attribute">
+          <AttributionPanel onAttributed={catalogueChanged} />
         </Card>
 
         <Card title="API — via generated client">
