@@ -1,4 +1,4 @@
-import { ApiError, type components, problemDetail } from '@fonoteca/api-client'
+import { type components, describeError } from '@fonoteca/api-client'
 import { Badge, Button, Stack, Text } from '@fonoteca/ui'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -47,7 +47,7 @@ export function IdentificationPanel() {
       setStatus(await api.get('/api/library/identify'))
       setError(null)
     } catch (cause) {
-      setError(describe(cause))
+      setError(describeError(cause))
     }
   }, [])
 
@@ -80,7 +80,7 @@ export function IdentificationPanel() {
       await api.post('/api/library/identify')
       await refresh()
     } catch (cause) {
-      setError(describe(cause))
+      setError(describeError(cause))
       await refresh()
     } finally {
       setBusy(false)
@@ -91,7 +91,7 @@ export function IdentificationPanel() {
     try {
       await api.delete('/api/library/identify')
     } catch (cause) {
-      setError(describe(cause))
+      setError(describeError(cause))
     }
 
     await refresh()
@@ -280,12 +280,4 @@ function formatDuration(ms: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)} s`
 
   return `${Math.floor(seconds / 60)} m ${Math.round(seconds % 60)} s`
-}
-
-function describe(error: unknown): string {
-  if (error instanceof ApiError) {
-    return problemDetail(error.body) ?? `${error.status} ${error.statusText}`
-  }
-
-  return error instanceof Error ? error.message : 'Unknown error'
 }

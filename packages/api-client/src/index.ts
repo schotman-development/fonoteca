@@ -8,6 +8,6 @@
  * Regenerate with `pnpm gen:api`.
  */
 
-export type { ApiClient, ApiClientOptions } from './client.ts'
-export { ApiError, createApiClient, problemDetail } from './client.ts'
+export type { ApiClient, ApiClientOptions, GetOptions } from './client.ts'
+export { ApiError, createApiClient, describeError, problemDetail } from './client.ts'
 export type { components, operations, paths } from './schema.d.ts'

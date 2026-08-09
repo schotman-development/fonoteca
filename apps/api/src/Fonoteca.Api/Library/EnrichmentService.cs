@@ -656,19 +656,15 @@ public sealed class EnrichmentService(
 
             db.ArtistCredits.RemoveRange(stale);
 
-            var recordingKey = recording.Id.Value;
-
             var staleLinks = await db.Relationships
-                .Where(r => r.TargetType == RelationshipTargets.Recording && r.TargetId == recordingKey)
+                .Where(r => r.RecordingId == recording.Id)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
             if (work is not null)
             {
-                var workKey = work.Id.Value;
-
                 staleLinks.AddRange(await db.Relationships
-                    .Where(r => r.TargetType == RelationshipTargets.Work && r.TargetId == workKey)
+                    .Where(r => r.WorkId == work.Id)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false));
             }
@@ -709,6 +705,7 @@ public sealed class EnrichmentService(
                     TargetId = toWork ? work!.Id.Value : recording.Id.Value,
                     Type = RoleName(credit.Role),
                     Attribute = credit.ArtistType,
+                    ArtistId = artist.Id,
                     WorkId = toWork ? work!.Id : null,
                     RecordingId = toWork ? null : recording.Id,
                 });

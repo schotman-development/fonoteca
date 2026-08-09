@@ -224,6 +224,16 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // "everything this engineer touched" walks this index.
             e.HasIndex(x => new { x.TargetType, x.TargetId, x.Type });
             e.HasIndex(x => new { x.SourceType, x.SourceId, x.Type });
+
+            // The typed end of the same links, which is what a browse query can
+            // actually join on. Cascade: a relationship describes a link between
+            // two entities and means nothing once either is gone.
+            e.HasOne<Artist>()
+                .WithMany(a => a.Relationships)
+                .HasForeignKey(x => x.ArtistId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.ArtistId);
         });
 
         modelBuilder.Entity<DomainEvent>(e =>

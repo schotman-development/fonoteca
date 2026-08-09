@@ -202,6 +202,7 @@ app.UseCors(CorsPolicy);
 app.MapHealthChecks("/health");
 app.MapSystemEndpoints();
 app.MapLibraryEndpoints();
+app.MapCatalogueEndpoints();
 app.MapHub<JobsHub>(JobsHub.Route);
 
 await app.RunAsync().ConfigureAwait(false);

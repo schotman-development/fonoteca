@@ -347,7 +347,18 @@ public sealed class Artist
 
     public string? Disambiguation { get; set; }
 
+    /// <summary>Billed credits — the printed credit line, with its order.</summary>
     public ICollection<ArtistCredit> Credits { get; init; } = [];
+
+    /// <summary>
+    /// Typed links: conductor, ensemble, composer, engineer.
+    /// </summary>
+    /// <remarks>
+    /// The other half of "everything by this artist", and on a classical library
+    /// the larger half — MusicBrainz bills a recording to its composer and puts
+    /// everyone who played it here.
+    /// </remarks>
+    public ICollection<Relationship> Relationships { get; init; } = [];
 }
 
 /// <summary>
@@ -406,6 +417,22 @@ public sealed class Relationship
     /// <summary>Instrument or role qualifier, e.g. "trumpet", "assistant".</summary>
     public string? Attribute { get; set; }
 
+    /*
+     * Typed foreign keys beside the generic pair above.
+     *
+     * SourceType/SourceId and TargetType/TargetId are what make this table able
+     * to link anything to anything; these are what make the common links
+     * queryable. A join from Artists to Relationships cannot be written over a
+     * bare Guid column, because the strongly-typed ids are value-converted and
+     * EF translates no member access on them into SQL — so "every recording this
+     * artist is linked to" would have to be evaluated on the client.
+     *
+     * One column per end that a browse query actually walks. Exactly one of
+     * WorkId and RecordingId is set on the links this application writes, and
+     * ArtistId is set on all of them.
+     */
+
+    public ArtistId? ArtistId { get; set; }
     public WorkId? WorkId { get; set; }
     public RecordingId? RecordingId { get; set; }
 }

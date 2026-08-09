@@ -1,4 +1,4 @@
-import { ApiError, problemDetail } from '@fonoteca/api-client'
+import { describeError } from '@fonoteca/api-client'
 import { Badge, Button, Stack, Text } from '@fonoteca/ui'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -43,7 +43,7 @@ export function LibraryScanPanel({ onScanned }: { readonly onScanned?: () => voi
     try {
       setStatus((await api.get('/api/library/scan')) as ScanStatus)
     } catch (cause) {
-      setError(describe(cause))
+      setError(describeError(cause))
     }
   }, [])
 
@@ -76,7 +76,7 @@ export function LibraryScanPanel({ onScanned }: { readonly onScanned?: () => voi
       // job; deciding what to do about it is not.
       onScanned?.()
     } catch (cause) {
-      setError(describe(cause))
+      setError(describeError(cause))
 
       // A 409 means someone else started one between render and click; a 503
       // means the root went missing. Either way the local view of "running" is
@@ -176,12 +176,4 @@ function formatDuration(ms: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)} s`
 
   return `${Math.floor(seconds / 60)} m ${Math.round(seconds % 60)} s`
-}
-
-function describe(error: unknown): string {
-  if (error instanceof ApiError) {
-    return problemDetail(error.body) ?? `${error.status} ${error.statusText}`
-  }
-
-  return error instanceof Error ? error.message : 'Unknown error'
 }

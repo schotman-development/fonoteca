@@ -1,4 +1,4 @@
-import { ApiError, type components } from '@fonoteca/api-client'
+import { type components, describeError } from '@fonoteca/api-client'
 import { Badge, type BadgeTone, Button, Stack, Text } from '@fonoteca/ui'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -43,7 +43,7 @@ export function MusicBrainzPanel() {
       setHealth(await api.get('/api/system/musicbrainz'))
       setError(null)
     } catch (cause) {
-      setError(describe(cause))
+      setError(describeError(cause))
     } finally {
       setBusy(false)
     }
@@ -167,10 +167,4 @@ function describeRate(health: Health): string {
 
 function formatLatency(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
-}
-
-function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.status} ${error.statusText}`
-
-  return error instanceof Error ? error.message : 'Unknown error'
 }

@@ -103,10 +103,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Artists with at least one track in the library.
+         * @description Ordered by sort name. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.
+         */
+        get: operations["GetArtists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/artists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One artist and every track of theirs in the library. */
+        get: operations["GetArtist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ArtistDetailResponse: {
+            artist: components["schemas"]["ArtistSummary"];
+            tracks: components["schemas"]["TrackRow"][];
+        };
+        ArtistListResponse: {
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["ArtistSummary"][];
+        };
+        ArtistSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            sortName: null | string;
+            disambiguation: null | string;
+            type: null | string;
+            /** Format: int32 */
+            trackCount: number;
+        };
         CatalogueCounts: {
             /** Format: int32 */
             files: number;
@@ -159,6 +215,11 @@ export interface components {
             /** Format: int32 */
             artists: number;
             cancelled: boolean;
+        };
+        FileRow: {
+            path: string;
+            /** Format: int64 */
+            sizeBytes: number;
         };
         IdentificationStartedResponse: {
             jobId: string;
@@ -266,6 +327,16 @@ export interface components {
             libraryPath: string;
             fileMutationAllowed: boolean;
             counts: components["schemas"]["CatalogueCounts"];
+        };
+        TrackRow: {
+            /** Format: uuid */
+            recordingId: string;
+            title: string;
+            workTitle: null | string;
+            duration: null | string;
+            roles: string[];
+            folder: string;
+            files: components["schemas"]["FileRow"][];
         };
     };
     responses: never;
@@ -526,6 +597,61 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetArtists: {
+        parameters: {
+            query?: {
+                query?: string;
+                skip?: number;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistListResponse"];
+                };
+            };
+        };
+    };
+    GetArtist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

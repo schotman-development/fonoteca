@@ -263,10 +263,180 @@
           }
         }
       }
+    },
+    "/api/catalogue/artists": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Artists with at least one track in the library.",
+        "description": "Ordered by sort name. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.",
+        "operationId": "GetArtists",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/artists/{id}": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "One artist and every track of theirs in the library.",
+        "operationId": "GetArtist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ArtistDetailResponse": {
+        "required": [
+          "artist",
+          "tracks"
+        ],
+        "type": "object",
+        "properties": {
+          "artist": {
+            "$ref": "#/components/schemas/ArtistSummary"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackRow"
+            }
+          }
+        }
+      },
+      "ArtistListResponse": {
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistSummary"
+            }
+          }
+        }
+      },
+      "ArtistSummary": {
+        "required": [
+          "id",
+          "name",
+          "sortName",
+          "disambiguation",
+          "type",
+          "trackCount"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "disambiguation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "CatalogueCounts": {
         "required": [
           "files",
@@ -428,6 +598,22 @@
           },
           "cancelled": {
             "type": "boolean"
+          }
+        }
+      },
+      "FileRow": {
+        "required": [
+          "path",
+          "sizeBytes"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -785,6 +971,54 @@
             "$ref": "#/components/schemas/CatalogueCounts"
           }
         }
+      },
+      "TrackRow": {
+        "required": [
+          "recordingId",
+          "title",
+          "workTitle",
+          "duration",
+          "roles",
+          "folder",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "recordingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folder": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileRow"
+            }
+          }
+        }
       }
     }
   },
@@ -794,6 +1028,9 @@
     },
     {
       "name": "Library"
+    },
+    {
+      "name": "Catalogue"
     }
   ]
 }
