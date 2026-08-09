@@ -84,7 +84,23 @@ public sealed class ReleaseAttributionService(
     /// </remarks>
     private const int MaximumComponentFiles = 600;
 
-    private const int MaximumComponentCandidates = 400;
+    /// <summary>
+    /// How many candidate releases one component may confirm.
+    /// </summary>
+    /// <remarks>
+    /// Generous, because the cost of being wrong here is asymmetric. Cutting the
+    /// list truncates it in hits order, and everything below the line is treated
+    /// as though it did not exist — so a perfect-fitting album can be discarded
+    /// while a box set that merely reprints it survives, which is what happened
+    /// to <i>Off the Wall</i> at a ceiling of 400. A lookup against a local
+    /// mirror is about 45ms and memoised for the whole run, so the ceiling costs
+    /// seconds where it binds; a wrong album costs somebody's library.
+    ///
+    /// It is still a ceiling rather than no ceiling: one jazz standard reaches
+    /// hundreds of anthologies, each naming hundreds more, and something has to
+    /// stop that walking the entire catalogue.
+    /// </remarks>
+    private const int MaximumComponentCandidates = 2_000;
 
     private readonly SemaphoreSlim _finished = new(0, 1);
 
