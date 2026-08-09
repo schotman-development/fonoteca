@@ -99,12 +99,28 @@ export function ArtistsPage() {
   )
 }
 
+/**
+ * How many artists there are, and — when the response was capped — what to do
+ * about it.
+ *
+ * "500 of 2,752" is honest and useless on its own: it does not say that the
+ * missing 2,252 are unreachable by scrolling. The server's cap is high enough
+ * that this should not fire on a library of this size, which is exactly why it
+ * has to say something actionable when it does.
+ */
 function Results({ total, shown }: { readonly total: number; readonly shown: number }) {
+  if (shown === total) {
+    return (
+      <Text size="sm" tone="tertiary">
+        {total.toLocaleString()} artist{total === 1 ? '' : 's'}
+      </Text>
+    )
+  }
+
   return (
-    <Text size="sm" tone="tertiary">
-      {shown === total
-        ? `${total.toLocaleString()} artist${total === 1 ? '' : 's'}`
-        : `${shown.toLocaleString()} of ${total.toLocaleString()} artists`}
+    <Text size="sm" tone="warning">
+      Showing the first {shown.toLocaleString()} of {total.toLocaleString()} artists — narrow the
+      filter to reach the rest.
     </Text>
   )
 }

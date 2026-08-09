@@ -36,14 +36,22 @@ public static class CatalogueEndpoints
     /// The most artists one response will carry.
     /// </summary>
     /// <remarks>
-    /// Generous rather than tuned: the author's library yields a few hundred, so
-    /// the default fetches all of them in one request and the paging exists so
-    /// that a library ten times the size does not have to discover the limit the
-    /// hard way.
+    /// Measured, and larger than it first looks like it needs to be. The guess
+    /// was "a few hundred" from 159 top-level library directories; the answer
+    /// against the real library is <b>2,752</b>, because every songwriter and
+    /// lyricist of every pop song is an artist you can browse to — most of them
+    /// with one track. A cap of 500 silently truncated the list at the letter D
+    /// with no way to reach the rest but the filter.
+    ///
+    /// So the default carries a library several times this one's size in one
+    /// response, and <see cref="MaxTake"/> is the backstop rather than the
+    /// working limit. Paging stays in the contract because a hundred-thousand
+    /// track library will need it, and because it costs nothing to have it
+    /// already there when it does.
     /// </remarks>
-    private const int DefaultTake = 500;
+    private const int DefaultTake = 10_000;
 
-    private const int MaxTake = 1000;
+    private const int MaxTake = 25_000;
 
     public static IEndpointRouteBuilder MapCatalogueEndpoints(this IEndpointRouteBuilder app)
     {
@@ -88,35 +96,36 @@ public static class CatalogueEndpoints
             matching = matching.Where(a => EF.Functions.ILike(a.Name, pattern, "\\"));
         }
 
-        // The same rule as TracksOf, written out. It cannot be shared: a helper
-        // taking the artist as an argument is a closure over the row being
-        // projected, and EF gives up on that at runtime with a 500 rather than
-        // at compile time. Expressing it as a set of (artist, recording) pairs
-        // and unioning them fails differently — EF refuses a set operation over
-        // a projection to a type of ours. So it is inline here, and
-        // TheListAndTheDetailPageAgree pins the two copies together.
-        var withCounts = matching
+        var counts = await CountsByArtistAsync(db, artist: null, cancellationToken).ConfigureAwait(false);
+
+        var named = await matching
+            // Ordered here so the collation doing the work is PostgreSQL's, which
+            // is the ICU en-US one compose.yaml pins. Sorting these in .NET would
+            // quietly use the server process's culture instead.
+            //
+            // SortName first — "Beatles, The" is what an alphabetical list wants
+            // and Name is not — falling back to Name rather than sorting nulls
+            // wherever the collation puts them, with the id breaking ties so
+            // paging cannot show or skip a row.
+            .OrderBy(a => a.SortName ?? a.Name)
+            .ThenBy(a => a.Id)
             .Select(a => new
             {
-                Artist = a,
-                TrackCount = db.Recordings.Count(recording =>
-                    recording.Files.Any()
-                    && (recording.Credits.Any(credit => credit.ArtistId == a.Id)
-                        || recording.Relationships.Any(link => link.ArtistId == a.Id)
-                        || (recording.Work != null
-                            && recording.Work.Relationships.Any(link => link.ArtistId == a.Id)))),
+                a.Id,
+                a.Name,
+                a.SortName,
+                a.Disambiguation,
+                a.Type,
             })
-            .Where(row => row.TrackCount > 0);
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-        var total = await withCounts.CountAsync(cancellationToken).ConfigureAwait(false);
+        var withTracks = named
+            .Select(a => (Artist: a, Count: counts.GetValueOrDefault(a.Id)))
+            .Where(row => row.Count > 0)
+            .ToList();
 
-        var page = await withCounts
-            // SortName first — "Beatles, The" is what an alphabetical list wants
-            // and Name is not. Falling back to Name rather than sorting nulls
-            // wherever the collation puts them; the id breaks ties so paging
-            // cannot show or skip a row.
-            .OrderBy(row => row.Artist.SortName ?? row.Artist.Name)
-            .ThenBy(row => row.Artist.Id)
+        var page = withTracks
             .Skip(from)
             .Take(wanted)
             .Select(row => new ArtistSummary(
@@ -125,11 +134,10 @@ public static class CatalogueEndpoints
                 row.Artist.SortName,
                 row.Artist.Disambiguation,
                 row.Artist.Type,
-                row.TrackCount))
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+                row.Count))
+            .ToList();
 
-        return TypedResults.Ok(new ArtistListResponse(total, page));
+        return TypedResults.Ok(new ArtistListResponse(withTracks.Count, page));
     }
 
     private static async Task<Results<Ok<ArtistDetailResponse>, ProblemHttpResult>> GetArtist(
@@ -152,7 +160,10 @@ public static class CatalogueEndpoints
                 statusCode: StatusCodes.Status404NotFound);
         }
 
-        var tracks = await TracksOf(db, artistId)
+        var theirs = await RecordingsOfAsync(db, artistId, cancellationToken).ConfigureAwait(false);
+
+        var tracks = await db.Recordings
+            .Where(recording => theirs.Contains(recording.Id))
             .AsNoTracking()
             .Select(recording => new
             {
@@ -207,38 +218,125 @@ public static class CatalogueEndpoints
     }
 
     /// <summary>
-    /// Every recording in the library this artist is responsible for.
+    /// Every (artist, recording) link the library can be browsed by.
     /// </summary>
     /// <remarks>
-    /// The three ways of being responsible: on the printed credit line, linked to
-    /// the recording as conductor or ensemble, or a writer of the work it
-    /// performs. The third is why a query cannot stop at the first — MusicBrainz
-    /// puts the composer on the work, so joining there is what spreads one
-    /// "composer" link across every performance of the piece.
+    /// The three ways of being responsible for a recording — on its printed
+    /// credit line, linked to it as conductor or ensemble, or a writer of the
+    /// work it performs. The third is why a query cannot stop at the first:
+    /// MusicBrainz puts the composer on the work, so joining there is what
+    /// spreads one "composer" link across every performance of the piece.
     ///
-    /// One predicate rather than a union of three sets, and that is EF's choice
-    /// rather than ours: a set operation over a projection to a type of ours is
-    /// refused at runtime ("unable to translate set operation after client
-    /// projection has been applied"). As a predicate it composes into a single
-    /// correlated <c>EXISTS</c> per branch, which is also the plan PostgreSQL
-    /// wants.
+    /// <b>Read from the links inward, not from the recordings outward, and the
+    /// difference is eight seconds.</b> Written the obvious way — a predicate
+    /// over <c>Recordings</c> with three <c>EXISTS</c> branches OR'd together,
+    /// evaluated once per artist — PostgreSQL cannot use an index to find an
+    /// artist's recordings, because the OR is a per-row test. On the author's
+    /// library that is 2,752 artists x 7,274 recordings, and the artist list
+    /// took 7.8 seconds. Starting from <c>ArtistCredits</c> and
+    /// <c>Relationships</c>, both of which are indexed by artist, it is three
+    /// index scans.
     ///
-    /// <c>Files.Any()</c> is the library filter, and first because it is by far
-    /// the most selective: a recording with no file is one the catalogue learned
-    /// about some other way, and this is a browser for what the user owns.
+    /// The union happens in memory rather than in SQL because EF refuses a set
+    /// operation over a projection to a type of ours ("unable to translate set
+    /// operation after client projection has been applied"). Deduplicating here
+    /// matters: an artist who both conducted a recording and is billed on it has
+    /// one track, not two.
     ///
-    /// <b>The artist list holds a second copy of this predicate</b>, inline,
-    /// because a helper taking the artist as an argument cannot be used inside a
-    /// projection — EF reads the argument as a closure over the row and gives up.
-    /// <c>TheListAndTheDetailPageAgree</c> is what stops the two drifting.
+    /// <paramref name="artist"/> narrows all three queries when only one artist
+    /// is wanted, which is what lets the list and the detail page share one copy
+    /// of the rule rather than drifting apart. <c>TheListAndTheDetailPageAgree</c>
+    /// asserts they still do.
     /// </remarks>
-    private static IQueryable<Recording> TracksOf(FonotecaDbContext db, ArtistId artist) =>
-        db.Recordings.Where(recording =>
-            recording.Files.Any()
-            && (recording.Credits.Any(credit => credit.ArtistId == artist)
-                || recording.Relationships.Any(link => link.ArtistId == artist)
-                || (recording.Work != null
-                    && recording.Work.Relationships.Any(link => link.ArtistId == artist))));
+    private static async Task<HashSet<ArtistTrack>> BrowsableAsync(
+        FonotecaDbContext db,
+        ArtistId? artist,
+        CancellationToken cancellationToken)
+    {
+        // The library filter: a recording with no file is one the catalogue
+        // learned about some other way, and this is a browser for what is owned.
+        var present = db.Recordings.Where(recording => recording.Files.Any()).Select(r => r.Id);
+
+        var credits = db.ArtistCredits.AsNoTracking().Where(c => c.RecordingId != null);
+        var links = db.Relationships.AsNoTracking().Where(r => r.RecordingId != null);
+        var wrote = db.Relationships.AsNoTracking().Where(r => r.WorkId != null);
+
+        // Applied as a separate Where rather than folded in as `artist == null ||
+        // …`, which would put a parameter-is-null test in the SQL and cost the
+        // planner the index.
+        if (artist is { } only)
+        {
+            credits = credits.Where(c => c.ArtistId == only);
+            links = links.Where(r => r.ArtistId == only);
+            wrote = wrote.Where(r => r.ArtistId == only);
+        }
+
+        var pairs = new HashSet<ArtistTrack>();
+
+        foreach (var pair in await credits
+            .Where(c => present.Contains(c.RecordingId!.Value))
+            .Select(c => new ArtistTrack(c.ArtistId, c.RecordingId!.Value))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+        {
+            pairs.Add(pair);
+        }
+
+        foreach (var pair in await links
+            .Where(r => r.ArtistId != null && present.Contains(r.RecordingId!.Value))
+            .Select(r => new ArtistTrack(r.ArtistId!.Value, r.RecordingId!.Value))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+        {
+            pairs.Add(pair);
+        }
+
+        // The composer hop: joined on the work, which is what carries one link
+        // across every recording of the piece.
+        foreach (var pair in await wrote
+            .Where(r => r.ArtistId != null)
+            .Join(
+                db.Recordings.Where(recording => recording.Files.Any()),
+                link => link.WorkId,
+                recording => recording.WorkId,
+                (link, recording) => new ArtistTrack(link.ArtistId!.Value, recording.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+        {
+            pairs.Add(pair);
+        }
+
+        return pairs;
+    }
+
+    /// <summary>How many browsable recordings each artist has.</summary>
+    private static async Task<Dictionary<ArtistId, int>> CountsByArtistAsync(
+        FonotecaDbContext db,
+        ArtistId? artist,
+        CancellationToken cancellationToken)
+    {
+        var pairs = await BrowsableAsync(db, artist, cancellationToken).ConfigureAwait(false);
+
+        var counts = new Dictionary<ArtistId, int>();
+
+        foreach (var pair in pairs)
+        {
+            counts[pair.ArtistId] = counts.GetValueOrDefault(pair.ArtistId) + 1;
+        }
+
+        return counts;
+    }
+
+    /// <summary>The recordings one artist is responsible for.</summary>
+    private static async Task<HashSet<RecordingId>> RecordingsOfAsync(
+        FonotecaDbContext db,
+        ArtistId artist,
+        CancellationToken cancellationToken)
+    {
+        var pairs = await BrowsableAsync(db, artist, cancellationToken).ConfigureAwait(false);
+
+        return [.. pairs.Select(pair => pair.RecordingId)];
+    }
 
     /// <summary>Why this artist has this track, strongest claim first.</summary>
     private static IReadOnlyList<string> Roles(
@@ -293,6 +391,9 @@ public static class CatalogueEndpoints
         .Replace("\\", "\\\\", StringComparison.Ordinal)
         .Replace("%", "\\%", StringComparison.Ordinal)
         .Replace("_", "\\_", StringComparison.Ordinal);
+
+    /// <summary>One artist's claim on one recording. Never leaves this file.</summary>
+    private readonly record struct ArtistTrack(ArtistId ArtistId, RecordingId RecordingId);
 }
 
 /// <summary>A page of artists, with the total the filter matched.</summary>

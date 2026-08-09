@@ -295,7 +295,7 @@
             "schema": {
               "type": "integer",
               "format": "int32",
-              "default": 500
+              "default": 10000
             }
           }
         ],
