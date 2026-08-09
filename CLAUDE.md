@@ -346,8 +346,10 @@ remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
   Reproducing the gather in Python against the same mirror *does* confirm
   `Off the Wall` among the candidates at coverage 1.00 and drift 0.00, so the
   rule would pick it if it arrived — which means the loss is in `GatherAsync`
-  and has not been isolated by reading. It needs a debugger and a
-  candidate-by-candidate trace, not more inference. Artists with a shallower
+  and has not been isolated by reading. `AnAlbumIsFoundEvenUnderThirty`
+  `CompilationsThatReprintIt` builds the same shape in a fixture and **passes**,
+  so it is not the obvious structural story either. It needs a
+  candidate-by-candidate trace against the real mirror. Artists with a shallower
   compilation history (Bonamassa, Ella Fitzgerald's albums) come out right.
 
 ### The identification providers, and what they refuse to do

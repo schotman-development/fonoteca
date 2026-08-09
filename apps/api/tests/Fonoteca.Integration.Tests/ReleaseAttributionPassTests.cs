@@ -270,6 +270,81 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
+    /// An album buried under thirty compilations that each reprint some of it.
+    /// </summary>
+    /// <remarks>
+    /// An attempt to reproduce the Michael Jackson failure in a fixture, where it
+    /// can be debugged. `Off the Wall` is ten tracks, all ten held, with an
+    /// edition matching to the millisecond — and it never reaches the candidate
+    /// set on real data, so the files land on whichever compilation did.
+    ///
+    /// If this passes, the failure is data-specific rather than structural and
+    /// the trace has to come from the real mirror.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumIsFoundEvenUnderThirtyCompilationsThatReprintIt()
+    {
+        var albumFiles = Enumerable.Range(1, 10)
+            .Select(index => ($"mj/{index:D2}.flac", Song(index), 200 + index))
+            .ToArray();
+
+        await SeedAsync(albumFiles);
+
+        var album = Album() with
+        {
+            Id = VinylId,
+            Title = "Off the Wall",
+            Tracks = [.. Enumerable.Range(1, 10).Select(index => Track(index, Song(index), 200 + index))],
+        };
+
+        var catalogue = new StubCatalogue().With(album);
+
+        // Thirty compilations, each reprinting a rolling window of the album at
+        // slightly different lengths, and each padded out with music nobody owns.
+        var compilations = new List<Mbid>();
+
+        for (var comp = 0; comp < 30; comp++)
+        {
+            var id = new Mbid(new Guid($"77777777-7777-4777-8777-{comp:D12}"));
+            compilations.Add(id);
+
+            var shared = Enumerable.Range(1, 10)
+                .Where(index => (index + comp) % 3 != 0)
+                .Select(index => Track(index, Song(index), 202 + index))
+                .ToList();
+
+            catalogue.With(Album() with
+            {
+                Id = id,
+                Title = $"Greatest Hits {comp}",
+                ReleaseGroupId = new Mbid(new Guid($"88888888-8888-4888-8888-{comp:D12}")),
+                Tracks = [.. shared, .. Enumerable.Range(1, 20).Select(n => Track(100 + n, Song(500 + comp * 20 + n), 200))],
+            });
+        }
+
+        // Every album track is on the album and on most of the compilations, so
+        // the seed's opening browse is dominated by them.
+        for (var index = 1; index <= 10; index++)
+        {
+            var on = new List<Mbid> { VinylId };
+            on.AddRange(compilations.Where(c => true));
+            catalogue.On(Song(index), [.. on]);
+        }
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var chosen = await db.MediaFiles
+            .Where(f => f.ReleaseId != null)
+            .Select(f => f.Release!.Title)
+            .ToListAsync(Token);
+
+        Assert.Equal(10, chosen.Count);
+        Assert.All(chosen, title => Assert.Equal("Off the Wall", title));
+    }
+
+    /// <summary>
     /// Two pressings of one album, both filed under, sharing a release group.
     /// </summary>
     /// <remarks>
