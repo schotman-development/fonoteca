@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b && tsc -p tsconfig.storybook.json",
+    "prestorybook": "pnpm --filter @fonoteca/tokens build",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build",
     "test": "vitest run",

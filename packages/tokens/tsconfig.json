@@ -3,6 +3,11 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    // Inside outDir, so `clean` (rm -rf dist) really does invalidate the build.
+    // Left at its default beside the tsconfig, a removed dist/ leaves tsc -b
+    // believing it is up to date: it no-ops, and dist/index.js — which
+    // package.json points `main` and `exports` at — is silently never emitted.
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "types": ["node"]
   },
   "include": ["src"]

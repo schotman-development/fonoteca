@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Fonoteca's web client.",
   "scripts": {
+    "predev": "pnpm --filter @fonoteca/tokens build",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
