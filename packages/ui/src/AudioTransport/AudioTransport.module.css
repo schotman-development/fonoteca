@@ -1,0 +1,105 @@
+/*
+ * **The component sets no height.** It fills the slot `AppShell` gives it, which
+ * is `--density-transport-height` — a token reserved for this since before the
+ * player existed. Restating 72px here would create a second place to get it
+ * wrong; see `apps/web/src/AppShell.module.css`.
+ *
+ * `minmax(0, …)` on the identity track is what lets `Text truncate` actually
+ * truncate: an `auto` track refuses to shrink below its content, and a long
+ * classical title would push the seek bar off the end of the bar instead.
+ */
+.root {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 2fr) auto auto;
+  align-items: center;
+  gap: var(--space-16);
+  block-size: 100%;
+  padding-inline: var(--space-16);
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-inline-size: 0;
+}
+
+.seek {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+/* Fixed width so the seek bar does not jump sideways as the elapsed time
+   crosses from 9:59 to 10:00. `ch` on a mono face is exactly this. */
+.time {
+  flex: none;
+  inline-size: 5ch;
+  text-align: end;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.volumeSlider {
+  inline-size: 80px;
+}
+
+.iconButton {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: 28px;
+  block-size: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--easing-standard);
+}
+
+.iconButton:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-interactive-hover);
+}
+
+.iconButton:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.glyph {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconButton {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .iconButton:focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+/*
+ * The live region is a `VisuallyHidden`, so the clip technique has one copy in
+ * the package rather than two. It carries the *change* in state; the failure
+ * message itself is also rendered visibly in the identity column, because a
+ * region announces once and someone arriving afterwards still has to be able to
+ * find out what went wrong.
+ */

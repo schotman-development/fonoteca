@@ -1,0 +1,81 @@
+/*
+ * The box is its own container, so the monogram is sized from the width the
+ * element actually got rather than from the width someone asked for. That is
+ * what lets one component serve a `1fr` grid track that stretches, a 56px row
+ * thumbnail and everything between with a single rule for the letters.
+ *
+ * Shape is a data attribute rather than two components because every other
+ * decision here — the inset fill, the border, the crop, the monogram scale — is
+ * shared, and shared decisions in two files drift.
+ */
+.root {
+  display: grid;
+  place-items: center;
+  container-type: inline-size;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-inset);
+}
+
+/* The one shape difference that carries the meaning. */
+.root[data-shape="circle"] {
+  border-radius: var(--radius-full);
+}
+
+/* ---- sizes ---- */
+
+/* No width of its own: it fills the track, the cell or the flex item it lands
+   in, and `aspect-ratio` above keeps it square while doing so. */
+.root[data-size="fill"] {
+  inline-size: 100%;
+}
+
+/*
+ * The three fixed boxes are raw pixels with no token behind them, and there is
+ * no artwork-size token to add: a spacing scale describes gaps between things,
+ * not the size of a picture. These are the three boxes the screens need — a
+ * thumbnail beside a table row, a cover beside a candidate, and the subject of
+ * an evidence panel.
+ */
+.root[data-size="sm"] {
+  inline-size: 32px;
+}
+
+.root[data-size="md"] {
+  inline-size: 56px;
+}
+
+.root[data-size="lg"] {
+  inline-size: 88px;
+}
+
+/* ---- contents ---- */
+
+.image {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  /* Covers are square and portraits are not; `cover` crops the odd one rather
+     than letterboxing it into a box of a different shape. */
+  object-fit: cover;
+}
+
+/*
+ * Sized in container units, capped by a token.
+ *
+ * A fixed size cannot serve every box: the same letters that fill an album
+ * cover crowd an artist's circle, and at 32px they would overflow it entirely.
+ * `cqi` follows the box; the `min()` stops the letters growing without limit in
+ * a grid one tile wide.
+ */
+.monogram {
+  font-family: var(--font-family-sans);
+  font-size: min(24cqi, var(--font-size-3xl));
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-wide);
+  color: var(--color-text-tertiary);
+  user-select: none;
+}

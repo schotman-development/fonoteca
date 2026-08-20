@@ -1,0 +1,39 @@
+/*
+ * Thin on purpose: `Table` already owns the density, the rules and the header
+ * treatment. What is here is only what a slot table needs that a table in
+ * general does not — a bound for the two columns that truncate, and the two
+ * states a slot can be in.
+ */
+.root {
+  inline-size: 100%;
+  table-layout: fixed;
+}
+
+.caption {
+  padding-block-end: var(--space-6);
+  text-align: start;
+}
+
+/*
+ * A missing slot is greyed, and the word "missing" is in the row regardless —
+ * the colour is emphasis, never the message. A row that said nothing and was
+ * merely pale would be indistinguishable from a held one to anyone not seeing
+ * colour, and "you are missing track 7" is the whole reason the row exists.
+ */
+.row[data-missing] {
+  color: var(--color-text-tertiary);
+}
+
+/* Drift past the tolerance. Also written out in the cell, in seconds. */
+.row [data-drifted] {
+  color: var(--color-warning-text);
+}
+
+/*
+ * Sized from the row-height token rather than a number: the control in it is a
+ * square button that has to fit the row it is in, so the column and the row
+ * height are one decision.
+ */
+.playCell {
+  inline-size: var(--density-row-cozy);
+}

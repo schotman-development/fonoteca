@@ -1,0 +1,41 @@
+/*
+ * A grid rather than a flex row, and that is the component's real job: every
+ * candidate's coverage sits in the same column as every other candidate's, so a
+ * stack of these can be read down as well as across. A flex row would size each
+ * one to its own content and the columns would zig-zag.
+ */
+.root {
+  display: grid;
+  gap: var(--space-8) var(--space-16);
+  align-items: start;
+  min-inline-size: 0;
+}
+
+.root[data-layout="row"] {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.root[data-layout="column"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Lets a meter shrink below its label's intrinsic width, so a narrow card
+   squeezes the bars rather than overflowing the card. */
+.meter {
+  min-inline-size: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: start;
+  align-items: center;
+  gap: var(--space-4);
+}

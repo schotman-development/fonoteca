@@ -1,0 +1,123 @@
+/*
+ * The open/closed state is `aria-expanded` on the button and `hidden` on the
+ * panel — the ARIA state IS the variant, as in ThemeSwitch — with `data-open` on
+ * the root only because a descendant cannot select on an ancestor's attribute.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-inline-size: 0;
+  padding: var(--space-4) var(--space-6);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-sans);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-snug);
+  text-align: start;
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--easing-standard);
+}
+
+.root[data-size="sm"] .trigger {
+  font-size: var(--font-size-xs);
+}
+
+.root[data-size="md"] .trigger {
+  font-size: var(--font-size-sm);
+}
+
+.trigger:hover {
+  background-color: var(--color-interactive-hover);
+}
+
+.trigger:active {
+  background-color: var(--color-interactive-active);
+}
+
+.trigger:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.trigger[aria-expanded="true"] {
+  color: var(--color-text-primary);
+}
+
+/*
+ * A triangle drawn from a border, so it needs no icon file and no SVG.
+ *
+ * Raw pixels: this is a 5px glyph and the spacing scale starts at 2px, so a
+ * token would be a coincidence rather than a decision.
+ */
+.marker {
+  flex: none;
+  inline-size: 0;
+  block-size: 0;
+  border-block: 5px solid transparent;
+  border-inline-start: 6px solid currentcolor;
+  rotate: 0deg;
+  transition: rotate var(--duration-fast) var(--easing-standard);
+}
+
+.trigger[aria-expanded="true"] .marker {
+  rotate: 90deg;
+}
+
+/* Reduced motion removes the movement, not the information: the triangle still
+   ends up pointing down, it simply gets there without turning. */
+@media (prefers-reduced-motion: reduce) {
+  .trigger,
+  .marker {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .marker {
+    border-inline-start-color: ButtonText;
+  }
+}
+
+.summary {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Indented to the summary's text rather than to the trigger's edge — 6px of
+ * marker, 6px of gap and the trigger's own inline padding — so the line reads as
+ * belonging to the row above it instead of starting a new one.
+ */
+.detail {
+  padding-inline-start: calc(6px + var(--space-6) + var(--space-6));
+  padding-block-end: var(--space-4);
+}
+
+.aside {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-inline-start: auto;
+  padding-inline-start: var(--space-8);
+}
+
+/*
+ * `hidden` is a `display: none` declaration in the UA stylesheet, and it loses
+ * to any `display` set here — including one added later by someone laying the
+ * panel out as a grid. Restating it in the module is what keeps the attribute
+ * authoritative, and it is silent when missing.
+ */
+.panel[hidden] {
+  display: none;
+}

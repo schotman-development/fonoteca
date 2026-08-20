@@ -1,0 +1,223 @@
+/*
+ * One custom property, `--slider-fraction`, is set inline as a bare 0..1 number;
+ * every geometric consequence is a `calc()` off it. Nothing else knows where the
+ * thumb is, so nothing else can disagree about it.
+ *
+ * `inset-inline-start` rather than `left` gives right-to-left for free: in RTL
+ * it maps to `right`, the fill grows from the right edge, and the thumb travels
+ * the other way with no second rule. The `-50%` translate that centres the thumb
+ * on that point needs no sign — unlike ThemeSwitch's, which moves a box by a
+ * distance and therefore has a direction — because centring is symmetric.
+ */
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.root[data-disabled] {
+  cursor: default;
+}
+
+.root[data-orientation="horizontal"] {
+  inline-size: 100%;
+}
+
+.root[data-orientation="vertical"] {
+  flex-direction: column;
+  justify-content: center;
+  block-size: 100%;
+}
+
+/* ---- rail, buffer, fill ---- */
+
+.rail {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-border-default);
+}
+
+.root[data-orientation="horizontal"] .rail {
+  inline-size: 100%;
+}
+
+.root[data-orientation="vertical"] .rail {
+  block-size: 100%;
+}
+
+/*
+ * Raw pixels, and there is no token to reach for: a rail's thickness is not a
+ * spacing decision and the scale's smallest step is 2px. The thumb diameters are
+ * chosen against the row heights they sit in — 12px clears a compact row, 14px
+ * suits the transport.
+ */
+.root[data-size="sm"][data-orientation="horizontal"] .rail {
+  block-size: 4px;
+}
+
+.root[data-size="md"][data-orientation="horizontal"] .rail {
+  block-size: 6px;
+}
+
+.root[data-size="sm"][data-orientation="vertical"] .rail {
+  inline-size: 4px;
+}
+
+.root[data-size="md"][data-orientation="vertical"] .rail {
+  inline-size: 6px;
+}
+
+.buffer,
+.fill {
+  position: absolute;
+  border-radius: inherit;
+}
+
+.root[data-orientation="horizontal"] .buffer,
+.root[data-orientation="horizontal"] .fill {
+  inset-block: 0;
+  inset-inline-start: 0;
+}
+
+.root[data-orientation="vertical"] .buffer,
+.root[data-orientation="vertical"] .fill {
+  inset-inline: 0;
+  inset-block-end: 0;
+}
+
+.root[data-orientation="horizontal"] .buffer {
+  inline-size: calc(var(--slider-secondary-fraction) * 100%);
+}
+
+.root[data-orientation="vertical"] .buffer {
+  block-size: calc(var(--slider-secondary-fraction) * 100%);
+}
+
+.root[data-orientation="horizontal"] .fill {
+  inline-size: calc(var(--slider-fraction) * 100%);
+}
+
+.root[data-orientation="vertical"] .fill {
+  block-size: calc(var(--slider-fraction) * 100%);
+}
+
+/* How much of the file has arrived. Decoration only — it is never in the ARIA,
+   because a buffered length is not the control's value. */
+.buffer {
+  background-color: var(--color-border-strong);
+}
+
+.root[data-tone="accent"] .fill {
+  background-color: var(--color-accent-solid);
+}
+
+.root[data-tone="neutral"] .fill {
+  background-color: var(--color-text-secondary);
+}
+
+.root[data-disabled] .fill {
+  background-color: var(--color-text-disabled);
+}
+
+/*
+ * The fill eases toward a new length, which is what makes a seek read as a jump
+ * rather than a glitch — and is exactly the vestibular case. Restated here
+ * rather than left to `reset.css`, which is a separate export a consumer may
+ * never have imported. It is also suppressed mid-drag whatever the setting: a
+ * transition during a drag lags the pointer and feels broken.
+ */
+.fill {
+  transition: inline-size var(--duration-fast) var(--easing-standard);
+}
+
+.root[data-dragging] .fill,
+.root[data-orientation="vertical"] .fill {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+}
+
+/* ---- thumb ---- */
+
+.thumb {
+  position: absolute;
+  border-radius: var(--radius-full);
+  /* A halo in the surface colour, so the thumb stays visible where it overlaps
+     its own fill — the one place where fill and thumb are the same family. */
+  box-shadow: 0 0 0 2px var(--color-surface-base);
+  background-color: var(--color-accent-solid);
+}
+
+.root[data-tone="neutral"] .thumb {
+  background-color: var(--color-text-secondary);
+}
+
+.root[data-disabled] .thumb {
+  background-color: var(--color-text-disabled);
+}
+
+.root[data-orientation="horizontal"] .thumb {
+  inset-inline-start: calc(var(--slider-fraction) * 100%);
+  translate: -50% 0;
+}
+
+.root[data-orientation="vertical"] .thumb {
+  inset-block-end: calc(var(--slider-fraction) * 100%);
+  translate: 0 50%;
+}
+
+.root[data-size="sm"] .thumb {
+  inline-size: 12px;
+  block-size: 12px;
+}
+
+.root[data-size="md"] .thumb {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+.thumb:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * Forced colours discards `background-color` and `box-shadow`, which between
+ * them are the entirety of a slider's value indication — so every part gets a
+ * system colour and the rail gets a real border to exist at all.
+ */
+@media (forced-colors: active) {
+  .rail {
+    border: var(--border-width-thin) solid CanvasText;
+    background-color: Canvas;
+  }
+
+  .root[data-tone] .fill {
+    background-color: Highlight;
+  }
+
+  .buffer {
+    background-color: GrayText;
+  }
+
+  .root[data-tone] .thumb {
+    background-color: ButtonText;
+    box-shadow: 0 0 0 2px Canvas;
+  }
+
+  .root[data-disabled] .thumb,
+  .root[data-disabled] .fill {
+    background-color: GrayText;
+  }
+
+  .thumb:focus-visible {
+    outline-color: Highlight;
+  }
+}

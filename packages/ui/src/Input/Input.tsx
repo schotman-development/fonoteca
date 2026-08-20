@@ -17,8 +17,13 @@ export type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & {
 /**
  * The bare control. It carries no label of its own — every use MUST pair it
  * with a `<label htmlFor>` or an `aria-label`, and the a11y addon will fail the
- * story if neither is present. A `Field` component that enforces this pairing
- * is deliberately deferred until a real form needs one.
+ * story if neither is present.
+ *
+ * `Field` is the component that enforces that pairing, and it is what most uses
+ * should reach for: it owns the `<label>`, generates the `for`, and wires a hint
+ * or an error into `aria-describedby`. This stays bare for the cases a Field
+ * would only get in the way of — a cell in a table, a control inside a toolbar
+ * that is already named.
  */
 export function Input({
   inputSize = 'md',

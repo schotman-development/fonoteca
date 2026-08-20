@@ -1,0 +1,132 @@
+/*
+ * A `<fieldset>` reset, plus one line that is not obvious and is the reason this
+ * file exists at all.
+ */
+.root {
+  /*
+   * A fieldset's intrinsic minimum width is `min-content`, not zero — so every
+   * `truncate` inside one silently stops working and a long release title
+   * stretches the whole list past its container. The symptom looks like a
+   * CSS-module bug three levels down and the cause is here.
+   */
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.legend {
+  padding: 0;
+  /* A legend is not a flex item of its own fieldset, so the gap above does not
+     apply to it. */
+  margin-block-end: var(--space-6);
+}
+
+.description {
+  margin-block-start: calc(-1 * var(--space-6));
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-inline-size: 0;
+}
+
+.option {
+  min-inline-size: 0;
+}
+
+.empty {
+  padding: var(--space-16);
+  border: var(--border-width-thin) dashed var(--color-border-default);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+/*
+ * The refusal is a peer row, not an escape hatch tucked under the list. It is
+ * the same radio in the same group, so the same arrow keys reach it — it just
+ * needs less card around it, because it has no evidence to show.
+ */
+.refusal {
+  display: flex;
+  gap: var(--space-12);
+  align-items: start;
+  padding: var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/*
+ * Sized to match the marker `CandidateCard` paints for the options above it.
+ *
+ * This one is a real, visible radio — it always was, and the cards' were clipped,
+ * which is how "None of these" came to be the only thing on the screen that
+ * looked like a choice. Now that the cards draw theirs, the two have to agree
+ * about how big a radio is, or the refusal reads as a different kind of control
+ * from the six answers in the same group.
+ */
+.refusal input[type="radio"] {
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  margin-block-start: var(--space-2);
+  accent-color: var(--color-accent-solid);
+  cursor: pointer;
+}
+
+.refusal:has(input:checked) {
+  border-color: var(--color-accent-border);
+  border-inline-start: var(--border-width-thick) solid var(--color-accent-solid);
+}
+
+.refusalText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.refusalText label {
+  cursor: pointer;
+}
+
+/*
+ * The commit bar, pinned to the bottom of whatever is scrolling the list.
+ *
+ * **Sticky, because the list is taller than the screen it is read on.** Six
+ * candidates with their evidence run to about 2,700px inside an 85vh dialog, so
+ * a footer in the flow means choosing the first option and then scrolling past
+ * the five you rejected to find the button — and, worse, no sight of the
+ * sentence saying what the button is about to do to the file. Pinned, the
+ * consequence and the control stay on screen from the moment there is something
+ * to commit.
+ *
+ * It needs no scroll container of its own: `position: sticky` resolves against
+ * the nearest scrolling ancestor, which is the dialog's body here and the page
+ * in a story. It needs no bleed either — the options are the fieldset's full
+ * width, so there is nothing beside them to slide out from under the bar. The
+ * `sticky` rung is the one the table header already uses; anything lower and the
+ * card borders draw over the bar's own edge.
+ */
+.footer {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: var(--z-index-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  padding-block: var(--space-12);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-raised);
+}
+
+@media (forced-colors: active) {
+  .refusal:has(input:checked) {
+    border-color: Highlight;
+  }
+}

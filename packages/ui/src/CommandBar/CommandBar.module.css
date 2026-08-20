@@ -1,0 +1,210 @@
+/*
+ * The command bar: a field-shaped trigger, and the palette it opens.
+ *
+ * The trigger deliberately borrows Input's shape — same border, radius, height
+ * and hover — while being a `<button>`. It looks like somewhere to type because
+ * that is where typing goes; it is a button because what it does is open a
+ * dialog, and a text field that swallows the first keystroke to open something
+ * else is a worse lie than a button that looks like a field.
+ */
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  inline-size: 100%;
+  height: var(--density-row-cozy);
+  padding-inline: var(--space-8);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
+  text-align: start;
+  cursor: pointer;
+
+  transition:
+    border-color var(--duration-fast) var(--easing-standard),
+    background-color var(--duration-fast) var(--easing-standard);
+}
+
+.trigger:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.trigger:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.triggerIcon,
+.searchIcon {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+}
+
+.triggerLabel {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kbd {
+  flex: 0 0 auto;
+  padding: 1px var(--space-4);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-inset);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-normal);
+}
+
+/*
+ * The palette.
+ *
+ * No z-index anywhere in this file: `showModal()` puts the element in the top
+ * layer, which is above every stacking context in the document — including the
+ * navigation rail — without joining the z-index scale at all.
+ *
+ * Positioned near the top rather than centred: the list grows downwards as you
+ * type, and a vertically centred palette moves its own first row away from the
+ * cursor on every keystroke.
+ */
+.dialog {
+  margin-block: 12vh auto;
+  margin-inline: auto;
+  inline-size: min(560px, calc(100vw - 2 * var(--space-16)));
+  max-block-size: min(60vh, 480px);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: transparent;
+  overflow: visible;
+}
+
+.dialog::backdrop {
+  background-color: var(--color-surface-overlay);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  max-block-size: min(60vh, 480px);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding-inline: var(--space-12);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+/*
+ * The input's own border and background are removed: the panel edge is already
+ * a boundary, and a second one inside it reads as two fields. The focus ring
+ * is not removed with them — it moves to the row, so the whole search area
+ * lights up when focus is where it always is.
+ */
+.input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  height: var(--density-row-comfortable);
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-tight);
+}
+
+.input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.input:focus {
+  outline: none;
+}
+
+.search:focus-within {
+  box-shadow: inset 0 0 0 var(--border-width-thick) var(--color-border-focus);
+}
+
+.list {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: var(--space-4);
+  list-style: none;
+  overflow-y: auto;
+}
+
+/*
+ * The armed row is marked by a filled surface AND by `aria-selected`, and the
+ * fill is `interactive.selected` rather than a tint of the text colour — the
+ * same pair of signals the nav rail uses, for the same reason.
+ */
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-8);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.option[data-active] {
+  background-color: var(--color-interactive-selected);
+  color: var(--color-accent-text);
+}
+
+.optionLabel {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.optionKind {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-16) var(--space-12);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-6) var(--space-12);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-sunken);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+.footerDot {
+  padding-inline: var(--space-2);
+}

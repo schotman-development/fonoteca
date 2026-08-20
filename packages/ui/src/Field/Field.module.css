@@ -1,0 +1,45 @@
+/*
+ * A column: label, control, message. The gap is the only spacing decision here
+ * — the control brings its own height and the field brings none, so a Field
+ * inside a Stack still gets its spacing from the Stack.
+ *
+ * There is no width. A field is as wide as it is put, which is why the search
+ * boxes on the browse screens set a `max-inline-size` on their own wrapper
+ * rather than expecting one from here.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
+.label {
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-snug);
+  color: var(--color-text-primary);
+}
+
+/*
+ * One element for both the hint and the error, because they are one slot: the
+ * error replaces the hint rather than joining it, and rendering both would put
+ * two descriptions on the control for a screen reader to read in sequence.
+ */
+.message {
+  margin: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.message[data-tone="hint"] {
+  color: var(--color-text-tertiary);
+}
+
+/* Colour is emphasis, not the message: the error is a sentence, and the control
+   also carries `aria-invalid`. Neither reader depends on this rule. */
+.message[data-tone="danger"] {
+  color: var(--color-danger-text);
+}

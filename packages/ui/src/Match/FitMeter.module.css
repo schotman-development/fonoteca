@@ -1,0 +1,119 @@
+/*
+ * The bar's length is `--fit-value`, set inline as a bare 0..1 number so the
+ * stylesheet can do arithmetic with it. Everything else — tone, size, and
+ * whether there was anything to measure — is a data attribute on the root.
+ *
+ * `data-measured` is absent rather than `false` when the value is null, which
+ * is the package's boolean idiom, and it is what selects the hatch below.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.track {
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-inset);
+}
+
+/* Raw pixels: a bar's thickness is not a spacing decision, and the scale has
+   nothing between 2px and 4px to borrow. */
+.root[data-size="sm"] .track {
+  block-size: 3px;
+}
+
+.root[data-size="md"] .track {
+  block-size: 6px;
+}
+
+.fill {
+  inline-size: calc(var(--fit-value) * 100%);
+  block-size: 100%;
+  border-radius: inherit;
+  transition: inline-size var(--duration-normal) var(--easing-standard);
+}
+
+/*
+ * A bar that eases toward a new length is exactly the vestibular case, and
+ * `reset.css` is a separate export a consumer may not have imported — so the
+ * rule is restated here rather than depended on from a distance.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+}
+
+.root[data-tone="neutral"] .fill {
+  background-color: var(--color-text-tertiary);
+}
+
+.root[data-tone="accent"] .fill {
+  background-color: var(--color-accent-solid);
+}
+
+.root[data-tone="success"] .fill {
+  background-color: var(--color-success-solid);
+}
+
+.root[data-tone="warning"] .fill {
+  background-color: var(--color-warning-solid);
+}
+
+.root[data-tone="danger"] .fill {
+  background-color: var(--color-danger-solid);
+}
+
+/*
+ * Nothing was measured, so the track is hatched rather than filled to zero: an
+ * empty bar and an unmeasured one must not look alike, because one of them is a
+ * verdict and the other is a shrug.
+ *
+ * `color-mix` on a token rather than a token of its own — no token expresses
+ * "we did not measure this", and inventing one for a decorative hatch would put
+ * a colour in the theme that no semantic pair was computed for. The words below
+ * the bar carry the fact; this only has to not lie.
+ */
+.root:not([data-measured]) .track {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 4px,
+    color-mix(in srgb, var(--color-text-tertiary) 30%, transparent) 4px 8px
+  );
+}
+
+.root:not([data-measured]) .fill {
+  inline-size: 0;
+}
+
+/*
+ * Forced colours discards `background-color`, which is the entirety of a bar's
+ * value indication — so the track gets a real border and the fill a system
+ * colour. The hatch becomes a flat GrayText fill, since a gradient is discarded
+ * too and "greyed out" is the closest system idiom for "no reading".
+ */
+@media (forced-colors: active) {
+  .track {
+    border: var(--border-width-thin) solid CanvasText;
+    background-color: Canvas;
+  }
+
+  .root[data-tone] .fill {
+    background-color: Highlight;
+  }
+
+  .root:not([data-measured]) .track {
+    background-image: none;
+    background-color: GrayText;
+  }
+}

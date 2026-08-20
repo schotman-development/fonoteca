@@ -1,0 +1,20 @@
+/*
+ * The box and the count it produced, kept together — the pairing is the reason
+ * this is a component rather than two things a page happens to render near each
+ * other.
+ *
+ * `max-inline-size` here rather than on the page, unlike the browse screens'
+ * search boxes: a filter over a fixed list of candidates has a known shape, and
+ * the field would otherwise stretch the full width of a screen whose rows are
+ * wide because they carry evidence.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-inline-size: 420px;
+}
+
+.count {
+  min-block-size: var(--space-16);
+}

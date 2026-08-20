@@ -1,0 +1,114 @@
+/*
+ * `data-state` is the one attribute this stylesheet selects on. It carries four
+ * values — idle, loading, playing, error — where ARIA has an attribute for none
+ * of them, which is why this component's CSS keys off a data attribute while
+ * ThemeSwitch's keys off `aria-checked`.
+ *
+ * The sizes are chosen against the row heights they sit in, and `sm` has no
+ * slack: `reset.css` draws focus as a 2px ring at 2px offset, so a 20px button
+ * occupies exactly 28px — one `--density-row-compact` — when focused. Growing it
+ * to 24px would clip the ring against the row, silently.
+ */
+.root {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--easing-standard),
+    background-color var(--duration-fast) var(--easing-standard);
+}
+
+.root[data-size="sm"] {
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+.root[data-size="md"] {
+  inline-size: 28px;
+  block-size: 28px;
+}
+
+.root[data-size="sm"] .glyph {
+  inline-size: 12px;
+  block-size: 12px;
+}
+
+.root[data-size="md"] .glyph {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+.root:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-interactive-hover);
+}
+
+.root:active {
+  background-color: var(--color-interactive-active);
+}
+
+.root:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* The current track. A background, never the only signal — the glyph is a pause
+   bar and the name says "Pause". */
+.root[data-current] {
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-subtle);
+}
+
+.root[data-state="error"] {
+  color: var(--color-danger-text);
+}
+
+.root[data-state="loading"] .glyph {
+  animation: spin var(--duration-slow) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/*
+ * Reduced motion removes the movement, not the information. The ring stops
+ * turning and stays a ring — which still reads as "not a play triangle" — and
+ * the name ("Loading …") plus `aria-busy` carry it for everyone else.
+ *
+ * Not left to `reset.css`'s global animation clamp: that leaves the ring frozen
+ * at whatever angle it reached, which is harmless only because a ring is
+ * rotationally ambiguous. Saying so explicitly is cheaper than relying on it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+
+  .root[data-state="loading"] .glyph {
+    animation: none;
+  }
+}
+
+/*
+ * Forced colours discards `background-color`, which is how the current track is
+ * marked. The glyph is drawn in `currentColor` and survives, so the state is
+ * still legible by shape; this restores the emphasis the fill was giving.
+ */
+@media (forced-colors: active) {
+  .root[data-current] {
+    outline: var(--border-width-thin) solid Highlight;
+  }
+
+  .root:focus-visible {
+    outline-color: Highlight;
+  }
+}

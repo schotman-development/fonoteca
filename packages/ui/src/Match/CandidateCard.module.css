@@ -1,0 +1,253 @@
+/*
+ * Identity, aside, and then full-width rows for the evidence, the small print
+ * and the expandable body. The identity block is a `<label>` and nothing else
+ * is, which is the component's one real rule and the reason the actions live in
+ * their own column rather than inside it.
+ *
+ * The control itself is clipped out of the layout (see `.control`), so a
+ * selectable card and a plain one share one template; what occupies the gutter
+ * is `.marker`, which is paint rather than a control and appears only when the
+ * card is selectable. `position: relative` scopes the clipped box to this card.
+ */
+.root {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-8) var(--space-12);
+  align-items: start;
+  padding: var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  transition: border-color var(--duration-fast) var(--easing-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+}
+
+/*
+ * Selected is a **geometry** change plus a word, not a fill.
+ *
+ * The rule down the inline-start edge is the whole visual difference, and the
+ * card body stays on `surface-raised` — every semantic text pair in the tokens
+ * was computed against that surface, and a tinted body would put
+ * `warning.text` on a background nobody has measured. It is also why the
+ * "Selected" badge exists: shape, position and word, so removing colour removes
+ * nothing.
+ *
+ * With the radio clipped this rule is no longer the *second* cue — it is the
+ * first, which is why it is a border width rather than a colour: a 3px edge
+ * survives greyscale, forced colours and a monitor nobody has calibrated.
+ */
+.root[data-selected] {
+  border-color: var(--color-accent-border);
+  border-inline-start: var(--border-width-thick) solid var(--color-accent-solid);
+}
+
+/*
+ * The radio is hidden, and the card is what shows its state.
+ *
+ * This is the clip technique from `VisuallyHidden`, spelled out rather than
+ * imported because what it is doing here is different: not naming something for
+ * a screen reader, but taking a control out of sight while it goes on being a
+ * control. Every alternative loses something this cannot afford to lose —
+ * `display: none`, `visibility: hidden` and the `hidden` attribute all take the
+ * radio out of the tab order and out of the accessibility tree, which would end
+ * the arrow-key navigation, the "2 of 6" position and the group semantics that
+ * are the entire reason the radios are native. `appearance: none` would keep
+ * them and hand back the marker, the focus ring and the forced-colors rendering
+ * as ours to rebuild.
+ *
+ * What the browser was drawing for free is now the card's job, and it is drawn
+ * three ways: the thick accent rule down the inline-start edge (`[data-selected]`
+ * below), the "Selected" badge, and the focus ring that `:has()` puts on the
+ * whole card. Nothing about the control's semantics changed — only what is
+ * painted.
+ */
+.control {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * The control is shrunk as well as clipped, so that "invisible" is true of the
+ * radio itself and not only of the box around it. A 13px input inside a clipped
+ * 1px wrapper paints identically — but it still reports a 13px rectangle, and a
+ * rectangle is what a pointer, a screenshot diff and
+ * `ControlIsHiddenNotRemoved` all measure.
+ */
+.control input[type="radio"] {
+  inline-size: 1px;
+  block-size: 1px;
+  margin: 0;
+}
+
+/*
+ * The focus ring the radio would have drawn on itself, drawn on the card
+ * instead. Without this the keyboard user loses the group entirely: arrow keys
+ * still move the selection and nothing on screen says where.
+ */
+.root:has(.control input:focus-visible) {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * Which part of the card selects, made visible on hover — precisely the label
+ * and no more. The play control and the disclosure sit outside it and must not
+ * look like they select anything, which they would if the whole card lit up.
+ */
+.root[data-selectable] .identity:hover {
+  background-color: var(--color-interactive-hover);
+  /* The bleed is an outline rather than padding and a negative margin: the
+     evidence and the small print are full-width rows starting at this same
+     edge, and shifting the label by 4px to give it breathing room would put the
+     title out of line with everything under it. */
+  outline: var(--space-4) solid var(--color-interactive-hover);
+  border-radius: var(--radius-sm);
+}
+
+.identity {
+  display: flex;
+  gap: var(--space-12);
+  align-items: start;
+  min-inline-size: 0;
+  cursor: pointer;
+}
+
+.root:not([data-selectable]) .identity {
+  cursor: default;
+}
+
+/*
+ * The radio's marker, drawn by the card because the radio itself is clipped.
+ *
+ * Sized and positioned as a real radio would be — a circle in a gutter at the
+ * start of the label, aligned to the first line of the title — so that a person
+ * scanning the list sees a group of options rather than a stack of information
+ * panels. It is `aria-hidden` in the markup: the control it depicts is a native
+ * radio one element away, and announcing this too would read every option twice.
+ *
+ * Geometry rather than fill, for the same reason the selected edge is: an unfilled
+ * ring and a ring with a dot in it are distinguishable in greyscale, in forced
+ * colours and on an uncalibrated monitor, where two shades of the same accent are
+ * not.
+ */
+.marker {
+  flex: none;
+  position: relative;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  /* Optically centred on the title's first line rather than on the label box,
+     which is three lines tall and would put the marker beside the credit. */
+  margin-block-start: var(--space-2);
+  border: var(--border-width-thick) solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  /* Transparent rather than a surface colour: the label tints on hover, and a
+     circle painted in the card's own background would punch a hole in it. */
+  background-color: transparent;
+}
+
+.root[data-selected] .marker {
+  border-color: var(--color-accent-solid);
+}
+
+.root[data-selected] .marker::after {
+  content: "";
+  position: absolute;
+  inset: var(--space-2);
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent-solid);
+}
+
+.root[data-selectable] .identity:hover .marker {
+  border-color: var(--color-accent-border);
+}
+
+.art {
+  flex: none;
+}
+
+.identityText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: end;
+  gap: var(--space-6);
+}
+
+.badges,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* The evidence, the small print and the body each take the whole width — they
+   are read across, not beside the identity. */
+.fit,
+.detail,
+.body {
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+}
+
+.detail {
+  padding-block-start: var(--space-2);
+}
+
+.body {
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+/*
+ * Forced colours discards the border colour that marks a selection, but keeps
+ * border *width* — so the thick inline-start rule survives as geometry, and this
+ * restores the emphasis the accent was giving.
+ */
+/*
+ * Forced colours discards the border colour that marks a selection, but keeps
+ * border *width* — so the thick inline-start rule survives as geometry, and
+ * these restore the emphasis the accent was giving. The focus ring is named
+ * explicitly for the same reason: it is now the only thing showing where the
+ * keyboard is, and the radio that used to draw its own is clipped.
+ */
+@media (forced-colors: active) {
+  .root[data-selected] {
+    border-color: Highlight;
+  }
+
+  /* `background-color` is discarded in forced colours and `border` is not, so
+     the dot is redrawn as a ring the system will actually paint. */
+  .marker {
+    border-color: CanvasText;
+  }
+
+  .root[data-selected] .marker,
+  .root[data-selected] .marker::after {
+    border: var(--border-width-thick) solid Highlight;
+  }
+
+  .root:has(.control input:focus-visible) {
+    outline-color: Highlight;
+  }
+}

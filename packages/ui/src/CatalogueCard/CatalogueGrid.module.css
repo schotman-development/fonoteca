@@ -1,0 +1,98 @@
+/*
+ * The whole sizing rule lives in this file.
+ *
+ * The track width is a custom property so that everything downstream of it —
+ * artwork, monogram, how many tiles fit a row — follows from one number. The
+ * card itself has no width; it fills the track.
+ *
+ * There is only ONE number here, and it is the album. Everything else is
+ * derived:
+ *
+ *   five artists span exactly four albums, gaps included.
+ *
+ * That is a relationship, so it is written as one rather than resolved to the
+ * 125.6px it currently works out to. A change to the album width or to the
+ * column gap keeps the alignment; a hard-coded number would quietly lose it,
+ * and losing it is invisible — the tiles would simply stop lining up with the
+ * album grid above them by a few pixels.
+ *
+ *   5a + 4g = 4A + 3g   →   a = (4A − g) / 5
+ *
+ * The album width is a literal pixel value rather than a token on purpose: the
+ * token package has scales for space, type and row height, and none of them is
+ * a scale of card widths. Inventing one for a single value would be a token
+ * nobody else could use.
+ */
+.root {
+  --catalogue-card-gap: var(--space-12);
+  --catalogue-card-album: 160px;
+  --catalogue-card-artist: calc((4 * var(--catalogue-card-album) - var(--catalogue-card-gap)) / 5);
+
+  --catalogue-card-column: var(--catalogue-card-artist);
+
+  display: grid;
+  /*
+   * Fixed tracks, not `minmax(…, 1fr)`.
+   *
+   * With a `1fr` maximum the column width is a floor rather than a size: four
+   * albums in a 900px grid stretched to 370px each, which is not a tile, it is
+   * a poster. A tile has a size — the row runs out early and the remaining
+   * space stays empty, which is what `justify-content: start` is for.
+   *
+   * `min(…, 100%)` is the narrow-viewport guard: below one column the track
+   * would otherwise be wider than the grid and push the page sideways.
+   */
+  grid-template-columns: repeat(auto-fill, min(var(--catalogue-card-column), 100%));
+  justify-content: start;
+  gap: var(--space-16) var(--catalogue-card-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * "A grid of only artists is smaller than a grid of albums; mixed goes large."
+ *
+ * `:has()` states exactly that and nothing else — the default above is the
+ * artists-only size, and the presence of a single album card anywhere inside
+ * raises the whole grid. Both halves of the requirement fall out of one
+ * selector, including the mixed case, which is the one a caller-supplied prop
+ * gets wrong.
+ *
+ * The alternative was inspecting children in JS. It would have to reach through
+ * whatever wrappers the caller renders, and it is a worse version of a question
+ * the browser answers natively.
+ *
+ * Where `:has()` is unsupported, an album grid renders at the artist size:
+ * tighter than intended, and still a working grid.
+ */
+.root:has([data-catalogue-card="album"]) {
+  --catalogue-card-column: var(--catalogue-card-album);
+}
+
+/*
+ * The explicit override, and it must come last.
+ *
+ * `:has()` takes the specificity of its most specific argument, so the rule
+ * above weighs a class plus an attribute — exactly what these two weigh. Source
+ * order is the only thing that makes `size` win, and a `size="artist"` grid
+ * silently rendering at the album width is a bug nobody would think to look for
+ * in a stylesheet.
+ */
+.root[data-size="artist"] {
+  --catalogue-card-column: var(--catalogue-card-artist);
+}
+
+.root[data-size="album"] {
+  --catalogue-card-column: var(--catalogue-card-album);
+}
+
+/*
+ * `min-width: 0` on the item, not just on the card. A grid item's automatic
+ * minimum size is its content, so without this a long unbroken title overflows
+ * the fixed track it was given — the ellipsis never appears and the tile spills
+ * over its neighbour.
+ */
+.item {
+  min-width: 0;
+}

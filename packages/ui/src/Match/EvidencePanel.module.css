@@ -1,0 +1,112 @@
+/*
+ * The rows are a real definition list, and the `<div>` around each pair is not
+ * decoration: a `<dl>` may contain only `<dt>`, `<dd>`, `<div>` and
+ * script-supporting elements, so a wrapper is the *only* legal way to pair a
+ * term with its description and lay the pair out. axe's `definition-list` rule
+ * checks exactly this.
+ *
+ * Auto-fill rather than a fixed column count, because the same panel serves a
+ * ten-file set and a single file, and those want different numbers of columns
+ * at the same width.
+ */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.subject {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-block-start: var(--space-2);
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-12) var(--space-24);
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+/* A path is 4096 characters at worst — a box set broke a live run at file 76 —
+   so the row that holds one takes the whole width rather than the column it
+   would otherwise blow out. */
+.row[data-wide] {
+  grid-column: 1 / -1;
+}
+
+.label {
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-snug);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.value {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  margin: 0;
+}
+
+.valueText {
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-primary);
+  /* A path has no spaces to break at, so it is broken anywhere rather than
+     allowed to push the grid wider than the card. */
+  overflow-wrap: anywhere;
+}
+
+.valueText[data-mono] {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+/*
+ * Tone is emphasis on top of a value that already says what it means — "not
+ * present", "1.99 s", "refused". Nothing here is carried by colour alone.
+ */
+.row[data-tone="success"] .valueText {
+  color: var(--color-success-text);
+}
+
+.row[data-tone="warning"] .valueText {
+  color: var(--color-warning-text);
+}
+
+.row[data-tone="danger"] .valueText {
+  color: var(--color-danger-text);
+}
+
+.row[data-tone="info"] .valueText {
+  color: var(--color-info-text);
+}
+
+.note {
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-tertiary);
+}

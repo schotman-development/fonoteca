@@ -1,0 +1,146 @@
+/*
+ * The modal dialog.
+ *
+ * No z-index anywhere in this file. `showModal()` puts the element in the top
+ * layer, which is above every stacking context in the document — including the
+ * sticky navigation rail and the transport row — without joining the scale.
+ *
+ * The element itself is stripped back to a positioning box: the browser gives a
+ * `<dialog>` a border, a background and padding of its own, and all three fight
+ * the panel inside it. The panel owns every visual.
+ */
+
+.dialog {
+  margin: auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: transparent;
+  max-block-size: min(85vh, 720px);
+  overflow: visible;
+}
+
+.dialog[data-size="md"] {
+  inline-size: min(560px, calc(100vw - 2 * var(--space-16)));
+}
+
+.dialog[data-size="lg"] {
+  inline-size: min(880px, calc(100vw - 2 * var(--space-16)));
+}
+
+.dialog::backdrop {
+  background-color: var(--color-surface-overlay);
+}
+
+/*
+ * The panel is the flex column that makes the header and the footer stay put
+ * while the body scrolls. `min-block-size: 0` on the body is what lets it: a
+ * flex child's automatic minimum is its content, so without it the body grows
+ * past the panel instead of scrolling inside it.
+ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  max-block-size: min(85vh, 720px);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-12);
+  flex: 0 0 auto;
+  padding: var(--space-16) var(--space-20);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+/*
+ * The heading is here for semantics; its type comes from these three rules
+ * rather than from the browser's own h2 styling, which would fight the token
+ * scale and reintroduce a margin the header row already owns.
+ */
+.title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
+  overflow-wrap: anywhere;
+}
+
+.description {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  inline-size: var(--density-row-compact);
+  block-size: var(--density-row-compact);
+  padding: 0;
+  border: var(--border-width-thin) solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+
+  transition:
+    color var(--duration-fast) var(--easing-standard),
+    background-color var(--duration-fast) var(--easing-standard);
+}
+
+.close:hover {
+  background-color: var(--color-interactive-hover);
+  color: var(--color-text-primary);
+}
+
+.close:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  min-inline-size: 0;
+  padding: var(--space-20);
+  overflow-y: auto;
+}
+
+.footer {
+  flex: 0 0 auto;
+  padding: var(--space-12) var(--space-20);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-sunken);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .close {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .panel {
+    border-color: CanvasText;
+  }
+}
