@@ -1,4 +1,5 @@
 using Fonoteca.Api.Library;
+using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
@@ -295,6 +296,123 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal(EnrichmentOutcome.NoRecording, row.EnrichmentOutcome);
         Assert.NotNull(row.RecordingLookupUtc);
     }
+
+    /// <summary>
+    /// Every file sharing a cluster keeps the evidence, not just the one that asked.
+    /// </summary>
+    /// <remarks>
+    /// The memo exists so five encodings of one track cost one lookup between
+    /// them, and it used to hold the recording that lookup collapsed to. Holding
+    /// AcoustID's whole answer instead is what lets the saving stay invisible:
+    /// with the old shape, four of the five files would have had no stored
+    /// evidence and the cache behind the Identify screen would have had a gap
+    /// with no explanation in it.
+    /// </remarks>
+    [Fact]
+    public async Task EveryFileSharingAClusterKeepsTheAnswerThatOneLookupBought()
+    {
+        await SeedAsync(
+            ("Hart/Seesaw/01 - Nutbush.flac", Cluster(1)),
+            ("Hart/Seesaw/01 - Nutbush.mp3", Cluster(1)),
+            ("Compilations/Blues/07 - Nutbush.flac", Cluster(1)));
+
+        var lookup = Answering(Recording);
+
+        await EnrichAsync(Build(lookup, Collaboration()));
+
+        Assert.Equal(1, lookup.Calls);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var rows = await db.MediaFiles.AsNoTracking().ToListAsync(Token);
+
+        Assert.Equal(3, rows.Count);
+
+        Assert.All(rows, row =>
+        {
+            Assert.NotNull(row.AcoustIdMatchesUtc);
+
+            var matches = AcoustIdEvidence.Deserialise(row.AcoustIdMatchesJson);
+
+            Assert.NotNull(matches);
+            Assert.Equal(Recording, Assert.Single(Assert.Single(matches).Recordings).Id);
+        });
+    }
+
+    /// <summary>
+    /// A file with no fingerprint does not answer for every other file sharing its cluster.
+    /// </summary>
+    /// <remarks>
+    /// The memo is keyed on the <i>cluster</i> and answers "what did AcoustID say
+    /// about this audio". A file with no stored fingerprint cannot be asked
+    /// about without reopening it, which this pass does not do — but that is a
+    /// fact about one file's columns, not about the cluster, and recording it
+    /// against the cluster makes the next file to share one inherit an answer
+    /// nobody ever asked for.
+    ///
+    /// It went wrong twice over. The second file is never looked up, so it is
+    /// filed as <c>NoRecording</c> despite carrying a perfectly good
+    /// fingerprint; and since <i>it</i> has the columns that say a lookup was
+    /// possible, that emptiness is written into its evidence column and believed
+    /// for a week, which then stops the decision endpoint asking either.
+    ///
+    /// Seeded fingerprintless-first because the worklist is ordered by id and
+    /// the ids are time-ordered, so insertion order is processing order. The
+    /// other way round the memo is filled with the real answer and nothing is
+    /// under test.
+    /// </remarks>
+    [Fact]
+    public async Task AFingerprintlessFileDoesNotAnswerForTheClusterItShares()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.MediaFiles.Add(Pending("Tagged/01 - No fingerprint.flac", Cluster(1), false));
+            await db.SaveChangesAsync(Token);
+
+            db.MediaFiles.Add(Pending("Ripped/01 - Fingerprinted.flac", Cluster(1), true));
+            await db.SaveChangesAsync(Token);
+        }
+
+        var lookup = Answering(Recording);
+
+        await EnrichAsync(Build(lookup, Collaboration()));
+
+        // Asked once — for the file that could be asked about.
+        Assert.Equal(1, lookup.Calls);
+
+        await using var after = PostgresFixture.CreateContext(_connectionString);
+
+        var untouched = await after.MediaFiles.AsNoTracking()
+            .SingleAsync(f => f.Path == "Tagged/01 - No fingerprint.flac", Token);
+
+        Assert.Null(untouched.RecordingId);
+        Assert.Null(untouched.AcoustIdMatchesJson);
+        Assert.Equal(EnrichmentOutcome.NoRecording, untouched.EnrichmentOutcome);
+
+        var linked = await after.MediaFiles.AsNoTracking()
+            .SingleAsync(f => f.Path == "Ripped/01 - Fingerprinted.flac", Token);
+
+        Assert.NotNull(linked.RecordingId);
+        Assert.Equal(EnrichmentOutcome.Linked, linked.EnrichmentOutcome);
+
+        var matches = AcoustIdEvidence.Deserialise(linked.AcoustIdMatchesJson);
+
+        Assert.NotNull(matches);
+        Assert.Equal(Recording, Assert.Single(Assert.Single(matches).Recordings).Id);
+    }
+
+    private static MediaFile Pending(string path, AcoustId cluster, bool fingerprinted) => new()
+    {
+        Id = MediaFileId.New(),
+        Path = path,
+        SizeBytes = 1024,
+        LastModifiedUtc = DateTimeOffset.UtcNow,
+        AcoustId = cluster,
+        AcoustIdCheckedUtc = DateTimeOffset.UtcNow,
+        AcoustIdOutcome = AcoustIdOutcome.Identified,
+        Fingerprint = fingerprinted ? FingerprintFor(cluster) : null,
+        FingerprintDuration = fingerprinted ? TimeSpan.FromMinutes(7) : null,
+    };
 
     private static Task<int> PendingAsync(ServiceProvider services) =>
         services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token);

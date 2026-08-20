@@ -222,10 +222,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/matching": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the passes refused to decide, as questions for a person.
+         * @description One entry per open question: a file no pass could identify, or a set of files no release explained. Refusals that are nobody's decision are left out — a lookup that did not answer is transient and stays on the worklist, a file the pass has not reached is a queue position, and a file the decoder could not read is a question about the file rather than about the music. No candidate answers come back here, because nothing records them — they are recovered on demand, per question: `matching/recordings/{id}/candidates` re-asks AcoustID from the file's stored fingerprint, and `matching/components/{stamp}/candidates` asks MusicBrainz again for a whole refused set.
+         */
+        get: operations["GetOpenQuestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/files/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Everything one file can be told to say about itself.
+         * @description What a person needs in front of them while deciding which recording a file holds, and the half the worklist could not carry. Half of it is catalogue — path, size, the length `fpcalc` measured, what each pass concluded — and half of it is read from the bytes on demand: codec, bitrate, sample rate, bit depth, channels, and whatever the file's own tags still claim.
+         *
+         *     **Separate from the candidate set on purpose.** This costs one header read and no provider request at all, so it answers for every file on the worklist — including the ones whose candidates cannot be recovered, which are most of them. The measured properties are written back to the catalogue as a side effect, since nothing else populates them yet.
+         *
+         *     Nothing here fails the request. An unmounted volume, a moved file or a decoder that refuses the container all come back as an absent `audio` block and a `note` saying which, because a file nothing could read is itself worth knowing about on this screen.
+         */
+        get: operations["GetMatchingFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/recordings/{id}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The recordings one file could be, re-asked from its stored fingerprint.
+         * @description The candidate set identification weighed and did not record. It is recovered rather than read: the fingerprint is in the catalogue, so AcoustID can be asked the same question again for one request and no disk access at all.
+         *
+         *     **Answered from the catalogue where it can be.** The identification and enrichment passes store AcoustID's whole answer as they go, and the assembled candidate document is stored the first time anybody asks for it; both are believed for a week. So the ordinary case is a single row read, and the expensive case — one AcoustID turn plus a MusicBrainz recording lookup per candidate, measured at 10.3 seconds each cold — is paid once per file rather than once per click. `refresh=true` skips the stored answer and asks again; `asOfUtc` and `fromCache` say which of the two happened.
+         */
+        get: operations["GetRecordingCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/recordings/{id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A person's answer to one file's identification question.
+         * @description The commit half of `matching/recordings/{id}/candidates`. `answer` is either `recording`, with the MBID chosen, or `none`, which is the person saying the audio is none of the recordings AcoustID named — a stronger claim than the rule was in a position to make, and the only one that closes the question without an identity. Either way the file is marked as decided by a person, which takes it out of the reach of the identification and enrichment worklists: re-asking a library after a rule change must not silently undo an answer somebody gave.
+         *
+         *     Choosing a recording links it, writes its artists, works and credits into the catalogue exactly as the enrichment pass would, re-asks AcoustID for the cluster that names it, and writes that cluster into the file's tags — subject to `Fonoteca:AllowFileMutation`, whose refusal comes back as `tag: Refused` rather than as an error. The file then joins the attribution worklist by the same rule every enriched file does.
+         */
+        post: operations["DecideRecordingMatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/components/{stamp}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The albums one refused component could be, gathered again on demand.
+         * @description The album-shaped half of the worklist, which used to have no answer at all. `stamp` is the component's identity — the `UtcTicks` of the `ReleaseLookupUtc` every file in it shares, which is the number in the worklist item's `release:` id.
+         *
+         *     **Gathered live, and nothing caches it.** No candidate set is recorded anywhere, so this browses MusicBrainz for each of the component's distinct recordings, ranks the releases those browses name by how much of the set each holds, and fetches the track lists of the best few to score them with the same `ReleaseFit` the pass uses. Expect seconds rather than milliseconds: it is one gated request per recording plus one per release offered. `browsed` and `recordings` say whether every recording was asked about, and `total` says how many releases were seen before the list was cut.
+         *
+         *     It takes no lease and writes nothing, so a slow gather refuses no pass.
+         */
+        get: operations["GetComponentCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/components/{stamp}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A person's answer to one component's album question.
+         * @description The commit half of `matching/components/{stamp}/candidates`. `answer` is either `release`, with the MBID chosen, or `none` — the person saying these files came from none of the albums MusicBrainz offered, which closes the question where the pass's refusal leaves it open forever.
+         *
+         *     Choosing a release writes it, its group and its **whole** track list into the catalogue exactly as the pass would, then links each file the release explains to its own track. Files in the component the release does not explain are left alone and stay on the worklist — a set that was refused as one is not necessarily one album, and filing the remainder under an album that does not list them would be the invention this pass exists to avoid.
+         *
+         *     Nothing on disk is touched: an album is a catalogue fact, so there is no tag write, no `Fonoteca:AllowFileMutation` and no undo journal — only the decision entry. Every file answered is marked as decided by a person, which takes it out of the attribution worklist for good.
+         */
+        post: operations["DecideComponentMatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcoustIdClusterRow: {
+            /** Format: uuid */
+            acoustId: string;
+            /** Format: double */
+            score: number;
+            /** Format: int32 */
+            recordings: number;
+        };
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];
             tracks: components["schemas"]["TrackRow"][];
@@ -307,6 +451,40 @@ export interface components {
             releases: number;
             cancelled: boolean;
         };
+        AudioQualityRow: {
+            codec: string;
+            /** Format: int32 */
+            bitrateKbps: number;
+            /** Format: int32 */
+            sampleRateHz: number;
+            /** Format: int32 */
+            bitDepth: null | number;
+            /** Format: int32 */
+            channels: number;
+            lossless: boolean;
+            tier: string;
+        };
+        CandidateAppearance: {
+            /** Format: uuid */
+            releaseId: string;
+            title: string;
+            released: null | string;
+            country: null | string;
+            status: null | string;
+            primaryType: null | string;
+            /** Format: int32 */
+            discNumber: null | number;
+            /** Format: int32 */
+            trackPosition: null | number;
+            trackNumber: null | string;
+            /** Format: int32 */
+            trackCount: null | number;
+        };
+        CandidatePerformer: {
+            role: string;
+            name: string;
+            type: null | string;
+        };
         CatalogueCounts: {
             /** Format: int32 */
             files: number;
@@ -316,6 +494,89 @@ export interface components {
             releases: number;
             /** Format: int32 */
             artists: number;
+        };
+        ComponentCandidateRow: {
+            mbid: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            country: null | string;
+            status: null | string;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            formats: null | string;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: int32 */
+            discCount: number;
+            /** Format: int32 */
+            filesExplained: number;
+            /** Format: double */
+            coverage: number;
+            /** Format: int32 */
+            meanDriftMs: null | number;
+            official: boolean;
+            slots: components["schemas"]["ComponentSlotRow"][];
+        };
+        ComponentCandidatesResponse: {
+            stamp: string;
+            /** Format: date-time */
+            asOfUtc: string;
+            fromCache: boolean;
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            recordings: number;
+            /** Format: int32 */
+            browsed: number;
+            /** Format: int32 */
+            total: number;
+            /** Format: double */
+            minimumCoverage: number;
+            /** Format: int32 */
+            maximumDriftMs: number;
+            candidates: components["schemas"]["ComponentCandidateRow"][];
+            fileList: components["schemas"]["ComponentFileRow"][];
+        };
+        ComponentDecisionRequest: {
+            answer: string;
+            /** Format: uuid */
+            release: null | string;
+        };
+        ComponentDecisionResponse: {
+            stamp: string;
+            outcome: string;
+            /** Format: uuid */
+            release: null | string;
+            title: null | string;
+            /** Format: int32 */
+            decided: number;
+            /** Format: int32 */
+            stillOpen: number;
+            detail: string;
+        };
+        ComponentFileRow: {
+            /** Format: uuid */
+            id: string;
+            path: string;
+            title: null | string;
+            duration: null | string;
+        };
+        ComponentSlotRow: {
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            position: number;
+            number: null | string;
+            title: string;
+            duration: null | string;
+            measured: null | string;
+            /** Format: int32 */
+            driftMs: null | number;
+            path: null | string;
+            /** Format: int64 */
+            sizeBytes: null | number;
         };
         EnrichmentStartedResponse: {
             jobId: string;
@@ -364,6 +625,10 @@ export interface components {
             path: string;
             /** Format: int64 */
             sizeBytes: number;
+        };
+        FileTagRow: {
+            name: string;
+            value: string;
         };
         FolderDisagreement: {
             folder: string;
@@ -455,6 +720,13 @@ export interface components {
             /** Format: int32 */
             unreadableDirectories: number;
         };
+        MatchingQueueResponse: {
+            /** Format: int32 */
+            total: number;
+            kinds: components["schemas"]["OpenQuestionCount"][];
+            reasons: components["schemas"]["OpenQuestionCount"][];
+            items: components["schemas"]["OpenQuestion"][];
+        };
         MusicBrainzHealthResponse: {
             server: string;
             isOfficialServer: boolean;
@@ -470,6 +742,25 @@ export interface components {
         };
         /** @enum {unknown} */
         MusicBrainzReachability: "NotConfigured" | "Reachable" | "Unreachable" | "Rejected";
+        OpenQuestion: {
+            id: string;
+            kind: string;
+            reason: string;
+            subject: string;
+            folders: string[];
+            /** Format: int32 */
+            files: number;
+            length: null | string;
+            size: null | string;
+            format: null | string;
+        };
+        OpenQuestionCount: {
+            name: string;
+            /** Format: int32 */
+            questions: number;
+            /** Format: int32 */
+            files: number;
+        };
         OutcomeCount: {
             outcome: string;
             /** Format: int32 */
@@ -482,6 +773,59 @@ export interface components {
             status?: null | number;
             detail?: null | string;
             instance?: null | string;
+        };
+        RecordingCandidateRow: {
+            /** Format: uuid */
+            mbid: string;
+            title: null | string;
+            artist: null | string;
+            disambiguation: null | string;
+            length: null | string;
+            /** Format: double */
+            score: number;
+            /** Format: int32 */
+            sources: number;
+            /** Format: int32 */
+            clusters: number;
+            release: null | string;
+            drift: null | string;
+            firstReleased: null | string;
+            work: null | string;
+            isrcs: string[];
+            performers: components["schemas"]["CandidatePerformer"][];
+            /** Format: int32 */
+            appearances: number;
+            releases: components["schemas"]["CandidateAppearance"][];
+        };
+        RecordingCandidatesResponse: {
+            /** Format: uuid */
+            mediaFileId: string;
+            measured: string;
+            clusters: components["schemas"]["AcoustIdClusterRow"][];
+            /** Format: int32 */
+            total: number;
+            candidates: components["schemas"]["RecordingCandidateRow"][];
+            /** Format: date-time */
+            asOfUtc: string;
+            fromCache: boolean;
+        };
+        RecordingDecisionRequest: {
+            answer: string;
+            /** Format: uuid */
+            recording: null | string;
+        };
+        RecordingDecisionResponse: {
+            /** Format: uuid */
+            mediaFileId: string;
+            outcome: string;
+            enrichment: string;
+            /** Format: uuid */
+            recording: null | string;
+            title: null | string;
+            /** Format: uuid */
+            acoustId: null | string;
+            tag: string;
+            detail: null | string;
         };
         ReleaseDetailResponse: {
             release: components["schemas"]["ReleaseSummary"];
@@ -532,6 +876,34 @@ export interface components {
             recordingId: string;
             held: boolean;
             files: components["schemas"]["FileRow"][];
+        };
+        SubjectFileResponse: {
+            /** Format: uuid */
+            mediaFileId: string;
+            path: string;
+            folder: string;
+            name: string;
+            format: string;
+            /** Format: int64 */
+            sizeBytes: number;
+            size: string;
+            measured: null | string;
+            duration: null | string;
+            audio: null | components["schemas"]["AudioQualityRow"];
+            identification: string;
+            enrichment: string;
+            attribution: string;
+            /** Format: uuid */
+            acoustId: null | string;
+            tagged: boolean;
+            fingerprinted: boolean;
+            integrity: string;
+            /** Format: date-time */
+            lastScannedUtc: null | string;
+            recording: null | string;
+            release: null | string;
+            tags: components["schemas"]["FileTagRow"][];
+            note: null | string;
         };
         SystemInfoResponse: {
             version: string;
@@ -1029,6 +1401,277 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttributionReportResponse"];
+                };
+            };
+        };
+    };
+    GetOpenQuestions: {
+        parameters: {
+            query?: {
+                skip?: number;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchingQueueResponse"];
+                };
+            };
+        };
+    };
+    GetMatchingFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectFileResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetRecordingCandidates: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingCandidatesResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DecideRecordingMatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDecisionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetComponentCandidates: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                stamp: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentCandidatesResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DecideComponentMatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stamp: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentDecisionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

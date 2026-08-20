@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Fonoteca.Api.Logging;
+using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
@@ -97,7 +98,9 @@ public sealed class EnrichmentService(
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
             return await db.MediaFiles
-                .Where(f => f.AcoustId != null && f.RecordingLookupUtc == null)
+                .Where(f => f.AcoustId != null
+                    && f.RecordingLookupUtc == null
+                    && f.IdentityDecidedUtc == null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -287,7 +290,9 @@ public sealed class EnrichmentService(
 
                 page = await db.MediaFiles
                     .AsNoTracking()
-                    .Where(f => f.AcoustId != null && f.RecordingLookupUtc == null)
+                    .Where(f => f.AcoustId != null
+                    && f.RecordingLookupUtc == null
+                    && f.IdentityDecidedUtc == null)
                     .OrderBy(f => f.Id)
                     .Select(f => new PendingFile(
                         f.Id, f.Path, f.AcoustId, f.Fingerprint, f.FingerprintDuration))
@@ -348,9 +353,19 @@ public sealed class EnrichmentService(
             row.RecordingLookupUtc = now;
             row.EnrichmentOutcome = resolved.Outcome;
 
+            // Refreshed on every pass that asks, so the freshest answer wins.
+            // Written after the LookupFailed return above, because a lookup that
+            // did not answer has no evidence to record and must not overwrite the
+            // evidence already there.
+            if (resolved.Matches is { } matches)
+            {
+                row.AcoustIdMatchesJson = AcoustIdEvidence.Serialise(matches);
+                row.AcoustIdMatchesUtc = now;
+            }
+
             if (resolved.Recording is { } recording)
             {
-                var writer = new CatalogueWriter(db, memo);
+                var writer = new CatalogueWriter(db, memo.Artists);
 
                 row.RecordingId = await writer
                     .UpsertAsync(recording, resolved.Work, cancellationToken)
@@ -381,12 +396,30 @@ public sealed class EnrichmentService(
     {
         try
         {
-            var recordingId = await RecordingForAsync(file, memo, cancellationToken).ConfigureAwait(false);
+            var matches = await MatchesForAsync(file, memo, cancellationToken).ConfigureAwait(false);
 
-            if (recordingId is not { } mbid)
+            // "Asked and told nothing" is worth storing; "never asked" is not,
+            // and an empty document for the second would read as the first. Both
+            // arrive as an empty list, so the two are told apart by the file's
+            // own columns — which is sound only because a fingerprintless file
+            // never writes its emptiness into the memo. See MatchesForAsync.
+            var asked = file.Fingerprint is { Length: > 0 } && file.FingerprintDuration is not null;
+            var evidence = asked ? matches : null;
+
+            // The recording-level collapse, and the right one here — its own
+            // documentation says so, and says equally plainly that it is the
+            // wrong one for AcoustIdSelection, which is choosing something else.
+            // Derived from the answer on every call rather than memoised beside
+            // it, because it is a rule and the answer is a fact: caching a rule's
+            // output leaves the cache quietly wrong the day the rule changes.
+            var candidates = RecordingCandidates.From(matches);
+
+            if (candidates.Count == 0)
             {
-                return new Resolution(EnrichmentOutcome.NoRecording, null, null, null);
+                return new Resolution(EnrichmentOutcome.NoRecording, null, null, null, evidence);
             }
+
+            var mbid = candidates[0].Id;
 
             if (!memo.Recordings.TryGetValue(mbid, out var recording))
             {
@@ -400,12 +433,12 @@ public sealed class EnrichmentService(
                 // Recorded rather than retried: the answer will not change until
                 // AcoustID's links are updated, which is not on our schedule.
                 return new Resolution(
-                    EnrichmentOutcome.RecordingNotFound, null, null, mbid.Value.ToString());
+                    EnrichmentOutcome.RecordingNotFound, null, null, mbid.Value.ToString(), evidence);
             }
 
             var work = await WorkForAsync(recording, memo, cancellationToken).ConfigureAwait(false);
 
-            return new Resolution(EnrichmentOutcome.Linked, recording, work, null);
+            return new Resolution(EnrichmentOutcome.Linked, recording, work, null, evidence);
         }
         catch (ProviderUnavailableException cause)
         {
@@ -414,15 +447,15 @@ public sealed class EnrichmentService(
     }
 
     /// <summary>
-    /// Which MusicBrainz recording this file's audio is, asked once per cluster.
+    /// What AcoustID says about this file's audio, asked once per cluster.
     /// </summary>
     /// <remarks>
-    /// <see cref="RecordingCandidates"/> rather than the first recording on the
-    /// first match: one AcoustID cluster is routinely linked to several
-    /// recordings by people who disagreed about which it was, and one recording
-    /// routinely spans several clusters. Collapsing onto recordings is the right
-    /// rule <i>here</i> — its own documentation says so — and the wrong one for
-    /// <see cref="AcoustIdSelection"/>, which is choosing something else.
+    /// The whole answer rather than the recording it collapses to, so the row
+    /// can keep the evidence — see <c>MediaFile.AcoustIdMatchesJson</c>. Which
+    /// recording it names is <see cref="RecordingCandidates"/>'s job and is
+    /// worked out by the caller: one AcoustID cluster is routinely linked to
+    /// several recordings by people who disagreed about which it was, and one
+    /// recording routinely spans several clusters.
     ///
     /// No threshold is applied. Identification already refused to record an
     /// AcoustID for anything below one, so every file reaching this pass carries
@@ -430,7 +463,7 @@ public sealed class EnrichmentService(
     /// opinion here would be re-litigating a decision with less evidence than the
     /// decision had.
     /// </remarks>
-    private async Task<Mbid?> RecordingForAsync(
+    private async Task<IReadOnlyList<AcoustIdMatch>> MatchesForAsync(
         PendingFile file,
         Memo memo,
         CancellationToken cancellationToken)
@@ -444,21 +477,25 @@ public sealed class EnrichmentService(
         // and the fingerprint simply does not exist yet. The next identification
         // pass has no work for it either; that is a gap worth closing when
         // something needs it, and not by opening files here.
+        //
+        // It does not reach the memo, and that is the correction rather than an
+        // omission. The memo is keyed on the *cluster* and answers "what did
+        // AcoustID say about this audio"; this is a fact about one file's
+        // columns. Recorded against the cluster, the next file sharing it — with
+        // a perfectly good fingerprint — reads an empty answer nobody asked for,
+        // is never looked up, and now has that emptiness written into its
+        // evidence column and believed for a week.
         if (file.Fingerprint is not { Length: > 0 } || file.FingerprintDuration is not { } duration)
         {
-            memo.Clusters[file.AcoustId] = null;
-            return null;
+            return [];
         }
 
         var matches = await acoustId
             .LookupAsync(new AudioFingerprint(file.Fingerprint, duration), cancellationToken)
             .ConfigureAwait(false);
 
-        var candidates = RecordingCandidates.From(matches);
-        var best = candidates.Count == 0 ? (Mbid?)null : candidates[0].Id;
-
-        memo.Clusters[file.AcoustId] = best;
-        return best;
+        memo.Clusters[file.AcoustId] = matches;
+        return matches;
     }
 
     /// <summary>The composition, asked once per work rather than once per file.</summary>
@@ -509,7 +546,19 @@ public sealed class EnrichmentService(
     /// </remarks>
     private sealed class Memo
     {
-        public Dictionary<AcoustId, Mbid?> Clusters { get; } = [];
+        /// <summary>
+        /// AcoustID's whole answer per cluster, not the recording it collapses to.
+        /// </summary>
+        /// <remarks>
+        /// It used to hold the winning MBID. Holding the answer instead is what
+        /// lets every file sharing a cluster have the evidence stamped on it
+        /// rather than only the first one that asked — the memo exists so five
+        /// encodings of a track cost one lookup, and a per-file cache that only
+        /// the first of the five got would make that saving visible as a gap.
+        /// It is also smaller than it looks beside <see cref="Recordings"/>,
+        /// which holds whole MusicBrainz recordings with up to 25 releases each.
+        /// </remarks>
+        public Dictionary<AcoustId, IReadOnlyList<AcoustIdMatch>> Clusters { get; } = [];
 
         public Dictionary<Mbid, MusicBrainzRecording?> Recordings { get; } = [];
 
@@ -533,236 +582,18 @@ public sealed class EnrichmentService(
     }
 
     /// <summary>What the network said about one file, before any row is touched.</summary>
+    /// <remarks>
+    /// <see cref="Matches"/> is AcoustID's raw answer, carried back so the row
+    /// can keep it. Null means nothing was asked — a file with no stored
+    /// fingerprint, or a lookup that failed — which is different from an answer
+    /// that named nothing, and only the second is worth writing down.
+    /// </remarks>
     private readonly record struct Resolution(
         EnrichmentOutcome Outcome,
         MusicBrainzRecording? Recording,
         MusicBrainzWork? Work,
-        string? Detail);
-
-    /// <summary>
-    /// Writes one recording's graph into the catalogue, creating only what is missing.
-    /// </summary>
-    /// <remarks>
-    /// Every upsert is keyed on the MBID, which carries a unique filtered index
-    /// on all four entity types — so a rerun over an unchanged library converges
-    /// on the same rows instead of duplicating them, and two files that resolve
-    /// to the same recording share it, which is the whole point of the
-    /// <c>Recording ↔ MediaFile</c> split.
-    ///
-    /// It reads through the scope's <c>DbContext</c> rather than keeping its own
-    /// identity map, so rows created for an earlier file in the same
-    /// <c>SaveChanges</c> are found by the later one.
-    /// </remarks>
-    private sealed class CatalogueWriter(FonotecaDbContext db, Memo memo)
-    {
-        public async Task<RecordingId> UpsertAsync(
-            MusicBrainzRecording source,
-            MusicBrainzWork? work,
-            CancellationToken cancellationToken)
-        {
-            var workRow = work is null
-                ? null
-                : await UpsertWorkAsync(work, cancellationToken).ConfigureAwait(false);
-
-            var recording = await db.Recordings
-                .FirstOrDefaultAsync(r => r.Mbid == source.Id, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (recording is null)
-            {
-                recording = new Recording
-                {
-                    Id = RecordingId.New(),
-                    Title = source.Title,
-                    Mbid = source.Id,
-                };
-
-                db.Recordings.Add(recording);
-            }
-            else
-            {
-                recording.Title = source.Title;
-            }
-
-            recording.Duration = source.Length;
-            recording.WorkId = workRow?.Id;
-
-            var credits = PrimaryCredits.From(source, work);
-
-            foreach (var credit in credits) memo.Artists.Add(credit.ArtistId);
-
-            await ApplyCreditsAsync(recording, workRow, credits, cancellationToken).ConfigureAwait(false);
-
-            return recording.Id;
-        }
-
-        private async Task<Work> UpsertWorkAsync(
-            MusicBrainzWork source,
-            CancellationToken cancellationToken)
-        {
-            var work = await db.Works
-                .FirstOrDefaultAsync(w => w.Mbid == source.Id, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (work is null)
-            {
-                work = new Work
-                {
-                    Id = WorkId.New(),
-                    Title = source.Title,
-                    Mbid = source.Id,
-                };
-
-                db.Works.Add(work);
-            }
-            else
-            {
-                work.Title = source.Title;
-            }
-
-            work.Type = source.Type;
-            return work;
-        }
-
-        /// <summary>
-        /// Billed credits become <c>ArtistCredit</c>; everything else becomes a
-        /// <c>Relationship</c>.
-        /// </summary>
-        /// <remarks>
-        /// The split is not cosmetic. <see cref="ArtistCredit"/>'s
-        /// <c>Position</c> and <c>JoinPhrase</c> describe a printed billing line —
-        /// "Beth Hart &amp; Joe Bonamassa" — and inserting a conductor into that
-        /// sequence corrupts the meaning for every consumer that reads it back as
-        /// a credit line. Conductors and ensembles are typed links to the
-        /// recording; writers are typed links to the <i>work</i>, which is where
-        /// MusicBrainz puts them and what makes "everything this composer wrote"
-        /// answerable across performances.
-        ///
-        /// Existing rows for this recording are replaced rather than merged. A
-        /// second pass over unchanged data produces the identical set, and a pass
-        /// after a MusicBrainz correction produces the corrected one — whereas
-        /// merging would accumulate every credit the recording ever had.
-        /// </remarks>
-        private async Task ApplyCreditsAsync(
-            Recording recording,
-            Work? work,
-            IReadOnlyList<PrimaryCredit> credits,
-            CancellationToken cancellationToken)
-        {
-            var stale = await db.ArtistCredits
-                .Where(c => c.RecordingId == recording.Id)
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            db.ArtistCredits.RemoveRange(stale);
-
-            var staleLinks = await db.Relationships
-                .Where(r => r.RecordingId == recording.Id)
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            if (work is not null)
-            {
-                staleLinks.AddRange(await db.Relationships
-                    .Where(r => r.WorkId == work.Id)
-                    .ToListAsync(cancellationToken)
-                    .ConfigureAwait(false));
-            }
-
-            db.Relationships.RemoveRange(staleLinks);
-
-            foreach (var credit in credits)
-            {
-                var artist = await UpsertArtistAsync(credit, cancellationToken).ConfigureAwait(false);
-
-                if (credit.Role == CreditRole.Billed)
-                {
-                    db.ArtistCredits.Add(new ArtistCredit
-                    {
-                        Id = Guid.CreateVersion7(),
-                        ArtistId = artist.Id,
-                        RecordingId = recording.Id,
-                        Position = credit.Position,
-                        JoinPhrase = credit.JoinPhrase,
-                        CreditedAs = credit.Name == artist.Name ? null : credit.Name,
-                    });
-
-                    continue;
-                }
-
-                // A writer is a fact about the composition, not about this
-                // performance of it — so it hangs off the work when there is one.
-                // Without a work there is nowhere else to put it, and the
-                // recording is the honest second choice.
-                var toWork = credit.Role == CreditRole.Writer && work is not null;
-
-                db.Relationships.Add(new Relationship
-                {
-                    Id = Guid.CreateVersion7(),
-                    SourceType = RelationshipTargets.Artist,
-                    SourceId = artist.Id.Value,
-                    TargetType = toWork ? RelationshipTargets.Work : RelationshipTargets.Recording,
-                    TargetId = toWork ? work!.Id.Value : recording.Id.Value,
-                    Type = RoleName(credit.Role),
-                    Attribute = credit.ArtistType,
-                    ArtistId = artist.Id,
-                    WorkId = toWork ? work!.Id : null,
-                    RecordingId = toWork ? null : recording.Id,
-                });
-            }
-        }
-
-        private async Task<Artist> UpsertArtistAsync(
-            PrimaryCredit credit,
-            CancellationToken cancellationToken)
-        {
-            var artist = await db.Artists
-                .FirstOrDefaultAsync(a => a.Mbid == credit.ArtistId, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (artist is null)
-            {
-                artist = new Artist
-                {
-                    Id = ArtistId.New(),
-                    Name = credit.Name,
-                    Mbid = credit.ArtistId,
-                };
-
-                db.Artists.Add(artist);
-            }
-
-            // The sort name is what the artist list orders by, and a credit that
-            // carries one is better evidence than the last one that did not.
-            // The display name is left alone once set: a credit line prints what
-            // that release printed, and overwriting the canonical name with it
-            // would rename "David Bowie" to "Bowie" on a sleeve's say-so.
-            artist.SortName ??= credit.SortName;
-            artist.Type ??= credit.ArtistType;
-            artist.Disambiguation ??= credit.Disambiguation;
-
-            return artist;
-        }
-
-        /// <summary>
-        /// The relationship type as stored, which is the role rather than
-        /// MusicBrainz's own relation name.
-        /// </summary>
-        /// <remarks>
-        /// Deliberate narrowing. MusicBrainz distinguishes "performing orchestra"
-        /// from a "performer" relation on an artist typed Orchestra, and
-        /// <see cref="PrimaryCredits"/> has already decided those mean the same
-        /// thing; storing the raw name would make the browse query re-derive that
-        /// decision in SQL, in a second place, where it would drift.
-        /// </remarks>
-        private static string RoleName(CreditRole role) => role switch
-        {
-            CreditRole.Conductor => "conductor",
-            CreditRole.Ensemble => "ensemble",
-            CreditRole.Writer => "composer",
-            _ => throw new InvalidOperationException($"Role {role} is not a relationship."),
-        };
-    }
+        string? Detail,
+        IReadOnlyList<AcoustIdMatch>? Matches = null);
 }
 
 /// <summary>

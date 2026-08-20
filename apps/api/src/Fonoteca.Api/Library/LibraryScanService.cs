@@ -286,6 +286,33 @@ public sealed class LibraryScanService(
                 row.AcoustIdTaggedUtc = null;
                 row.AcoustIdOutcome = AcoustIdOutcome.NotAttempted;
 
+                // Including an answer a person gave, and that is not a slight on
+                // the person. They decided what *those* bytes were, and these are
+                // different bytes; a decision about audio that is no longer here
+                // is not a decision about the audio that is.
+                //
+                // Leaving it is worse than losing it, and specifically: both
+                // passes' worklists exclude IdentityDecidedUtc, and the reset
+                // above sets AcoustIdOutcome to NotAttempted, which the worklist
+                // of refusals deliberately does not count as a question. A file
+                // keeping this stamp through a replacement would be invisible to
+                // every pass and to the screen at once, with nothing in the
+                // application able to reach it again.
+                row.IdentityDecidedUtc = null;
+
+                // And the evidence, which is the sharpest of these. It is
+                // believed for a week, and the candidates endpoint checks that
+                // freshness *before* it checks for a fingerprint — so a stale
+                // answer here does not merely go unused, it answers. Left in
+                // place, opening this file would offer the recordings the
+                // previous audio matched, and committing one of them would write
+                // that cluster into the new bytes. That is the exact thing the
+                // paragraph above refuses to let happen by another route.
+                row.AcoustIdMatchesJson = null;
+                row.AcoustIdMatchesUtc = null;
+                row.RecordingCandidatesJson = null;
+                row.RecordingCandidatesUtc = null;
+
                 // And what the identification was turned into. The link to a
                 // recording rests entirely on the AcoustID cleared above, so
                 // leaving it would keep the file filed under an artist on the
@@ -309,6 +336,14 @@ public sealed class LibraryScanService(
                 row.ReleaseLookupUtc = null;
                 row.AttributionOutcome = ReleaseAttributionOutcome.NotAttempted;
                 row.EditionAlternatives = 0;
+
+                // Including a person's answer, for the reason the identity
+                // decision above is cleared: a file that kept the guard through a
+                // replacement would be excluded from the pass's worklist and
+                // carry NotAttempted, which the open-questions screen does not
+                // count as a question either — invisible to both at once, with
+                // nothing able to reach it again.
+                row.ReleaseDecidedUtc = null;
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

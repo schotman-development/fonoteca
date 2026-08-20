@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Fonoteca.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Fonoteca.Data.Migrations
 {
     [DbContext(typeof(FonotecaDbContext))]
-    partial class FonotecaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260818092821_StoredAcoustIdEvidence")]
+    partial class StoredAcoustIdEvidence
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -185,9 +188,6 @@ namespace Fonoteca.Data.Migrations
                     b.Property<DateTimeOffset?>("RecordingLookupUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTimeOffset?>("ReleaseDecidedUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<Guid?>("ReleaseGroupId")
                         .HasColumnType("uuid");
 
@@ -265,7 +265,7 @@ namespace Fonoteca.Data.Migrations
                         .HasFilter("\"AcoustId\" IS NOT NULL AND \"RecordingLookupUtc\" IS NULL AND \"IdentityDecidedUtc\" IS NULL");
 
                     b.HasIndex(new[] { "Id" }, "IX_MediaFiles_ReleasePending")
-                        .HasFilter("\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL AND \"ReleaseDecidedUtc\" IS NULL");
+                        .HasFilter("\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL");
 
                     b.ToTable("MediaFiles");
                 });
@@ -437,28 +437,6 @@ namespace Fonoteca.Data.Migrations
                     NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Title"), new[] { "gin_trgm_ops" });
 
                     b.ToTable("Releases");
-                });
-
-            modelBuilder.Entity("Fonoteca.Domain.Catalogue.ReleaseCandidateSet", b =>
-                {
-                    b.Property<DateTimeOffset>("ComponentUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DocumentJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<int>("Files")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("GatheredUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("ComponentUtc");
-
-                    b.HasIndex("GatheredUtc");
-
-                    b.ToTable("ReleaseCandidateSets");
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.ReleaseGroup", b =>

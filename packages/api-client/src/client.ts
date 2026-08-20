@@ -68,6 +68,68 @@ type PostPath = {
 }[keyof paths]
 
 /**
+ * The path and query parameters a POST declares. Read exactly as a GET's are.
+ */
+type PostParams<P extends PostPath> = paths[P] extends { post: { parameters: infer Q } } ? Q : never
+
+/**
+ * The JSON body a POST accepts, or `never` when it accepts none.
+ *
+ * `openapi-typescript` writes `requestBody?: never` for a route with no body, so
+ * the conditional below fails to match it — an optional `never` is not the
+ * required object shape — and the route's body type comes out as `never`. That
+ * is what {@link NeedsBody} tests, and it is why a bodyless POST keeps its old
+ * one-argument call and a POST with a body cannot be called without one.
+ */
+type PostBody<P extends PostPath> = paths[P] extends {
+  post: { requestBody: { content: { 'application/json': infer B } } }
+}
+  ? B
+  : never
+
+/** Whether the route has a required path segment to fill in. */
+type NeedsPostParams<P extends PostPath> =
+  PostParams<P> extends { path: Record<string, unknown> } ? true : false
+
+/**
+ * Whether the route takes a JSON body.
+ *
+ * Wrapped in a tuple so the check is not distributive: a bare
+ * `PostBody<P> extends never` on a union body would distribute over its members
+ * and answer for each of them separately.
+ */
+type NeedsBody<P extends PostPath> = [PostBody<P>] extends [never] ? false : true
+
+/**
+ * A POST's options: everything `fetch` takes, minus the body, plus a typed one.
+ *
+ * `json` rather than `body` because they are different things — `RequestInit`'s
+ * body is already-encoded bytes, and this is the value to encode. Overloading
+ * the name would let a caller hand over a string that happens to parse and lose
+ * the contract that the whole file exists for.
+ */
+export type PostOptions<P extends PostPath> = Omit<RequestInit, 'body'> & {
+  params?: PostParams<P>
+  json?: PostBody<P>
+}
+
+/**
+ * The argument list after the path: mandatory when the route needs either half.
+ *
+ * A rest tuple for the reason {@link GetArgs} is one. A route with a
+ * `{segment}` and a required body cannot be called with neither, and the type
+ * says so at the call site rather than at the server.
+ */
+type PostArgs<P extends PostPath> =
+  NeedsPostParams<P> extends true
+    ? NeedsBody<P> extends true
+      ? [options: PostOptions<P> & { params: PostParams<P>; json: PostBody<P> }]
+      : [options: PostOptions<P> & { params: PostParams<P> }]
+    : NeedsBody<P> extends true
+      ? [options: PostOptions<P> & { json: PostBody<P> }]
+      : [options?: PostOptions<P>]
+
+/**
  * The JSON body a POST answers with.
  *
  * Both 200 and 202 are extracted, because a command that finishes inside its
@@ -124,14 +186,15 @@ export type ApiClient = {
    */
   get<P extends GetPath>(path: P, ...options: GetArgs<P>): Promise<GetResponse<P>>
   /**
-   * POST with no request body.
+   * POST, with the route's own parameters and body when it has them.
    *
-   * Every mutating endpoint so far is a command with its arguments in the path,
-   * so there is nothing to send. When one takes a body, its type comes from
-   * `paths[P]['post']['requestBody']` — deriving it now, with no endpoint to
-   * check it against, would be a guess dressed as a contract.
+   * `api.post('/api/library/scan')` for a command whose arguments are all in
+   * the path, and
+   * `api.post('/api/…/{id}/decision', { params: { path: { id } }, json: { … } })`
+   * for one that carries a document. Both halves are derived from the generated
+   * types, so a route that needs either cannot be called without it.
    */
-  post<P extends PostPath>(path: P, init?: RequestInit): Promise<PostResponse<P>>
+  post<P extends PostPath>(path: P, ...options: PostArgs<P>): Promise<PostResponse<P>>
   /**
    * DELETE, for endpoints where the thing being removed is a running operation
    * rather than a record. Answers with nothing.
@@ -146,15 +209,25 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   async function request(
     method: string,
     path: string,
-    options?: RequestInit & { params?: UrlParams },
+    options?: Omit<RequestInit, 'body'> & { params?: UrlParams; json?: unknown },
   ): Promise<unknown> {
-    const { params, ...init } = options ?? {}
+    const { params, json, ...init } = options ?? {}
     const url = buildUrl(baseUrl, path, params)
+
+    // Only when there is one. A POST with no document must not carry a
+    // Content-Type announcing an empty body as JSON — ASP.NET reads that as a
+    // malformed document and answers 400 rather than running the command.
+    const encoded = json === undefined ? undefined : JSON.stringify(json)
 
     const response = await doFetch(url, {
       ...init,
+      ...(encoded === undefined ? {} : { body: encoded }),
       method,
-      headers: { Accept: 'application/json', ...init?.headers },
+      headers: {
+        Accept: 'application/json',
+        ...(encoded === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...init?.headers,
+      },
     })
 
     if (!response.ok) {
@@ -183,8 +256,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       return (await request('GET', String(path), request0)) as GetResponse<P>
     },
 
-    async post<P extends PostPath>(path: P, init?: RequestInit): Promise<PostResponse<P>> {
-      return (await request('POST', String(path), init)) as PostResponse<P>
+    async post<P extends PostPath>(path: P, ...options: PostArgs<P>): Promise<PostResponse<P>> {
+      // Erased inside the implementation, exactly as `get`'s is: proving
+      // `PostParams<P>` assignable to the shape `buildUrl` reads would mean
+      // repeating the whole conditional here for no benefit.
+      const request0 = options[0] as
+        | (Omit<RequestInit, 'body'> & { params?: UrlParams; json?: unknown })
+        | undefined
+
+      return (await request('POST', String(path), request0)) as PostResponse<P>
     },
 
     async delete<P extends DeletePath>(path: P, init?: RequestInit): Promise<void> {

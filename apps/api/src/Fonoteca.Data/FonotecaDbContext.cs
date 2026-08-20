@@ -27,6 +27,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
 
+    public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Properties<WorkId>().HaveConversion<WorkIdConverter>();
@@ -139,6 +141,14 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.ContentHash).HasMaxLength(128);
             e.Property(x => x.AudioHash).HasMaxLength(128);
 
+            // JSONB rather than text, for the reason DomainEvents.PayloadJson is:
+            // the column is opaque to the application's queries today, and being
+            // able to ask a question of it later — "which files did AcoustID name
+            // this recording for" — should not need a migration to become
+            // possible. It also compresses, which matters at a kilobyte a row.
+            e.Property(x => x.AcoustIdMatchesJson).HasColumnType("jsonb");
+            e.Property(x => x.RecordingCandidatesJson).HasColumnType("jsonb");
+
             // Dedupe reads these constantly, so both are indexed. AudioHash is
             // the exact-duplicate path (same decoded audio, different tags);
             // Fingerprint is the cross-encoding path.
@@ -164,8 +174,13 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // returns the first builder and quietly renames it and replaces its
             // filter. The worklist index then never reaches the migration, and
             // nothing says so.
+            // The second half of the filter is the person guard. Clearing
+            // AcoustIdCheckedUtc by hand is the documented way to re-ask a whole
+            // library after a rule change, and without this that same UPDATE
+            // would sweep up every file somebody had already answered and hand
+            // it back to the rule that could not answer it.
             e.HasIndex(x => x.Id, "IX_MediaFiles_AcoustIdPending")
-                .HasFilter("\"AcoustIdCheckedUtc\" IS NULL");
+                .HasFilter("\"AcoustIdCheckedUtc\" IS NULL AND \"IdentityDecidedUtc\" IS NULL");
 
             // Identified, but the file itself does not say so yet — exactly what
             // a run with Fonoteca:AllowFileMutation off leaves behind. The run
@@ -185,12 +200,16 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // reasons as the pair above — it is meant to shrink to nothing, and a
             // third unnamed HasIndex on Id would silently replace one of them.
             e.HasIndex(x => x.Id, "IX_MediaFiles_RecordingPending")
-                .HasFilter("\"AcoustId\" IS NOT NULL AND \"RecordingLookupUtc\" IS NULL");
+                .HasFilter(
+                    "\"AcoustId\" IS NOT NULL AND \"RecordingLookupUtc\" IS NULL "
+                    + "AND \"IdentityDecidedUtc\" IS NULL");
 
             // The attribution worklist. Fourth named partial index on Id, and the
             // naming matters here for the same reason it did for the other three.
             e.HasIndex(x => x.Id, "IX_MediaFiles_ReleasePending")
-                .HasFilter("\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL");
+                .HasFilter(
+                    "\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL "
+                    + "AND \"ReleaseDecidedUtc\" IS NULL");
 
             // "Everything on this album" has to be one indexed read whether or
             // not the pressing was decided, so both links are indexed.
@@ -298,6 +317,23 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // Reversing a whole batch as a unit.
             e.HasIndex(x => x.CorrelationId).HasFilter("\"CorrelationId\" IS NOT NULL");
             e.HasIndex(x => x.OccurredAtUtc);
+        });
+
+        modelBuilder.Entity<ReleaseCandidateSet>(e =>
+        {
+            // The component's own stamp is the key. No surrogate: there is
+            // exactly one candidate set per component, the component has no row
+            // of its own anywhere, and a generated id would only add a second
+            // way to name the same thing.
+            e.HasKey(x => x.ComponentUtc);
+
+            e.Property(x => x.DocumentJson).HasColumnType("jsonb").IsRequired();
+
+            // No foreign key to MediaFiles, deliberately. The component is not a
+            // row, and the files that make it up leave it — a scan clears their
+            // stamp, a person answers half of it — so there is nothing stable to
+            // point at. `Files` is what catches that instead; see the entity.
+            e.HasIndex(x => x.GatheredUtc);
         });
 
         base.OnModelCreating(modelBuilder);

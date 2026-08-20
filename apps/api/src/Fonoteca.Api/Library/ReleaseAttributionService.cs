@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Logging;
+using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
@@ -130,7 +133,9 @@ public sealed class ReleaseAttributionService(
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
             return await db.MediaFiles
-                .Where(f => f.RecordingId != null && f.ReleaseLookupUtc == null)
+                .Where(f => f.RecordingId != null
+                    && f.ReleaseLookupUtc == null
+                    && f.ReleaseDecidedUtc == null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -206,6 +211,8 @@ public sealed class ReleaseAttributionService(
         var memo = new Memo();
 
         var pending = await CountPendingAsync(cancellationToken).ConfigureAwait(false);
+
+        await ForgetAnsweredCandidatesAsync(cancellationToken).ConfigureAwait(false);
 
         Log.AttributionStarted(logger, jobId, pending);
 
@@ -307,9 +314,18 @@ public sealed class ReleaseAttributionService(
 
             return await db.MediaFiles
                 .AsNoTracking()
-                .Where(f => f.RecordingId != null && f.ReleaseLookupUtc == null && f.Recording!.Mbid != null)
+                .Where(f => f.RecordingId != null
+                    && f.ReleaseLookupUtc == null
+                    && f.ReleaseDecidedUtc == null
+                    && f.Recording!.Mbid != null)
                 .OrderBy(f => f.Id)
-                .Select(f => new PendingFile(f.Id, f.Path, f.Recording!.Mbid!.Value, f.FingerprintDuration))
+                .Select(f => new PendingFile(
+                    f.Id,
+                    f.Path,
+                    f.Recording!.Title,
+                    f.Recording!.Mbid!.Value,
+                    f.FingerprintDuration ?? f.Quality!.Duration,
+                    f.SizeBytes))
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -365,8 +381,21 @@ public sealed class ReleaseAttributionService(
                 counts.Releases++;
             }
 
-            var now = clock.UtcNow;
+            // Floored, and that is load-bearing rather than tidy. This one value
+            // is stamped on every file the component decides, which makes it the
+            // component's identity — the id the worklist prints and the key the
+            // candidate document is stored under. PostgreSQL keeps microseconds
+            // and .NET keeps 100ns ticks, so an unfloored stamp is a key that
+            // never matches what comes back out of the column.
+            var now = StoreTime.ToStorePrecision(clock.UtcNow);
             var recordings = component.Files.ToDictionary(file => file.Id, file => file.Recording);
+
+            // The files this component is about to leave open, collected as the
+            // outcomes are written rather than read off the rule: the outcome on
+            // the row is not always the one `Assign` returned — a `NoCandidate`
+            // whose only candidates the prune discarded is rewritten to
+            // `NoConfidentFit` a few lines below.
+            var refused = new List<MediaFileId>();
 
             foreach (var assignment in assignments)
             {
@@ -411,11 +440,143 @@ public sealed class ReleaseAttributionService(
 
                 counts.Record(row.AttributionOutcome);
                 counts.Examined++;
+
+                if (Unanswered.Contains(row.AttributionOutcome)) refused.Add(assignment.File);
             }
 
             counts.Components++;
 
+            await KeepCandidatesAsync(db, now, component, refused, cancellationToken).ConfigureAwait(false);
+
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Drops candidate documents for components nobody can be asked about any more.
+    /// </summary>
+    /// <remarks>
+    /// A component is a timestamp, and a re-run mints new ones — so without this
+    /// the table keeps a document per component the library has ever had rather
+    /// than per question it currently holds. Nothing reads an orphan (the file
+    /// count check would miss it anyway), so this is housekeeping rather than
+    /// correctness, and it belongs at the start of a pass because that is the
+    /// only moment the whole set is about to be rewritten.
+    ///
+    /// One statement, and it names the same predicate the worklist does: a
+    /// component with no file still waiting on an answer is not a question.
+    /// </remarks>
+    private async Task ForgetAnsweredCandidatesAsync(CancellationToken cancellationToken)
+    {
+        var scope = scopeFactory.CreateAsyncScope();
+
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            await db.ReleaseCandidateSets
+                .Where(set => !db.MediaFiles.Any(file =>
+                    file.ReleaseLookupUtc == set.ComponentUtc
+                    && file.ReleaseDecidedUtc == null
+                    && Unanswered.Contains(file.AttributionOutcome)))
+                .ExecuteDeleteAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The two outcomes that leave a person a question to answer.
+    /// </summary>
+    /// <remarks>
+    /// The same pair <c>CatalogueEndpoints.UnattributedOutcomes</c> builds the
+    /// worklist from. A component with none of these was decided, and a decided
+    /// component is not a question — so it gets no candidate document, and the
+    /// table stays the size of the worklist rather than the size of the library.
+    /// </remarks>
+    private static readonly ReleaseAttributionOutcome[] Unanswered =
+        [ReleaseAttributionOutcome.NoConfidentFit, ReleaseAttributionOutcome.NoCandidate];
+
+    /// <summary>
+    /// Keeps the candidate set this component was refused against.
+    /// </summary>
+    /// <remarks>
+    /// <b>The gather is already paid for, and throwing it away was the expensive
+    /// part.</b> Everything a person needs to answer this question — every
+    /// release confirmed for the component, with its whole track list — is in
+    /// memory at this moment and about to be discarded. Recovering it later cost
+    /// a browse per recording and a lookup per release offered: measured against
+    /// a live mirror, up to two minutes and 38 turns at the rate limit, on a
+    /// click, for something the pass had already computed. This is the same
+    /// mistake <c>MediaFile.AcoustIdMatchesJson</c> exists because of, one pass
+    /// along; see <see cref="ReleaseCandidateSet"/>.
+    ///
+    /// Scored against the <i>refused</i> files rather than the whole component,
+    /// because that is the question: a component may file most of itself
+    /// confidently and leave three files over, and coverage figures computed
+    /// over the files that already have an album would describe a set nobody is
+    /// being asked about.
+    ///
+    /// It shares the component's <c>SaveChanges</c> — the document and the
+    /// outcomes it explains are one fact, and a crash between them should lose
+    /// both or neither. Nothing here can fail the pass: a component whose
+    /// document cannot be built is simply a component the endpoint will gather
+    /// for, which is what it did for all of them before this existed.
+    /// </remarks>
+    private async Task KeepCandidatesAsync(
+        FonotecaDbContext db,
+        DateTimeOffset componentUtc,
+        Component component,
+        List<MediaFileId> refused,
+        CancellationToken cancellationToken)
+    {
+        if (refused.Count == 0) return;
+
+        var open = new HashSet<MediaFileId>(refused);
+
+        var members = component.Files
+            .Where(file => open.Contains(file.Id))
+            .OrderBy(file => file.Path, StringComparer.Ordinal)
+            .Select(file => file.ToMember())
+            .ToList();
+
+        if (members.Count == 0) return;
+
+        var recordings = members.Select(member => member.Recording).Distinct().ToList();
+
+        var document = ComponentCandidates.Build(
+            componentUtc.UtcTicks.ToString(CultureInfo.InvariantCulture),
+            componentUtc,
+            members,
+            component.Candidates,
+            component.Formats,
+            recordings.Count,
+            recordings.Count(component.Browsed.Contains),
+            component.Candidates.Count,
+            options.Value.ReleaseMinimumCoverage,
+            options.Value.ReleaseMaximumDriftMs);
+
+        var existing = await db.ReleaseCandidateSets
+            .FirstOrDefaultAsync(set => set.ComponentUtc == componentUtc, cancellationToken)
+            .ConfigureAwait(false);
+
+        var json = JsonSerializer.Serialize(
+            document, MatchingJson.Default.ComponentCandidatesResponse);
+
+        if (existing is null)
+        {
+            db.ReleaseCandidateSets.Add(new ReleaseCandidateSet
+            {
+                ComponentUtc = componentUtc,
+                DocumentJson = json,
+                Files = document.Files,
+                GatheredUtc = componentUtc,
+            });
+        }
+        else
+        {
+            existing.DocumentJson = json;
+            existing.Files = document.Files;
+            existing.GatheredUtc = componentUtc;
         }
     }
 
@@ -553,7 +714,7 @@ public sealed class ReleaseAttributionService(
 
         if (capped) Log.AttributionComponentCapped(logger, seed.Path, files.Count, confirmed.Count);
 
-        return new Component([.. files.Values], [.. confirmed.Values], formats, placed);
+        return new Component([.. files.Values], [.. confirmed.Values], formats, browsed, placed);
     }
 
     /// <summary>
@@ -598,7 +759,7 @@ public sealed class ReleaseAttributionService(
     }
 
     /// <summary>"CD", "Digital Media", "CD+DVD-Video" — the honest reason a rip is partial.</summary>
-    private static string? Formats(MusicBrainzReleaseCandidate candidate)
+    internal static string? Formats(MusicBrainzReleaseCandidate candidate)
     {
         var named = candidate.Media
             .Select(medium => medium.Format)
@@ -634,9 +795,16 @@ public sealed class ReleaseAttributionService(
             var rows = await db.MediaFiles
                 .AsNoTracking()
                 .Where(f => f.ReleaseLookupUtc == null
+                    && f.ReleaseDecidedUtc == null
                     && f.Recording!.Mbid != null
                     && recordings.Contains(f.Recording.Mbid.Value))
-                .Select(f => new PendingFile(f.Id, f.Path, f.Recording!.Mbid!.Value, f.FingerprintDuration))
+                .Select(f => new PendingFile(
+                    f.Id,
+                    f.Path,
+                    f.Recording!.Title,
+                    f.Recording!.Mbid!.Value,
+                    f.FingerprintDuration ?? f.Quality!.Duration,
+                    f.SizeBytes))
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
@@ -693,6 +861,17 @@ public sealed class ReleaseAttributionService(
         IReadOnlyDictionary<Mbid, string?> Formats,
 
         /// <summary>
+        /// Recordings a browse was actually sent for.
+        /// </summary>
+        /// <remarks>
+        /// Every recording in a component that closed, and fewer when a cap
+        /// stopped the expansion. Carried so the stored candidate document can
+        /// say which — a list cut because half the set was never asked about
+        /// looks exactly like a complete one otherwise.
+        /// </remarks>
+        IReadOnlySet<Mbid> Browsed,
+
+        /// <summary>
         /// Recordings a browse returned at least one release for, whether or not
         /// that release survived the prune.
         /// </summary>
@@ -713,9 +892,31 @@ public sealed class ReleaseAttributionService(
             ?? "Unknown album";
     }
 
-    private sealed record PendingFile(MediaFileId Id, string Path, Mbid Recording, TimeSpan? Duration)
+    /// <summary>
+    /// One file waiting on an album.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Title"/> and <see cref="SizeBytes"/> are along for the ride
+    /// rather than for the decision: the rule reads the recording and the
+    /// duration, and these two are what the candidate document this pass now
+    /// stores has to print. Selected here because they are on the row already —
+    /// fetching them later would be a second query per refused component.
+    ///
+    /// <see cref="Duration"/> is <c>FingerprintDuration ?? Quality.Duration</c>,
+    /// which is also what the endpoint scores with. A third of this worklist has
+    /// no fingerprint duration at all.
+    /// </remarks>
+    private sealed record PendingFile(
+        MediaFileId Id,
+        string Path,
+        string? Title,
+        Mbid Recording,
+        TimeSpan? Duration,
+        long SizeBytes)
     {
         public AttributionFile ToAttributionFile() => new(Id, Recording, Duration);
+
+        public ComponentMember ToMember() => new(Id, Path, Title, Recording, Duration, SizeBytes);
     }
 
     private sealed class Tally
@@ -755,7 +956,7 @@ public sealed class ReleaseAttributionService(
     /// Reads through the scope's context so rows added earlier in the same
     /// <c>SaveChanges</c> are found rather than duplicated.
     /// </remarks>
-    private sealed class ReleaseWriter(FonotecaDbContext db)
+    internal sealed class ReleaseWriter(FonotecaDbContext db)
     {
         private readonly Dictionary<(ReleaseId, int, int), TrackId> _tracks = [];
 
@@ -827,7 +1028,11 @@ public sealed class ReleaseAttributionService(
             release.CatalogNumber = label?.CatalogNumber;
             release.TrackCount = source.Tracks.Count;
             release.DiscCount = source.Tracks.Select(track => track.DiscNumber).Distinct().Count();
-            release.MediumFormats = mediumFormats;
+            // Coalesced rather than assigned. The pass knows the disc formats
+            // because a browse told it; a person's decision comes from a release
+            // lookup, which does not carry them, and blanking "CD" on the way
+            // past would lose a fact nothing else can restore.
+            release.MediumFormats = mediumFormats ?? release.MediumFormats;
 
             await ApplyTracksAsync(release, source, cancellationToken).ConfigureAwait(false);
             await ApplyCreditsAsync(release, source, cancellationToken).ConfigureAwait(false);
@@ -945,18 +1150,39 @@ public sealed class ReleaseAttributionService(
         /// accumulate every track the release ever had. The unique index on
         /// (release, disc, position) would eventually catch that; this stops it
         /// happening.
+        ///
+        /// <b>Replaced slot by slot, not row by row, and that distinction is a
+        /// bug that reached live data.</b> Deleting the whole list and minting
+        /// new ids looks equivalent and is not: <c>MediaFiles.TrackId</c> is
+        /// <c>ON DELETE SET NULL</c>, so every file already filed under this
+        /// release silently loses its position the moment anything writes the
+        /// release again. Two components picking the same release is ordinary in
+        /// a pass, and a person answering an album question a second time reaches
+        /// it in one click — on the endpoint whose whole point is that the track
+        /// list is written. So a track at a slot the release still has is
+        /// <i>updated</i>, keeping its id, and only the surplus is deleted.
         /// </remarks>
         private async Task ApplyTracksAsync(
             Release release,
             MusicBrainzRelease source,
             CancellationToken cancellationToken)
         {
-            var stale = await db.Tracks
+            var existing = await db.Tracks
                 .Where(t => t.ReleaseId == release.Id)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            db.Tracks.RemoveRange(stale);
+            // Keyed on the unique index's own columns. A duplicated slot in the
+            // database cannot survive that index, so the first wins and the rest
+            // fall through to the surplus below.
+            var bySlot = new Dictionary<(int Disc, int Position), Track>();
+
+            foreach (var row in existing)
+            {
+                bySlot.TryAdd((row.DiscNumber, row.Position), row);
+            }
+
+            var kept = new HashSet<TrackId>();
 
             foreach (var track in source.Tracks)
             {
@@ -988,21 +1214,42 @@ public sealed class ReleaseAttributionService(
 
                 _minted[mbid] = recording;
 
-                var row = new Track
-                {
-                    Id = TrackId.New(),
-                    ReleaseId = release.Id,
-                    RecordingId = recording.Id,
-                    Position = track.Position,
-                    DiscNumber = track.DiscNumber,
-                    Number = track.Number,
-                    Title = track.Title,
-                    Length = track.Length,
-                };
+                bySlot.TryGetValue((track.DiscNumber, track.Position), out var row);
 
-                db.Tracks.Add(row);
+                // A slot MusicBrainz has re-pointed at a different recording is
+                // not the same track any more, and `Track.RecordingId` is
+                // init-only precisely because that pair is the row's identity. So
+                // it is replaced rather than updated, and the file filed there
+                // loses its position — which is the honest answer: the slot now
+                // holds different music.
+                if (row is not null && row.RecordingId != recording.Id) row = null;
+
+                if (row is null)
+                {
+                    row = new Track
+                    {
+                        Id = TrackId.New(),
+                        ReleaseId = release.Id,
+                        RecordingId = recording.Id,
+                        Position = track.Position,
+                        DiscNumber = track.DiscNumber,
+                    };
+
+                    db.Tracks.Add(row);
+                    bySlot[(track.DiscNumber, track.Position)] = row;
+                }
+
+                row.Number = track.Number;
+                row.Title = track.Title;
+                row.Length = track.Length;
+
+                kept.Add(row.Id);
                 _tracks[(release.Id, row.DiscNumber, row.Position)] = row.Id;
             }
+
+            // What the release no longer prints. Removing these still nulls the
+            // TrackId of anything filed there, which is correct: the slot is gone.
+            db.Tracks.RemoveRange(existing.Where(row => !kept.Contains(row.Id)));
         }
     }
 }

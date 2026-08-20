@@ -1,5 +1,6 @@
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Library;
+using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
@@ -683,6 +684,47 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
         }
 
         return !identification.IsRunning;
+    }
+
+    /// <summary>
+    /// The pass keeps AcoustID's answer, not just the verdict it reached from it.
+    /// </summary>
+    /// <remarks>
+    /// The catalogue used to record the outcome and discard the evidence, and
+    /// the bill for that arrived later: working out what 951 withheld files
+    /// actually were meant re-asking AcoustID about every one of them, 951 turns
+    /// at the rate limit to recover something the application had already been
+    /// told. It is also what makes opening one of those questions on the Identify
+    /// screen cheap — the answer is already here.
+    ///
+    /// Stored for a confident match too, not only for a refusal. The evidence
+    /// behind a decision is worth as much as the evidence behind an indecision,
+    /// and a rule that only kept the second would be keeping it for the case
+    /// where nobody had asked yet whether the first was right.
+    /// </remarks>
+    [Fact]
+    public async Task TheAnswerFromAcoustIdIsStoredAndNotJustTheVerdict()
+    {
+        SkipWithoutTools();
+        Copy(Corpus.Flac, "evidence.flac");
+
+        var services = Build(allowMutation: false, Answering(0.97, 0.62));
+        await ScanAsync(services);
+        await IdentifyAsync(services);
+
+        var row = await RowAsync("evidence.flac");
+
+        Assert.NotNull(row.AcoustIdMatchesJson);
+        Assert.NotNull(row.AcoustIdMatchesUtc);
+
+        // Read back through the same reader the endpoints use, so a change to
+        // the stored shape fails here rather than at a screen.
+        var matches = AcoustIdEvidence.Deserialise(row.AcoustIdMatchesJson);
+
+        Assert.NotNull(matches);
+        Assert.Equal(2, matches.Count);
+        Assert.Equal([0.97, 0.62], matches.Select(match => match.Score));
+        Assert.All(matches, match => Assert.Equal(Cluster, match.AcoustId));
     }
 
     private static StubLookup Answering(params double[] scores) =>

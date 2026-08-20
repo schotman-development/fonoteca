@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Logging;
+using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
@@ -124,7 +125,7 @@ public sealed class IdentificationService(
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
             return await db.MediaFiles
-                .Where(f => f.AcoustIdCheckedUtc == null)
+                .Where(f => f.AcoustIdCheckedUtc == null && f.IdentityDecidedUtc == null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -352,7 +353,7 @@ public sealed class IdentificationService(
 
                 page = await db.MediaFiles
                     .AsNoTracking()
-                    .Where(f => f.AcoustIdCheckedUtc == null)
+                    .Where(f => f.AcoustIdCheckedUtc == null && f.IdentityDecidedUtc == null)
                     .OrderBy(f => f.Id)
                     .Select(f => new PendingFile(f.Id, f.Path, f.Fingerprint, f.FingerprintDuration))
                     .Take(PageSize)
@@ -630,6 +631,14 @@ public sealed class IdentificationService(
             Log.FileIdentified(logger, item.File.Path, AcoustIdOutcome.NotAttempted, cause.Message);
             return;
         }
+
+        // Kept before anything is decided about it, and kept whatever is decided.
+        // The catalogue used to store the verdict and discard the evidence, which
+        // is why finding out what 951 withheld files actually were cost 951 turns
+        // at the rate limit. It also means the two identification refusals can be
+        // opened on the Identify screen without asking AcoustID a second time.
+        row.AcoustIdMatchesJson = AcoustIdEvidence.Serialise(matches);
+        row.AcoustIdMatchesUtc = now;
 
         var choice = AcoustIdSelection.Choose(
             matches, config.AcoustIdMinimumScore, config.AcoustIdMinimumMargin);

@@ -302,6 +302,92 @@ public sealed class MediaFile
     public AcoustIdOutcome AcoustIdOutcome { get; set; } = AcoustIdOutcome.NotAttempted;
 
     /// <summary>
+    /// AcoustID's whole answer about this file, kept rather than thrown away.
+    /// </summary>
+    /// <remarks>
+    /// <b>The evidence, which the catalogue used to record no trace of.</b>
+    /// Identification stored its verdict and discarded the clusters it reached
+    /// it from, so working out what 951 withheld files actually were meant
+    /// re-asking AcoustID about every one of them — 951 turns at the rate limit
+    /// to recover something the application had already been told. This column
+    /// is that mistake not being made twice.
+    ///
+    /// Written by whatever asked: the identification pass, the enrichment pass,
+    /// and the candidates endpoint when it finds this stale. The shape is the
+    /// provider's own answer, flattened — clusters, scores, and the recording
+    /// MBIDs each one links to — and deliberately not our ranking of it.
+    /// A ranking is a rule, rules change, and a cache of a rule's output would
+    /// go quietly wrong the moment one did.
+    ///
+    /// Stored as JSONB and read back by <c>AcoustIdEvidence</c>. Roughly a
+    /// kilobyte a file, which is a hundred megabytes across a library of
+    /// 100,000 and less after TOAST compresses it — against a lookup budget of
+    /// one request per 340ms, that is not a close trade.
+    /// </remarks>
+    public string? AcoustIdMatchesJson { get; set; }
+
+    /// <summary>
+    /// When <see cref="AcoustIdMatchesJson"/> was taken.
+    /// </summary>
+    /// <remarks>
+    /// Beside the payload rather than derived from
+    /// <see cref="AcoustIdCheckedUtc"/>, which answers a different question: that
+    /// one says when a verdict was last reached, and a verdict can be reached
+    /// from a cached answer. Reading freshness off it would let a week-old
+    /// answer look like it arrived a moment ago.
+    /// </remarks>
+    public DateTimeOffset? AcoustIdMatchesUtc { get; set; }
+
+    /// <summary>
+    /// The rendered candidate set for this file — both providers' answers, assembled.
+    /// </summary>
+    /// <remarks>
+    /// A second cache rather than a bigger first one, because the two are
+    /// somebody else's answer and <i>our</i> assembly of two answers, and they
+    /// go stale for different reasons. This one costs up to six MusicBrainz
+    /// recording lookups to build — the heaviest request this application makes,
+    /// measured at 10.3 seconds cold — so it is filled the first time somebody
+    /// opens the question rather than by a pass: pre-building it for every
+    /// refused file would put thousands of gated requests inside a run to save a
+    /// wait nobody may ever have.
+    ///
+    /// Holds a serialised <c>RecordingCandidatesResponse</c>, which is the exact
+    /// document the endpoint answers with. Storing the wire shape is what keeps
+    /// a cache hit a single read and a deserialise.
+    /// </remarks>
+    public string? RecordingCandidatesJson { get; set; }
+
+    /// <summary>When <see cref="RecordingCandidatesJson"/> was assembled.</summary>
+    public DateTimeOffset? RecordingCandidatesUtc { get; set; }
+
+    /// <summary>
+    /// When a person settled this file's identity by hand, if one ever did.
+    /// </summary>
+    /// <remarks>
+    /// <b>A guard, not a display column.</b> Every worklist in this application
+    /// is a timestamp being null, and every one of them is deliberately
+    /// re-openable: <c>AcoustIdCheckedUtc</c> and <c>RecordingLookupUtc</c> are
+    /// cleared by hand after a rule changes, so a library can be re-asked
+    /// without re-fingerprinting. That is the right behaviour for an answer a
+    /// rule produced and the wrong one for an answer a person produced — a
+    /// re-ask would quietly overwrite the decision with the same refusal the
+    /// person was answering, and there would be no trace that it had.
+    ///
+    /// So the two passes exclude rows carrying this, in the query and in the
+    /// partial index behind it. Clearing it is how a person changes their mind,
+    /// and it has to be as deliberate as the decision was.
+    ///
+    /// Separate from <see cref="AcoustIdOutcome"/> even though the outcome
+    /// already names the two person-made verdicts, for the reason
+    /// <see cref="AcoustIdTaggedUtc"/> is separate from
+    /// <see cref="AcoustIdCheckedUtc"/>: the outcome says what was concluded and
+    /// this says who is entitled to overwrite it, and folding them together
+    /// would make the guard a list of enum values that grows every time an
+    /// outcome is added.
+    /// </remarks>
+    public DateTimeOffset? IdentityDecidedUtc { get; set; }
+
+    /// <summary>
     /// When this file was last asked what recording it holds.
     /// </summary>
     /// <remarks>
@@ -364,6 +450,23 @@ public sealed class MediaFile
     /// </remarks>
     public int EditionAlternatives { get; set; }
 
+    /// <summary>
+    /// When a person settled this file's album by hand, if one ever did.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IdentityDecidedUtc"/>'s counterpart, and it exists for exactly
+    /// the same reason. Clearing <see cref="ReleaseLookupUtc"/> by hand is the
+    /// documented way to re-attribute a library after a rule change, and that
+    /// one UPDATE would otherwise hand every answered component straight back to
+    /// the rule that could not answer it — overwriting the decision with the
+    /// same refusal the person was answering, leaving no trace that it had.
+    ///
+    /// So the attribution pass excludes rows carrying this, in its worklist and
+    /// in the partial index behind it. Clearing it is how somebody changes their
+    /// mind, and it has to be as deliberate as the decision was.
+    /// </remarks>
+    public DateTimeOffset? ReleaseDecidedUtc { get; set; }
+
     public AudioQuality? Quality { get; set; }
 
     public IntegrityState Integrity { get; set; } = IntegrityState.Unchecked;
@@ -415,6 +518,35 @@ public enum AcoustIdOutcome
     /// existed still read <see cref="Ambiguous"/> until they are asked again.
     /// </remarks>
     BelowThreshold = 5,
+
+    /// <summary>
+    /// A person read the candidate set and chose which recording this is.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Identified"/>, and the distinction is the point: that one
+    /// means a rule cleared a score and a margin, and this one means it did not
+    /// and somebody decided anyway. Reading them back as the same fact would
+    /// lose the only thing that distinguishes an answer that can be recomputed
+    /// from an answer that cannot — and would make a report of how well
+    /// identification performs quietly count the files it failed on.
+    ///
+    /// Always accompanied by <see cref="MediaFile.IdentityDecidedUtc"/>, which
+    /// is what actually protects the row.
+    /// </remarks>
+    IdentifiedByPerson = 6,
+
+    /// <summary>
+    /// A person read the candidate set and said none of it is this audio.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="Unknown"/>, which is AcoustID never having heard
+    /// the audio. Here AcoustID answered, offered recordings, and a person who
+    /// listened to the file rejected all of them — which is a stronger claim
+    /// than either the rule or the provider is in a position to make, and the
+    /// only one that legitimately closes an <see cref="Ambiguous"/> or
+    /// <see cref="BelowThreshold"/> question without an identity.
+    /// </remarks>
+    RejectedByPerson = 7,
 }
 
 /// <summary>
@@ -482,6 +614,94 @@ public enum ReleaseAttributionOutcome
 
     /// <summary>The lookup did not answer. Transient; the file stays on the worklist.</summary>
     LookupFailed = 6,
+
+    /// <summary>
+    /// A person named the release, after the rule refused to.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Attributed"/>, for the reason
+    /// <see cref="AcoustIdOutcome.IdentifiedByPerson"/> is not
+    /// <see cref="AcoustIdOutcome.Identified"/>: one means a fit cleared the
+    /// coverage floor and the drift gate, the other means it did not and
+    /// somebody decided anyway. Folded together, any report of how attribution
+    /// performs would quietly count the components it failed on.
+    /// </remarks>
+    AttributedByPerson = 7,
+
+    /// <summary>
+    /// A person said none of the candidate releases is the one these files came from.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="NoConfidentFit"/> in the same way
+    /// <see cref="AcoustIdOutcome.RejectedByPerson"/> is from
+    /// <see cref="AcoustIdOutcome.Unknown"/>: the rule declining to believe any
+    /// candidate is weaker than a person who looked at them saying so. It closes
+    /// the question, where the refusal leaves it open forever.
+    /// </remarks>
+    NoReleaseByPerson = 8,
+}
+
+/// <summary>
+/// The candidate albums for one refused component, kept rather than thrown away.
+/// </summary>
+/// <remarks>
+/// <b>The evidence half of an attribution refusal, and the mistake
+/// <c>MediaFile.AcoustIdMatchesJson</c> already exists because of, one pass
+/// along.</b> The attribution pass browses every recording in a component,
+/// fetches the track lists worth fetching and ranks the lot — then records the
+/// verdict and discards the candidates. Putting that question back to a person
+/// therefore meant doing all of it again from nothing: measured against a live
+/// mirror, 30 browses plus 8 lookups, up to two minutes and 38 turns at the rate
+/// limit, for an answer the application had already computed.
+///
+/// <b>Its own table, because its key is not a file.</b> Attribution's unit is a
+/// component — a set of files that share a candidate set and are decided together
+/// — and the component's identity is the one <see cref="MediaFile.ReleaseLookupUtc"/>
+/// its files share. There is no row for that anywhere else, and stamping the
+/// same document onto every file in a 59-file component would store it 59 times.
+///
+/// <b>Written only where somebody may ask.</b> A component the pass filed
+/// confidently is not a question, so it gets no row; the table's size is the
+/// number of open album questions, which on the target library is 117.
+/// </remarks>
+public sealed class ReleaseCandidateSet
+{
+    /// <summary>
+    /// The component: the <see cref="MediaFile.ReleaseLookupUtc"/> its files share.
+    /// </summary>
+    /// <remarks>
+    /// The key, and stored to whole microseconds like every other timestamp here
+    /// — the value is written by the pass and read back by an endpoint, and a
+    /// tick PostgreSQL rounded away is a component nobody can look up.
+    /// </remarks>
+    public required DateTimeOffset ComponentUtc { get; init; }
+
+    /// <summary>
+    /// The assembled document, as the endpoint answers with it.
+    /// </summary>
+    /// <remarks>
+    /// The wire shape verbatim, for the reason <see cref="MediaFile.RecordingCandidatesJson"/>
+    /// stores one: a cache hit is then a read and a deserialise, with no second
+    /// type to keep in step with the first.
+    /// </remarks>
+    public required string DocumentJson { get; set; }
+
+    /// <summary>
+    /// How many files were waiting on this component when the document was built.
+    /// </summary>
+    /// <remarks>
+    /// The staleness check, and it catches what a timestamp cannot. A component
+    /// is a <i>set</i>, and the set moves under the document: a scan clears
+    /// <see cref="MediaFile.ReleaseLookupUtc"/> on a file whose bytes changed,
+    /// and a person answering part of a component takes files out of it. Every
+    /// coverage figure in the document is computed against the set that existed
+    /// when it was written, so a different count means the numbers describe a
+    /// component that no longer exists — a miss, not a failure.
+    /// </remarks>
+    public required int Files { get; set; }
+
+    /// <summary>When MusicBrainz was asked. Mirrors the document's own <c>AsOfUtc</c>.</summary>
+    public required DateTimeOffset GatheredUtc { get; set; }
 }
 
 /// <summary>Result of decode-testing a file.</summary>

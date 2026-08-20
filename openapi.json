@@ -541,10 +541,413 @@
           }
         }
       }
+    },
+    "/api/catalogue/matching": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "What the passes refused to decide, as questions for a person.",
+        "description": "One entry per open question: a file no pass could identify, or a set of files no release explained. Refusals that are nobody's decision are left out — a lookup that did not answer is transient and stays on the worklist, a file the pass has not reached is a queue position, and a file the decoder could not read is a question about the file rather than about the music. No candidate answers come back here, because nothing records them — they are recovered on demand, per question: `matching/recordings/{id}/candidates` re-asks AcoustID from the file's stored fingerprint, and `matching/components/{stamp}/candidates` asks MusicBrainz again for a whole refused set.",
+        "operationId": "GetOpenQuestions",
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchingQueueResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/files/{id}": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Everything one file can be told to say about itself.",
+        "description": "What a person needs in front of them while deciding which recording a file holds, and the half the worklist could not carry. Half of it is catalogue — path, size, the length `fpcalc` measured, what each pass concluded — and half of it is read from the bytes on demand: codec, bitrate, sample rate, bit depth, channels, and whatever the file's own tags still claim.\n\n**Separate from the candidate set on purpose.** This costs one header read and no provider request at all, so it answers for every file on the worklist — including the ones whose candidates cannot be recovered, which are most of them. The measured properties are written back to the catalogue as a side effect, since nothing else populates them yet.\n\nNothing here fails the request. An unmounted volume, a moved file or a decoder that refuses the container all come back as an absent `audio` block and a `note` saying which, because a file nothing could read is itself worth knowing about on this screen.",
+        "operationId": "GetMatchingFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectFileResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/recordings/{id}/candidates": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The recordings one file could be, re-asked from its stored fingerprint.",
+        "description": "The candidate set identification weighed and did not record. It is recovered rather than read: the fingerprint is in the catalogue, so AcoustID can be asked the same question again for one request and no disk access at all.\n\n**Answered from the catalogue where it can be.** The identification and enrichment passes store AcoustID's whole answer as they go, and the assembled candidate document is stored the first time anybody asks for it; both are believed for a week. So the ordinary case is a single row read, and the expensive case — one AcoustID turn plus a MusicBrainz recording lookup per candidate, measured at 10.3 seconds each cold — is paid once per file rather than once per click. `refresh=true` skips the stored answer and asks again; `asOfUtc` and `fromCache` say which of the two happened.",
+        "operationId": "GetRecordingCandidates",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingCandidatesResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/recordings/{id}/decision": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "A person's answer to one file's identification question.",
+        "description": "The commit half of `matching/recordings/{id}/candidates`. `answer` is either `recording`, with the MBID chosen, or `none`, which is the person saying the audio is none of the recordings AcoustID named — a stronger claim than the rule was in a position to make, and the only one that closes the question without an identity. Either way the file is marked as decided by a person, which takes it out of the reach of the identification and enrichment worklists: re-asking a library after a rule change must not silently undo an answer somebody gave.\n\nChoosing a recording links it, writes its artists, works and credits into the catalogue exactly as the enrichment pass would, re-asks AcoustID for the cluster that names it, and writes that cluster into the file's tags — subject to `Fonoteca:AllowFileMutation`, whose refusal comes back as `tag: Refused` rather than as an error. The file then joins the attribution worklist by the same rule every enriched file does.",
+        "operationId": "DecideRecordingMatch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/components/{stamp}/candidates": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The albums one refused component could be, gathered again on demand.",
+        "description": "The album-shaped half of the worklist, which used to have no answer at all. `stamp` is the component's identity — the `UtcTicks` of the `ReleaseLookupUtc` every file in it shares, which is the number in the worklist item's `release:` id.\n\n**Gathered live, and nothing caches it.** No candidate set is recorded anywhere, so this browses MusicBrainz for each of the component's distinct recordings, ranks the releases those browses name by how much of the set each holds, and fetches the track lists of the best few to score them with the same `ReleaseFit` the pass uses. Expect seconds rather than milliseconds: it is one gated request per recording plus one per release offered. `browsed` and `recordings` say whether every recording was asked about, and `total` says how many releases were seen before the list was cut.\n\nIt takes no lease and writes nothing, so a slow gather refuses no pass.",
+        "operationId": "GetComponentCandidates",
+        "parameters": [
+          {
+            "name": "stamp",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentCandidatesResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/components/{stamp}/decision": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "A person's answer to one component's album question.",
+        "description": "The commit half of `matching/components/{stamp}/candidates`. `answer` is either `release`, with the MBID chosen, or `none` — the person saying these files came from none of the albums MusicBrainz offered, which closes the question where the pass's refusal leaves it open forever.\n\nChoosing a release writes it, its group and its **whole** track list into the catalogue exactly as the pass would, then links each file the release explains to its own track. Files in the component the release does not explain are left alone and stay on the worklist — a set that was refused as one is not necessarily one album, and filing the remainder under an album that does not list them would be the invention this pass exists to avoid.\n\nNothing on disk is touched: an album is a catalogue fact, so there is no tag write, no `Fonoteca:AllowFileMutation` and no undo journal — only the decision entry. Every file answered is marked as decided by a person, which takes it out of the attribution worklist for good.",
+        "operationId": "DecideComponentMatch",
+        "parameters": [
+          {
+            "name": "stamp",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComponentDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AcoustIdClusterRow": {
+        "required": [
+          "acoustId",
+          "score",
+          "recordings"
+        ],
+        "type": "object",
+        "properties": {
+          "acoustId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "recordings": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "ArtistDetailResponse": {
         "required": [
           "artist",
@@ -832,6 +1235,145 @@
           }
         }
       },
+      "AudioQualityRow": {
+        "required": [
+          "codec",
+          "bitrateKbps",
+          "sampleRateHz",
+          "bitDepth",
+          "channels",
+          "lossless",
+          "tier"
+        ],
+        "type": "object",
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "bitrateKbps": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sampleRateHz": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bitDepth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "channels": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lossless": {
+            "type": "boolean"
+          },
+          "tier": {
+            "type": "string"
+          }
+        }
+      },
+      "CandidateAppearance": {
+        "required": [
+          "releaseId",
+          "title",
+          "released",
+          "country",
+          "status",
+          "primaryType",
+          "discNumber",
+          "trackPosition",
+          "trackNumber",
+          "trackCount"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "released": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "country": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "primaryType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "discNumber": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "trackPosition": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "trackNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trackCount": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "CandidatePerformer": {
+        "required": [
+          "role",
+          "name",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "CatalogueCounts": {
         "required": [
           "files",
@@ -856,6 +1398,332 @@
           "artists": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "ComponentCandidateRow": {
+        "required": [
+          "mbid",
+          "title",
+          "artist",
+          "year",
+          "country",
+          "status",
+          "primaryType",
+          "secondaryTypes",
+          "formats",
+          "trackCount",
+          "discCount",
+          "filesExplained",
+          "coverage",
+          "meanDriftMs",
+          "official",
+          "slots"
+        ],
+        "type": "object",
+        "properties": {
+          "mbid": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "country": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "primaryType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "formats": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "discCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "filesExplained": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "coverage": {
+            "type": "number",
+            "format": "double"
+          },
+          "meanDriftMs": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "official": {
+            "type": "boolean"
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentSlotRow"
+            }
+          }
+        }
+      },
+      "ComponentCandidatesResponse": {
+        "required": [
+          "stamp",
+          "asOfUtc",
+          "fromCache",
+          "files",
+          "recordings",
+          "browsed",
+          "total",
+          "minimumCoverage",
+          "maximumDriftMs",
+          "candidates",
+          "fileList"
+        ],
+        "type": "object",
+        "properties": {
+          "stamp": {
+            "type": "string"
+          },
+          "asOfUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fromCache": {
+            "type": "boolean"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recordings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "browsed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minimumCoverage": {
+            "type": "number",
+            "format": "double"
+          },
+          "maximumDriftMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentCandidateRow"
+            }
+          },
+          "fileList": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentFileRow"
+            }
+          }
+        }
+      },
+      "ComponentDecisionRequest": {
+        "required": [
+          "answer",
+          "release"
+        ],
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "release": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "ComponentDecisionResponse": {
+        "required": [
+          "stamp",
+          "outcome",
+          "release",
+          "title",
+          "decided",
+          "stillOpen",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "stamp": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "release": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "decided": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stillOpen": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "ComponentFileRow": {
+        "required": [
+          "id",
+          "path",
+          "title",
+          "duration"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ComponentSlotRow": {
+        "required": [
+          "discNumber",
+          "position",
+          "number",
+          "title",
+          "duration",
+          "measured",
+          "driftMs",
+          "path",
+          "sizeBytes"
+        ],
+        "type": "object",
+        "properties": {
+          "discNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "number": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "measured": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "driftMs": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "path": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sizeBytes": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -1009,6 +1877,21 @@
           "sizeBytes": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "FileTagRow": {
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
           }
         }
       },
@@ -1298,6 +2181,39 @@
           }
         }
       },
+      "MatchingQueueResponse": {
+        "required": [
+          "total",
+          "kinds",
+          "reasons",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenQuestionCount"
+            }
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenQuestionCount"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenQuestion"
+            }
+          }
+        }
+      },
       "MusicBrainzHealthResponse": {
         "required": [
           "server",
@@ -1354,6 +2270,83 @@
           "Rejected"
         ]
       },
+      "OpenQuestion": {
+        "required": [
+          "id",
+          "kind",
+          "reason",
+          "subject",
+          "folders",
+          "files",
+          "length",
+          "size",
+          "format"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "length": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "size": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "format": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "OpenQuestionCount": {
+        "required": [
+          "name",
+          "questions",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "questions": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "OutcomeCount": {
         "required": [
           "outcome",
@@ -1399,6 +2392,232 @@
             ]
           },
           "instance": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RecordingCandidateRow": {
+        "required": [
+          "mbid",
+          "title",
+          "artist",
+          "disambiguation",
+          "length",
+          "score",
+          "sources",
+          "clusters",
+          "release",
+          "drift",
+          "firstReleased",
+          "work",
+          "isrcs",
+          "performers",
+          "appearances",
+          "releases"
+        ],
+        "type": "object",
+        "properties": {
+          "mbid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "disambiguation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "length": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "sources": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "clusters": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "release": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "drift": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "firstReleased": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "work": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isrcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "performers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CandidatePerformer"
+            }
+          },
+          "appearances": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CandidateAppearance"
+            }
+          }
+        }
+      },
+      "RecordingCandidatesResponse": {
+        "required": [
+          "mediaFileId",
+          "measured",
+          "clusters",
+          "total",
+          "candidates",
+          "asOfUtc",
+          "fromCache"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaFileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "measured": {
+            "type": "string"
+          },
+          "clusters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcoustIdClusterRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordingCandidateRow"
+            }
+          },
+          "asOfUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fromCache": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RecordingDecisionRequest": {
+        "required": [
+          "answer",
+          "recording"
+        ],
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "recording": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "RecordingDecisionResponse": {
+        "required": [
+          "mediaFileId",
+          "outcome",
+          "enrichment",
+          "recording",
+          "title",
+          "acoustId",
+          "tag",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaFileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "enrichment": {
+            "type": "string"
+          },
+          "recording": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "acoustId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "detail": {
             "type": [
               "null",
               "string"
@@ -1598,6 +2817,136 @@
             "items": {
               "$ref": "#/components/schemas/FileRow"
             }
+          }
+        }
+      },
+      "SubjectFileResponse": {
+        "required": [
+          "mediaFileId",
+          "path",
+          "folder",
+          "name",
+          "format",
+          "sizeBytes",
+          "size",
+          "measured",
+          "duration",
+          "audio",
+          "identification",
+          "enrichment",
+          "attribution",
+          "acoustId",
+          "tagged",
+          "fingerprinted",
+          "integrity",
+          "lastScannedUtc",
+          "recording",
+          "release",
+          "tags",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaFileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "size": {
+            "type": "string"
+          },
+          "measured": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "audio": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AudioQualityRow"
+              }
+            ]
+          },
+          "identification": {
+            "type": "string"
+          },
+          "enrichment": {
+            "type": "string"
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "acoustId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "tagged": {
+            "type": "boolean"
+          },
+          "fingerprinted": {
+            "type": "boolean"
+          },
+          "integrity": {
+            "type": "string"
+          },
+          "lastScannedUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "recording": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "release": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileTagRow"
+            }
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
