@@ -1,0 +1,40 @@
+/*
+ * The application owns the viewport; the document does not scroll.
+ *
+ * `AppShell` is a fixed frame — a rail, a top bar, a scrolling content column
+ * and a transport row — and `.main` is the only thing in it that scrolls. That
+ * only holds if the shell is exactly as tall as the client box, and viewport
+ * units are not a reliable way to say that in a browser with classic,
+ * space-taking scrollbars:
+ *
+ * - `100dvh` is measured against the viewport INCLUDING the strip a horizontal
+ *   scrollbar sits in, so the moment anything overflows sideways the shell is a
+ *   scrollbar's height too tall and the document grows a vertical scrollbar of
+ *   its own — beside the one `.main` already has.
+ * - At any zoom other than 100%, or on a display whose scale factor is not a
+ *   whole number, the client height is fractional and `100dvh` rounds the other
+ *   way. A sub-pixel overflow still draws a full scrollbar.
+ *
+ * A percentage chain has neither problem: it resolves against the initial
+ * containing block, which is the client box, exactly, at every zoom. `overflow:
+ * hidden` on the body is then the guarantee rather than the mechanism — with
+ * the chain correct nothing overflows, and if something ever does it must not
+ * be able to bring the second scrollbar back.
+ *
+ * Loaded after `@fonoteca/ui/reset.css` because it overrides it. The reset is
+ * the design system's and is right for documents that flow — Storybook's own
+ * page is one — so the override belongs here, in the one application that is a
+ * fixed frame rather than a page.
+ */
+html,
+body,
+#root {
+  block-size: 100%;
+}
+
+body {
+  /* The reset's `min-block-size: 100dvh`, which is the second of the two
+     viewport measurements above and would overflow the html element by itself. */
+  min-block-size: 0;
+  overflow: hidden;
+}

@@ -1,5 +1,5 @@
 import type { components } from '@fonoteca/api-client'
-import { Badge, Input, Stack, Text } from '@fonoteca/ui'
+import { Badge, CatalogueCard, CatalogueGrid, Input, Stack, Text } from '@fonoteca/ui'
 import { Link } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
@@ -86,13 +86,16 @@ export function ArtistsPage() {
         state.data.items.length === 0 ? (
           <Empty filtered={query.length > 0} />
         ) : (
-          <ul className={styles.list}>
+          /*
+            No `size` prop: the grid reads its own contents, and everything in
+            it is an artist card. Pinning it would state the same fact twice
+            and be the copy that goes stale.
+          */
+          <CatalogueGrid aria-label="Artists">
             {state.data.items.map((artist) => (
-              <li key={artist.id}>
-                <ArtistCard artist={artist} />
-              </li>
+              <ArtistCard key={artist.id} artist={artist} />
             ))}
-          </ul>
+          </CatalogueGrid>
         )
       ) : null}
     </Stack>
@@ -146,39 +149,57 @@ function Empty({ filtered }: { readonly filtered: boolean }) {
   )
 }
 
+/**
+ * One artist, as a tile.
+ *
+ * `render` rather than `href`: the design system has no router and will not
+ * grow one, so the caller owns the element. Every prop it is handed has to be
+ * spread onto the `Link` — the `data-catalogue-card` attribute among them is
+ * what the grid sizes its columns by, and dropping it would silently give the
+ * whole page the album width.
+ */
 function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
   return (
-    <Link
-      to="/library/artists/$artistId"
-      params={{ artistId: artist.id }}
-      className={styles.artist}
-    >
-      <Stack direction="column" gap={2}>
-        <Text weight="medium" truncate>
-          {artist.name}
-        </Text>
-        {artist.disambiguation != null ? (
-          <Text size="xs" tone="tertiary" truncate>
-            {artist.disambiguation}
-          </Text>
-        ) : null}
-      </Stack>
+    <CatalogueCard
+      variant="artist"
+      title={artist.name}
+      /*
+        The count and nothing else. It is on every artist, it is what says
+        whether a name is a whole shelf or one guest appearance, and it is
+        short enough to survive a tile — the subtitle truncates to one line,
+        so anything sharing it with the count is shown as a fragment or not
+        at all.
+      */
+      subtitle={`${artist.trackCount.toLocaleString()} tracks`}
+      meta={
+        <>
+          {/*
+            The type is worth the space on a library like this one: it is what
+            tells an orchestra from the person conducting it at a glance, and
+            those sit next to each other in an alphabetical list.
+          */}
+          {artist.type != null && artist.type !== 'Person' ? (
+            <Badge tone="neutral" size="sm">
+              {artist.type}
+            </Badge>
+          ) : null}
 
-      <Stack gap={8} align="center">
-        {/*
-          The type is worth the space on a library like this one: it is what
-          tells an orchestra from the person conducting it at a glance, and
-          those sit next to each other in an alphabetical list.
-        */}
-        {artist.type != null && artist.type !== 'Person' ? (
-          <Badge tone="neutral" size="sm">
-            {artist.type}
-          </Badge>
-        ) : null}
-        <Text size="sm" tone="tertiary" family="mono">
-          {artist.trackCount.toLocaleString()}
-        </Text>
-      </Stack>
-    </Link>
+          {/*
+            The disambiguation, wrapping rather than truncating. It is the only
+            thing telling two artists of the same name apart, so half of it is
+            worth less than all of it on two lines — and it is rare enough that
+            the tiles it makes taller are a handful in a page.
+          */}
+          {artist.disambiguation != null ? (
+            <Text size="xs" tone="tertiary">
+              {artist.disambiguation}
+            </Text>
+          ) : null}
+        </>
+      }
+      render={(props) => (
+        <Link {...props} to="/library/artists/$artistId" params={{ artistId: artist.id }} />
+      )}
+    />
   )
 }

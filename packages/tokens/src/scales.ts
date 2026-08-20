@@ -105,6 +105,19 @@ export const density = {
   toolbarHeight: '44px',
   /** Reserved for the future playback transport bar. See the plan's playback section. */
   transportHeight: '72px',
+  /**
+   * Shell metrics, here for the same reason the row heights are: the sidebar's
+   * width is a number the layout has to agree on in more than one place — the
+   * grid track and the narrow-viewport breakpoint below which that track stops
+   * being affordable.
+   */
+  sidebarWidth: '224px',
+  /**
+   * The reading width of the centred content column. Wide enough for the
+   * catalogue grids to fit several tiles per row, narrow enough that a line of
+   * prose on a 2560px monitor is still a line and not a paragraph-long ruler.
+   */
+  contentMaxWidth: '1120px',
 } as const
 
 export const duration = {

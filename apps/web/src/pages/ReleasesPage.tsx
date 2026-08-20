@@ -1,5 +1,5 @@
 import type { components } from '@fonoteca/api-client'
-import { Badge, Input, Stack, Text } from '@fonoteca/ui'
+import { Badge, CatalogueCard, CatalogueGrid, Input, Stack, Text } from '@fonoteca/ui'
 import { Link } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
@@ -88,13 +88,11 @@ export function ReleasesPage() {
         state.data.items.length === 0 ? (
           <Empty filtered={query.length > 0} />
         ) : (
-          <ul className={styles.list}>
+          <CatalogueGrid aria-label="Albums">
             {state.data.items.map((release) => (
-              <li key={release.id}>
-                <ReleaseCard release={release} />
-              </li>
+              <ReleaseCard key={release.id} release={release} />
             ))}
-          </ul>
+          </CatalogueGrid>
         )
       ) : null}
     </Stack>
@@ -190,38 +188,45 @@ function ReleaseCard({ release }: { readonly release: ReleaseSummary }) {
   const partial = release.held < release.trackCount
 
   return (
-    <Link
-      to="/library/releases/$releaseId"
-      params={{ releaseId: release.id }}
-      className={styles.release}
-    >
-      <Stack direction="column" gap={2}>
-        <Text weight="medium" truncate>
-          {release.title}
-        </Text>
-        <Text size="xs" tone="tertiary" truncate>
-          {[release.artist, release.year?.toString(), release.formats]
-            .filter(Boolean)
-            .join(' · ') || 'No credited artist'}
-        </Text>
-      </Stack>
+    <CatalogueCard
+      variant="album"
+      title={release.title}
+      /*
+        The artist alone on this line. The row this replaced ran artist, year
+        and format together, and at tile width that sentence truncates in the
+        middle of the year — so the two facts that are short enough to always
+        fit have moved down to the meta row, where they do.
+      */
+      subtitle={release.artist ?? 'No credited artist'}
+      meta={
+        <>
+          <Text size="xs" tone="tertiary" family="mono">
+            {[release.year?.toString(), release.formats].filter(Boolean).join(' · ')}
+          </Text>
 
-      <Stack gap={8} align="center">
-        {certainty !== undefined && certainty.tone !== 'ok' ? (
-          <Badge tone={certainty.tone === 'warning' ? 'warning' : 'neutral'} size="sm">
-            {certainty.label}
+          {/*
+            Held against printed, so a part-ripped album reads as one at a glance.
+            Tracks rather than files — an album held twice over in two encodings is
+            still the same half of an album.
+
+            A badge rather than the bare text the row used: next to the year it
+            would otherwise read as a second number in the same sentence.
+          */}
+          <Badge tone={partial ? 'warning' : 'neutral'} size="sm" mono>
+            {release.held}/{release.trackCount}
           </Badge>
-        ) : null}
 
-        {/*
-          Held against printed, so a part-ripped album reads as one at a glance.
-          Tracks rather than files — an album held twice over in two encodings is
-          still the same half of an album.
-        */}
-        <Text size="sm" tone={partial ? 'warning' : 'tertiary'} family="mono">
-          {release.held}/{release.trackCount}
-        </Text>
-      </Stack>
-    </Link>
+          {/* Last, so that when the row wraps it is the badge that moves. */}
+          {certainty !== undefined && certainty.tone !== 'ok' ? (
+            <Badge tone={certainty.tone === 'warning' ? 'warning' : 'neutral'} size="sm">
+              {certainty.short}
+            </Badge>
+          ) : null}
+        </>
+      }
+      render={(props) => (
+        <Link {...props} to="/library/releases/$releaseId" params={{ releaseId: release.id }} />
+      )}
+    />
   )
 }

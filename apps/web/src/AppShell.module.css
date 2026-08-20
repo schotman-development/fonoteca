@@ -1,7 +1,8 @@
 /*
  * The application shell.
  *
- * Three rows: header, scrollable content, and a RESERVED transport row.
+ * A navigation rail down the inline-start edge, a top bar and a scrollable
+ * content column beside it, and a RESERVED transport row spanning both.
  *
  * The transport row is the cheap half of supporting playback later. A player
  * has to persist across navigation, which means it must live outside whatever
@@ -10,50 +11,118 @@
  * zero height until something occupies it.
  */
 
+/*
+ * A definite height, not `min-height`, and it changed when the transport
+ * stopped being empty. With an indefinite height the 1fr row grows to its
+ * content, the shell grows with it, and the transport ends up at the bottom of
+ * the *document* — a player bar that scrolls away, which is the one thing a
+ * player bar may not do. A definite height makes 1fr mean "whatever is left",
+ * which is what `.main { overflow-y: auto }` was always written for.
+ *
+ * `100%` and not `100dvh`, which is the whole of app.css: a viewport unit is
+ * measured against a box that a classic scrollbar or a fractional zoom can make
+ * taller than the client box, and a shell one pixel too tall gives the document
+ * a second scrollbar beside the one `.main` already has. The percentage
+ * resolves against `#root`, which app.css chains up to the client box exactly.
+ *
+ * The transport spans both columns rather than sitting beside the rail: it
+ * controls the application, not the view, and a bar that stops short of one
+ * edge reads as belonging to whatever it stops at.
+ */
 .shell {
   display: grid;
+  grid-template-columns: var(--density-sidebar-width) 1fr;
   grid-template-rows: auto 1fr auto;
-  min-height: 100dvh;
+  block-size: 100%;
   background-color: var(--color-surface-base);
 }
 
-.header {
+/* Rows 1 and 2: the rail runs past the top bar, which starts where the content
+   column starts. The rail is beside the whole view, not under a strip of it. */
+.sidebar {
+  grid-column: 1;
+  grid-row: 1 / 3;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-16);
-  height: var(--density-toolbar-height);
-  padding-inline: var(--space-16);
-  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+  flex-direction: column;
+  gap: var(--space-24);
+  padding: var(--space-16) var(--space-12);
+  border-inline-end: var(--border-width-thin) solid var(--color-border-subtle);
   background-color: var(--color-surface-raised);
-  position: sticky;
-  top: 0;
-  z-index: var(--z-index-sticky);
+  /* The rail scrolls on its own when the link list outgrows a short viewport,
+     for the same reason `.main` does — and needs the same minimum override,
+     since its automatic minimum is its content. */
+  overflow-y: auto;
+  min-block-size: 0;
 }
 
 .brand {
   display: flex;
   align-items: baseline;
   gap: var(--space-8);
+  padding-inline: var(--space-8);
 }
 
 .nav {
   display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  margin-inline-end: auto;
-  margin-inline-start: var(--space-16);
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 /*
- * The current page is marked by a rule under it AND by aria-current, not by
- * colour alone — the same discipline as Badge. A 2px underline survives
- * greyscale, a slightly darker grey does not.
+ * The top bar. Its middle column is `1fr` between two equal `1fr` sides, which
+ * is what centres the command bar on the content column below rather than in
+ * whatever space the theme switch leaves over — the empty start cell exists
+ * only to be that counterweight.
+ */
+.topbar {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  /* The middle track is the command bar's width, not the content column's: a
+     1120px search field reads as a page element rather than as a control. It is
+     the track and not the child that is capped, so the two `1fr` sides stay
+     equal and the centring holds. */
+  grid-template-columns: 1fr minmax(0, 420px) 1fr;
+  align-items: center;
+  gap: var(--space-16);
+  min-block-size: var(--density-toolbar-height);
+  padding: var(--space-8) var(--space-24);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-raised);
+}
+
+/* Empty, and load-bearing: it is the counterweight described above. */
+.topbarStart {
+  min-inline-size: 0;
+}
+
+.topbarCentre {
+  display: flex;
+  justify-content: center;
+  min-inline-size: 0;
+}
+
+.topbarEnd {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+}
+
+/*
+ * The current page is marked by a rule beside it AND by aria-current, not by
+ * colour alone — the same discipline as Badge. A 2px marker survives
+ * greyscale, a slightly darker grey does not. It moved from the block end to
+ * the inline start with the nav itself: an underline under a stacked link
+ * reads as a separator between two links rather than as a mark on one.
+ *
+ * The border is on every link, transparent when inactive, so becoming current
+ * does not shift the text sideways.
  */
 .navLink {
+  display: block;
   padding: var(--space-6) var(--space-8);
-  border-block-end: var(--border-width-thick) solid transparent;
-  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  border-inline-start: var(--border-width-thick) solid transparent;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
@@ -67,7 +136,7 @@
 
 .navLink[data-current="page"] {
   color: var(--color-text-primary);
-  border-block-end-color: var(--color-accent-solid);
+  border-inline-start-color: var(--color-accent-solid);
 }
 
 .navLink:focus-visible {
@@ -76,16 +145,114 @@
 }
 
 .main {
-  padding: var(--space-24) var(--space-16);
+  grid-column: 2;
+  grid-row: 2;
+  padding: var(--space-24);
   overflow-y: auto;
+  /* A grid item's automatic minimum is its content, which would push the row
+     past the viewport again and undo the line above. */
+  min-block-size: 0;
+}
+
+/*
+ * The centred column. The cap is on this element and not on `.main` because
+ * `.main` is the scroll container: capping it would centre the scrollbar in
+ * the window too, and pull it away from the edge the pointer throws itself at.
+ */
+.content {
+  max-inline-size: var(--density-content-max-width);
+  margin-inline: auto;
 }
 
 /*
  * Reserved for the playback transport. Empty and zero-height today; when a
  * player exists it renders here and every view keeps working unchanged.
  */
+.transport {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
 .transport:not(:empty) {
   height: var(--density-transport-height);
   border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
   background-color: var(--color-surface-raised);
+}
+
+/*
+ * Below roughly twice the rail's width there is no content column left worth
+ * centring, so the rail lies back down as a top bar — which is what it was.
+ * The active marker returns to the block end with it: an inline-start border
+ * on a horizontal row of links marks the gap between them, not the link.
+ */
+@media (width <= 640px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  .sidebar {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-16);
+    min-block-size: var(--density-toolbar-height);
+    padding: 0 var(--space-16);
+    border-inline-end: none;
+    border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .brand {
+    padding-inline: 0;
+    /* The wordmark is the one thing that may be scrolled off; the links are
+       what the bar is for. */
+    flex: 0 0 auto;
+  }
+
+  .nav {
+    flex-direction: row;
+    gap: var(--space-4);
+    margin-inline-end: auto;
+  }
+
+  .navLink {
+    border-inline-start-width: 0;
+    border-block-end: var(--border-width-thick) solid transparent;
+    border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+    white-space: nowrap;
+  }
+
+  .navLink[data-current="page"] {
+    border-block-end-color: var(--color-accent-solid);
+  }
+
+  /*
+   * Two columns, not three: the centre track's counterweight is a luxury of a
+   * wide viewport. Here the command bar takes the room that is left and the
+   * theme switch keeps its own — a centred 420px field with two 0px sides is
+   * not centred, it is just narrow.
+   */
+  .topbar {
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: var(--space-8) var(--space-16);
+  }
+
+  .topbarStart {
+    display: none;
+  }
+
+  .main {
+    grid-column: 1;
+    grid-row: 3;
+    padding: var(--space-16);
+  }
+
+  .transport {
+    grid-row: 4;
+  }
 }

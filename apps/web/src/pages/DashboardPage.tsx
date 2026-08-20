@@ -1,4 +1,4 @@
-import { Badge, Card, Stack, Text } from '@fonoteca/ui'
+import { Card, Stack, Text } from '@fonoteca/ui'
 import { useReducer } from 'react'
 
 import { AttributionPanel } from '../components/AttributionPanel.tsx'
@@ -67,26 +67,6 @@ export function DashboardPage() {
 
         <Card title="Realtime — SignalR">
           <JobsPanel />
-        </Card>
-
-        <Card title="Design system">
-          <Stack direction="column" gap={12}>
-            <Text size="sm" tone="secondary" block>
-              Components come from <code>@fonoteca/ui</code>, styled entirely with tokens from{' '}
-              <code>@fonoteca/tokens</code>. Toggling the theme above re-renders every one of them,
-              including this card.
-            </Text>
-            <Stack gap={6} wrap>
-              <Badge tone="success" mono>
-                FLAC 24/96
-              </Badge>
-              <Badge tone="neutral" mono>
-                MP3 320
-              </Badge>
-              <Badge tone="warning">Upgrade available</Badge>
-              <Badge tone="danger">3 duplicates</Badge>
-            </Stack>
-          </Stack>
         </Card>
       </div>
     </Stack>
