@@ -94,7 +94,20 @@ builder.Services.AddSingleton<IAudioFingerprinter>(sp => new FpcalcFingerprinter
     sp.GetRequiredService<FileSystemAudioFileStore>(),
     sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FpcalcPath));
 
+// The third tool, and the only thing here qualified to measure audio: a tag
+// library asked about a VBR MP3 answers with the first frame's bitrate, and
+// asked about a truncated FLAC answers off an intact header. See IAudioProbe.
+builder.Services.AddSingleton<IAudioProbe>(sp => new FfprobeAudioProbe(
+    sp.GetRequiredService<FileSystemAudioFileStore>(),
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfprobePath));
+
 builder.Services.AddSingleton<TagReader>();
+
+// The read that answers "what is this file", as opposed to the read that
+// authorises a write. Separate from TagReader because its contract is the
+// opposite one: it never throws, it truncates, and nothing is decided from it —
+// it is what the manual matching screen puts in front of a person.
+builder.Services.AddSingleton<AudioFileDescriber>();
 
 // The one switch that decides whether this process may modify a file at all.
 // It is read here, once, so Fonoteca.Tagging never learns what FonotecaOptions
