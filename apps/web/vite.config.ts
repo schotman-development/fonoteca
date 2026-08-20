@@ -4,6 +4,10 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Listen on every interface, not just loopback, so the UI can be opened
+    // from a phone or another machine on the LAN. The API must be reachable
+    // too — see VITE_API_BASE_URL in api.ts and Fonoteca__CorsOrigins.
+    host: true,
     port: 5173,
     strictPort: true,
   },

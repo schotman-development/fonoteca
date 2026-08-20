@@ -85,11 +85,18 @@ done
 echo " ${status:-unknown}"
 
 echo "==> api        http://localhost:5088"
+# Bound to 0.0.0.0, not localhost, to match the Vite dev server: the browser
+# calls the API directly rather than through Vite, so viewing the UI from
+# another device needs both listening off-loopback. There is no authentication
+# yet — keep the firewall scoped to the LAN.
 ASPNETCORE_ENVIRONMENT=Development \
   dotnet watch --project apps/api/src/Fonoteca.Api --non-interactive \
-  run --no-launch-profile --urls http://localhost:5088 &
+  run --no-launch-profile --urls http://0.0.0.0:5088 &
 pids+=($!)
 
+# @fonoteca/tokens is built first, by the predev/prestorybook hooks in the two
+# packages that consume it — vite does not build workspace dependencies, and
+# tokens.css is generated into a gitignored dist/.
 echo "==> web        http://localhost:5173"
 pnpm --filter @fonoteca/web dev &
 pids+=($!)
