@@ -19,8 +19,11 @@ recordings, works, artists — and `/library` browses it. The **attribution pass
 then decides which release each file came from, from the audio alone, and
 `/library/releases` browses that.
 
-Still missing: hashing, probing (`AudioQuality` is never populated), and
-downloading.
+Still missing: hashing, downloading, and probing as a *pass*. There **is** now a
+probe — `IAudioProbe` over `ffprobe` — but the only thing that calls it is
+`GET /api/catalogue/matching/files/{id}`, one file at a time, when somebody opens
+it. `AudioQuality` therefore fills in gradually rather than being populated by a
+run over the library.
 
 ## Toolchain
 
@@ -352,6 +355,436 @@ remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
   candidate-by-candidate trace against the real mirror. Artists with a shallower
   compilation history (Bonamassa, Ella Fitzgerald's albums) come out right.
 
+### The worklist of refusals
+
+`GET /api/catalogue/matching` reads the three passes' outcome columns back as
+questions for a person, and `/library/matching` renders it. **No candidate set is
+recorded anywhere**, so what is open and what could answer it are two different
+problems. The list shows what is open — as a summary, grouped by refusal and
+collapsed, rather than as the seven hundred rows it started as. Three of the
+seven refusals also get an answer, because their candidates can be recovered:
+the two identification ones from the file's stored fingerprint, and
+`NoConfidentFit` by asking MusicBrainz again.
+
+`GET /api/catalogue/matching/recordings/{id}/candidates` is that re-ask.
+`MediaFile.Fingerprint` is stored, so the expensive half of identification —
+decoding audio — is already paid, and AcoustID can be asked the same question for
+one request and no disk access. It is the same reason re-asking a whole library
+after a rule change costs turns at the rate limit rather than hours of `fpcalc`.
+
+**It is answered from the catalogue where it can be.** It began as a pure
+recovery that persisted nothing, and that was one lookup too expensive to keep:
+opening the same question twice cost an AcoustID turn plus a MusicBrainz
+recording lookup per candidate — the heaviest request this application makes,
+measured at 10.3 seconds cold — so returning to a file cost as much as reaching
+it. Two caches now sit under it, both believed for a week
+(`CatalogueEndpoints.CacheDuration`):
+
+- **`MediaFile.AcoustIdMatchesJson` is the provider's own answer**, written by
+  the identification pass, the enrichment pass, and either endpoint when it finds
+  the stored copy stale. It is what the catalogue used to throw away — recording
+  the verdict and discarding the evidence is why working out what 951 withheld
+  files actually were cost 951 turns at the rate limit.
+- **`MediaFile.RecordingCandidatesJson` is the assembled document**, filled the
+  first time somebody opens the question — and, since the wait turned out to be
+  one somebody pays on every row of a seven-hundred-row worklist, filled ahead of
+  that click by `CandidateWarmService`. It is not a pass and takes no gate: a
+  `BackgroundService` that puts every open question to *the endpoints themselves*
+  every fifteen minutes, in the order the screen lists them, and stops for the
+  rest of the sweep the moment a pass takes `LibraryWorkGate`. Measured cold on
+  the target library, a recording question is 24s and a large component over two
+  minutes; warmed, both are around 10ms. Two things make it safe to repeat
+  forever: it assembles nothing itself — a warmer with its own copy of the
+  ranking would be free to drift from the document a person reads — and an item
+  whose cache is fresh comes back `fromCache` without touching a provider, so a
+  warm sweep is one query per kind and a row read per question.
+  `Fonoteca:WarmCandidates` turns it off, which is what the integration tests do:
+  it would otherwise put its own questions to their stubs out of a thread nothing
+  waits for. Three things it must keep doing: it stops for `LibraryScanService`
+  as well as for the gate, because the scan is the thing that *clears* these
+  columns and has never been on the gate — a sweep's read-modify-write spans a
+  full AcoustID turn and up to six MusicBrainz lookups, long enough to land a
+  document computed from audio that is gone. It counts a candidate set where
+  nothing could be named as a failure and gives up after three: the endpoint
+  stores a title-less document on purpose, which is right for a person who can
+  see it and press refresh, and unattended is an outage written across the whole
+  worklist and believed for a week with AcoustID still answering. And nothing in
+  it may throw — an unhandled exception out of a `BackgroundService` stops the
+  host by default, so a transient database error would take the API down to save
+  a cache nobody is waiting for.
+- **The enrichment memo holds AcoustID's answer, not the recording it collapses
+  to.** Five encodings of one track still cost one lookup; the change is that all
+  five rows keep the evidence rather than only the one that asked, which is what
+  keeps the cache from having a gap with no explanation in it.
+- **What is cached is answers, never rankings.** `RecordingCandidates` and
+  `AcoustIdSelection` collapse the same evidence in opposite directions and both
+  have changed since they were written. Clusters, scores and the links between
+  them are facts; caching a rule's output would leave the cache quietly wrong the
+  day the rule changed, with nothing to notice it.
+- **A malformed entry is a cache miss, not a failure.** A cache must not be able
+  to break the thing it makes faster; the most a bad row may cost is the request
+  it was there to save.
+- **The scan clears both, and it has to.** Freshness is checked *before* the
+  endpoint checks for a fingerprint, so a stale entry does not go unused — it
+  answers. Left behind, opening a replaced file would offer the recordings the
+  previous audio matched, and committing one would write that cluster into the
+  new bytes.
+- **The enrichment memo is keyed on the cluster, so a file with no fingerprint
+  must not write to it.** It cannot be asked about without reopening it, which
+  the pass does not do — but that is a fact about one file's columns, not about
+  the cluster, and recorded against the cluster it makes the next file to share
+  one inherit an emptiness nobody asked for, skip its lookup, and cache that
+  emptiness for a week.
+- **`asOfUtc` and `fromCache` come back with it, and `?refresh=true` skips it.**
+  A candidate list is evidence, and evidence with an unstated age is what makes a
+  person distrust the screen when a score does not match MusicBrainz today.
+- **The stamp is floored to whole microseconds** before it is stored, or the
+  answer that filled the cache and the identical answer read back out of it
+  report different `asOfUtc` values. The scan's oldest lesson, second place.
+
+- **It is still a recovery rather than a record of what the pass saw.** The
+  answer can differ from the one that produced the refusal — AcoustID's data
+  moves, and a week is long enough for it to. That is honest rather than awkward:
+  the screen is asking what the audio matches *now*, and saying when it asked.
+- **`RecordingCandidates` ranks it, and that is not the rule that refused.**
+  `AcoustIdSelection` compares *clusters*, and its own remarks record that
+  reaching for `RecordingCandidates` there breaks 64 of 200 files. So the raw
+  clusters come back beside the collapsed list, unaggregated, and the count of
+  clusters per recording is on each row — two near-tied scores naming one
+  recording are one answer arriving twice, which is the commonest reason a
+  near-tie is not the disagreement it looks like.
+- **Six candidates, because each is the heaviest lookup here.**
+  `GetRecordingAsync` includes artists, credits, releases, release groups, media,
+  ISRCs and two relationship kinds — the request measured at 10.3s cold. The full
+  count comes back as `Total`, so a cut set says so.
+- **Only `Ambiguous` and `BelowThreshold` are asked about here.** `Unknown` is
+  audio AcoustID has never heard and `NoRecording` is a cluster MusicBrainz links
+  nothing to, so re-asking spends a turn to reconfirm an emptiness the catalogue
+  already holds. `NoConfidentFit` has its own endpoint below, because its unit is
+  a component rather than a file.
+
+`POST /api/catalogue/matching/recordings/{id}/decision` is the commit, and it is
+the only path in the application that writes an audio file on a person's say-so.
+
+- **What crosses the boundary is a recording, not a cluster.** The candidate list
+  names recordings; the thing written into the file's bytes is an AcoustID. The
+  endpoint re-asks AcoustID and picks the highest-scoring cluster naming the
+  chosen recording, rather than taking an identifier from the request body — the
+  one irreversible write in the system should not be authorised by a form post.
+  It costs a second turn at the rate limit on a click somebody deliberately made.
+  `TheClusterWrittenIsTheOneThatNamesTheChosenRecording` stubs the rival cluster
+  *higher*, so anything that ranks by score alone fails.
+- **The recording is linked even when no cluster survives.** AcoustID's data
+  moves between the question and the answer. The link is a fact about MusicBrainz
+  and stands on its own; what is lost is the tag, and that comes back as
+  `tag: NotAttempted` with the reason rather than as a failure.
+- **`answer` is a named field, not an inference from a missing MBID.** An empty
+  body would otherwise deserialise into a person rejecting every candidate — a
+  decision that then outranks every pass and can only be undone by hand.
+- **Two outcomes a pass can never write.** `IdentifiedByPerson` is not
+  `Identified`: one means a rule cleared a score and a margin and the other means
+  it did not and somebody decided anyway, and folding them would make any report
+  of how identification performs quietly count the files it failed on.
+  `RejectedByPerson` is not `Unknown`: AcoustID answered and offered recordings,
+  and somebody who listened rejected them — a stronger claim than the provider is
+  in a position to make.
+- **`MediaFile.IdentityDecidedUtc` is the guard, and it is why there is a
+  column rather than just an enum value.** Clearing `AcoustIdCheckedUtc` by hand
+  is the documented way to re-ask a library after a rule change, and that same
+  UPDATE would hand every answered file back to the rule that could not answer
+  it. Both passes' worklists and both partial indexes exclude it.
+- **It takes `LibraryWorkGate` rather than reading it — which excludes the three
+  passes, and not a scan.** Taking rather than checking is the easy half: the two
+  lookups and the tag write all come after the check, so `ActiveKind` alone only
+  narrows the window. The half worth writing down is what the gate is: **the scan
+  has never been on it.** `LibraryScanService` guards itself with a private
+  interlocked flag and `POST /api/library/scan` takes no lease, so a scan
+  arriving mid-decision runs anyway and clears every derived column it decides a
+  file changed. The gate's own remarks say "a scan and an identification pass
+  must not overlap"; that is the intent, not the wiring, and it predates this
+  work. What the lease does buy is real — all three passes take it, and any of
+  them may hold the file in an in-flight page. It is held across up to two
+  MusicBrainz requests at a 90-second timeout each, so against a degraded mirror
+  one click can refuse every pass for minutes.
+- **A scan that sees the bytes change clears the decision and the evidence with
+  everything else.** Both are claims about audio that is no longer there. The
+  stamp especially: the reset sets `AcoustIdOutcome` to `NotAttempted`, which the
+  worklist deliberately does not count as a question, and both passes exclude
+  `IdentityDecidedUtc` — so a file that kept it through a replacement would be
+  invisible to every pass and to the screen at once, with nothing able to reach
+  it again.
+- **The decision is journalled separately from the tag write.** The undo entry
+  records what the tags were before a byte changed; the decision entry records
+  that a person overrode a rule. A rejection writes only the second, because
+  nothing was opened — without it a refusal would leave no trace at all.
+- **`Fonoteca:AllowFileMutation` off is the ordinary path, not an error.** The
+  catalogue is decided, the cluster is stored, `AcoustIdTaggedUtc` stays null —
+  which is exactly what `IX_MediaFiles_AcoustIdUntagged` exists to find — and the
+  answer comes back `tag: Refused`. `tagWrite.ts` is the one place that becomes
+  English, and it is the only place that knows this is not a failure.
+
+`GET /api/catalogue/matching/files/{id}` is what a person reads while deciding.
+The worklist and the candidate set are both about *music*; this is about the
+file, and without it the screen was asking somebody to pick between six
+recordings on the strength of a filename.
+
+- **Half catalogue, half bytes, and the split is what keeps the worklist a
+  query.** Path, size, the length `fpcalc` measured and each pass's outcome are
+  row reads, so they also ride along on `GET /api/catalogue/matching` — a
+  seven-hundred-row worklist still opens no files. Codec, bitrate, sample rate,
+  bit depth, channels and the file's own tags need the bytes, so they are read
+  here, one file at a time, on the file somebody actually opened.
+- **This is the first thing that writes `MediaFile.Quality`.** The column has
+  been in the schema since the first migration with nothing populating it, and a
+  clean reading is written back — so the second visit is free, and so is the
+  worklist row behind it. That second part is load-bearing rather than an
+  optimisation: `GET /api/catalogue/matching` reads
+  `FingerprintDuration ?? Quality.Duration`, and **a third of the target
+  library's file-level questions have no fingerprint duration at all**, because
+  their AcoustID was adopted from a tag they already carried and `fpcalc` never
+  ran. Without the fallback those rows print a size and a container and no length
+  forever. It is only ever filled in, never blanked: a failed read is a fact
+  about the mount, and clearing the columns on it would make the numbers flicker
+  with the volume rather than with the file.
+- **A decoder measures the audio, not a tag library — `IAudioProbe` /
+  `Ingest/FfprobeAudioProbe`.** This was TagLib# first, and it was wrong twice
+  over on real files: a VBR MP3 with no Xing header read back at **64 kbps and
+  5:35** where the audio is 128 kbps and 2:58 (the first frame's bitrate, and a
+  duration extrapolated from it as MPEG-2), and a FLAC truncated to a quarter of
+  its bytes read back at its original duration with the bitrate computed against
+  what remained — **3 kbps, typed lossless CD**. Neither library is a decoder;
+  they answer from headers they parse in passing. There are 64 MP3s on the target
+  library's worklist, so this was not a corner case.
+- **`-count_frames`, and what it buys is narrower than it sounds.** The numbers
+  are still the container's declarations — codec, rate, depth, duration, bitrate
+  — and a FLAC truncated *after* its metadata blocks goes on declaring its
+  original length and exits **zero**. What reading the frames buys is that ffmpeg
+  objects to them, and that sentence is the only thing distinguishing a damaged
+  file from a short one. Costs 3.9s on the library's largest FLAC (475 MB)
+  against 0.03s for a header read, which is why the timeout is 60s and why this
+  is a request somebody clicked rather than anything a pass does. Whether the
+  bytes are intact remains `IntegrityState`'s question and still needs its own
+  pass.
+- **Only a clean decode is written to the catalogue.** At `-v error` a healthy
+  stream says nothing; anything on stderr is the decoder objecting to these bytes
+  while it read them, and it exits *zero* having done so. A complaint means show
+  the reading and do not remember it: measured across sixty real library files
+  exactly one complains, and that one has a defect. `AudioQuality` decides which
+  duplicate to keep, and a number the decoder objected to has no business being
+  an input to that.
+- **Losslessness comes from the codec name, never the extension.** An `.m4a` is
+  ALAC about as often as it is AAC. `wavpack` is deliberately *not* in the
+  lossless set — it has a lossy mode and nothing in the header says which — so it
+  under-claims rather than promising a bit-exact copy that may not be one.
+- **TagLib# reads the tags, which is the reverse of the write path**, because it
+  resolves one fact across containers through named accessors — `ALBUMARTIST` in
+  a Vorbis comment, `TPE2` in ID3v2, `aART` in MP4 — and because it is the
+  library that does not fall over on the forty ID3-prefixed FLACs, which are
+  disproportionately the files a person ends up looking at here. ATL is opened
+  third and optionally, for `AdditionalFields`.
+- **It cannot fail on the file** — and the `catch` is on `Exception`, not on the
+  probe's own type. A path resolving outside the library root, a container
+  declaring an absurd duration and output the deserialiser cannot map are none of
+  them `AudioProbeFailedException`, and every one would 500 the single endpoint
+  documented as unable to fail on a file, for exactly the class of broken file
+  this screen exists for.
+- **It is a GET that starts a subprocess and writes a row, and takes no lease for
+  either.** Median 0.28s on this library, 2.3s on the largest file on the
+  worklist, no cap on concurrent decodes. The write needs no `LibraryWorkGate`:
+  no pass writes those columns, and a scan that sees the bytes change clears them
+  with everything else derived — so the worst a race does is store a measurement
+  of audio that has just been replaced, which the scan then removes. Taking the
+  gate would refuse the screen for the length of any running pass, which is the
+  wrong trade for a read.
+- **`MUSICBRAINZ_TRACKID` in a file outranks every score on the screen, and
+  nothing was reading it.** Identification asks AcoustID what the *audio* is; it
+  never asks the file what it claims to be. **The note above that this library is
+  tag-stripped is wrong** — it was measured during the attribution work as
+  "`ACOUSTID_ID` on every one and nothing else at all", and re-measuring it
+  through this endpoint finds a full Picard tag set on every sampled file the
+  passes refused, MusicBrainz recording, release and release-group ids included.
+  Whatever that sample was, it was not this library. Nothing has been changed on
+  the strength of it — attribution still decides from the audio — but a tag-based
+  fallback now has evidence behind it that it did not have.
+
+**The candidate rows carry what the lookup had already paid for.**
+`GetRecordingAsync` asks for artists, credits, releases, release groups, media,
+ISRCs and two kinds of relationship — the 10.3-second request — and the row built
+from it printed a title, a credit line, a length and three numbers. Everything
+added is from that same response and costs nothing:
+
+- **Drift**, signed, against the file's measured length. The edition
+  discriminator attribution already ranks pressings on; a person should not have
+  to subtract two timestamps in their head.
+- **The performers from the relationships**, because MusicBrainz bills a Karajan
+  reading of Beethoven's Fifth to *Beethoven* — so on classical catalogue every
+  candidate reads identically until the conductor and the orchestra appear.
+  `PrimaryCredits`'s narrowing is deliberately not applied here: that rule decides
+  what a track is browsable under, and this is evidence, where an engineer is
+  worth a line.
+- **The releases it appears on**, earliest first on the parts MusicBrainz stated,
+  with the first release date beside the title — what separates an original from
+  the compilation that reprinted it when both rows say the same thing. Capped for
+  reading, with the count beside it, and the count itself is capped at 25 by WS/2
+  without saying so.
+- **The ISRCs and the work.**
+
+- **A stored document written before a field existed is a cache miss.**
+  Deserialising last week's JSON into today's record succeeds and leaves the new
+  collections null, which serialise back as `null` where the generated schema
+  promises an array — so the cache that makes the screen fast would be the thing
+  that broke it, and only for the files somebody had already opened. `Complete`
+  checks the shape rather than a version number, for the same reason the
+  malformed-JSON case beside it does: the most a stale entry may cost is the
+  request it was there to save.
+
+`GET /api/catalogue/matching/components/{stamp}/candidates` and
+`POST …/decision` are the album-shaped half, which for a while the screen said
+could not exist. The stated reason was that recovering the candidates means a
+MusicBrainz browse per recording in the component, which is a pass rather than a
+request — and that is true of *forming* a component and not of re-asking about
+one that already exists.
+
+- **The expansion is the expensive half, and it is already paid for.** The pass
+  browses a recording, fetches the releases it names, reads back which of their
+  tracks the library holds, admits those files and browses *their* recordings.
+  Unbounded, and the reason a component can reach six hundred files. None of it
+  is needed on a re-ask: the component's members are written down, in the
+  `ReleaseLookupUtc` they share. What is left is one browse per distinct
+  recording and one lookup per release offered — bounded at 30 and 8, and a wait
+  rather than a job. Tens of seconds against the public server, a few against a
+  mirror.
+- **The stamp is a string on the wire, and that is not cosmetic.**
+  `DateTimeOffset.UtcTicks` is around 6.4 × 10^17 where JavaScript is exact to
+  9 × 10^15. Routed as a `long` it arrives in a browser rounded to the nearest
+  few hundred ticks, and every request asks about a component that does not
+  exist. `CatalogueEndpoints.Component` is the one place it becomes a number.
+- **The pass writes the answer down, and that is what makes the screen free.**
+  Every browse and every track list the endpoint would gather, the attribution
+  pass has already fetched by the time it refuses a component — and then threw
+  away. `ReleaseCandidateSet` is that not happening twice: one row per open album
+  question, keyed on the component's stamp, holding the assembled document. On an
+  ordinary library opening a refused album costs **zero** provider requests, and
+  `ThePassStoresTheCandidatesItWouldOtherwiseDiscard` asserts exactly that by
+  counting calls. The live gather stays as the fallback — a component decided
+  before this existed, one whose file set has moved, and `?refresh=true`.
+- **Its own table, because its key is not a file.** A component's identity is the
+  one `ReleaseLookupUtc` its files share, and nothing else has a row for that;
+  stamping the same document onto every file of a 59-file component would store
+  it 59 times. Written only where somebody may ask — a component the pass filed
+  confidently is not a question — so the table is the size of the worklist, 117
+  rows on the target library.
+- **The pass's component stamp is floored now, and it had to be.** It is the
+  primary key of that table and the id the worklist prints, and PostgreSQL keeps
+  microseconds where .NET keeps 100ns ticks: an unfloored stamp is a key that
+  never matches what comes back out of the column.
+- **`Files` is the staleness check, not the timestamp.** A component is a *set*
+  and the set moves under the document: a scan clears the stamp on a file whose
+  bytes changed, a person answering part of a component takes files out of it.
+  Every coverage figure was computed against the set that existed when it was
+  written, so a different count means the numbers describe a component that no
+  longer exists — a miss, never a failure. `AStoredAnswerForADifferentSetOf`
+  `FilesIsAMiss`.
+- **`asOfUtc` and `fromCache` come back with it, and the screen says so.** The
+  ordinary answer is the set the *rule* was looking at when it gave up, which is
+  the right thing to show and exactly the thing that has to state its age.
+  `?refresh=true` is a button, not a default, because the alternative costs two
+  minutes.
+- **The shortlist is ranked by the harmonic mean of two shares, and each one
+  alone was measured wrong.** By raw hits — how much of the component a release
+  holds — a 59-file component came back as eight compilations and no album, led
+  by a 1,197-track radio anthology holding 21 files. By estimated coverage — how
+  much of the release the component holds — the same component came back as
+  eight one-track singles, each scoring 1.00 by arithmetic. The mean of the two
+  is near zero unless both are decent, which is the shape of "this looks like
+  the album these came from". `CatalogueEndpoints.Support`.
+- **The list a person reads is ordered by files explained, then coverage**, and
+  that pair is `ReleaseFit`'s own. Coverage first put two singles above the album
+  explaining all twelve files on a real component; files first would put a box
+  set above the album it reprints, which is the documented failure. Both, in that
+  order, get both right.
+- **Both cuts are reported.** `browsed` against `recordings` says whether every
+  recording was asked about, and `total` against the list length says how much of
+  the tail was never looked up. Either can be why the album a person is looking
+  for is not there, and a short list that looks complete is the failure
+  `MusicBrainzRecording.Appearances` already paid for.
+- **Nothing on disk is touched.** An album is a catalogue fact — no tag write, no
+  `Fonoteca:AllowFileMutation`, no undo journal, one decision entry in the event
+  log keyed on the component rather than on thirty-one files.
+- **Files the chosen release does not list stay open.** A component is a set that
+  shared a *candidate set*, which is not a promise that every file in it came
+  from one album. Stamping the remainder with a release that does not name them
+  would be the invention the pass exists to avoid, so they keep their refusal and
+  the response says how many. `FilesTheChosenAlbumDoesNotListStayOnTheWorklist`.
+- **A release that explains nothing is refused rather than written.** Without
+  that check the writer mints the release, its group and its whole track list,
+  links nothing to any of it and reports a decision — a catalogue growing albums
+  nobody owns, one bad click at a time.
+- **`ReleaseWriter.ApplyTracksAsync` replaces a track list slot by slot, not row
+  by row, and the difference is a silent data loss.** `MediaFiles.TrackId` is
+  `ON DELETE SET NULL`, so deleting the rows and minting new ids strips the
+  position off every file already filed under that release — release and group
+  intact, track link gone, nothing logged. The pass already reached it whenever
+  two components chose one release; a person answering two album questions with
+  the same album reaches it in one click, on the endpoint whose selling point is
+  that the whole track list is written. A slot the release still prints keeps its
+  row and its id; a slot re-pointed at a different recording is replaced, because
+  `Track.RecordingId` is init-only for the good reason that the pair is the row's
+  identity. `DecidingASecondComponentKeepsTheFirstComponentsTrackLinks`.
+- **Both halves measure a file the same way.** The candidate screen scores with
+  `FingerprintDuration ?? Quality.Duration` and the commit used to score with the
+  fingerprint alone — and a third of this worklist has no fingerprint duration.
+  No file changed hands, since `ReleaseFit` matches on recording MBID, but a
+  release listing one recording twice could seat a file on a different slot than
+  the one the person read.
+- **`MediaFile.ReleaseDecidedUtc` is the guard**, and it is `IdentityDecidedUtc`'s
+  counterpart down to the reasoning. Clearing `ReleaseLookupUtc` by hand is the
+  documented way to re-attribute after a rule change; without a separate column
+  that one UPDATE hands every answered component back to the rule that could not
+  answer it. The pass's worklist and `IX_MediaFiles_ReleasePending` both exclude
+  it, and a scan that sees the bytes change clears it with everything else
+  derived.
+- **A mixed component is taken apart one album at a time, and that falls out of
+  the design rather than being built.** The 59-file example above is AC/DC,
+  Aretha Franklin and Motown glued together by a compilation, and no album
+  explains it. Answering with the one that explains two files leaves the other
+  fifty-seven on the worklist under the same stamp, so re-opening asks a smaller
+  question. Measured on the real database: components run 1 to 59 files, a
+  one-file component costs about 30 seconds and the 59-file one about two
+  minutes.
+- **`AttributedByPerson` is not `Attributed`, and `NoReleaseByPerson` is not
+  `NoConfidentFit`.** The same distinction identification already keeps: one
+  means a fit cleared the gates and the other means it did not and somebody
+  decided anyway. Folded together, any report of how attribution performs would
+  quietly count the components it failed on.
+- **`NoCandidate` is still not offered.** MusicBrainz holds no release with the
+  recording on it at all, so the browse that would recover the candidates is the
+  one already known to come back empty.
+
+- **The unit differs by kind.** Identification and enrichment refuse one file at
+  a time; attribution refuses a *component*, and the component is recovered from
+  `ReleaseLookupUtc` — the pass reads the clock once per component and stamps
+  that one value on every file it decides, so the timestamp is the component's
+  identity written down. It is the same query the live database is asked by hand.
+- **Three refusals are deliberately not questions.** `LookupFailed` is transient
+  and the file stays on the pass's own worklist, `NotAttempted` is a queue
+  position, and `Unfingerprintable` is a question about the file rather than
+  about the music — its follow-up is an integrity check, and answering a match
+  cannot clear it.
+- **The reason is the first pass that refused.** A file AcoustID could not place
+  is left `NotAttempted` by enrichment, which never sees it; reading the later
+  silence would report a consequence and send a person to MusicBrainz to look for
+  something nobody asked about.
+- **Counted by reason, not merely counted.** 454 of the 697 open files in the
+  target library are one fact — AcoustID knows the audio, MusicBrainz links no
+  recording — so the counts come back grouped and the screen says it once. The
+  attribution reasons sort first regardless of size, or the album-shaped question
+  a person can actually finish sits under four hundred rows of the same sentence.
+- **Reason names are flat and that is safe by construction.** Three enums feed
+  this, and the two names that collide between them — `LookupFailed`,
+  `NotAttempted` — are exactly the two never returned. `openQuestions.ts` is the
+  one place they become English, delegating the attribution three to `CERTAINTY`.
+
 ### The identification providers, and what they refuse to do
 
 | | |
@@ -488,6 +921,17 @@ the same reason on the EF side. Don't move startup work into `Program.cs`.
   version of the throwaway `useState`/`useEffect`, with no cache, no dedup and no
   invalidation, so adopting TanStack Query stays a decision to take on evidence
   rather than one taken by association with the router's name.
+
+The shell is a navigation rail, a top bar over the content column, a centred
+content column and the transport row across the foot. Two things in it are not
+free-form layout. `NAV_ITEMS` in `apps/web/src/navigation.ts` is the **one** list
+of sections — the rail renders it and the command bar's "Go to" commands are
+built from it, so a new screen cannot reach one and miss the other. And the
+command bar itself (`CommandBar`, ADR 0010) is a native `<dialog>` around a
+hand-built combobox: the dialog element is doing the focus trap, the focus
+restoration, `Escape` and the top-layer stacking, which is why nothing in it
+touches the z-index scale. Its commands are a prop; searching the catalogue is
+not among them, because no endpoint answers that yet.
 
 Three theme states, not two: `data-theme="light"`, `data-theme="dark"`, and
 **no attribute at all** (follow the system). `ThemeProvider` removes the
