@@ -37,6 +37,10 @@ public sealed class LibraryScanEndpointTests(PostgresFixture postgres) : IAsyncL
         {
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
+
+            // The background warmer would put its own questions to the providers,
+            // out of a thread nothing here waits for.
+            builder.UseSetting("Fonoteca:WarmCandidates", "false");
         });
     }
 

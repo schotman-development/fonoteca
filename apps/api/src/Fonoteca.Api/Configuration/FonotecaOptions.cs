@@ -172,6 +172,19 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public bool IdentifyAfterScan { get; init; } = true;
 
+    /// <summary>
+    /// Whether the candidate caches are filled in the background.
+    /// </summary>
+    /// <remarks>
+    /// On by default: without it the first person to open any question on the
+    /// worklist waits for the providers to answer — 24 seconds for a recording
+    /// and over two minutes for a large component, measured — and every question
+    /// is somebody's first. Off is for tests, which stub the providers and count
+    /// the calls, and for a run where the rate limit is wanted for a pass
+    /// instead. See <c>CandidateWarmService</c>.
+    /// </remarks>
+    public bool WarmCandidates { get; init; } = true;
+
     /// <summary>Origins allowed to call the API. The web app's dev server in development.</summary>
     public IReadOnlyList<string> CorsOrigins { get; init; } = [];
 

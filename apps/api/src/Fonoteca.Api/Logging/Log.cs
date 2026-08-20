@@ -18,6 +18,7 @@ namespace Fonoteca.Api.Logging;
 ///   1200-1219  library scanning
 ///   1220-1249  identification — fingerprinting, AcoustID, tag writing
 ///   1250-1279  enrichment — recordings, works and artists from MusicBrainz
+///   1280-1299  candidate warming — filling the worklist's answers ahead of a click
 ///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
 ///              another assembly, but the same numbering
 /// </remarks>
@@ -365,4 +366,33 @@ internal static partial class Log
         string path,
         int files,
         int releases);
+
+    [LoggerMessage(
+        EventId = 1280,
+        Level = LogLevel.Information,
+        Message = "Candidate warming swept the worklist: {Warmed} answers built, {Failures} failed.")]
+    public static partial void CandidatesWarmed(ILogger logger, int warmed, int failures);
+
+    /// <summary>One item a sweep could not build.</summary>
+    /// <remarks>
+    /// Debug, because nobody is waiting for it: the click that opens the same
+    /// question still gets the live answer and still reports its own failure.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1281,
+        Level = LogLevel.Debug,
+        Message = "Candidate warming skipped an item.")]
+    public static partial void CandidateWarmFailed(ILogger logger, Exception cause);
+
+    /// <summary>A sweep that ended on something other than a provider saying no.</summary>
+    /// <remarks>
+    /// Warning rather than error, and it must never be a throw: an unhandled
+    /// exception out of a <c>BackgroundService</c> stops the host, and a cache
+    /// nobody is waiting for is not worth the API.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1282,
+        Level = LogLevel.Warning,
+        Message = "Candidate warming failed; the next sweep tries again.")]
+    public static partial void CandidateWarmSweepFailed(ILogger logger, Exception cause);
 }

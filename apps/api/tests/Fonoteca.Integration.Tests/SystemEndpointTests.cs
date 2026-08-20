@@ -30,6 +30,10 @@ public sealed class SystemEndpointTests(PostgresFixture postgres) : IAsyncLifeti
             builder.UseSetting("ConnectionStrings:Fonoteca", connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
 
+            // The background warmer would put its own questions to the providers,
+            // out of a thread nothing here waits for.
+            builder.UseSetting("Fonoteca:WarmCandidates", "false");
+
             // No contact, so the probe answers from configuration alone and
             // this test never touches the network. That is also the state a
             // fresh checkout is in, which is the one worth pinning: the card

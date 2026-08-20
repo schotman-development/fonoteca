@@ -133,6 +133,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationServ
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EnrichmentService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ReleaseAttributionService>());
 
+// The worklist's answers, built before somebody clicks rather than while they
+// wait. Hosted only — nothing else holds a reference to it.
+builder.Services.AddHostedService<CandidateWarmService>();
+
 // ---------------------------------------------------------------------------
 // External services. Both are registered unconditionally, including when the
 // key or the contact is missing: the failure then names the setting at the
