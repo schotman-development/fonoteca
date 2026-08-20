@@ -1,0 +1,156 @@
+/*
+ * The file's own tags, under the evidence rows rather than among them.
+ *
+ * A separate list because it is a different kind of fact. The rows above are
+ * things this application worked out — a measured length, a refusal, a cluster —
+ * and each of them is one line worth reading. These are things the file claims
+ * about itself, there can be sixty of them, and most files in this library carry
+ * none at all.
+ */
+.tags {
+  inline-size: 100%;
+  padding-block-start: var(--space-8);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+.tagList {
+  display: grid;
+  inline-size: 100%;
+  margin: 0;
+  gap: var(--space-2);
+}
+
+/*
+ * Name and value on one line, with the name in a fixed column so the values
+ * align down the list — a ragged left edge on forty rows of monospace is what
+ * makes a tag dump unreadable. The column collapses on a narrow dialog rather
+ * than squeezing the value into three characters.
+ */
+.tagRow {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: baseline;
+}
+
+/*
+ * Both halves wrap. The names come from ATL's `AdditionalFields` and are
+ * whatever the tagger wrote — `MUSICBRAINZ_ORIGINALALBUMID` is longer than the
+ * column — so a name that only overflowed would push its value off the row.
+ */
+.tagRow > dt,
+.tagRow > dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 40rem) {
+  .tagRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+/*
+ * The releases one candidate appears on, inside its disclosure.
+ *
+ * Earliest first, so the original sits above the compilations that reprinted it
+ * — which is the comparison the list exists for, and the reason the rows carry a
+ * date column at all.
+ */
+.appearances {
+  display: grid;
+  inline-size: 100%;
+  margin: 0;
+  padding: 0;
+  gap: var(--space-4);
+  list-style: none;
+}
+
+.appearance {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-8);
+  align-items: baseline;
+}
+
+/*
+ * Performers, ISRCs and the work: the evidence that tells two candidates apart
+ * when their titles and billed artists are identical.
+ */
+.aside {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/*
+ * The chooser, which is now the first thing in the dialog.
+ *
+ * Full width because it is the content rather than an aside: its parent is an
+ * `align="start"` column, which would otherwise shrink the whole question to the
+ * width of its longest line.
+ */
+.chooser {
+  inline-size: 100%;
+}
+
+/*
+ * The wait, while the candidates are looked up.
+ *
+ * Bordered rather than a line of grey text, because the rest of the dialog is
+ * already painted by the time it appears — the file, its measurements and its
+ * tags all come from a read that finishes in milliseconds, while this one is an
+ * AcoustID turn plus up to six MusicBrainz lookups. Something has to say that
+ * the screen is not finished, and it has to say it at the size of the thing that
+ * is missing.
+ */
+.waiting {
+  inline-size: 100%;
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width-thin) dashed var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+/*
+ * What the file is, and what it claims to be, pinned above the options.
+ *
+ * Sunken rather than raised: it is the fixed thing every option is measured
+ * against, so it should read as the background the comparison happens on rather
+ * than as a seventh candidate.
+ */
+.yourFile {
+  inline-size: 100%;
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-sunken);
+}
+
+/*
+ * The lead on a question with no chooser, and the reason the dialog no longer
+ * opens on an inspector when there is nothing to inspect for.
+ */
+.verdict {
+  inline-size: 100%;
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-inline-start: var(--border-width-thick) solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-sunken);
+}
+
+/*
+ * The evidence panel, inside the disclosure that now holds it.
+ *
+ * `Disclosure`'s panel is not a full-width block by default and the panel is a
+ * `Card`, so without this the file's own heading and rule stop short of the
+ * dialog's edge and read as a nested aside rather than as the section it is.
+ */
+.evidence {
+  inline-size: 100%;
+  padding-block-start: var(--space-8);
+}
+
+/* Room under the committed badge for the button that continues a mixed set. */
+.continue {
+  margin-block-start: var(--space-6);
+}

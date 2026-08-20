@@ -1,0 +1,169 @@
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/*
+ * The "why can't I answer all of these" explanation, closed.
+ *
+ * Bordered in the info tone rather than tinted like an alert: it is a fact about
+ * the scaffold, not a problem with the library. It holds a disclosure now rather
+ * than six lines of open prose, so the padding is tighter — a closed row inside
+ * a box padded for a paragraph reads as an empty box.
+ */
+.notice {
+  max-width: 760px;
+  padding: var(--space-8) var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-inline-start: var(--border-width-thick) solid var(--color-info-solid);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+.noticeBody {
+  padding-block: var(--space-8) var(--space-4);
+  max-width: 680px;
+}
+
+/*
+ * The one section that is somebody's to work, marked as such.
+ *
+ * A rule down the leading edge and nothing else — no tint, because every
+ * semantic text pair in the tokens was computed against `surface-raised` and a
+ * coloured panel would put them all on a background nobody has measured. It is
+ * the same device the selected candidate card uses, for the same reason: it
+ * survives greyscale and forced colours, where a wash does not.
+ */
+.yours {
+  border-inline-start: var(--border-width-thick) solid var(--color-accent-solid);
+}
+
+/*
+ * The refusals inside one section, separated by a rule.
+ *
+ * A closed disclosure is a single row of text, and four of them stacked with
+ * nothing between read as one paragraph that happens to have triangles in it.
+ * The rule is what makes them count as four things to choose between.
+ */
+/* The section body is an `align="start"` column, so this asks for the width back. */
+.groups {
+  inline-size: 100%;
+}
+
+.groups > * + * {
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+/* Indented under the trigger, so an open group is visibly inside its heading. */
+.panel {
+  padding-block: var(--space-8) var(--space-12);
+  padding-inline-start: var(--space-20);
+  max-width: 760px;
+}
+
+/*
+ * The rows inside one refusal.
+ *
+ * Separated by a rule rather than by a gap: the eye needs a boundary it can
+ * count against, and spacing alone stops reading as one past a dozen rows.
+ */
+.rows {
+  display: grid;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rows > li {
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+.rows > li:first-child {
+  border-block-start: none;
+}
+
+/*
+ * The row is a button, and it has to look like the row it replaced rather than
+ * like a control: full width, text-aligned to the start, and no chrome until the
+ * pointer or the keyboard arrives. The padding lives here rather than on the
+ * `<li>` so the whole row — not a strip inside it — is the hit target.
+ */
+.rowButton {
+  display: block;
+  inline-size: 100%;
+  padding: var(--space-8) var(--space-8);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+
+  transition: background-color var(--duration-fast) var(--easing-standard);
+}
+
+.rowButton:hover {
+  background-color: var(--color-interactive-hover);
+}
+
+.rowButton:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: -2px;
+}
+
+/*
+ * Paths are long and arbitrary, and a library-relative one runs past any column
+ * width worth having. Wrapping anywhere would break a filename mid-word for no
+ * reason, so it breaks where the filesystem already put the seams.
+ */
+.row {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.preview {
+  max-width: 760px;
+  padding-block-start: var(--space-16);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+.previewBody {
+  padding-block: var(--space-8) var(--space-4);
+  max-width: 680px;
+}
+
+/*
+ * A button that reads as the link it used to be. It opens a dialog rather than
+ * navigating, and a real `<a>` with no href is neither focusable nor announced —
+ * so the element is a button and the appearance is borrowed.
+ */
+.exampleButton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-link);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.exampleButton:hover {
+  text-decoration: none;
+}
+
+.exampleButton:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rowButton {
+    transition: none;
+  }
+}

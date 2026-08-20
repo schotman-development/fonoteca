@@ -1,0 +1,41 @@
+/*
+ * One question, inside the dialog that carries its title.
+ *
+ * No width here any more: the dialog's `lg` size is the reading measure, and a
+ * second `max-width` inside it would leave the panel wider than its contents at
+ * every viewport. `min-inline-size: 0` stays, because everything inside
+ * truncates — file paths, credit lines, candidate titles — and a grid or flex
+ * child's automatic minimum size is `min-content`, which defeats every
+ * `truncate` under it. The candidate list pays for this again on its own
+ * fieldset.
+ */
+.subject {
+  min-inline-size: 0;
+}
+
+.listen {
+  margin-block-start: var(--space-12);
+  padding-block-start: var(--space-12);
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+.files {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * Play, then the file, then what it measures — the fingerprint length last and
+ * right-aligned, because a column of them is how two editions of the same track
+ * are told apart by eye.
+ */
+.file {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: var(--density-row-compact);
+}
