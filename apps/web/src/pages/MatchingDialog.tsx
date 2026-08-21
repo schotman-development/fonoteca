@@ -27,6 +27,7 @@ import styles from './MatchingDialog.module.css'
 import { MatchingSubject } from './MatchingSubject.tsx'
 import type { MatchingQuestion } from './matchingFixtures.ts'
 import { isAnswerable, whyOpen } from './openQuestions.ts'
+import { mediaFileIdOf } from './seating.ts'
 import { readTagWrite } from './tagWrite.ts'
 
 type OpenQuestion = components['schemas']['OpenQuestion']
@@ -61,14 +62,6 @@ type ComponentCommitState =
   | { readonly status: 'sending' }
   | { readonly status: 'done'; readonly result: ComponentDecision }
   | { readonly status: 'error'; readonly message: string }
-
-/** The media file id inside a `recording:{guid}` question id. */
-function mediaFileIdOf(question: OpenQuestion): string | null {
-  if (question.kind !== 'recording') return null
-
-  const id = question.id.startsWith('recording:') ? question.id.slice('recording:'.length) : ''
-  return id.length > 0 ? id : null
-}
 
 /**
  * The component a `release:` question names, as the string it arrived as.

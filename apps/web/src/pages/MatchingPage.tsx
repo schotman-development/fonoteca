@@ -1,14 +1,16 @@
 import type { components } from '@fonoteca/api-client'
-import { Badge, Card, Disclosure, Stack, Text, VisuallyHidden } from '@fonoteca/ui'
+import { Badge, Button, Card, Disclosure, Stack, Text, VisuallyHidden } from '@fonoteca/ui'
 import { Link } from '@tanstack/react-router'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import { MatchingDialog, type MatchingSubjectRef } from './MatchingDialog.tsx'
 import styles from './MatchingPage.module.css'
 import { MATCHING_QUESTIONS } from './matchingFixtures.ts'
-import { isAnswerable, kindOf, type OpenKind, type OpenReason, whyOpen } from './openQuestions.ts'
+import { kindOf, type OpenKind, type OpenReason, whyOpen } from './openQuestions.ts'
+import { ReleaseMatchDialog } from './ReleaseMatchDialog.tsx'
+import { albumFolderOf } from './seating.ts'
 
 type OpenQuestion = components['schemas']['OpenQuestion']
 type OpenQuestionCount = components['schemas']['OpenQuestionCount']
@@ -29,7 +31,24 @@ type MatchingQueue = components['schemas']['MatchingQueueResponse']
  * how much is open.
  */
 const ALBUM_ROWS = 10
-const TRACK_ROWS = 50
+
+/**
+ * How many album folders the by-hand section is allowed to print.
+ *
+ * A ceiling for a pathological library, not a page size — the old cap of fifty
+ * rows was a reading decision, because fifty of six hundred and ninety-six files
+ * were the same sentence fifty times and the rest were more of it. Grouped, no
+ * two rows are the same fact: each one is an album somebody either recognises or
+ * does not, and cutting the list in half hides work rather than repetition. The
+ * measured worklist is a hundred and thirteen folders, so this shows all of it
+ * and only bites on a library several times the size.
+ *
+ * Files inside a folder are never capped at all. A folder is the thing somebody
+ * is about to match, and offering the first fifty of a hundred and twelve would
+ * file two thirds of an album and leave the rest looking like a separate
+ * problem.
+ */
+const FOLDER_ROWS = 250
 
 /**
  * What the passes would not decide.
@@ -84,6 +103,20 @@ export function MatchingPage() {
 
   const [subject, setSubject] = useState<MatchingSubjectRef | null>(null)
 
+  /**
+   * Which files are ticked, across every folder at once.
+   *
+   * One set for the page rather than one per folder, so collapsing a group does
+   * not throw a selection away — a person comparing two folders before deciding
+   * which is which should not lose their ticks by looking. Each folder reads its
+   * own intersection with this, which is also what makes "all selected, or all
+   * of them if none are" a per-folder question with a page-wide answer.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+
+  /** The files a release is being chosen for, once somebody has asked for one. */
+  const [filing, setFiling] = useState<Filing | null>(null)
+
   return (
     <Stack direction="column" gap={20}>
       <Stack direction="column" gap={4}>
@@ -110,9 +143,7 @@ export function MatchingPage() {
           </Stack>
         ) : null}
 
-        {state.status === 'ready' ? (
-          <Summary kinds={state.data.kinds} reasons={state.data.reasons} />
-        ) : null}
+        {state.status === 'ready' ? <Summary kinds={state.data.kinds} /> : null}
       </div>
 
       {/*
@@ -141,25 +172,26 @@ export function MatchingPage() {
               <Text size="sm" tone="secondary" block>
                 When a pass gives up on a file it records <em>that</em> it gave up, not what it was
                 choosing between — the candidates are worked out while the pass runs and thrown
-                away. So the question can only be put back to you where the list of answers can be
-                rebuilt.
+                away. So Fonoteca can only put a list of answers back in front of you where that
+                list can be rebuilt.
               </Text>
               <Text size="sm" tone="secondary" block>
-                For a single file it can: the fingerprint is stored, so Fonoteca asks AcoustID the
-                same question again for one request and no disk access. That is what the first
-                section below offers. Your answer is recorded as a person’s decision, so no later
-                pass overwrites it.
+                For a set of files it can: they were refused together because they share the
+                recordings they were compared against, so asking MusicBrainz again about that set
+                rebuilds the same shortlist. That is the second section, and it costs a wait of
+                seconds rather than an instant answer.
               </Text>
               <Text size="sm" tone="secondary" block>
-                For a set of files it can too, and that costs more: Fonoteca asks MusicBrainz about
-                each recording in the set, then fetches the track lists of the albums that come back
-                so it can score them against what you hold. Expect a wait of seconds rather than an
-                instant answer.
+                For a single file it usually cannot, and that is not a gap in Fonoteca. These files
+                are open because AcoustID has never heard the audio, or has heard it and links it to
+                no MusicBrainz recording — there is no shortlist anywhere, and re-asking spends a
+                turn at the rate limit to be told the same thing.
               </Text>
               <Text size="sm" tone="secondary" block>
-                What is left is the questions with no answers to offer — audio nobody has submitted
-                to AcoustID, a fingerprint nobody has linked to a recording, a recording that
-                appears on no album. Re-asking those spends a turn to be told the same thing.
+                Which leaves the one thing that does work: you know what the album is. Search
+                MusicBrainz for it, check the pairing Fonoteca proposes and file them. Your answer
+                is recorded as a person’s decision, so no later pass overwrites it, and nothing on
+                disk is touched.
               </Text>
             </Stack>
           </Disclosure>
@@ -167,7 +199,13 @@ export function MatchingPage() {
       ) : null}
 
       {state.status === 'ready' && state.data.total > 0 ? (
-        <Sections data={state.data} onOpen={setSubject} />
+        <Sections
+          data={state.data}
+          onOpen={setSubject}
+          selected={selected}
+          onSelect={setSelected}
+          onFile={setFiling}
+        />
       ) : null}
 
       {state.status === 'ready' && state.data.total === 0 ? <Empty /> : null}
@@ -194,33 +232,56 @@ export function MatchingPage() {
           }}
         />
       ) : null}
+
+      {filing !== null ? (
+        <ReleaseMatchDialog
+          folder={filing.folder}
+          questions={filing.questions}
+          onClose={() => {
+            setFiling(null)
+          }}
+          onFiled={() => {
+            // The ticks are spent. Clearing them is the honest reading of what
+            // just happened — those files are no longer open questions, so a
+            // selection that survived would be a set of things this screen can
+            // no longer do anything with, waiting to be re-offered to the next
+            // album somebody opens.
+            setSelected(new Set())
+            setDecisions((committed) => committed + 1)
+          }}
+        />
+      ) : null}
     </Stack>
   )
 }
 
+/** A folder and the files in it a release is being chosen for. */
+type Filing = {
+  readonly folder: string
+  readonly questions: readonly OpenQuestion[]
+}
+
 /**
- * How much is open — and how much of it is yours.
+ * How much is open, and in which of the two units.
  *
- * **The second sentence is the one that was missing.** On the target library 743
- * of 817 questions are waiting on somebody else entirely: an AcoustID
- * submission, a MusicBrainz link, a gather that has to run as a pass. A bare
- * "817 open questions" reads as 817 things to work through, which is both
- * demoralising and wrong, and it was the number a person saw before anything
- * told them otherwise.
+ * **The second sentence used to say how much was "waiting on you", counted from
+ * the refusals that had a candidate set to show.** That number was 74 of 817 and
+ * it is no longer true of anything: the six hundred and ninety-six file-level
+ * questions have no candidate set and never will — that is what makes them
+ * open — and they are now the part of this screen a person can actually finish,
+ * by naming the album themselves. Counting them as somebody else's problem was
+ * the honest reading of the old screen and would be a lie about this one.
+ *
+ * So it says the split instead, which is the thing that decides what to do next:
+ * one number is folders to work through by hand, the other is sets Fonoteca has
+ * already found candidates for.
  */
-function Summary({
-  kinds,
-  reasons,
-}: {
-  readonly kinds: readonly OpenQuestionCount[]
-  readonly reasons: readonly OpenQuestionCount[]
-}) {
+function Summary({ kinds }: { readonly kinds: readonly OpenQuestionCount[] }) {
   const questions = kinds.reduce((total, kind) => total + kind.questions, 0)
   const files = kinds.reduce((total, kind) => total + kind.files, 0)
 
-  const yours = reasons
-    .filter((reason) => isAnswerable(reason.name))
-    .reduce((total, reason) => total + reason.questions, 0)
+  const loose = kinds.find((kind) => kind.name === 'recording')
+  const sets = kinds.find((kind) => kind.name === 'release')
 
   if (questions === 0) return null
 
@@ -231,9 +292,17 @@ function Summary({
         {files.toLocaleString()} file{files === 1 ? '' : 's'}.
       </Text>
       <Text size="sm" tone="secondary" block>
-        {yours === 0
-          ? 'None of them can be settled from this screen — they are all waiting on data nobody here controls.'
-          : `${yours.toLocaleString()} of them ${yours === 1 ? 'is' : 'are'} waiting on you; the rest are waiting on data nobody here controls.`}
+        {[
+          loose !== undefined && loose.files > 0
+            ? `${loose.files.toLocaleString()} single files to match against an album yourself`
+            : null,
+          sets !== undefined && sets.questions > 0
+            ? `${sets.questions.toLocaleString()} set${sets.questions === 1 ? '' : 's'} of files Fonoteca can offer candidates for`
+            : null,
+        ]
+          .filter((part) => part !== null)
+          .join(', and ')}
+        .
       </Text>
     </Stack>
   )
@@ -245,68 +314,424 @@ type Group = {
   readonly kind: OpenKind
 }
 
+/** An album folder, and every open file in it whatever refused them. */
+type Folder = {
+  /** `Artist/Album`, which is the key and the heading at once. */
+  readonly path: string
+  readonly questions: readonly OpenQuestion[]
+}
+
 /**
- * The worklist, split by the unit it is open in and then by refusal.
+ * Every file-level question, gathered by the album it probably came from.
  *
- * The split is the one thing the old page said in grey six-point type and buried
- * everything else under: these are two different jobs. A release question is a
- * set of files decided together — an album, and a finishable afternoon. A
- * recording question is one file, and there are hundreds of them, most waiting
- * on data nobody here owns. Sorting them into one list by size puts the four
- * hundred repetitions above the dozen decisions, every time.
+ * **The change this screen was rebuilt for.** The worklist arrives ordered by
+ * path and split by refusal, which reads as six hundred and ninety-six unrelated
+ * files: an album whose eight tracks AcoustID has never heard and whose four
+ * others it knows but cannot link appears as two runs of rows in two different
+ * sections, and the only thing on screen tying them together is a folder name
+ * printed twelve times. Matching a release from that is not hard, it is
+ * impossible — the unit of the decision is the album and the unit of the display
+ * was the refusal.
  *
- * Attribution's refusals come back from the endpoint first for that reason, and
- * rendering the release section first keeps that ordering visible rather than
- * merely present.
+ * So the refusal becomes a badge on the row and the folder becomes the group.
+ * On the target library that is a hundred and twenty-five groups instead of six
+ * hundred and ninety-six rows, and each group is one album somebody can name.
+ *
+ * Ordered by size, then by path. Biggest first for the reason the endpoint
+ * orders components that way — a folder with thirty files in it is a whole album
+ * missing from the catalogue, and it is worth a person's attention before a
+ * folder holding one stray track.
+ */
+function foldersOf(questions: readonly OpenQuestion[]): readonly Folder[] {
+  const byFolder = new Map<string, OpenQuestion[]>()
+
+  for (const question of questions) {
+    const path = albumFolderOf(question.folders[0] ?? '')
+    const held = byFolder.get(path)
+
+    if (held === undefined) byFolder.set(path, [question])
+    else held.push(question)
+  }
+
+  return [...byFolder]
+    .map(([path, held]) => ({ path, questions: held }))
+    .sort(
+      (left, right) =>
+        right.questions.length - left.questions.length || left.path.localeCompare(right.path),
+    )
+}
+
+/**
+ * The worklist, split by the unit the decision is taken in.
+ *
+ * Two units, and they were always two jobs. A release question is a set of files
+ * the attribution pass formed and refused together; it has a candidate set that
+ * can be re-gathered, and answering one is a click on an album Fonoteca found.
+ * A file-level question has none of that — nothing recorded what it was choosing
+ * between, and for these files there was never anything to choose between, since
+ * AcoustID could not place the audio at all.
+ *
+ * That second kind is now grouped by folder rather than by refusal, and given
+ * the only tool that can settle it: a person who knows what the album is,
+ * searching MusicBrainz for it. See {@link foldersOf}.
  */
 function Sections({
   data,
   onOpen,
+  selected,
+  onSelect,
+  onFile,
 }: {
   readonly data: MatchingQueue
   readonly onOpen: (subject: MatchingSubjectRef) => void
+  readonly selected: ReadonlySet<string>
+  readonly onSelect: (next: ReadonlySet<string>) => void
+  readonly onFile: (filing: Filing) => void
 }) {
   const groups: readonly Group[] = data.reasons.map((reason) => {
     const questions = data.items.filter((item) => item.reason === reason.name)
     return { reason, questions, kind: kindOf(reason.name, questions) }
   })
 
-  const yours = groups.filter((group) => isAnswerable(group.reason.name))
-  const releases = groups.filter(
-    (group) => group.kind === 'release' && !isAnswerable(group.reason.name),
+  const albums = groups.filter((group) => group.kind === 'release')
+
+  // Memoised because the grouping walks every item and rebuilds a hundred and
+  // twenty-five arrays, and it re-runs on every tick of a checkbox otherwise.
+  const folders = useMemo(
+    () => foldersOf(data.items.filter((item) => item.kind === 'recording')),
+    [data.items],
   )
-  const others = groups.filter(
-    (group) => group.kind === 'recording' && !isAnswerable(group.reason.name),
-  )
+
+  const files = groups.filter((group) => group.kind === 'recording')
 
   return (
     <Stack direction="column" gap={16}>
-      <Section
-        title="You can settle these"
-        note="Fonoteca found more than one plausible answer and would not guess. Open one and it asks again, then shows you what it found: recordings to compare against a single file, or albums scored against a whole set of them. Pick, or say it is none of them."
-        count={total(yours)}
-        groups={yours}
+      <FolderSection
+        folders={folders}
+        count={total(files)}
+        selected={selected}
+        onSelect={onSelect}
         onOpen={onOpen}
-        tone="accent"
+        onFile={onFile}
       />
 
       <Section
-        title="Albums with nothing to choose from"
-        note="Sets of files decided together and refused together, where MusicBrainz lists no album containing these recordings at all. There is nothing to put in front of you — opening one shows which files are in it and where they sit on disk."
-        count={total(releases)}
-        groups={releases}
-        onOpen={onOpen}
-      />
-
-      <Section
-        title="Waiting on somebody else"
-        note="One file each. Nothing on this screen moves these: they are waiting on audio being submitted to AcoustID, or on a fingerprint being linked to a MusicBrainz recording. Worth knowing about, not worth working through."
-        count={total(others)}
-        groups={others}
+        title="Sets of files Fonoteca could not place"
+        note="Files the passes decided together and refused together, because they share the recordings they were compared against. Open one and Fonoteca asks MusicBrainz again for the whole set, then scores every album that comes back against what you actually hold."
+        count={total(albums)}
+        groups={albums}
         onOpen={onOpen}
       />
     </Stack>
   )
+}
+
+/**
+ * The by-hand half, and the only place on this screen a release can be searched for.
+ *
+ * **Why it is a section of its own and not a third `Section`.** Every other
+ * group here is a refusal with a candidate set behind it, recovered from
+ * something a pass wrote down; the label a person needs is *why the rule gave
+ * up*. These files have nothing written down about them at all — measured on the
+ * target library, not one of the six hundred and ninety-six holds a MusicBrainz
+ * recording — so the useful label is not the refusal but the folder, and the
+ * useful action is not "look at what Fonoteca found" but "tell it what this is".
+ *
+ * The refusals have not been thrown away: each row still carries its own, and
+ * the file dialog behind a filename still offers the AcoustID re-ask for the two
+ * that have one. What changed is that the refusal is no longer the thing the
+ * page is organised around, because organising by it is what made an album
+ * unmatchable.
+ */
+function FolderSection({
+  folders,
+  count,
+  selected,
+  onSelect,
+  onOpen,
+  onFile,
+}: {
+  readonly folders: readonly Folder[]
+  readonly count: OpenQuestionCount | undefined
+  readonly selected: ReadonlySet<string>
+  readonly onSelect: (next: ReadonlySet<string>) => void
+  readonly onOpen: (subject: MatchingSubjectRef) => void
+  readonly onFile: (filing: Filing) => void
+}) {
+  if (folders.length === 0) return null
+
+  const shown = folders.slice(0, FOLDER_ROWS)
+
+  return (
+    <Card
+      className={styles.yours}
+      title="Albums to match by hand"
+      aside={count !== undefined ? <SectionCount count={count} /> : null}
+    >
+      <Stack direction="column" gap={12} align="start">
+        <Text size="sm" tone="secondary" block>
+          Files grouped by the folder they sit in, whatever went wrong for each one — separate discs
+          of a set are one group. Nothing here can be recovered from a fingerprint: AcoustID either
+          has never heard this audio or knows it and links it to no recording, so the only thing
+          that can settle these is somebody who knows what the album is. Tick the files, find the
+          release on MusicBrainz, check the pairing and file them.
+        </Text>
+
+        <Stack direction="column" gap={4} className={styles.groups}>
+          {shown.map((folder) => (
+            <FolderGroup
+              key={folder.path}
+              folder={folder}
+              selected={selected}
+              onSelect={onSelect}
+              onOpen={onOpen}
+              onFile={onFile}
+            />
+          ))}
+        </Stack>
+
+        {shown.length < folders.length ? (
+          <Text size="xs" tone="warning" block>
+            Showing {shown.length.toLocaleString()} of {folders.length.toLocaleString()} folders.
+            The rest are smaller and hold the same kinds of question.
+          </Text>
+        ) : null}
+      </Stack>
+    </Card>
+  )
+}
+
+/**
+ * One album folder: the files in it, what refused each, and the button that
+ * settles the lot.
+ *
+ * Closed by default, like every group on this page, and for the same reason — a
+ * hundred and twenty-five folders that all insist on printing themselves is the
+ * flat list again with extra headings. What survives the collapse is the folder,
+ * the file count and the refusals in it, which is enough to decide whether this
+ * is the album you came for.
+ */
+function FolderGroup({
+  folder,
+  selected,
+  onSelect,
+  onOpen,
+  onFile,
+}: {
+  readonly folder: Folder
+  readonly selected: ReadonlySet<string>
+  readonly onSelect: (next: ReadonlySet<string>) => void
+  readonly onOpen: (subject: MatchingSubjectRef) => void
+  readonly onFile: (filing: Filing) => void
+}) {
+  const root = useRef<HTMLDivElement>(null)
+
+  const ticked = folder.questions.filter((question) => selected.has(question.id))
+
+  // "All selected, or all of them if none are." The fallback is what makes the
+  // ordinary case — a folder that is one album, entirely — a two-click job
+  // rather than thirty ticks and a click.
+  const filing = ticked.length > 0 ? ticked : folder.questions
+
+  function set(ids: readonly string[], on: boolean) {
+    const next = new Set(selected)
+
+    for (const id of ids) {
+      if (on) next.add(id)
+      else next.delete(id)
+    }
+
+    onSelect(next)
+  }
+
+  const allTicked = ticked.length === folder.questions.length
+
+  return (
+    <Disclosure
+      ref={root}
+      size="sm"
+      onOpenChange={(open) => {
+        if (open) root.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }}
+      summary={
+        <Text size="sm" weight="medium" family="mono">
+          {folder.path === '' ? 'At the library root' : folder.path}
+        </Text>
+      }
+      aside={
+        <Badge tone={ticked.length > 0 ? 'accent' : 'neutral'} size="sm" mono>
+          {ticked.length > 0
+            ? `${ticked.length} of ${folder.questions.length} ticked`
+            : `${folder.questions.length} file${folder.questions.length === 1 ? '' : 's'}`}
+        </Badge>
+      }
+      detail={
+        <Text size="xs" tone="tertiary" block>
+          {refusalLine(folder.questions)}
+        </Text>
+      }
+    >
+      <Stack direction="column" gap={12} align="start" className={styles.panel}>
+        <Stack gap={12} align="center" wrap>
+          <Button
+            size="sm"
+            variant="primary"
+            aria-haspopup="dialog"
+            onClick={() => {
+              onFile({ folder: folder.path, questions: filing })
+            }}
+          >
+            Match {filing.length === folder.questions.length ? 'all' : `${filing.length}`} to an
+            album…
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              set(
+                folder.questions.map((question) => question.id),
+                !allTicked,
+              )
+            }}
+          >
+            {allTicked ? 'Untick all' : 'Tick all'}
+          </Button>
+        </Stack>
+
+        <ul className={styles.rows} aria-label={`Files in ${folder.path}`}>
+          {folder.questions.map((question) => (
+            <li key={question.id}>
+              <FileRow
+                question={question}
+                folder={folder.path}
+                ticked={selected.has(question.id)}
+                onTick={(on) => {
+                  set([question.id], on)
+                }}
+                onOpen={onOpen}
+              />
+            </li>
+          ))}
+        </ul>
+      </Stack>
+    </Disclosure>
+  )
+}
+
+/**
+ * What went wrong in this folder, said once however many files it happened to.
+ *
+ * The refusal has not stopped mattering — "AcoustID has never heard any of
+ * this" and "AcoustID knows all of it and MusicBrainz links none of it" are
+ * different facts about an album, and the second means somebody could fix it
+ * upstream. It has stopped being the *heading*, which is different.
+ */
+function refusalLine(questions: readonly OpenQuestion[]): string {
+  const counts = new Map<string, number>()
+
+  for (const question of questions) {
+    counts.set(question.reason, (counts.get(question.reason) ?? 0) + 1)
+  }
+
+  return [...counts]
+    .sort((left, right) => right[1] - left[1])
+    .map(([reason, files]) =>
+      counts.size === 1 ? whyOpen(reason).label : `${whyOpen(reason).label} (${files})`,
+    )
+    .join(' · ')
+}
+
+/**
+ * One file in a folder: a tick, a name that opens it, and what refused it.
+ *
+ * The checkbox is a bare `<input type="checkbox">` inside its own `<label>`.
+ * There is no checkbox in the design system, and this is not the reason to add
+ * one: the native control already carries the role, the state, the keyboard
+ * behaviour and the label association that a hand-built one would have to
+ * reimplement and have tested against axe.
+ *
+ * It sits *beside* the button rather than inside it, because a button
+ * containing a checkbox is one control claiming to be two — clicking the tick
+ * would open the dialog, and neither the mouse nor the keyboard could reach the
+ * tick on its own.
+ */
+function FileRow({
+  question,
+  folder,
+  ticked,
+  onTick,
+  onOpen,
+}: {
+  readonly question: OpenQuestion
+  readonly folder: string
+  readonly ticked: boolean
+  readonly onTick: (on: boolean) => void
+  readonly onOpen: (subject: MatchingSubjectRef) => void
+}) {
+  const why = whyOpen(question.reason)
+
+  return (
+    <Stack gap={8} align="start" className={styles.fileRow}>
+      <label className={styles.tick}>
+        <input
+          type="checkbox"
+          checked={ticked}
+          onChange={(event) => {
+            onTick(event.currentTarget.checked)
+          }}
+        />
+        <VisuallyHidden>Include {question.subject}</VisuallyHidden>
+      </label>
+
+      <button
+        type="button"
+        className={styles.rowButton}
+        aria-haspopup="dialog"
+        onClick={() => {
+          onOpen({ source: 'catalogue', question })
+        }}
+      >
+        <Stack direction="column" gap={2} align="start" className={styles.row}>
+          <Stack gap={8} align="baseline" wrap>
+            <Text size="sm" family="mono" block>
+              {question.subject}
+            </Text>
+
+            {fileFacts(question) !== null ? (
+              <Text size="xs" tone="tertiary" family="mono">
+                {fileFacts(question)}
+              </Text>
+            ) : null}
+
+            <Badge tone={why.tone} size="sm">
+              {why.label}
+            </Badge>
+          </Stack>
+
+          {/*
+            Only where it differs from the group's own heading — which is where
+            it is worth reading. A two-disc set prints `CD1` and `CD2` here and
+            nothing at all on the ordinary album, where every row would otherwise
+            repeat the folder name above it.
+          */}
+          {folderTail(question, folder) !== null ? (
+            <Text size="xs" tone="tertiary" family="mono" block>
+              {folderTail(question, folder)}
+            </Text>
+          ) : null}
+        </Stack>
+      </button>
+    </Stack>
+  )
+}
+
+/** Whatever of a file's folder the group heading does not already say. */
+function folderTail(question: OpenQuestion, folder: string): string | null {
+  const own = question.folders[0] ?? ''
+  if (own === folder) return null
+
+  return own.startsWith(`${folder}/`) ? own.slice(folder.length + 1) : own
 }
 
 /**
@@ -338,26 +763,19 @@ function Section({
   count,
   groups,
   onOpen,
-  tone,
 }: {
   readonly title: string
   readonly note: string
   readonly count: OpenQuestionCount | undefined
   readonly groups: readonly Group[]
   readonly onOpen: (subject: MatchingSubjectRef) => void
-  /** `accent` on the one section that is somebody's to work. */
-  readonly tone?: 'accent'
 }) {
   // A section with nothing in it is not an empty state, it is a section that
   // does not apply — every file identified, or attribution not yet run.
   if (groups.length === 0) return null
 
   return (
-    <Card
-      className={tone === 'accent' ? styles.yours : undefined}
-      title={title}
-      aside={count !== undefined ? <SectionCount count={count} /> : null}
-    >
+    <Card title={title} aside={count !== undefined ? <SectionCount count={count} /> : null}>
       <Stack direction="column" gap={12} align="start">
         <Text size="sm" tone="secondary" block>
           {note}
@@ -419,8 +837,7 @@ function ReasonGroup({
   const { reason, questions, kind } = group
   const why = whyOpen(reason.name)
 
-  const cap = kind === 'release' ? ALBUM_ROWS : TRACK_ROWS
-  const shown = questions.slice(0, cap)
+  const shown = questions.slice(0, ALBUM_ROWS)
 
   const root = useRef<HTMLDivElement>(null)
 

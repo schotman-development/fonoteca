@@ -167,3 +167,45 @@
     transition: none;
   }
 }
+
+/*
+ * A file row in a folder: a tick, then the row button.
+ *
+ * The button keeps `inline-size: 100%` from `.rowButton`, so the flex row needs
+ * to give it what is left rather than what it asks for — without `min-inline-size: 0`
+ * a long filename pushes the tick off the start edge instead of wrapping.
+ */
+.fileRow {
+  inline-size: 100%;
+}
+
+.fileRow > .rowButton {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+/*
+ * The checkbox, sized against the row it sits in.
+ *
+ * A native control, deliberately — see `FileRow`. `accent-color` is the whole
+ * of the theming: it tints the checked box in both themes and leaves the
+ * platform's own focus ring, sizing and high-contrast behaviour alone, which is
+ * the half a hand-built one gets wrong.
+ *
+ * The padding matches `.rowButton`'s so the tick and the first line of text sit
+ * on the same baseline, and it widens the hit target to something a pointer can
+ * find.
+ */
+.tick {
+  display: flex;
+  align-items: center;
+  padding: var(--space-8) var(--space-4);
+  cursor: pointer;
+}
+
+.tick input {
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  accent-color: var(--color-accent-solid);
+  cursor: pointer;
+}

@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
+    "test": "node --test src/**/*.test.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist"
   },
