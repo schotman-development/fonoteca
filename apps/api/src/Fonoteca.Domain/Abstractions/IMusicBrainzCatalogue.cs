@@ -6,14 +6,26 @@ namespace Fonoteca.Domain.Abstractions;
 /// "What is this recording, and what was it released on?", answered by MBID.
 /// </summary>
 /// <remarks>
-/// Lookup by identifier only. There is no search here, and that is a decision
-/// rather than an omission: searching MusicBrainz by artist and title returns a
-/// ranked list that has to be <i>matched</i> — scored against what the file's
-/// tags claim, against its duration, against the rest of its folder — and
-/// matching is a domain rule, not an HTTP call. Putting a search method on the
-/// provider would invite that rule to be written next to the JSON parser.
-/// Identification therefore goes fingerprint → <see cref="IAcoustIdLookup"/> →
-/// MBID → here, and the tag-based fallback arrives with its own scoring code.
+/// Lookup by identifier, and one search that exists only because a person is
+/// reading its results. The original rule here was that there is no search at
+/// all — a text search returns a <i>ranked</i> list, ranking is matching, and
+/// matching is a domain rule that had no business being written next to the JSON
+/// parser. Every automated path still obeys it: identification goes fingerprint
+/// → <see cref="IAcoustIdLookup"/> → MBID → here, and attribution starts from
+/// <see cref="BrowseReleasesForRecordingAsync"/>.
+///
+/// <see cref="SearchReleasesAsync"/> is the exception and it is narrow. Its
+/// caller is one endpoint behind one screen, where somebody types an album name
+/// and picks from what comes back; nothing scores those results, nothing writes
+/// anything from them without a click, and the relevance number MusicBrainz
+/// returns is printed rather than believed. A pass that reached for this would
+/// be the mistake the rule was written against.
+///
+/// <b>It needs a search index, which a mirror does not have.</b> Replication
+/// covers the database and not Solr, so against a self-hosted server this call
+/// fails where every other method on this interface works — see ADR 0006. That
+/// is reported as the provider error it is rather than as an empty result, so
+/// "no albums match" and "this server cannot search" stay distinguishable.
 ///
 /// The shapes below are MusicBrainz's, flattened to what the catalogue in
 /// <c>Fonoteca.Domain.Catalogue</c> actually stores. Deliberately not the
@@ -57,6 +69,31 @@ public interface IMusicBrainzCatalogue
     /// <exception cref="ProviderRejectedException">The request was refused.</exception>
     Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
         Mbid recording,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Releases matching what somebody typed, most relevant first.
+    /// </summary>
+    /// <remarks>
+    /// A free-text search, which is the only method here that is not keyed on an
+    /// identifier — see the type's remarks for why that is allowed exactly once.
+    /// The query goes to MusicBrainz's own indexed search, so its syntax is
+    /// theirs: bare words match across the release, and field prefixes
+    /// (<c>artist:</c>, <c>date:</c>, <c>barcode:</c>) work as documented.
+    ///
+    /// Results carry a track count and no track list. Choosing one and reading
+    /// what is on it is <see cref="GetReleaseAsync"/>, one release at a time,
+    /// for the reason that method already gives.
+    /// </remarks>
+    /// <param name="limit">Results wanted. MusicBrainz caps this at 100.</param>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">
+    /// The request was refused — which is also what a server with no search index
+    /// looks like from here.
+    /// </exception>
+    Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+        string query,
+        int limit,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -312,6 +349,24 @@ public sealed record MusicBrainzReleaseCandidate(
     /// <summary>Tracks across every disc — the denominator of any coverage estimate.</summary>
     public int TrackCount => Media.Sum(medium => medium.TrackCount);
 }
+
+/// <summary>
+/// A search hit: a release, plus the two things a browse result cannot carry.
+/// </summary>
+/// <remarks>
+/// Composed rather than a wider <see cref="MusicBrainzReleaseCandidate"/>,
+/// because the extra fields are facts about the <i>search</i> and not about the
+/// release. <see cref="Score"/> exists only because a query produced this;
+/// <see cref="Credits"/> is here because a browse for a known recording never
+/// needed the billing line — the caller already knew whose recording it was —
+/// and somebody reading a list of forty albums called <i>Greatest Hits</i>
+/// needs nothing more urgently.
+/// </remarks>
+/// <param name="Score">MusicBrainz's own relevance, 0-100. Printed, never ranked on.</param>
+public sealed record MusicBrainzReleaseMatch(
+    MusicBrainzReleaseCandidate Release,
+    IReadOnlyList<MusicBrainzCredit> Credits,
+    int? Score);
 
 /// <summary>One disc of a release, counted rather than listed.</summary>
 public sealed record MusicBrainzMediumSummary(

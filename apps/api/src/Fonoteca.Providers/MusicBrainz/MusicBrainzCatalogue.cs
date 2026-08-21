@@ -91,6 +91,9 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// </summary>
     private const int BrowsePageSize = 100;
 
+    /// <summary>Search hits per request. MusicBrainz's own ceiling.</summary>
+    private const int SearchPageSize = 100;
+
     private readonly Query _query;
     private readonly MusicBrainzOptions _config;
     private readonly ILogger<MusicBrainzCatalogue> _logger;
@@ -215,6 +218,42 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         return candidates ?? [];
     }
 
+    public async Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+        string query,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+
+        // One page, never paged to exhaustion like the browse above it. A browse
+        // is a candidate set and a short one is a wrong answer; a search is a
+        // person typing until they see the album they meant, and page fifty of
+        // "greatest hits" has never been the album they meant.
+        var matches = await LookupAsync(
+            "release search",
+            null,
+            async token =>
+            {
+                var results = await _query
+                    .FindReleasesAsync(query, Math.Clamp(limit, 1, SearchPageSize), simple: false, cancellationToken: token)
+                    .ConfigureAwait(false);
+
+                var collected = new List<MusicBrainzReleaseMatch>(results.Results.Count);
+
+                foreach (var result in results.Results)
+                {
+                    collected.Add(MusicBrainzMapper.ToReleaseMatch(result));
+                }
+
+                return collected;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        ProviderLog.MusicBrainzSearched(_logger, query, matches?.Count ?? 0);
+
+        return matches ?? [];
+    }
+
     public Task<MusicBrainzWork?> GetWorkAsync(
         Mbid id,
         CancellationToken cancellationToken = default) =>
@@ -228,9 +267,21 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
 
     public void Dispose() => _query.Dispose();
 
+    /// <summary>
+    /// The contact check, the logging and the five ways a request can fail.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="id"/> is null for the one call that is not a lookup by
+    /// identifier, and that nullability is load-bearing rather than cosmetic: the
+    /// 404 arm below turns "MusicBrainz no longer has this" into a null answer,
+    /// which is right for an MBID that has been merged away and badly wrong for a
+    /// search — a server with no search index answers 404, and swallowing it
+    /// would report "no albums match your query" for a mirror that cannot search
+    /// at all.
+    /// </remarks>
     private async Task<T?> LookupAsync<T>(
         string entityType,
-        Mbid id,
+        Mbid? id,
         Func<CancellationToken, Task<T>> lookup,
         CancellationToken cancellationToken)
         where T : class
@@ -250,15 +301,15 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         try
         {
             var result = await lookup(cancellationToken).ConfigureAwait(false);
-            ProviderLog.MusicBrainzLookedUp(_logger, entityType, id.Value);
+            if (id is { } found) ProviderLog.MusicBrainzLookedUp(_logger, entityType, found.Value);
             return result;
         }
-        catch (HttpError error) when (error.Status == HttpStatusCode.NotFound)
+        catch (HttpError error) when (id is not null && error.Status == HttpStatusCode.NotFound)
         {
             // Not a failure. An MBID AcoustID still points at can have been
             // merged away hours ago, and "MusicBrainz no longer has this" is an
             // answer the caller can act on.
-            ProviderLog.MusicBrainzNotFound(_logger, entityType, id.Value);
+            ProviderLog.MusicBrainzNotFound(_logger, entityType, id!.Value.Value);
             return null;
         }
         catch (HttpError error)

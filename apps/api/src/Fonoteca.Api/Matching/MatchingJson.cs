@@ -76,6 +76,38 @@ public sealed record ComponentDecisionPayload
 }
 
 /// <summary>
+/// The event log's payload for one person filing files under an album by hand.
+/// </summary>
+/// <remarks>
+/// The only decision payload that records the <i>seating</i> and not just the
+/// answer, and it has to. Everywhere else the pairing is reproducible — a
+/// recording MBID and a release determine the slot, so the log can stay small
+/// and the mapping can be recomputed. Here the pairing came out of a person's
+/// head: none of these files holds a recording MBID, so nothing in the catalogue
+/// or at MusicBrainz can say afterwards why file 7 was seated on track 8. Left
+/// out, "who decided this and on what" would have no answer at all.
+///
+/// <see cref="Seats"/> is a flat list of <c>{fileId:N}@{disc}-{position}</c>
+/// rather than a list of objects, because it is read by a person looking at one
+/// row of JSONB and its whole job is to fit on a screen at album length.
+/// </remarks>
+public sealed record AlbumFilingPayload
+{
+    public required Guid Release { get; init; }
+
+    /// <summary>The album's title as MusicBrainz gave it, so the log reads without a lookup.</summary>
+    public required string Title { get; init; }
+
+    public required int Filed { get; init; }
+
+    /// <summary>Pairs naming a file that was no longer an open question.</summary>
+    public required int Skipped { get; init; }
+
+    /// <summary>Every seat taken, as <c>{fileId:N}@{disc}-{position}</c>.</summary>
+    public required IReadOnlyList<string> Seats { get; init; }
+}
+
+/// <summary>
 /// Source-generated, matching <c>TaggingJson</c>.
 /// </summary>
 /// <remarks>
@@ -94,6 +126,7 @@ public sealed record ComponentDecisionPayload
     DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
 [JsonSerializable(typeof(RecordingDecisionPayload))]
 [JsonSerializable(typeof(ComponentDecisionPayload))]
+[JsonSerializable(typeof(AlbumFilingPayload))]
 [JsonSerializable(typeof(AcoustIdEvidence))]
 [JsonSerializable(typeof(Fonoteca.Api.Endpoints.RecordingCandidatesResponse))]
 [JsonSerializable(typeof(Fonoteca.Api.Endpoints.ComponentCandidatesResponse))]

@@ -796,6 +796,13 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             return Task.FromResult(_releases.GetValueOrDefault(id));
         }
 
+        /// <summary>Never searched for. Only the by-hand album screen searches.</summary>
+        public Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseMatch>>([]);
+
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>

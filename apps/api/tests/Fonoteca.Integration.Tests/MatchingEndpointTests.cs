@@ -775,6 +775,13 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
     {
         public static StubTitles Unavailable() => new(unavailable: true);
 
+        /// <summary>Never searched for. Only the by-hand album screen searches.</summary>
+        public Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseMatch>>([]);
+
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
             CancellationToken cancellationToken = default)
@@ -826,6 +833,13 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
     /// </remarks>
     private sealed class StubDetailedTitles : IMusicBrainzCatalogue
     {
+        /// <summary>Never searched for. Only the by-hand album screen searches.</summary>
+        public Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseMatch>>([]);
+
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>

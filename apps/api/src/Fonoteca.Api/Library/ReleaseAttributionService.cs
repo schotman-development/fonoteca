@@ -961,6 +961,20 @@ public sealed class ReleaseAttributionService(
         private readonly Dictionary<(ReleaseId, int, int), TrackId> _tracks = [];
 
         /// <summary>
+        /// The recording behind each slot, filled beside <see cref="_tracks"/>.
+        /// </summary>
+        /// <remarks>
+        /// For the caller that seats a file on a slot the file could not name
+        /// itself. The attribution pass never needs this — it matches on the
+        /// recording MBID the file already holds, so it knew the recording before
+        /// it found the slot — but a person choosing an album for files with no
+        /// recording at all is reading the identity <i>off</i> the slot, and the
+        /// row it needs was minted in this unit of work and is invisible to a
+        /// query until <c>SaveChanges</c>.
+        /// </remarks>
+        private readonly Dictionary<(ReleaseId, int, int), RecordingId> _slotRecordings = [];
+
+        /// <summary>
         /// Recordings minted in this unit of work, by MBID.
         /// </summary>
         /// <remarks>
@@ -1088,6 +1102,10 @@ public sealed class ReleaseAttributionService(
         /// </remarks>
         public TrackId? TrackIdAt(ReleaseId release, int disc, int position) =>
             _tracks.TryGetValue((release, disc, position), out var known) ? known : null;
+
+        /// <summary>The recording at a slot. Same map, same reason as <see cref="TrackIdAt"/>.</summary>
+        public RecordingId? RecordingIdAt(ReleaseId release, int disc, int position) =>
+            _slotRecordings.TryGetValue((release, disc, position), out var known) ? known : null;
 
         /// <summary>
         /// The name on the front of the album.
@@ -1245,6 +1263,7 @@ public sealed class ReleaseAttributionService(
 
                 kept.Add(row.Id);
                 _tracks[(release.Id, row.DiscNumber, row.Position)] = row.Id;
+                _slotRecordings[(release.Id, row.DiscNumber, row.Position)] = recording.Id;
             }
 
             // What the release no longer prints. Removing these still nulls the

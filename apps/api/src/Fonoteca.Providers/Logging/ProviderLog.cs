@@ -38,6 +38,12 @@ internal static partial class ProviderLog
     public static partial void MusicBrainzNotFound(ILogger logger, string entityType, Guid mbid);
 
     [LoggerMessage(
+        EventId = 1353,
+        Level = LogLevel.Debug,
+        Message = "MusicBrainz search for {Query} returned {Matches} releases")]
+    public static partial void MusicBrainzSearched(ILogger logger, string query, int matches);
+
+    [LoggerMessage(
         EventId = 1352,
         Level = LogLevel.Information,
         Message = "MusicBrainz client configured for {Server}, one request every {IntervalMs}ms, "

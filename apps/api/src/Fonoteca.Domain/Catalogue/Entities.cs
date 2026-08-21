@@ -583,6 +583,27 @@ public enum EnrichmentOutcome
 
     /// <summary>A provider did not answer. Stays on the worklist.</summary>
     LookupFailed = 4,
+
+    /// <summary>
+    /// A person named the recording, after the passes could not.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Linked"/>, and the gap between them is real rather than
+    /// bookkeeping: <c>Linked</c> promises "linked to a recording, <i>with its
+    /// artists</i>", written by a pass that fetched the recording and ran
+    /// <c>PrimaryCredits</c> over it. A person filing files under an album gets
+    /// the recording's identity out of the release's track list and no artist
+    /// graph at all — one release lookup covers thirty files, where enriching
+    /// them properly is thirty recording lookups at the rate limit. So the
+    /// catalogue knows what these files are and cannot yet say who played on
+    /// them, and this is the value that says so.
+    ///
+    /// It also has to exist for the worklist to empty. The queue is
+    /// <c>UnidentifiedOutcomes OR UnlinkedOutcomes</c>, so a file left at
+    /// <see cref="NoRecording"/> keeps its place however confidently its identity
+    /// was decided.
+    /// </remarks>
+    LinkedByPerson = 5,
 }
 
 /// <summary>What was decided about a file, and how firmly.</summary>

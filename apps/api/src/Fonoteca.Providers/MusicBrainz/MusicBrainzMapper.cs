@@ -2,6 +2,7 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using MetaBrainz.MusicBrainz;
 using MetaBrainz.MusicBrainz.Interfaces.Entities;
+using MetaBrainz.MusicBrainz.Interfaces.Searches;
 
 namespace Fonoteca.Providers.MusicBrainz;
 
@@ -127,6 +128,13 @@ internal static class MusicBrainzMapper
             SecondaryTypes: group?.SecondaryTypes ?? [],
             Media: media);
     }
+
+    /// <summary>A search hit: the browse shape, plus the billing line and the score.</summary>
+    public static MusicBrainzReleaseMatch ToReleaseMatch(ISearchResult<IRelease> source) =>
+        new(
+            Release: ToReleaseCandidate(source.Item),
+            Credits: ToCredits(source.Item.ArtistCredit),
+            Score: source.Score);
 
     /// <summary>Every release the recording appears on, and where on it.</summary>
     /// <remarks>

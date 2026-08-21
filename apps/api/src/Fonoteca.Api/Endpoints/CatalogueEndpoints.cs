@@ -39,7 +39,7 @@ namespace Fonoteca.Api.Endpoints;
 /// own, and the one question it exists to answer — "what do I have by this
 /// artist" — would be the one it could not answer.
 /// </remarks>
-public static class CatalogueEndpoints
+public static partial class CatalogueEndpoints
 {
     /// <summary>
     /// The most artists one response will carry.
@@ -389,6 +389,12 @@ public static class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // The by-hand half: search MusicBrainz for an album, then file a set of
+        // files a person picked under a slot each. In its own partial because it
+        // starts from a folder rather than from anything the passes wrote down —
+        // see CatalogueEndpoints.AlbumMatching.cs.
+        MapAlbumMatchingEndpoints(group);
 
         return app;
     }

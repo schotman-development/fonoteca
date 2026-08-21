@@ -358,6 +358,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/matching/releases/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Albums matching what somebody typed.
+         * @description A free-text search of MusicBrainz, for the files no candidate set can be recovered for — the ones AcoustID cannot place, whose only remaining evidence is a person who knows what the album is. `q` takes MusicBrainz's own query syntax, so `artist:` and `date:` work; a MusicBrainz release URL or a bare MBID pasted into it is looked up directly instead of searched for, and comes back as the single result it is.
+         *
+         *     **This is the one call in the application that needs a search index**, which database replication does not cover. Against a self-hosted mirror it fails where every other MusicBrainz call works — reported as a provider error rather than as an empty list, so 'nothing matches' and 'this server cannot search' stay apart. `score` is MusicBrainz's own relevance and is printed, not ranked on: the order is theirs.
+         */
+        get: operations["SearchReleases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/releases/{id}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every position on one album, filled or not.
+         * @description The track list a person seats files onto, straight from MusicBrainz and not from the catalogue — the release may well not be in the catalogue yet, since filing files under it is what puts it there.
+         *
+         *     Every slot the release prints is returned, including the ones nobody holds: the empty ones are what a person is choosing *around*, and a list of only the occupied positions cannot show a rip that skipped track 7. `durationMs` is beside the formatted length so a client can measure a proposed pairing without parsing it back.
+         *
+         *     `folder` is optional and is the one thing here read from the catalogue: given a library folder, every slot already held by a file *in that folder and filed under this same release* comes back naming it in `heldBy`. An album is rarely wholly unmatched — the passes place most of a rip and leave the two files they could not — so without this the screen offers twenty-one empty positions for one leftover file and proposes seating it on track 1.
+         */
+        get: operations["GetReleaseSlots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/files/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * File a set of chosen files onto a set of chosen album slots.
+         * @description The commit half of `matching/releases/search`, and the only write in the application whose seating comes from the request rather than from a rule. Each pair names one file and one `(disc, position)` on the release; the pairing is committed as given, because for these files the person is the evidence — none of them holds a recording MBID, so nothing here could check the claim against anything.
+         *
+         *     Choosing a release writes it, its group and its whole track list into the catalogue exactly as the attribution pass would, then gives each file the recording its slot names, the track, the release and the group. All three outcomes are set to their by-a-person values and all three decided-stamps are written, which is what takes the files off every pass's worklist for good.
+         *
+         *     A file that is not currently an open question is skipped rather than rewritten — this endpoint answers refusals, it does not overrule decisions. Nothing on disk is touched: no tag write, no `Fonoteca:AllowFileMutation`, no undo journal, one decision entry naming every pair.
+         */
+        post: operations["FileFilesUnderRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -369,6 +439,29 @@ export interface components {
             score: number;
             /** Format: int32 */
             recordings: number;
+        };
+        AlbumFilingPair: {
+            /** Format: uuid */
+            file: string;
+            /** Format: int32 */
+            disc: number;
+            /** Format: int32 */
+            position: number;
+        };
+        AlbumFilingRequest: {
+            /** Format: uuid */
+            release: string;
+            pairs: components["schemas"]["AlbumFilingPair"][];
+        };
+        AlbumFilingResponse: {
+            /** Format: uuid */
+            release: string;
+            title: string;
+            /** Format: int32 */
+            filed: number;
+            /** Format: int32 */
+            skipped: number;
+            detail: string;
         };
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];
@@ -841,6 +934,63 @@ export interface components {
             /** Format: int32 */
             total: number;
             items: components["schemas"]["ReleaseSummary"][];
+        };
+        ReleaseSearchResponse: {
+            query: string;
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["ReleaseSearchRow"][];
+        };
+        ReleaseSearchRow: {
+            /** Format: uuid */
+            mbid: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            country: null | string;
+            status: null | string;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            formats: null | string;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: int32 */
+            discCount: number;
+            /** Format: int32 */
+            score: null | number;
+        };
+        ReleaseSlotRow: {
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            position: number;
+            number: null | string;
+            title: string;
+            artist: null | string;
+            duration: null | string;
+            /** Format: int32 */
+            durationMs: null | number;
+            /** Format: uuid */
+            recording: null | string;
+            heldBy: null | string;
+        };
+        ReleaseSlotsResponse: {
+            /** Format: uuid */
+            mbid: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            country: null | string;
+            status: null | string;
+            /** Format: uuid */
+            releaseGroup: null | string;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            /** Format: int32 */
+            discCount: number;
+            slots: components["schemas"]["ReleaseSlotRow"][];
         };
         ReleaseSummary: {
             /** Format: uuid */
@@ -1636,6 +1786,149 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComponentDecisionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SearchReleases: {
+        parameters: {
+            query?: {
+                q?: string;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseSearchResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetReleaseSlots: {
+        parameters: {
+            query?: {
+                folder?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseSlotsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    FileFilesUnderRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlbumFilingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumFilingResponse"];
                 };
             };
             /** @description Bad Request */

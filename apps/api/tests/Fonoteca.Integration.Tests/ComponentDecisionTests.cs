@@ -648,6 +648,13 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
         /// <summary>Release lookups that reached it — the track lists, the heavy half.</summary>
         public int Lookups { get; private set; }
 
+        /// <summary>Never searched for. Only the by-hand album screen searches.</summary>
+        public Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseMatch>>([]);
+
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>
