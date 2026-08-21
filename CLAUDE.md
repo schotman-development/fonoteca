@@ -785,6 +785,116 @@ one that already exists.
   `NotAttempted` — are exactly the two never returned. `openQuestions.ts` is the
   one place they become English, delegating the attribution three to `CERTAINTY`.
 
+### Matching an album by hand, when nothing about the files names one
+
+| | |
+| --- | --- |
+| `Domain/Abstractions/IMusicBrainzCatalogue.cs` | `SearchReleasesAsync` — the one text search in the application |
+| `Api/Endpoints/CatalogueEndpoints.AlbumMatching.cs` | search, track list, and the commit |
+| `web/src/pages/MatchingPage.tsx` | the worklist, grouped by album folder |
+| `web/src/pages/ReleaseMatchDialog.tsx` | search → choose → check the pairing → file |
+| `web/src/pages/seating.ts` | the pure half — ids, drift, folder cut. `node --test` |
+
+**Every other chooser on the matching screen recovers a candidate set. This one
+has none to recover.** Measured on the target library, **all 696 open
+file-level questions have a null `RecordingId`** — that is precisely why they
+are open: AcoustID has never heard the audio, or has heard it and links it to no
+recording. So `ReleaseFit` cannot seat these files (it matches on the recording
+MBID the file holds), and neither can anything else keyed on an identifier.
+
+The only two claims in existence about them are the folder they sit in and the
+order they sit in it, and the folder is the claim this project makes a point of
+not believing. The difference here is who is doing the believing: a pass reading
+a folder name is a guess with nobody watching; a person reading it, searching
+MusicBrainz and approving a pairing they can see is the only evidence available.
+
+- **The worklist is grouped by album folder, and that was the whole complaint.**
+  Ordered by path and split by refusal, one album appears as two runs of rows in
+  two sections — the 112-file *Swan Lake* folder is 96 `NoRecording` and 16
+  `Unknown`. `ALBUM_FOLDER_DEPTH` cuts at `Artist/Album`, so `CD1` and `CD2`
+  collapse onto one question. 696 rows become 113 folders. The refusal survives
+  as a badge on the row; it stopped being the heading.
+- **A folder on this screen is rarely a whole album, and the worklist cannot say
+  so.** It lists *open questions*, so a folder the passes mostly placed arrives
+  here as a one-file album: Fleetwood Mac's `Rumours` is 11 files of which 10 are
+  filed, `David Gilmour/Live At Pompeii` is 21 of which 20 are, `B.B. King/Live
+  (2008)` is 12 of which 9 are. All five leftovers are `Ambiguous` — one AcoustID
+  cluster legitimately linked to several recordings, the inverse of the case
+  `AcoustIdSelection` was taught to see through, and not a tie any rule can break.
+  Seated by raw index against the release's printed order, Pompeii's one leftover
+  goes on **track 1**, which is wrong in the worst way available: the number is
+  plausible, the drift is the only thing contradicting it, and the file it
+  displaces is not on the screen to notice. So `GET …/releases/{id}/slots` takes
+  an optional `folder` and returns `heldBy` per slot — the folder's *other* files,
+  the answered ones, named on the positions they already sit on.
+  `defaultSeating` then seats onto the gaps, which is exactly index order when
+  nothing is filed and one click when one file has one hole. Held options stay in
+  the `<select>`, disabled: removing them would renumber the album, and "14 is the
+  only gap" is only legible against the tracks either side of it.
+- **The held lookup is constrained to the same release, and that is the
+  load-bearing half.** Track 2 of one pressing is not track 2 of another, so a
+  sibling's position is only a fact about the release it was filed under.
+  Reported across editions it greys out a slot on the strength of a number that
+  means something else — silently, since the file making the claim is not on the
+  screen. Where the editions differ the query finds nothing and the dialog
+  behaves as it did before, which is the right way for this to fail. The prefix
+  carries a trailing slash, or `Artist/Album` also matches `Artist/Album Live`.
+  The wildcard question was *measured*, not assumed: EF Core's `StartsWith` over
+  a parameter is safe, checked by asking for `David Gilmour/Live%` and for the
+  same folder with `_` where the brackets are, and getting nothing both times.
+  `_` is not exotic in this library — one Pompeii file is `Time _ Breathe`.
+- **The seating is proposed by the client and committed verbatim.** There is no
+  matching rule in the endpoint at all — one would be a fourth pass whose
+  worklist is exactly the files the other three refused. The default pairing is
+  file order against printed order, which is right on a complete rip and wrong
+  the moment a track is missing, so every pair is on screen with both lengths
+  and the drift between them and every one is changeable through a native
+  `<select>`. Re-seating a taken position **swaps** the two files, which keeps
+  "one file per position" true without an error state.
+  `TheSeatingCommittedIsTheOneThatWasSentAndNotFileOrder` is the guard.
+- **All three outcomes are written, not just attribution.** The worklist is
+  `UnidentifiedOutcomes OR UnlinkedOutcomes`, so a file filed under an album with
+  its identification refusal intact stays on the worklist forever and the screen
+  appears to do nothing. Hence `EnrichmentOutcome.LinkedByPerson`, which is *not*
+  `Linked`: that value promises "with its artists", and these files get the
+  recording's identity off the release's track list and **no artist graph at
+  all** — one release lookup covers thirty files where enriching them properly is
+  thirty recording lookups at the rate limit. They browse under
+  `/library/releases` and not yet under `/library/artists`.
+- **A position the release does not print is refused before anything is
+  written.** `TrackIdAt` answers null for a slot that does not exist, so the file
+  would be filed under the album with no position — which reads on every later
+  screen as a track MusicBrainz has since removed rather than as a number
+  somebody invented.
+- **`ReleaseWriter` gained `RecordingIdAt` beside `TrackIdAt`.** The pass never
+  needed it: it matches on the recording MBID the file already holds, so it knows
+  the recording *before* it finds the slot. This reads the identity off the slot,
+  and those `Recording` rows do not exist in the database until `SaveChanges` —
+  a query would miss every one.
+- **A file that is no longer an open question is skipped, not rewritten.** This
+  endpoint answers refusals; overruling a decision is a different act. The count
+  comes back so two open tabs are visible rather than merely lucky.
+- **Nothing on disk is touched.** An album is a catalogue fact: no tag write, no
+  `Fonoteca:AllowFileMutation`, no undo journal — one decision entry recording
+  every seat, because unlike every other decision here the pairing is not
+  reproducible from anything the catalogue holds.
+- **A worklist id is not a media file id, and getting that wrong is invisible.**
+  `OpenQuestion.Id` is `recording:{guid}`; the request field is a bare `Guid`.
+  Sending the whole thing failed to deserialise **before the handler ran**, so
+  none of the endpoint's own validation was reached, the response was
+  `text/plain` rather than a problem document, and the screen showed
+  `400 Bad Request` with nothing in it to read. The integration tests could not
+  have caught it — they POST media file ids directly and never meet the
+  worklist's format. So the id unwrapping, the drift arithmetic and the folder
+  cut live in `seating.ts`, which imports no React and no stylesheet and is
+  therefore runnable under `node --test` (`apps/web` now has a `test` script, and
+  `pnpm -r test` picks it up). `pairs carry the bare guid, never the recording:
+  prefix` is the regression.
+- **Search needs a Solr index, which a mirror has not got.** See the mirror
+  section. Pasting an MBID or a release URL into the box is a lookup and works
+  either way; `CatalogueEndpoints.AlbumMatching` detects one with a regex before
+  it searches, because MusicBrainz indexes titles and not identifiers.
+
 ### The identification providers, and what they refuse to do
 
 | | |
@@ -874,10 +984,16 @@ search index, replicating daily. Optional; nothing in the build, the tests or
 - **Its own compose project, `fonoteca-musicbrainz`, not a profile in
   `compose.yaml`.** `podman compose down -v` while resetting the dev database
   must not be able to delete 100 GB that took a day to build.
-- **No Solr, and that is load-bearing.** Replication does not cover search
-  indexes, so they would need a rebuild schedule forever. `IMusicBrainzCatalogue`
-  has no search method, so nothing would call it. If tag-based matching is ever
-  added as a fallback, revisit this *before* designing it.
+- **No Solr, and one call now needs it.** Replication does not cover search
+  indexes, so they would need a rebuild schedule forever. That was free while
+  `IMusicBrainzCatalogue` had no search method at all; it now has exactly one —
+  `SearchReleasesAsync`, behind the by-hand album screen — so against a mirror
+  that call fails where every other one works. It is reported as the provider
+  error it is rather than as an empty result, and the screen says so in as many
+  words, because "no albums match" and "this server cannot search" are otherwise
+  indistinguishable. Pasting a release MBID or URL into the same box is a lookup
+  and works against a mirror. Nothing automated calls it: if tag-based matching
+  is ever added as a *pass*, this is still the thing to revisit first.
 - **AcoustID gets no equivalent.** No full base dump exists — only daily
   incrementals back to 2011, ~414 GB compressed — and its server is documented
   as only meant to run on acoustid.org.
