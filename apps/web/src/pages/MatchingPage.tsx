@@ -243,6 +243,10 @@ export function MatchingPage() {
           selected={selected}
           onSelect={setSelected}
           onFile={setFiling}
+          onDismissed={() => {
+            setSelected(new Set())
+            setDecisions((committed) => committed + 1)
+          }}
         />
       ) : null}
 
@@ -419,12 +423,14 @@ function Sections({
   selected,
   onSelect,
   onFile,
+  onDismissed,
 }: {
   readonly data: MatchingQueue
   readonly onOpen: (subject: MatchingSubjectRef) => void
   readonly selected: ReadonlySet<string>
   readonly onSelect: (next: ReadonlySet<string>) => void
   readonly onFile: (filing: Filing) => void
+  readonly onDismissed: () => void
 }) {
   const groups: readonly Group[] = data.reasons.map((reason) => {
     const questions = data.items.filter((item) => item.reason === reason.name)
@@ -451,6 +457,7 @@ function Sections({
         onSelect={onSelect}
         onOpen={onOpen}
         onFile={onFile}
+        onDismissed={onDismissed}
       />
 
       <Section
@@ -488,6 +495,7 @@ function FolderSection({
   onSelect,
   onOpen,
   onFile,
+  onDismissed,
 }: {
   readonly folders: readonly Folder[]
   readonly count: OpenQuestionCount | undefined
@@ -495,6 +503,7 @@ function FolderSection({
   readonly onSelect: (next: ReadonlySet<string>) => void
   readonly onOpen: (subject: MatchingSubjectRef) => void
   readonly onFile: (filing: Filing) => void
+  readonly onDismissed: () => void
 }) {
   if (folders.length === 0) return null
 
@@ -524,6 +533,7 @@ function FolderSection({
               onSelect={onSelect}
               onOpen={onOpen}
               onFile={onFile}
+              onDismissed={onDismissed}
             />
           ))}
         </Stack>
@@ -555,14 +565,31 @@ function FolderGroup({
   onSelect,
   onOpen,
   onFile,
+  onDismissed,
 }: {
   readonly folder: Folder
   readonly selected: ReadonlySet<string>
   readonly onSelect: (next: ReadonlySet<string>) => void
   readonly onOpen: (subject: MatchingSubjectRef) => void
   readonly onFile: (filing: Filing) => void
+  readonly onDismissed: () => void
 }) {
   const root = useRef<HTMLDivElement>(null)
+
+  const [dismissal, setDismissal] = useState<'idle' | 'sending' | string>('idle')
+  const [reopening, setReopening] = useState<'idle' | 'sending' | string>('idle')
+
+  /*
+    Whether this folder has ever been open, which is what gates the read of its
+    whole contents.
+
+    `Disclosure` renders its children whether it is open or not — closed is
+    `hidden`, not unmounted — so a fetch mounted unconditionally would be a
+    hundred and thirteen requests on a page nobody has interacted with. Sticky
+    rather than tracking the open state, so collapsing and reopening a folder
+    does not re-read it.
+  */
+  const [opened, setOpened] = useState(false)
 
   const ticked = folder.questions.filter((question) => selected.has(question.id))
 
@@ -584,12 +611,113 @@ function FolderGroup({
 
   const allTicked = ticked.length === folder.questions.length
 
+  /**
+   * Whether this group's path is safe to dismiss whole.
+   *
+   * The button sends a path and the server closes everything beneath it, so the
+   * two have to mean the same set. They do at `Artist/Album`, which is what
+   * {@link albumFolderOf} cuts to and what every group on this screen is. They
+   * do not at `Artist` — that function cuts a path down to two segments and does
+   * not pad a shorter one up to them, so a stray file sitting directly under an
+   * artist folder produces a one-segment group, and `Artist/` as a prefix is
+   * every album that artist has. Rare, and answered file by file instead of by
+   * sweeping a discography on a click that promised six files.
+   */
+  const markable = folder.path.split('/').length >= ALBUM_FOLDER_DEPTH
+
+  /**
+   * The other answer: this folder is nobody's release.
+   *
+   * Some folders are somebody's own compilation — tracks pulled off YouTube, a
+   * mixtape, a rip of a set never issued as an album — and no amount of
+   * searching will find them, because there is nothing to find. Without this the
+   * folder sits here forever and three passes go on re-asking about it at the
+   * rate limit.
+   *
+   * Confirmed through the browser's own dialog rather than a built one: it is a
+   * bulk write over every open file under a path, undone only by hand, and the
+   * whole of what a person needs to read before agreeing to it is one sentence.
+   */
+  async function dismiss() {
+    const count = folder.questions.length
+
+    if (
+      !window.confirm(
+        `Mark “${folder.path}” as coming from no release?\n\n` +
+          `The ${count} open file${count === 1 ? '' : 's'} here — and anything else under that ` +
+          'path Fonoteca still has a question about — stop being asked about, here and by every ' +
+          'pass. Files Fonoteca has already matched are left exactly as they are, and nothing ' +
+          'on disk is touched.',
+      )
+    ) {
+      return
+    }
+
+    setDismissal('sending')
+
+    try {
+      await api.post('/api/catalogue/matching/folders/unreleased', {
+        json: { folder: folder.path },
+      })
+
+      onDismissed()
+    } catch (cause: unknown) {
+      setDismissal(describeError(cause))
+    }
+  }
+
+  /**
+   * The third answer: the passes matched this folder to the wrong thing.
+   *
+   * The only one of the three that is not about the files on this screen. A
+   * folder arrives here showing the files a pass *refused* — one leftover of an
+   * album that was otherwise placed correctly, most of the time. But sometimes
+   * the placement itself is wrong: a live set whose songs AcoustID matched to
+   * the studio recordings of the same titles is filed, linked, off every
+   * worklist and readable as a finished album until somebody plays it. The
+   * measured example is a 2019 concert where thirteen of sixteen files went to
+   * the studio album of the same name, leaving three on this screen — which is
+   * exactly how it looks: a folder that says three when it means sixteen.
+   *
+   * So this reaches past the rows shown. Every file under the path that a pass
+   * placed gives up its recording and album and joins the question.
+   */
+  async function reopen() {
+    if (
+      !window.confirm(
+        `Ask “${folder.path}” again from scratch?\n\n` +
+          'Every file under that path that Fonoteca matched gives up its recording, its album ' +
+          'and its track, and the whole folder comes back here as one question for you. Files ' +
+          'already waiting for an answer keep the answer they are waiting for. No pass will ' +
+          'match them again — this is undone by matching them yourself. Nothing on disk is ' +
+          'touched.',
+      )
+    ) {
+      return
+    }
+
+    setReopening('sending')
+
+    try {
+      await api.post('/api/catalogue/matching/folders/reopen', {
+        json: { folder: folder.path },
+      })
+
+      onDismissed()
+    } catch (cause: unknown) {
+      setReopening(describeError(cause))
+    }
+  }
+
   return (
     <Disclosure
       ref={root}
       size="sm"
       onOpenChange={(open) => {
-        if (open) root.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        if (!open) return
+
+        setOpened(true)
+        root.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       }}
       summary={
         <Text size="sm" weight="medium" family="mono">
@@ -600,7 +728,7 @@ function FolderGroup({
         <Badge tone={ticked.length > 0 ? 'accent' : 'neutral'} size="sm" mono>
           {ticked.length > 0
             ? `${ticked.length} of ${folder.questions.length} ticked`
-            : `${folder.questions.length} file${folder.questions.length === 1 ? '' : 's'}`}
+            : `${folder.questions.length} open`}
         </Badge>
       }
       detail={
@@ -635,25 +763,322 @@ function FolderGroup({
           >
             {allTicked ? 'Untick all' : 'Tick all'}
           </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!markable || dismissal === 'sending'}
+            onClick={() => {
+              void dismiss()
+            }}
+          >
+            {dismissal === 'sending' ? 'Marking…' : 'Not a release'}
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!markable || reopening === 'sending'}
+            onClick={() => {
+              void reopen()
+            }}
+          >
+            {reopening === 'sending' ? 'Reopening…' : 'Wrong match — ask again'}
+          </Button>
         </Stack>
 
-        <ul className={styles.rows} aria-label={`Files in ${folder.path}`}>
-          {folder.questions.map((question) => (
-            <li key={question.id}>
-              <FileRow
-                question={question}
-                folder={folder.path}
-                ticked={selected.has(question.id)}
-                onTick={(on) => {
-                  set([question.id], on)
-                }}
-                onOpen={onOpen}
-              />
-            </li>
-          ))}
-        </ul>
+        <AddToMusicBrainz folder={folder.path} enabled={markable} />
+
+        {dismissal !== 'idle' && dismissal !== 'sending' ? (
+          <Text size="xs" tone="warning" block>
+            {dismissal}
+          </Text>
+        ) : null}
+
+        {reopening !== 'idle' && reopening !== 'sending' ? (
+          <Text size="xs" tone="warning" block>
+            {reopening}
+          </Text>
+        ) : null}
+
+        {opened && markable ? (
+          <FolderContents
+            folder={folder.path}
+            questions={folder.questions}
+            selected={selected}
+            onTick={(id, on) => {
+              set([id], on)
+            }}
+            onOpen={onOpen}
+          />
+        ) : (
+          <OpenRows
+            folder={folder.path}
+            questions={folder.questions}
+            selected={selected}
+            onTick={(id, on) => {
+              set([id], on)
+            }}
+            onOpen={onOpen}
+          />
+        )}
       </Stack>
     </Disclosure>
+  )
+}
+
+/**
+ * The whole folder, matched files and all.
+ *
+ * **The worklist prints the leftovers, and for a wrongly-matched album the
+ * leftovers are the smaller half.** The measured example is a 2019 concert
+ * where thirteen of sixteen files were matched to the studio album of the same
+ * name: the three the pass refused are the group above, the thirteen wrong ones
+ * are on no screen in the application, and the folder therefore reads as a
+ * three-file album. "Wrong match — ask again" is right there and there is
+ * nothing on screen to tell somebody they need it.
+ *
+ * So the rows are the directory rather than the queue. An open question keeps
+ * its tick, its refusal and its dialog; a file that is already matched shows
+ * what it was matched to and cannot be ticked, because the filing endpoint
+ * skips a file that is not an open question and a tick that silently does
+ * nothing is worse than no tick.
+ *
+ * **Read on first open, never on render.** One request per folder somebody
+ * actually looks at — see the `opened` flag above — and only for a path that is
+ * an album folder. A one-segment group is a stray file sitting directly under an
+ * artist, where the prefix is the whole discography and the listing would be
+ * hundreds of unrelated files reported as this album's; the library root is
+ * refused by the endpoint outright. Both keep the plain list of open questions,
+ * which is what they had before.
+ *
+ * While it is loading, and if it fails, the open questions are still listed:
+ * this adds to the group, so a slow read must not take away what the group
+ * could already show.
+ */
+function FolderContents({
+  folder,
+  questions,
+  selected,
+  onTick,
+  onOpen,
+}: {
+  readonly folder: string
+  readonly questions: readonly OpenQuestion[]
+  readonly selected: ReadonlySet<string>
+  readonly onTick: (id: string, on: boolean) => void
+  readonly onOpen: (subject: MatchingSubjectRef) => void
+}) {
+  /*
+    The folder, and the open questions in it, as this read's identity.
+
+    **Filing is what makes the second half necessary.** A committed decision
+    bumps the page's one counter, which re-reads the *worklist* — so the files
+    just answered leave `questions` and their rows flip from a tick to a placed
+    row, rendered from a listing fetched before the write. They would print
+    "matched to nothing yet" about the tracks somebody had just matched, on the
+    feature whose whole job is saying what is matched. The ids are the honest
+    dependency rather than the counter: this listing goes stale exactly when the
+    set of open questions under it moves, which is also what reopening a folder
+    does.
+  */
+  const asking = questions.map((question) => question.id).join(' ')
+
+  const state = useApiQuery(
+    () =>
+      api.get('/api/catalogue/matching/folders/files', {
+        params: { query: { folder } },
+      }),
+    [folder, asking],
+  )
+
+  if (state.status !== 'ready') {
+    return (
+      <>
+        <OpenRows
+          folder={folder}
+          questions={questions}
+          selected={selected}
+          onTick={onTick}
+          onOpen={onOpen}
+        />
+
+        {state.status === 'loading' ? (
+          <Text size="xs" tone="tertiary" block>
+            Reading the rest of the folder…
+          </Text>
+        ) : (
+          <Text size="xs" tone="warning" block>
+            The rest of the folder could not be read: {state.message}
+          </Text>
+        )}
+      </>
+    )
+  }
+
+  const { items, files, open } = state.data
+
+  // Keyed on the media file id rather than on the question id, because the two
+  // lists come from two endpoints that name the same file differently: the
+  // worklist says `recording:{guid}` and this one says the guid.
+  const asked = new Map(
+    questions.flatMap((question) => {
+      const id = mediaFileIdOf(question)
+
+      return id === null ? [] : [[id, question] as const]
+    }),
+  )
+
+  return (
+    <>
+      <Text size="xs" tone="secondary" block>
+        {files.toLocaleString()} file{files === 1 ? '' : 's'} in this folder — {open} still waiting
+        for an answer, {(files - open).toLocaleString()} already matched, both counted over the
+        whole folder. The matched ones are listed so a wrong one is visible; if this album went to
+        the wrong record, “Wrong match — ask again” brings the whole folder back here.
+      </Text>
+
+      <ul className={styles.rows} aria-label={`Files in ${folder}`}>
+        {items.map((item) => {
+          const question = asked.get(item.mediaFileId)
+
+          return (
+            <li key={item.mediaFileId}>
+              {question === undefined ? (
+                <PlacedRow item={item} folder={folder} />
+              ) : (
+                <FileRow
+                  question={question}
+                  folder={folder}
+                  ticked={selected.has(question.id)}
+                  onTick={(on) => {
+                    onTick(question.id, on)
+                  }}
+                  onOpen={onOpen}
+                />
+              )}
+            </li>
+          )
+        })}
+      </ul>
+
+      {items.length < files ? (
+        <Text size="xs" tone="warning" block>
+          Showing {items.length.toLocaleString()} of {files.toLocaleString()} files. This path holds
+          more than one album's worth, so it is probably a level above the album.
+        </Text>
+      ) : null}
+    </>
+  )
+}
+
+/** The open questions in a folder, which is what the group could always show. */
+function OpenRows({
+  folder,
+  questions,
+  selected,
+  onTick,
+  onOpen,
+}: {
+  readonly folder: string
+  readonly questions: readonly OpenQuestion[]
+  readonly selected: ReadonlySet<string>
+  readonly onTick: (id: string, on: boolean) => void
+  readonly onOpen: (subject: MatchingSubjectRef) => void
+}) {
+  return (
+    <ul className={styles.rows} aria-label={`Files in ${folder}`}>
+      {questions.map((question) => (
+        <li key={question.id}>
+          <FileRow
+            question={question}
+            folder={folder}
+            ticked={selected.has(question.id)}
+            onTick={(on) => {
+              onTick(question.id, on)
+            }}
+            onOpen={onOpen}
+          />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * One file that is not an open question: what it was matched to, and by whom.
+ *
+ * **No tick and no dialog, deliberately.** `POST matching/files/release` skips a
+ * file that is not an open question — it answers refusals, it does not overrule
+ * decisions — so a checkbox here would send a pair the server drops, and the
+ * screen would report a filing that did not happen to this row. The way to
+ * change one of these is to reopen the folder, which is a button on the group
+ * above and says exactly what it does.
+ *
+ * A row with no album is not a mistake either: attribution refuses sets it
+ * cannot place, so a file can be identified, linked and on no release at all.
+ * The certainty badge is what says which of those happened.
+ */
+function PlacedRow({ item, folder }: { readonly item: FolderFile; readonly folder: string }) {
+  const certainty = CERTAINTY[item.certainty]
+  const tail = item.folder === folder ? null : item.folder.slice(folder.length + 1)
+
+  const seat =
+    item.disc !== null && item.position !== null
+      ? `${item.disc > 1 ? `Disc ${item.disc} · ` : ''}Track ${item.position}`
+      : null
+
+  return (
+    <div className={styles.placedRow}>
+      <Stack direction="column" gap={2} align="start" className={styles.row}>
+        <Stack gap={8} align="baseline" wrap>
+          <Text size="sm" family="mono" tone="secondary" block>
+            {item.name}
+          </Text>
+
+          {item.length !== null ? (
+            <Text size="xs" tone="tertiary" family="mono">
+              {item.length}
+            </Text>
+          ) : null}
+
+          {certainty !== undefined && certainty.label !== 'Certain' ? (
+            <Badge tone={certainty.tone === 'ok' ? 'success' : certainty.tone} size="sm">
+              {certainty.short}
+            </Badge>
+          ) : null}
+        </Stack>
+
+        <Text size="xs" tone="tertiary" block>
+          {item.release === null ? (
+            item.recording === null ? (
+              'Matched to nothing yet'
+            ) : (
+              <>Identified as “{item.recording}”, on no album</>
+            )
+          ) : (
+            <>
+              {seat === null ? '' : `${seat} · `}
+              {item.track ?? item.recording ?? 'Untitled'} —{' '}
+              {item.releaseId === null ? (
+                item.release
+              ) : (
+                <Link to="/library/releases/$releaseId" params={{ releaseId: item.releaseId }}>
+                  {item.release}
+                </Link>
+              )}
+              {item.year === null ? '' : ` (${item.year})`}
+            </>
+          )}
+        </Text>
+
+        {tail !== null && tail !== '' ? (
+          <Text size="xs" tone="tertiary" family="mono" block>
+            {tail}
+          </Text>
+        ) : null}
+      </Stack>
+    </div>
   )
 }
 

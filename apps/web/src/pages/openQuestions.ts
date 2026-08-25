@@ -104,6 +104,18 @@ const IDENTITY: Readonly<Record<string, OpenReason>> = {
       'Closes when somebody links the cluster to a MusicBrainz recording. Until then this is a ' +
       'gap in their data, not in yours, and re-running enrichment cannot close it.',
   },
+  ReopenedByPerson: {
+    label: 'You said this was wrong',
+    tone: 'warning',
+    note:
+      'A pass matched these files confidently and you disagreed, so they gave up the recording ' +
+      'and album it chose. The commonest case is a live set matched to the studio recordings of ' +
+      'the same songs — right title, right length, wrong performance.',
+    next:
+      'Yours to settle, and only yours: no pass will look at these again, because re-asking the ' +
+      'same providers the same question returns the same answer. Match the folder to the right ' +
+      'album — adding it to MusicBrainz first if it is not there yet.',
+  },
   RecordingNotFound: {
     label: 'The recording is gone',
     tone: 'warning',

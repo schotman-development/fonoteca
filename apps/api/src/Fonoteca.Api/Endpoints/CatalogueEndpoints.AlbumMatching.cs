@@ -75,6 +75,39 @@ public static partial class CatalogueEndpoints
     /// </remarks>
     private const string FilingSubject = "album-filing";
 
+    /// <summary>Event type for a person saying a folder is nobody's release.</summary>
+    private const string FolderUnreleasedEventType = "matching.folder.unreleased";
+
+    /// <summary>Event type for a person saying a pass got a whole folder wrong.</summary>
+    private const string FolderReopenedEventType = "matching.folder.reopened";
+
+    /// <summary>What the event log calls a folder somebody dismissed whole.</summary>
+    private const string FolderSubject = "album-folder";
+
+    /// <summary>
+    /// How much of a folder path fits in <c>DomainEvent.SubjectId</c>.
+    /// </summary>
+    /// <remarks>
+    /// The column is <c>varchar(200)</c> and a library path is up to 4096 — the
+    /// same mismatch that broke a live tagging run at file 76, which is why the
+    /// undo journal is keyed by id and never by path. There is no id for a
+    /// folder, so the path is the subject and it is cut to fit. The whole one is
+    /// in the payload, where nothing constrains it.
+    /// </remarks>
+    private const int MaximumSubjectId = 200;
+
+    /// <summary>
+    /// Most files one folder listing returns.
+    /// </summary>
+    /// <remarks>
+    /// A guard on the path rather than a page size: the screen asks about
+    /// <c>Artist/Album</c>, and the largest thing that legitimately is one is a
+    /// box set. A path a level higher is a discography, and printing eleven
+    /// hundred rows into a disclosure is not the answer to that — the count
+    /// still comes back whole, so the screen can say what it is not showing.
+    /// </remarks>
+    private const int MaximumFolderFiles = 300;
+
     /// <summary>An MBID anywhere in what somebody typed or pasted.</summary>
     [GeneratedRegex(
         "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -123,6 +156,24 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        group.MapGet("/matching/folders/files", GetFolderContents)
+            .WithName("GetFolderContents")
+            .WithSummary("Every file in one folder, and what each of them is matched to.")
+            .WithDescription(
+                "The whole folder, not the open questions in it — which is the one view of a "
+                + "rip nothing else here offers. The worklist lists what the passes refused, so "
+                + "a folder of sixteen files that were matched wrongly, minus the three that "
+                + "were refused, appears on it as a three-file album; the thirteen that are "
+                + "wrong are on no screen at all.\n\n"
+                + "Each row says whether the file is still an open question and, when it is not, "
+                + "the album, disc, position and track it was filed under, and how certain that "
+                + "was. Ordered by path, so the discs of a set come back in the order they sit "
+                + "in.\n\n"
+                + "A catalogue read and nothing more: no provider call, no file opened, nothing "
+                + "written.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         group.MapPost("/matching/files/release", FileFilesUnderRelease)
             .WithName("FileFilesUnderRelease")
             .WithSummary("File a set of chosen files onto a set of chosen album slots.")
@@ -146,6 +197,51 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapPost("/matching/folders/unreleased", MarkFolderUnreleased)
+            .WithName("MarkFolderUnreleased")
+            .WithSummary("Say a folder is nobody's release, so it stops being asked about.")
+            .WithDescription(
+                "The other answer to the question `matching/files/release` answers. Some folders "
+                + "are somebody's own compilation — tracks pulled off YouTube, a mixtape, a rip of "
+                + "a set never issued as an album or a single — and no search will ever find them, "
+                + "because there is nothing to find. Left alone they sit on the worklist forever "
+                + "and every pass re-asks about them at the rate limit.\n\n"
+                + "`folder` is a library-relative path and matches everything beneath it, so "
+                + "`Artist/Album` covers its `CD1` and `CD2` and `Artist` covers the lot. Only "
+                + "files that are currently open questions are touched: a file the passes placed "
+                + "confidently keeps its identity, its release and its track, because this says "
+                + "'stop asking', not 'forget what you know'. Each of the three outcomes is set to "
+                + "`Unreleased` only where that pass had in fact refused.\n\n"
+                + "Nothing on disk is touched — no tag write, no `Fonoteca:AllowFileMutation`, no "
+                + "undo journal, one decision entry naming the folder. Undoing it is a hand-written "
+                + "`UPDATE`, the same as re-asking a library after a rule change.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/matching/folders/reopen", ReopenFolder)
+            .WithName("ReopenFolder")
+            .WithSummary("Say the passes got this folder wrong, and ask it again by hand.")
+            .WithDescription(
+                "The answer to a *confident* mistake, which is the one kind nothing else here can "
+                + "reach. A refused file is on the worklist; a wrongly-matched one is on no screen "
+                + "at all — a live set whose tracks AcoustID matched to the studio recordings of "
+                + "the same songs reads as a finished album until somebody plays it.\n\n"
+                + "Every file under `folder` that a pass placed gives up its recording, track, "
+                + "release and release group, and comes back as one folder-shaped question with "
+                + "the outcome `ReopenedByPerson`. Files already waiting on an answer are left "
+                + "exactly as they are: `Unknown` says something true about the audio that "
+                + "`ReopenedByPerson` does not.\n\n"
+                + "**No pass will answer it again.** The three lookup stamps are deliberately "
+                + "left set, because they record that the providers were asked — which is still "
+                + "true, and is what keeps every pass off the file. Clearing them would hand the "
+                + "folder back to the rule that got it wrong, with the same evidence and "
+                + "therefore the same answer. The fingerprint, the AcoustID and any tag already "
+                + "written to disk are all kept; nothing on disk is touched.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
     }
 
     private static async Task<Results<Ok<ReleaseSearchResponse>, ProblemHttpResult>> SearchReleases(
@@ -259,6 +355,137 @@ public static partial class CatalogueEndpoints
             release.SecondaryTypes,
             slots.Select(slot => slot.DiscNumber).Distinct().Count(),
             slots));
+    }
+
+    /// <summary>
+    /// What is actually in a folder, whatever the worklist says about it.
+    /// </summary>
+    /// <remarks>
+    /// <b>The screen was showing the leftovers and calling them the album.</b>
+    /// Every other list on the matching page is built from refusals, which is
+    /// right for deciding what still needs an answer and wrong for deciding
+    /// whether an answer already given was any good. The measured example is a
+    /// 2019 concert where thirteen of sixteen files went to the studio album of
+    /// the same name: the three the pass refused are on the worklist, the
+    /// thirteen wrong ones are on nothing, and the folder reads as a three-file
+    /// album.
+    ///
+    /// So this is the folder as it is on disk, matched files included, and it
+    /// is what makes <c>matching/folders/reopen</c> a decision somebody can take
+    /// with their eyes open rather than a guess.
+    ///
+    /// <b>It is deliberately not a second worklist.</b> The rows carry no
+    /// candidates and nothing here is answerable: a file that is an open
+    /// question says so and the screen already knows what to do with one, and a
+    /// file that is matched is shown so it can be *read*. Overruling a decision
+    /// stays where it is, one folder at a time, because the endpoint that does
+    /// it is a bulk write and pretending otherwise on a per-row basis would
+    /// promise something no write here delivers.
+    /// </remarks>
+    private static async Task<Results<Ok<FolderContentsResponse>, ProblemHttpResult>>
+        GetFolderContents(
+            string? folder,
+            FonotecaDbContext db,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return TypedResults.Problem(
+                title: "No folder named",
+                detail: "`folder` is required, and is a library-relative path.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // The trailing slash is load-bearing, and it is the same one the held
+        // slots query carries: without it `Artist/Album` also matches
+        // `Artist/Album Live`, which is a different record.
+        var prefix = folder.EndsWith('/') ? folder : folder + "/";
+
+        var files = db.MediaFiles.AsNoTracking().Where(file => file.Path.StartsWith(prefix));
+
+        var total = await files.CountAsync(cancellationToken).ConfigureAwait(false);
+
+        if (total == 0)
+        {
+            return TypedResults.Problem(
+                title: "No files in that folder",
+                detail:
+                    $"The catalogue holds nothing under “{folder}”. A scan may not have reached "
+                    + "it, or the path may not be the one the worklist printed.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        // Counted in the database over the whole folder rather than over the page
+        // below it. Past the cap the two numbers are about different sets, and
+        // "12 waiting, 140 matched" computed from a truncated list would
+        // overstate the matched half — on precisely the folders too big to read.
+        var open = await files
+            .CountAsync(
+                file => file.IdentityDecidedUtc == null
+                    && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                        || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        var rows = await files
+            .OrderBy(file => file.Path)
+            .Take(MaximumFolderFiles)
+            .Select(file => new
+            {
+                file.Id,
+                file.Path,
+                file.FingerprintDuration,
+                Measured = file.Quality == null ? null : file.Quality.Duration,
+                file.AcoustIdOutcome,
+                file.EnrichmentOutcome,
+                file.AttributionOutcome,
+                file.IdentityDecidedUtc,
+                Recording = file.Recording == null ? null : file.Recording.Title,
+                ReleaseId = file.Release == null ? (Guid?)null : file.Release.Id.Value,
+                Release = file.Release == null ? null : file.Release.Title,
+                Year = file.Release == null ? null : file.Release.ReleasedYear,
+                Disc = file.Track == null ? (int?)null : file.Track.DiscNumber,
+                Position = file.Track == null ? (int?)null : file.Track.Position,
+                Track = file.Track == null ? null : file.Track.Title,
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var items = rows
+            .Select(row =>
+            {
+                var unanswered = row.IdentityDecidedUtc is null
+                    && (UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
+                        || UnlinkedOutcomes.Contains(row.EnrichmentOutcome));
+
+                return new FolderFileRow(
+                    row.Id.Value,
+                    NameOf(row.Path),
+                    FolderOf(row.Path),
+                    Format(row.FingerprintDuration ?? row.Measured),
+                    unanswered,
+
+                    // The first pass that refused names the question, exactly as
+                    // the worklist folds it: a file AcoustID could not place is
+                    // left `NotAttempted` by enrichment, and reading that later
+                    // silence would report a consequence instead of a cause.
+                    unanswered
+                        ? UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
+                            ? row.AcoustIdOutcome.ToString()
+                            : row.EnrichmentOutcome.ToString()
+                        : null,
+                    row.Recording,
+                    row.ReleaseId,
+                    row.Release,
+                    row.Year,
+                    row.Disc,
+                    row.Position,
+                    row.Track,
+                    row.AttributionOutcome.ToString());
+            })
+            .ToList();
+
+        return TypedResults.Ok(new FolderContentsResponse(folder, total, open, items));
     }
 
     /// <summary>
@@ -490,6 +717,346 @@ public static partial class CatalogueEndpoints
                 : $"{filed.Count} of {request.Pairs.Count} files filed under “{release.Title}”. "
                     + "The rest are no longer open questions and were left as they are."));
     }
+
+    /// <summary>
+    /// One person's claim that a folder is nobody's release, committed.
+    /// </summary>
+    /// <remarks>
+    /// <b>The answer the worklist had no way of taking.</b> Every other chooser
+    /// on that screen ends in an identity — a recording, an album, a seating.
+    /// This one ends in there being none, and that is not the same as a pass
+    /// giving up: a refusal is a question left open, and a person saying "this is
+    /// my own compilation" closes it. Without this the folder is asked about by
+    /// three passes forever and read by a person on every visit to the screen.
+    ///
+    /// <b>Only the legs that were refused are written.</b> A folder is rarely
+    /// wholly unmatched — the passes place most of a rip — and stamping every
+    /// file under a prefix would throw away identities that are correct and
+    /// expensive. So each of the three outcomes moves to
+    /// <see cref="AcoustIdOutcome.Unreleased"/> only where it currently sits on
+    /// that pass's own refusal list, and a file with nothing open is not counted.
+    ///
+    /// <b>It takes <see cref="LibraryWorkGate"/>, like every other decision
+    /// here.</b> Which excludes the three passes and, as documented on the gate,
+    /// not a scan — a scan that sees the bytes change clears these columns with
+    /// everything else derived, which is the right answer: the claim was about
+    /// audio that is no longer there.
+    /// </remarks>
+    private static async Task<Results<Ok<FolderUnreleasedResponse>, ProblemHttpResult>>
+        MarkFolderUnreleased(
+            FolderUnreleasedRequest request,
+            FonotecaDbContext db,
+            IEventLog events,
+            LibraryWorkGate gate,
+            ICallerContext caller,
+            IClock clock,
+            CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Folder))
+        {
+            return TypedResults.Problem(
+                title: "Nothing to mark",
+                detail: "The request body must name a library-relative `folder`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Not trimmed: a trailing space is legal in a directory name on every
+        // filesystem this runs on, and silently removing one turns a real folder
+        // into a prefix that matches nothing.
+        var folder = request.Folder;
+
+        // The trailing slash for `HeldSlotsAsync`'s reason — `Artist/Album` must
+        // not also match `Artist/Album Live` — and it is what makes a two-disc
+        // rip's `CD1` and `CD2` both included from the one heading the client
+        // shows. A path is never marked by naming it exactly: this dismisses a
+        // folder, and the unit is the folder.
+        var prefix = folder.EndsWith('/') ? folder : folder + "/";
+
+        if (!gate.TryEnter(DecisionWorkKind, out var lease))
+        {
+            return TypedResults.Problem(
+                title: "The library is busy",
+                detail:
+                    $"A {gate.ActiveKind ?? "pass"} is running, and it may clear or rewrite exactly "
+                    + "the columns this decision sets. Answer again once it has finished.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        using var held = lease;
+
+        // The worklist's own two predicates, unioned and unmodified — `loose` and
+        // the component query in `GetOpenQuestions`. What this closes is exactly
+        // what that screen shows under this path, which is the only definition
+        // that cannot surprise the person who pressed the button.
+        //
+        // Note what is deliberately *not* here: the filing endpoint narrows its
+        // set with `IdentityDecidedUtc == null` and this must not, because the
+        // worklist does not either. A file already decided on identity and still
+        // refused on enrichment is on the screen, and a set that skipped it would
+        // leave a row the button appeared to cover and then 404 on.
+        //
+        // The attribution leg is included for the folder's sake: a folder holding
+        // files the attribution pass refused comes back as a component question
+        // with the same path printed on it, and closing only half of a folder is
+        // not closing it.
+        var rows = await db.MediaFiles
+            .Where(file => file.Path.StartsWith(prefix)
+                && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                    || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)
+                    || (file.ReleaseDecidedUtc == null
+                        && UnattributedOutcomes.Contains(file.AttributionOutcome))))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (rows.Count == 0)
+        {
+            return TypedResults.Problem(
+                title: "Nothing open in that folder",
+                detail:
+                    $"No file under \u201c{folder}\u201d is waiting on an answer. Either the folder "
+                    + "was answered while this screen was open, or the path does not match what the "
+                    + "catalogue holds \u2014 re-read the worklist.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var now = StoreTime.ToStorePrecision(clock.UtcNow);
+        var correlationId = Guid.CreateVersion7().ToString("N")[..12];
+
+        foreach (var row in rows)
+        {
+            // Leg by leg, and never over a pass that succeeded. A folder of
+            // thirty files with two open questions in it keeps twenty-eight
+            // identities, twenty-eight recordings and twenty-eight track links.
+            if (row.IdentityDecidedUtc == null
+                && UnidentifiedOutcomes.Contains(row.AcoustIdOutcome))
+            {
+                row.AcoustIdOutcome = AcoustIdOutcome.Unreleased;
+
+                // Only if nothing ever asked, for the reason the rejection path
+                // states: the stamp means "AcoustID has been put this question",
+                // and overwriting a real one with the time somebody answered
+                // would misreport when the provider was last consulted.
+                row.AcoustIdCheckedUtc ??= now;
+                row.IdentityDecidedUtc = now;
+            }
+
+            if (UnlinkedOutcomes.Contains(row.EnrichmentOutcome))
+            {
+                row.EnrichmentOutcome = EnrichmentOutcome.Unreleased;
+                row.RecordingLookupUtc ??= now;
+
+                // The identification leg may have been `Identified` and left
+                // alone above — this file is open on enrichment, not on identity
+                // — but the decided stamp is what keeps enrichment's own worklist
+                // off it, so it is written here too.
+                row.IdentityDecidedUtc ??= now;
+            }
+
+            if (row.ReleaseDecidedUtc == null
+                && UnattributedOutcomes.Contains(row.AttributionOutcome))
+            {
+                row.AttributionOutcome = ReleaseAttributionOutcome.Unreleased;
+                row.ReleaseLookupUtc ??= now;
+                row.ReleaseDecidedUtc = now;
+            }
+        }
+
+        await events.AppendAsync(
+            DomainEvent.Create(
+                FolderUnreleasedEventType,
+                FolderSubject,
+                Fit(folder),
+                caller.ActorId,
+                now,
+                JsonSerializer.Serialize(
+                    new FolderUnreleasedPayload
+                    {
+                        Folder = folder,
+                        Closed = rows.Count,
+                    },
+                    MatchingJson.Default.FolderUnreleasedPayload),
+                correlationId),
+            cancellationToken).ConfigureAwait(false);
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new FolderUnreleasedResponse(
+            folder,
+            rows.Count,
+            $"{rows.Count} file{(rows.Count == 1 ? "" : "s")} under \u201c{folder}\u201d marked as "
+            + "coming from no release. Nothing on disk was touched."));
+    }
+
+    /// <summary>
+    /// One person's claim that a pass got a whole folder wrong, committed.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one mistake no worklist can show.</b> Everything else on the
+    /// matching screen is a question a pass declined to answer. This is the
+    /// opposite shape: the pass answered, confidently, and was wrong — and the
+    /// files are therefore identified, linked, filed and on no screen. The case
+    /// it was built for is a live album AcoustID matched to the studio
+    /// recordings of the same songs, which reads as a finished album on every
+    /// screen this application has until somebody plays it.
+    ///
+    /// <b>What is cleared is what a pass derived, and nothing that was
+    /// measured.</b> The recording, the track, the release and the release group
+    /// go, along with both decided-stamps and the edition count. The
+    /// fingerprint, the AcoustID, the cached provider answers and any tag
+    /// already on disk all stay: they are facts about audio that has not
+    /// changed, and re-deriving them would cost a decode and a turn at the rate
+    /// limit to arrive at the same values.
+    ///
+    /// <b>The three lookup stamps stay set, and that is the load-bearing
+    /// half.</b> <see cref="MediaFile.AcoustIdCheckedUtc"/>,
+    /// <see cref="MediaFile.RecordingLookupUtc"/> and
+    /// <see cref="MediaFile.ReleaseLookupUtc"/> mean "this provider has been put
+    /// this question", which stays true after somebody disagrees with the
+    /// answer — and each is its pass's worklist. Clearing them, which is what
+    /// "reopen" sounds like it should do, hands the folder straight back to the
+    /// rule that got it wrong, on the next run, with the same evidence and so
+    /// the same answer. The file is reopened for a <i>person</i>;
+    /// <see cref="AcoustIdOutcome.ReopenedByPerson"/> is how the worklist sees
+    /// it.
+    ///
+    /// <b>Files already open are left alone.</b> A folder is rarely wholly
+    /// wrong: the three files in the worked example that AcoustID had never
+    /// heard are <see cref="AcoustIdOutcome.Unknown"/>, which says something true
+    /// about the audio that <c>ReopenedByPerson</c> does not, and they are
+    /// already on the same screen under the same folder heading. Overwriting
+    /// them would lose the distinction and change nothing a person can see.
+    /// </remarks>
+    private static async Task<Results<Ok<FolderReopenResponse>, ProblemHttpResult>>
+        ReopenFolder(
+            FolderReopenRequest request,
+            FonotecaDbContext db,
+            IEventLog events,
+            LibraryWorkGate gate,
+            ICallerContext caller,
+            IClock clock,
+            CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Folder))
+        {
+            return TypedResults.Problem(
+                title: "Nothing to reopen",
+                detail: "The request body must name a library-relative `folder`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Untrimmed, and slash-terminated, for the reasons the dismissal above
+        // states: a directory name may legally end in a space, and `Artist/Album`
+        // must not also match `Artist/Album Live`.
+        var folder = request.Folder;
+        var prefix = folder.EndsWith('/') ? folder : folder + "/";
+
+        if (!gate.TryEnter(DecisionWorkKind, out var lease))
+        {
+            return TypedResults.Problem(
+                title: "The library is busy",
+                detail:
+                    $"A {gate.ActiveKind ?? "pass"} is running, and it may rewrite exactly the "
+                    + "columns this clears. Answer again once it has finished.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        using var held = lease;
+
+        // "Placed by something" rather than "not currently a question", because
+        // those differ on the row that matters. A file can carry a recording and
+        // still be open — identified, linked, and refused by attribution — and
+        // that file belongs to the album question being reopened just as much as
+        // the ones that were filed. The set is therefore everything under the
+        // path with a derived link or a decision on it, and the reopen is a
+        // no-op for a row that has neither.
+        var rows = await db.MediaFiles
+            .Where(file => file.Path.StartsWith(prefix)
+                && (file.RecordingId != null
+                    || file.ReleaseId != null
+                    || file.TrackId != null
+                    || file.ReleaseGroupId != null
+                    || file.IdentityDecidedUtc != null
+                    || file.ReleaseDecidedUtc != null))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (rows.Count == 0)
+        {
+            return TypedResults.Problem(
+                title: "Nothing matched in that folder",
+                detail:
+                    $"No file under \u201c{folder}\u201d has an identity, a release or a decision "
+                    + "to give up \u2014 either the folder is already one open question, or the "
+                    + "path does not match what the catalogue holds.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var now = StoreTime.ToStorePrecision(clock.UtcNow);
+        var correlationId = Guid.CreateVersion7().ToString("N")[..12];
+
+        foreach (var row in rows)
+        {
+            row.RecordingId = null;
+            row.TrackId = null;
+            row.ReleaseId = null;
+            row.ReleaseGroupId = null;
+            row.EditionAlternatives = 0;
+
+            row.IdentityDecidedUtc = null;
+            row.ReleaseDecidedUtc = null;
+
+            row.AcoustIdOutcome = AcoustIdOutcome.ReopenedByPerson;
+
+            // Both of the later legs go back to "no answer", which is what they
+            // now are: the recording they were about is gone. They are not moved
+            // to a refusal — no pass refused anything here — and NotAttempted is
+            // not on any worklist, which is right. The question is the
+            // identification one, asked once for the folder, and answering it
+            // through `matching/files/release` writes all three legs again.
+            row.EnrichmentOutcome = EnrichmentOutcome.NotAttempted;
+            row.AttributionOutcome = ReleaseAttributionOutcome.NotAttempted;
+        }
+
+        await events.AppendAsync(
+            DomainEvent.Create(
+                FolderReopenedEventType,
+                FolderSubject,
+                Fit(folder),
+                caller.ActorId,
+                now,
+                JsonSerializer.Serialize(
+                    new FolderReopenedPayload
+                    {
+                        Folder = folder,
+                        Reopened = rows.Count,
+                    },
+                    MatchingJson.Default.FolderReopenedPayload),
+                correlationId),
+            cancellationToken).ConfigureAwait(false);
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new FolderReopenResponse(
+            folder,
+            rows.Count,
+            $"{rows.Count} file{(rows.Count == 1 ? "" : "s")} under \u201c{folder}\u201d gave up "
+            + "the recording and album a pass chose, and are now one question for you. No pass "
+            + "will answer them again. Nothing on disk was touched."));
+    }
+
+    /// <summary>A folder path cut to what <c>DomainEvent.SubjectId</c> holds.</summary>
+    /// <remarks>
+    /// One character back if the cut lands between the halves of a surrogate
+    /// pair, which a library full of non-Latin folder names will find eventually.
+    /// A lone surrogate is not text: it survives the serialiser as a replacement
+    /// character and reaches PostgreSQL as bytes nobody meant, for a log key.
+    /// </remarks>
+    private static string Fit(string folder) =>
+        folder.Length <= MaximumSubjectId
+            ? folder
+            : folder[..(char.IsHighSurrogate(folder[MaximumSubjectId - 1])
+                ? MaximumSubjectId - 1
+                : MaximumSubjectId)];
 
     private static ReleaseSearchRow RowFor(MusicBrainzReleaseMatch match) =>
         RowFor(
@@ -727,3 +1294,99 @@ public sealed record AlbumFilingResponse(
     int Filed,
     int Skipped,
     string Detail);
+
+/// <summary>
+/// A person's claim: nothing under this folder came from a release.
+/// </summary>
+/// <remarks>
+/// The whole request, because the whole claim is the folder. There is nowhere
+/// for a reason to go that anything would read back, and the folder name is
+/// already the most legible one available.
+/// </remarks>
+public sealed record FolderUnreleasedRequest(string Folder);
+
+/// <summary>
+/// A person's claim: the passes matched this folder to the wrong thing.
+/// </summary>
+/// <remarks>
+/// The folder and nothing else, like the dismissal beside it. There is no field
+/// for which album it should have been, because that is the next question rather
+/// than part of this one — reopening puts the folder on the worklist, and the
+/// worklist is where it gets an album.
+/// </remarks>
+public sealed record FolderReopenRequest(string Folder);
+
+/// <summary>What reopening one folder did.</summary>
+/// <param name="Reopened">
+/// Files that gave up a derived identity or album. Not the size of the folder:
+/// files that were already open questions are left as they are, since their
+/// refusal says something true that "somebody disagreed" does not.
+/// </param>
+public sealed record FolderReopenResponse(string Folder, int Reopened, string Detail);
+
+/// <summary>What marking one folder did.</summary>
+/// <param name="Closed">
+/// Files that had an open question and now do not. Not the size of the folder:
+/// everything the passes had already placed was left exactly as it was.
+/// </param>
+public sealed record FolderUnreleasedResponse(string Folder, int Closed, string Detail);
+
+/// <summary>One folder as it sits on disk, answered questions and all.</summary>
+/// <param name="Files">
+/// Files under the path, whole — not the length of <paramref name="Items"/>,
+/// which stops at <c>MaximumFolderFiles</c>. A listing cut short says so by the
+/// two disagreeing, which is the only honest way for a capped list to read.
+/// </param>
+/// <param name="Open">
+/// How many of them can still be answered, counted over the whole folder rather
+/// than over <paramref name="Items"/> — which stops at the cap, and would
+/// otherwise report the two halves of a large folder against different sets.
+/// Beside <paramref name="Files"/> it is the gap that is the whole point of the
+/// endpoint.
+/// </param>
+public sealed record FolderContentsResponse(
+    string Folder,
+    int Files,
+    int Open,
+    IReadOnlyList<FolderFileRow> Items);
+
+/// <summary>One file in a folder, and whatever it has been matched to.</summary>
+/// <param name="Folder">
+/// The file's own folder, which is not the one that was asked about: a two-disc
+/// rip is one album question and two directories, and a person checking a
+/// pairing needs to see which disc a row is on.
+/// </param>
+/// <param name="Open">
+/// Whether this file can still be answered here — <c>FileFilesUnderRelease</c>'s
+/// own predicate, which is the useful one for a row that offers a tick: what
+/// this claims and what a filing will actually accept cannot drift apart.
+///
+/// It is one condition narrower than the worklist's, which does not exclude
+/// <see cref="MediaFile.IdentityDecidedUtc"/>. Nothing reaches that difference
+/// today — every path that stamps it also moves the file out of the enrichment
+/// refusals — but if one ever did, this would call the file matched while the
+/// worklist went on asking about it, and the tick is the half that has to be
+/// honest.
+/// </param>
+/// <param name="Reason">The refusal, when it is open. Null when it is not.</param>
+/// <param name="Certainty">
+/// <c>ReleaseAttributionOutcome</c>'s own name. <c>Attributed</c> and
+/// <c>AttributedByPerson</c> are both matched and only one of them was a rule's
+/// doing, which is exactly the distinction somebody hunting a wrong match is
+/// looking for.
+/// </param>
+public sealed record FolderFileRow(
+    Guid MediaFileId,
+    string Name,
+    string Folder,
+    string? Length,
+    bool Open,
+    string? Reason,
+    string? Recording,
+    Guid? ReleaseId,
+    string? Release,
+    int? Year,
+    int? Disc,
+    int? Position,
+    string? Track,
+    string Certainty);

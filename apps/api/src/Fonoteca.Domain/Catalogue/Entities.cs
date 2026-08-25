@@ -571,6 +571,64 @@ public enum AcoustIdOutcome
     /// <see cref="BelowThreshold"/> question without an identity.
     /// </remarks>
     RejectedByPerson = 7,
+
+    /// <summary>
+    /// A person said this audio was never released, so nothing will ever place it.
+    /// </summary>
+    /// <remarks>
+    /// The answer to a <i>folder</i> rather than to a file: somebody's own
+    /// compilation — tracks pulled off YouTube, a mixtape, a rip of a set that
+    /// was never issued as an album or a single. AcoustID has never heard it
+    /// because nobody submitted it and nobody is going to, so
+    /// <see cref="Unknown"/> is a question that stays open forever and re-asking
+    /// spends a turn at the rate limit to be told the same thing again.
+    ///
+    /// Not <see cref="RejectedByPerson"/>, which is somebody who listened
+    /// rejecting the candidates AcoustID <i>did</i> offer. Folding the two would
+    /// make any count of "files a person listened to and turned down" quietly
+    /// include a folder dismissed in one click, and this is the coarser claim by
+    /// a wide margin.
+    ///
+    /// Written across all three outcomes at once, because the claim answers all
+    /// three: no release, therefore no track, therefore nothing to identify
+    /// against. <see cref="MediaFile.IdentityDecidedUtc"/> is what protects it.
+    /// </remarks>
+    Unreleased = 8,
+
+    /// <summary>
+    /// A person looked at what a pass decided and said it was wrong.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one refusal nothing refused.</b> Every other value here is a rule
+    /// or a person answering an open question; this is a person <i>reopening</i>
+    /// a closed one. It exists because a confident wrong answer is invisible:
+    /// the files are identified, linked and filed, so they are on no worklist
+    /// and no screen asks about them — a live album whose tracks AcoustID
+    /// matched to the studio recordings of the same songs reads as a finished
+    /// album until somebody plays it.
+    ///
+    /// <b>It is an open question, so it is in the worklist's own set.</b> That
+    /// is the whole point: the folder comes back as something a person can
+    /// answer by hand, which is the only thing that can answer it — the audio is
+    /// genuinely not in AcoustID, or is in it under the wrong link, and neither
+    /// is fixed by asking again.
+    ///
+    /// <b>No pass may answer it, and the mechanism is the stamps rather than
+    /// this value.</b> Reopening deliberately leaves
+    /// <see cref="MediaFile.AcoustIdCheckedUtc"/>,
+    /// <see cref="MediaFile.RecordingLookupUtc"/> and
+    /// <see cref="MediaFile.ReleaseLookupUtc"/> exactly as they were, because
+    /// they record that the providers <i>were asked</i> — which stays true, and
+    /// is what keeps all three passes off the file. Clearing them would hand the
+    /// folder straight back to the rule that got it wrong, on the next run, with
+    /// the same evidence and therefore the same answer.
+    ///
+    /// Not <see cref="RejectedByPerson"/>: that is somebody who read the
+    /// candidates and turned them all down, and it is <i>settled</i>. This is
+    /// unsettled by definition, and folding the two would make a folder waiting
+    /// for an album read as one that has been dealt with.
+    /// </remarks>
+    ReopenedByPerson = 9,
 }
 
 /// <summary>
@@ -628,6 +686,18 @@ public enum EnrichmentOutcome
     /// was decided.
     /// </remarks>
     LinkedByPerson = 5,
+
+    /// <summary>
+    /// A person said this audio was never released. See
+    /// <see cref="AcoustIdOutcome.Unreleased"/>, which is written with it.
+    /// </summary>
+    /// <remarks>
+    /// The enrichment leg exists for the reason <see cref="LinkedByPerson"/>
+    /// does: the queue is <c>UnidentifiedOutcomes OR UnlinkedOutcomes</c>, so a
+    /// file left at <see cref="NoRecording"/> keeps its place on the worklist
+    /// however firmly the folder it sits in was dismissed.
+    /// </remarks>
+    Unreleased = 6,
 }
 
 /// <summary>What was decided about a file, and how firmly.</summary>
@@ -684,6 +754,19 @@ public enum ReleaseAttributionOutcome
     /// the question, where the refusal leaves it open forever.
     /// </remarks>
     NoReleaseByPerson = 8,
+
+    /// <summary>
+    /// A person said these files came from no release at all. See
+    /// <see cref="AcoustIdOutcome.Unreleased"/>, which is written with it.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="NoReleaseByPerson"/>: that is somebody reading a shortlist
+    /// of real candidate editions and saying none of them is the one — a
+    /// judgement about a component the pass formed. This is somebody saying no
+    /// such edition exists anywhere, about a folder, without a candidate set
+    /// having been offered at all.
+    /// </remarks>
+    Unreleased = 9,
 }
 
 /// <summary>

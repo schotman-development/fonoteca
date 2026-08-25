@@ -426,6 +426,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/matching/folders/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every file in one folder, and what each of them is matched to.
+         * @description The whole folder, not the open questions in it — which is the one view of a rip nothing else here offers. The worklist lists what the passes refused, so a folder of sixteen files that were matched wrongly, minus the three that were refused, appears on it as a three-file album; the thirteen that are wrong are on no screen at all.
+         *
+         *     Each row says whether the file is still an open question and, when it is not, the album, disc, position and track it was filed under, and how certain that was. Ordered by path, so the discs of a set come back in the order they sit in.
+         *
+         *     A catalogue read and nothing more: no provider call, no file opened, nothing written.
+         */
+        get: operations["GetFolderContents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/matching/files/release": {
         parameters: {
             query?: never;
@@ -444,6 +468,54 @@ export interface paths {
          *     A file that is not currently an open question is skipped rather than rewritten — this endpoint answers refusals, it does not overrule decisions. Nothing on disk is touched: no tag write, no `Fonoteca:AllowFileMutation`, no undo journal, one decision entry naming every pair.
          */
         post: operations["FileFilesUnderRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/folders/unreleased": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say a folder is nobody's release, so it stops being asked about.
+         * @description The other answer to the question `matching/files/release` answers. Some folders are somebody's own compilation — tracks pulled off YouTube, a mixtape, a rip of a set never issued as an album or a single — and no search will ever find them, because there is nothing to find. Left alone they sit on the worklist forever and every pass re-asks about them at the rate limit.
+         *
+         *     `folder` is a library-relative path and matches everything beneath it, so `Artist/Album` covers its `CD1` and `CD2` and `Artist` covers the lot. Only files that are currently open questions are touched: a file the passes placed confidently keeps its identity, its release and its track, because this says 'stop asking', not 'forget what you know'. Each of the three outcomes is set to `Unreleased` only where that pass had in fact refused.
+         *
+         *     Nothing on disk is touched — no tag write, no `Fonoteca:AllowFileMutation`, no undo journal, one decision entry naming the folder. Undoing it is a hand-written `UPDATE`, the same as re-asking a library after a rule change.
+         */
+        post: operations["MarkFolderUnreleased"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/folders/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say the passes got this folder wrong, and ask it again by hand.
+         * @description The answer to a *confident* mistake, which is the one kind nothing else here can reach. A refused file is on the worklist; a wrongly-matched one is on no screen at all — a live set whose tracks AcoustID matched to the studio recordings of the same songs reads as a finished album until somebody plays it.
+         *
+         *     Every file under `folder` that a pass placed gives up its recording, track, release and release group, and comes back as one folder-shaped question with the outcome `ReopenedByPerson`. Files already waiting on an answer are left exactly as they are: `Unknown` says something true about the audio that `ReopenedByPerson` does not.
+         *
+         *     **No pass will answer it again.** The three lookup stamps are deliberately left set, because they record that the providers were asked — which is still true, and is what keeps every pass off the file. Clearing them would hand the folder back to the rule that got it wrong, with the same evidence and therefore the same answer. The fingerprint, the AcoustID and any tag already written to disk are all kept; nothing on disk is touched.
+         */
+        post: operations["ReopenFolder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -798,9 +870,56 @@ export interface components {
             accepted: number;
             detail: string;
         };
+        FolderContentsResponse: {
+            folder: string;
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            open: number;
+            items: components["schemas"]["FolderFileRow"][];
+        };
         FolderDisagreement: {
             folder: string;
             releases: components["schemas"]["AttributionShare"][];
+        };
+        FolderFileRow: {
+            /** Format: uuid */
+            mediaFileId: string;
+            name: string;
+            folder: string;
+            length: null | string;
+            open: boolean;
+            reason: null | string;
+            recording: null | string;
+            /** Format: uuid */
+            releaseId: null | string;
+            release: null | string;
+            /** Format: int32 */
+            year: null | number;
+            /** Format: int32 */
+            disc: null | number;
+            /** Format: int32 */
+            position: null | number;
+            track: null | string;
+            certainty: string;
+        };
+        FolderReopenRequest: {
+            folder: string;
+        };
+        FolderReopenResponse: {
+            folder: string;
+            /** Format: int32 */
+            reopened: number;
+            detail: string;
+        };
+        FolderUnreleasedRequest: {
+            folder: string;
+        };
+        FolderUnreleasedResponse: {
+            folder: string;
+            /** Format: int32 */
+            closed: number;
+            detail: string;
         };
         IdentificationStartedResponse: {
             jobId: string;
@@ -2034,6 +2153,46 @@ export interface operations {
             };
         };
     };
+    GetFolderContents: {
+        parameters: {
+            query?: {
+                folder?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderContentsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     FileFilesUnderRelease: {
         parameters: {
             query?: never;
@@ -2085,6 +2244,108 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    MarkFolderUnreleased: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderUnreleasedRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderUnreleasedResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    ReopenFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderReopenRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderReopenResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

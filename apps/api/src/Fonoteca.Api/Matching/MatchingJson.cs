@@ -108,6 +108,42 @@ public sealed record AlbumFilingPayload
 }
 
 /// <summary>
+/// The event log's payload for one person dismissing a whole folder.
+/// </summary>
+/// <remarks>
+/// The only trace this decision leaves. It writes no identity, no release and no
+/// track — it takes questions away — so without the log there is nothing
+/// afterwards to say a folder was ever answered, or by whom, or how many files
+/// it cost. <see cref="Folder"/> is the whole path even though the event's
+/// subject id is cut to two hundred characters, which is the point of it being
+/// here as well.
+/// </remarks>
+public sealed record FolderUnreleasedPayload
+{
+    public required string Folder { get; init; }
+
+    /// <summary>Files that had an open question and now do not.</summary>
+    public required int Closed { get; init; }
+}
+
+/// <summary>
+/// The event log's payload for one person reopening a whole folder.
+/// </summary>
+/// <remarks>
+/// The same argument as the dismissal above, in the other direction: this
+/// decision <i>removes</i> identities that a pass wrote, so afterwards nothing
+/// in the catalogue says they were ever there or who took them away. The count
+/// is the only measure of what it cost.
+/// </remarks>
+public sealed record FolderReopenedPayload
+{
+    public required string Folder { get; init; }
+
+    /// <summary>Files that gave up a derived identity or album.</summary>
+    public required int Reopened { get; init; }
+}
+
+/// <summary>
 /// What was contributed to AcoustID, and what it acknowledged.
 /// </summary>
 /// <remarks>
@@ -150,6 +186,8 @@ public sealed record FingerprintContributionPayload
 [JsonSerializable(typeof(RecordingDecisionPayload))]
 [JsonSerializable(typeof(ComponentDecisionPayload))]
 [JsonSerializable(typeof(AlbumFilingPayload))]
+[JsonSerializable(typeof(FolderUnreleasedPayload))]
+[JsonSerializable(typeof(FolderReopenedPayload))]
 [JsonSerializable(typeof(FingerprintContributionPayload))]
 [JsonSerializable(typeof(AcoustIdEvidence))]
 [JsonSerializable(typeof(Fonoteca.Api.Endpoints.RecordingCandidatesResponse))]

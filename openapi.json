@@ -1079,6 +1079,57 @@
         }
       }
     },
+    "/api/catalogue/matching/folders/files": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every file in one folder, and what each of them is matched to.",
+        "description": "The whole folder, not the open questions in it — which is the one view of a rip nothing else here offers. The worklist lists what the passes refused, so a folder of sixteen files that were matched wrongly, minus the three that were refused, appears on it as a three-file album; the thirteen that are wrong are on no screen at all.\n\nEach row says whether the file is still an open question and, when it is not, the album, disc, position and track it was filed under, and how certain that was. Ordered by path, so the discs of a set come back in the order they sit in.\n\nA catalogue read and nothing more: no provider call, no file opened, nothing written.",
+        "operationId": "GetFolderContents",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderContentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/matching/files/release": {
       "post": {
         "tags": [
@@ -1150,6 +1201,131 @@
           }
         }
       }
+    },
+    "/api/catalogue/matching/folders/unreleased": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Say a folder is nobody's release, so it stops being asked about.",
+        "description": "The other answer to the question `matching/files/release` answers. Some folders are somebody's own compilation — tracks pulled off YouTube, a mixtape, a rip of a set never issued as an album or a single — and no search will ever find them, because there is nothing to find. Left alone they sit on the worklist forever and every pass re-asks about them at the rate limit.\n\n`folder` is a library-relative path and matches everything beneath it, so `Artist/Album` covers its `CD1` and `CD2` and `Artist` covers the lot. Only files that are currently open questions are touched: a file the passes placed confidently keeps its identity, its release and its track, because this says 'stop asking', not 'forget what you know'. Each of the three outcomes is set to `Unreleased` only where that pass had in fact refused.\n\nNothing on disk is touched — no tag write, no `Fonoteca:AllowFileMutation`, no undo journal, one decision entry naming the folder. Undoing it is a hand-written `UPDATE`, the same as re-asking a library after a rule change.",
+        "operationId": "MarkFolderUnreleased",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderUnreleasedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderUnreleasedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/folders/reopen": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Say the passes got this folder wrong, and ask it again by hand.",
+        "description": "The answer to a *confident* mistake, which is the one kind nothing else here can reach. A refused file is on the worklist; a wrongly-matched one is on no screen at all — a live set whose tracks AcoustID matched to the studio recordings of the same songs reads as a finished album until somebody plays it.\n\nEvery file under `folder` that a pass placed gives up its recording, track, release and release group, and comes back as one folder-shaped question with the outcome `ReopenedByPerson`. Files already waiting on an answer are left exactly as they are: `Unknown` says something true about the audio that `ReopenedByPerson` does not.\n\n**No pass will answer it again.** The three lookup stamps are deliberately left set, because they record that the providers were asked — which is still true, and is what keeps every pass off the file. Clearing them would hand the folder back to the rule that got it wrong, with the same evidence and therefore the same answer. The fingerprint, the AcoustID and any tag already written to disk are all kept; nothing on disk is touched.",
+        "operationId": "ReopenFolder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderReopenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderReopenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/releases/{id}/fingerprints": {
       "post": {
         "tags": [
@@ -2343,6 +2519,34 @@
           }
         }
       },
+      "FolderContentsResponse": {
+        "required": [
+          "folder",
+          "files",
+          "open",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "open": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FolderFileRow"
+            }
+          }
+        }
+      },
       "FolderDisagreement": {
         "required": [
           "folder",
@@ -2358,6 +2562,163 @@
             "items": {
               "$ref": "#/components/schemas/AttributionShare"
             }
+          }
+        }
+      },
+      "FolderFileRow": {
+        "required": [
+          "mediaFileId",
+          "name",
+          "folder",
+          "length",
+          "open",
+          "reason",
+          "recording",
+          "releaseId",
+          "release",
+          "year",
+          "disc",
+          "position",
+          "track",
+          "certainty"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaFileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "length": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recording": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "releaseId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "release": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "disc": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "position": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "track": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "certainty": {
+            "type": "string"
+          }
+        }
+      },
+      "FolderReopenRequest": {
+        "required": [
+          "folder"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          }
+        }
+      },
+      "FolderReopenResponse": {
+        "required": [
+          "folder",
+          "reopened",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "reopened": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "FolderUnreleasedRequest": {
+        "required": [
+          "folder"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          }
+        }
+      },
+      "FolderUnreleasedResponse": {
+        "required": [
+          "folder",
+          "closed",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "closed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string"
           }
         }
       },

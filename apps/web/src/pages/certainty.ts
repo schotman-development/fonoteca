@@ -53,6 +53,39 @@ export const CERTAINTY: Readonly<
   },
 
   /*
+    The two a person writes. `AttributedByPerson` is not `Attributed` and the
+    difference is the point of printing it: one means a rule cleared its gates
+    and the other means it did not and somebody decided anyway. On the folder
+    listing that is the first thing to look at when hunting a wrong match —
+    "Fonoteca decided this" and "you decided this" want different amounts of
+    suspicion.
+  */
+  AttributedByPerson: {
+    label: 'Matched by you',
+    short: 'By you',
+    tone: 'neutral',
+    note:
+      'No rule placed these files. Somebody found the album, checked the pairing track by track ' +
+      'and filed them, which is the strongest evidence available for music AcoustID cannot place.',
+  },
+  NoReleaseByPerson: {
+    label: 'No album, said by you',
+    short: 'No album',
+    tone: 'neutral',
+    note:
+      'Somebody looked at the candidates and said none of them is the album these files came ' +
+      'from — a stronger claim than the rule was in a position to make.',
+  },
+  Unreleased: {
+    label: 'Not from a release',
+    short: 'Unreleased',
+    tone: 'neutral',
+    note:
+      "Somebody said this folder is nobody's album — a private recording, a mixtape, tracks " +
+      'pulled together by hand — so no release will ever fit it and nothing goes on asking.',
+  },
+
+  /*
     The four that file nothing. None of them is an error and none is styled as
     one: refusing is a first-class answer here, and a screen that shouted about
     it would be arguing with the rule that produced it. `NotAttempted` is not

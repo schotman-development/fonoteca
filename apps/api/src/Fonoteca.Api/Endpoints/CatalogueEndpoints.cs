@@ -159,9 +159,23 @@ public static partial class CatalogueEndpoints
     /// could not read has none: the follow-up is to check whether the file is
     /// intact, which is a different screen and a different fix. Listing it here
     /// would put work in a queue that answering the question cannot clear.
+    ///
+    /// <see cref="AcoustIdOutcome.ReopenedByPerson"/> is here for the opposite
+    /// reason: it is not a refusal at all, but a person saying a confident
+    /// answer was wrong. It has to appear on the worklist or reopening a folder
+    /// does nothing visible, and it has to be in <i>this</i> set rather than
+    /// only in the worklist query, because the same set is what
+    /// <c>FileFilesUnderRelease</c> accepts and what "not a release" can close.
+    /// A file that can be reopened and then not answered is worse than one that
+    /// was never reopened.
     /// </remarks>
     private static readonly AcoustIdOutcome[] UnidentifiedOutcomes =
-        [AcoustIdOutcome.Unknown, AcoustIdOutcome.Ambiguous, AcoustIdOutcome.BelowThreshold];
+    [
+        AcoustIdOutcome.Unknown,
+        AcoustIdOutcome.Ambiguous,
+        AcoustIdOutcome.BelowThreshold,
+        AcoustIdOutcome.ReopenedByPerson,
+    ];
 
     /// <summary>Enrichment refusals: the audio is known, the recording is not.</summary>
     private static readonly EnrichmentOutcome[] UnlinkedOutcomes =

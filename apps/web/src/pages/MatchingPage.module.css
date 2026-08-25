@@ -209,3 +209,16 @@
   accent-color: var(--color-accent-solid);
   cursor: pointer;
 }
+
+/*
+ * A file that is already matched, in the folder listing.
+ *
+ * Padded to line up with `.rowButton` and indented past the tick column, so the
+ * open questions and the answered files read as one directory rather than two
+ * lists. Deliberately not interactive: there is nothing to answer here, and a
+ * hover state would promise there was.
+ */
+.placedRow {
+  padding: var(--space-8);
+  padding-inline-start: calc(var(--space-8) + var(--space-20));
+}
