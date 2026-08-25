@@ -217,6 +217,72 @@ public sealed class AudioFileDescriber(IAudioFileStore files, IAudioProbe probe)
         };
     }
 
+    /// <summary>
+    /// The cover the file carries, if it carries one.
+    /// </summary>
+    /// <remarks>
+    /// <b>TagLib# again, and here that is not a preference.</b> ATL's
+    /// <c>EmbeddedPictures</c> is the accessor that dereferences null on the
+    /// forty FLACs in the target library carrying a prepended, unsynchronised
+    /// ID3v2 header — see <see cref="TagReadFailedException"/> — and those are
+    /// disproportionately the files that end up on the matching screen.
+    ///
+    /// <b>Front cover first, then whatever there is.</b> A file can carry a
+    /// back cover, a booklet page and a picture of the artist, and the first
+    /// one in the array is whichever the tagger wrote first. Where nothing is
+    /// typed as a front cover the first picture is still better than none — a
+    /// booklet page identifies an album about as well as its front does.
+    ///
+    /// Same contract as <see cref="DescribeAsync"/>: it never throws. No
+    /// artwork and an unreadable file are the same answer to the caller, which
+    /// draws a monogram either way.
+    /// </remarks>
+    public async Task<EmbeddedArtwork?> ReadArtworkAsync(
+        LibraryPath path,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
+            await using (stream.ConfigureAwait(false))
+            {
+                using var file = TagLibFile.Create(new StreamFileAbstraction(path.Value, stream));
+
+                var pictures = (file.Tag?.Pictures ?? [])
+                    .Where(picture => picture.Data.Count > 0)
+                    .ToArray();
+
+                var chosen =
+                    Array.Find(pictures, picture => picture.Type == TagLib.PictureType.FrontCover)
+                    ?? pictures.FirstOrDefault();
+
+                if (chosen is null) return null;
+
+                // A declared type that is not an image type is a tagger's typo,
+                // not a format: browsers refuse to paint `image/` or
+                // `application/octet-stream`, and every embedded cover in
+                // practice is one of two formats. Guessing the commoner one
+                // renders; honouring the typo never does.
+                var mime = chosen.MimeType is { Length: > 0 } declared
+                    && declared.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                        ? declared
+                        : "image/jpeg";
+
+                return new EmbeddedArtwork(chosen.Data.Data, mime);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // Documented above: a file with no readable cover has no cover.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+
     private static void Add(List<TagValue> tags, HashSet<string> seen, string name, string? value)
     {
         if (tags.Count >= MaxTags) return;

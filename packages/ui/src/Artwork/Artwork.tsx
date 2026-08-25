@@ -65,6 +65,13 @@ export function Artwork({
           alt=""
           loading="lazy"
           decoding="async"
+          /*
+            No Referer to whoever is serving the picture. Cover art comes from a
+            third-party CDN, and the default header would tell it which page of
+            a private library the reader is looking at — a self-hosted catalogue
+            leaking its browsing one tile at a time.
+          */
+          referrerPolicy="no-referrer"
           onError={() => setBrokenImage(src)}
         />
       ) : (

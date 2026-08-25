@@ -266,6 +266,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/matching/files/{id}/art": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The cover art embedded in one file, as it is stored.
+         * @description The bytes of the file's own front cover, served unchanged — no scaling, no re-encoding. It is the one claim about an album that a person can check against a candidate at a glance, and unlike the folder name it travels inside the file.
+         *
+         *     **404 is the ordinary answer, not an error.** A file with no picture, a file no tag parser will open and an unmounted volume all come back the same way, because the screen draws the same monogram for all three.
+         */
+        get: operations["GetMatchingFileArtwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/matching/recordings/{id}/candidates": {
         parameters: {
             query?: never;
@@ -1671,6 +1693,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SubjectFileResponse"];
                 };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetMatchingFileArtwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Not Found */
             404: {

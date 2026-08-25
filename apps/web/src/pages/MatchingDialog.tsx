@@ -1,5 +1,6 @@
 import { type components, describeError } from '@fonoteca/api-client'
 import {
+  Artwork,
   Badge,
   Button,
   CandidateCard,
@@ -23,6 +24,7 @@ import { useState } from 'react'
 
 import { api } from '../api.ts'
 import { type QueryState, useApiQuery } from '../useApiQuery.ts'
+import { embeddedArt, releaseArt } from './coverArt.ts'
 import styles from './MatchingDialog.module.css'
 import { MatchingSubject } from './MatchingSubject.tsx'
 import type { MatchingQuestion } from './matchingFixtures.ts'
@@ -253,6 +255,15 @@ function CatalogueSubject({
           }
         : {})}
       badges={<Badge tone={why.tone}>{why.label}</Badge>}
+      {...(mediaFileId !== null
+        ? {
+            // The cover the file itself carries, which nothing on this screen
+            // was showing. It is the one claim a person can check against a
+            // candidate without reading a word — and on a component there is no
+            // single file to ask, so the aside is simply absent there.
+            actions: <Artwork name={question.subject} src={embeddedArt(mediaFileId)} size="lg" />,
+          }
+        : {})}
       rows={[
         // Only where it says something. "Files: 1" under a heading that
         // already reads "This file" is the row restating the panel.
@@ -1398,6 +1409,12 @@ function candidateOption(
     id: candidate.mbid,
     render: (selection: CandidateOptionProps) => (
       <CandidateCard
+        {...(candidate.releases[0] != null
+          ? // The earliest release it appears on, which is the list's own order.
+            // A recording has no cover of its own; the record it came out on
+            // does, and the original is the one a person recognises.
+            { image: releaseArt(candidate.releases[0].releaseId) }
+          : {})}
         // Falls back to the identifier rather than to "Unknown": MusicBrainz not
         // answering does not make the recording nameless, and the MBID is what a
         // person would paste into MusicBrainz to go and look.
@@ -1901,6 +1918,7 @@ function albumOption(candidate: ComponentCandidateRow, driftToleranceMs: number)
     id: candidate.mbid,
     render: (selection: CandidateOptionProps) => (
       <CandidateCard
+        image={releaseArt(candidate.mbid)}
         title={candidate.title}
         {...(candidate.artist != null ? { subtitle: candidate.artist } : {})}
         facts={facts}

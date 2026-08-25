@@ -298,21 +298,30 @@ function Results({
                   onChoose(release)
                 }}
               >
-                <Stack direction="column" gap={2} align="start">
-                  <Stack gap={8} align="baseline" wrap>
-                    <Text size="sm" weight="medium">
-                      {release.title}
-                    </Text>
-                    {release.artist !== null ? (
-                      <Text size="sm" tone="secondary">
-                        {release.artist}
-                      </Text>
-                    ) : null}
-                  </Stack>
+                <Stack gap={12} align="center">
+                  {/*
+                    The cover, because two pressings of one album are two
+                    identical lines of text and two different sleeves. Missing
+                    art draws a monogram — plenty of releases have none.
+                  */}
+                  <Artwork name={release.title} src={releaseArt(release.mbid)} size="md" />
 
-                  <Text size="xs" tone="tertiary" family="mono" block>
-                    {releaseFacts(release)}
-                  </Text>
+                  <Stack direction="column" gap={2} align="start">
+                    <Stack gap={8} align="baseline" wrap>
+                      <Text size="sm" weight="medium">
+                        {release.title}
+                      </Text>
+                      {release.artist !== null ? (
+                        <Text size="sm" tone="secondary">
+                          {release.artist}
+                        </Text>
+                      ) : null}
+                    </Stack>
+
+                    <Text size="xs" tone="tertiary" family="mono" block>
+                      {releaseFacts(release)}
+                    </Text>
+                  </Stack>
                 </Stack>
               </button>
             </li>
@@ -456,7 +465,10 @@ function Pairing({
 
   return (
     <Stack direction="column" gap={12} align="start" className={styles.pairing}>
-      <Stack gap={12} align="baseline" wrap>
+      <Stack gap={12} align="center" wrap>
+        {/* The album being seated against, so a mis-click is visible before
+            thirty files are filed under it. */}
+        <Artwork name={release.title} src={releaseArt(release.mbid)} size="md" />
         <Text size="sm" weight="medium">
           {release.title}
         </Text>

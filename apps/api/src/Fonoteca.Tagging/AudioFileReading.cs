@@ -87,3 +87,11 @@ public sealed record AudioFileReading
 /// <c>ACOUSTID_ID</c> above both.
 /// </remarks>
 public sealed record TagValue(string Name, string Value);
+
+/// <summary>One picture out of a file's tags, ready to be served as it was stored.</summary>
+/// <remarks>
+/// The bytes are handed on untouched. Nothing here scales, re-encodes or crops:
+/// that would mean an image library this project does not have, on a request one
+/// person made about one file. The browser is already a competent image scaler.
+/// </remarks>
+public sealed record EmbeddedArtwork(byte[] Bytes, string MimeType);

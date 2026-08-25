@@ -42,6 +42,7 @@ public sealed class MatchingFileTests(PostgresFixture postgres) : IAsyncLifetime
     private MediaFileId _empty;
     private MediaFileId _notAudio;
     private MediaFileId _id3Prefixed;
+    private MediaFileId _withArtwork;
     private MediaFileId _neverFingerprinted;
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -74,7 +75,8 @@ public sealed class MatchingFileTests(PostgresFixture postgres) : IAsyncLifetime
                 Corpus.TruncatedFlac,
                 Corpus.EmptyFlac,
                 Corpus.NotAudioFlac,
-                Corpus.Id3PrefixedFlac);
+                Corpus.Id3PrefixedFlac,
+                Corpus.FlacWithArtwork);
         }
 
         await SeedAsync();
@@ -378,6 +380,47 @@ public sealed class MatchingFileTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal("FLAC", row.Format);
     }
 
+    /// <summary>
+    /// A file's own cover comes back as an image, and a file without one 404s.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are the endpoint's contract. The picture is served as it was
+    /// stored — the point of it is that a person can compare it with a
+    /// candidate's sleeve — and "no picture" is an ordinary answer rather than a
+    /// failure, because the screen draws the same monogram for a file with no
+    /// art, a file no parser will open and an unmounted volume.
+    /// </remarks>
+    [Fact]
+    public async Task TheCoverInAFileIsServedAndAFileWithoutOneIsNotFound()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        using var client = _factory!.CreateClient();
+
+        var art = await client.GetAsync(
+            new Uri($"/api/catalogue/matching/files/{_withArtwork.Value}/art", UriKind.Relative),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, art.StatusCode);
+        Assert.StartsWith(
+            "image/",
+            art.Content.Headers.ContentType?.MediaType,
+            StringComparison.OrdinalIgnoreCase);
+
+        var bytes = await art.Content.ReadAsByteArrayAsync(Token);
+        Assert.NotEmpty(bytes);
+
+        // The corpus attaches a PNG, and the bytes must be the ones that were
+        // stored rather than anything re-encoded on the way out.
+        Assert.Equal<byte[]>([0x89, (byte)'P', (byte)'N', (byte)'G'], bytes[..4]);
+
+        var none = await client.GetAsync(
+            new Uri($"/api/catalogue/matching/files/{_onDisk.Value}/art", UriKind.Relative),
+            Token);
+
+        Assert.Equal(HttpStatusCode.NotFound, none.StatusCode);
+    }
+
     [Fact]
     public async Task AFileTheCatalogueDoesNotHoldIsNotFound()
     {
@@ -442,6 +485,12 @@ public sealed class MatchingFileTests(PostgresFixture postgres) : IAsyncLifetime
 
         _id3Prefixed = id3Prefixed.Id;
         db.MediaFiles.Add(id3Prefixed);
+
+        var withArtwork = Unidentified(
+            Path.GetFileName(Corpus.IsAvailable ? Corpus.FlacWithArtwork : "artwork.flac"));
+
+        _withArtwork = withArtwork.Id;
+        db.MediaFiles.Add(withArtwork);
 
         var missing = Unidentified("Bootlegs/gone.flac");
         _missing = missing.Id;

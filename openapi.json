@@ -627,6 +627,42 @@
         }
       }
     },
+    "/api/catalogue/matching/files/{id}/art": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The cover art embedded in one file, as it is stored.",
+        "description": "The bytes of the file's own front cover, served unchanged — no scaling, no re-encoding. It is the one claim about an album that a person can check against a candidate at a glance, and unlike the folder name it travels inside the file.\n\n**404 is the ordinary answer, not an error.** A file with no picture, a file no tag parser will open and an unmounted volume all come back the same way, because the screen draws the same monogram for all three.",
+        "operationId": "GetMatchingFileArtwork",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/matching/recordings/{id}/candidates": {
       "get": {
         "tags": [
