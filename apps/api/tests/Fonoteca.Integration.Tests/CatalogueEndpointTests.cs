@@ -110,6 +110,47 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.DoesNotContain(body.Items, a => a.Id == _seed.Orphan);
     }
 
+    /// <summary>
+    /// An artist's picture is one of their albums, because there is no
+    /// photograph of anybody to be had — MusicBrainz holds none and the Cover
+    /// Art Archive is keyed on releases.
+    /// </summary>
+    /// <remarks>
+    /// Which album is the whole question, and the greedy answer is wrong in the
+    /// way this codebase keeps meeting: the release holding most of an artist's
+    /// tracks is a compilation about as often as it is theirs. Measured against
+    /// the real library, Joe Bonamassa's 454 tracks put a hundred-track
+    /// anthology on top with 32 of them, ahead of every record with his name on
+    /// the sleeve — so the seed here reproduces that shape at three against two.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistsPictureIsAnAlbumTheyAreBilledOnRatherThanTheBiggerOneTheyGuestOn()
+    {
+        using var client = _factory!.CreateClient();
+
+        var body = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(body);
+
+        var bonamassa = body.Items.Single(a => a.Id == _seed.Bonamassa);
+
+        Assert.Equal(_seed.SeesawMbid, bonamassa.Cover);
+        Assert.NotEqual(_seed.AnthologyMbid, bonamassa.Cover);
+
+        // The same rule on the detail page, from the same input — a tile and the
+        // page it opens must not show two different faces for one artist.
+        var detail = await client.GetFromJsonAsync<ArtistDetailResponse>(
+            new Uri($"/api/catalogue/artists/{_seed.Bonamassa}", UriKind.Relative), Token);
+
+        Assert.NotNull(detail);
+        Assert.Equal(_seed.SeesawMbid, detail.Artist.Cover);
+
+        // Karajan's files were never attributed to a release, so there is
+        // nothing to draw and the card falls back to its monogram.
+        Assert.Null(body.Items.Single(a => a.Id == _seed.Karajan).Cover);
+    }
+
     [Fact]
     public async Task TheFilterMatchesAnywhereInTheNameAndIgnoresCase()
     {
@@ -195,10 +236,12 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         var bonamassa = await ArtistAsync(client, _seed.Bonamassa);
 
         var forHart = Assert.Single(hart.Tracks);
-        var forBonamassa = Assert.Single(bonamassa.Tracks);
+
+        // Named rather than singled: he is also on the anthology, which is the
+        // shape the artist picture rule exists to see past.
+        var forBonamassa = bonamassa.Tracks.Single(t => t.RecordingId == _seed.Duet);
 
         Assert.Equal(_seed.Duet, forHart.RecordingId);
-        Assert.Equal(_seed.Duet, forBonamassa.RecordingId);
         Assert.Equal(["billed"], forHart.Roles);
         Assert.Equal(["billed"], forBonamassa.Roles);
     }
@@ -344,9 +387,11 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(list);
 
-        var release = Assert.Single(list.Items);
+        var release = list.Items.Single(item => item.Title == "Seesaw");
 
-        Assert.Equal("Seesaw", release.Title);
+        // The Cover Art Archive is keyed on this, and it is the only way the
+        // browser can ask for a sleeve.
+        Assert.Equal(_seed.SeesawMbid, release.Mbid);
 
         // The release's own billing line, rebuilt with its join phrase intact.
         Assert.Equal("Beth Hart & Joe Bonamassa", release.Artist);
@@ -419,9 +464,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(report);
 
-        // Two folders, each internally consistent, both naming one release.
-        Assert.Equal(2, report.Folders);
-        Assert.Equal(2, report.FoldersAgreeing);
+        // Three folders, each internally consistent, each naming one release.
+        Assert.Equal(3, report.Folders);
+        Assert.Equal(3, report.FoldersAgreeing);
         Assert.Empty(report.FoldersSplit);
 
         var spanning = Assert.Single(report.ReleasesSpanningFolders);
@@ -541,6 +586,55 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         db.MediaFiles.Add(Attributed(
             File("Singles/Close to My Fire.flac", elsewhere), seesaw, group, strayTrack));
 
+        // An anthology holding more of Bonamassa's recordings than his own album
+        // does, and billed to nobody. It is what a picture for an artist has to
+        // see past: the greedy answer here is somebody else's compilation.
+        var anthologyGroup = new ReleaseGroup
+        {
+            Id = ReleaseGroupId.New(),
+            Title = "Blues Summit 100",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PrimaryType = "Album",
+        };
+
+        var anthology = new Release
+        {
+            Id = ReleaseId.New(),
+            Title = "Blues Summit 100",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            ReleaseGroupId = anthologyGroup.Id,
+            Released = new ReleaseDate(2019, null, null),
+            Status = "Official",
+            MediumFormats = "CD",
+            TrackCount = 3,
+            DiscCount = 1,
+        };
+
+        db.ReleaseGroups.Add(anthologyGroup);
+        db.Releases.Add(anthology);
+
+        for (var n = 1; n <= 3; n++)
+        {
+            var guest = new Recording
+            {
+                Id = RecordingId.New(),
+                Title = $"Guest spot {n}",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                Duration = TimeSpan.FromSeconds(200),
+            };
+
+            db.Recordings.Add(guest);
+            db.ArtistCredits.Add(Credit(bonamassa, guest, 0, null));
+
+            var slot = TrackOn(db, anthology, guest, n, $"Guest spot {n}", 200);
+
+            db.MediaFiles.Add(Attributed(
+                File($"Various/Blues Summit 100/0{n} - Guest spot {n}.flac", guest),
+                anthology,
+                anthologyGroup,
+                slot));
+        }
+
         // Credited on a recording the library does not hold. Enrichment cannot
         // produce this, but a rescan that unlinks every file of a recording can.
         var absent = new Recording { Id = RecordingId.New(), Title = "Never Ripped" };
@@ -560,6 +654,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             FirstMovement = first.Id.Value,
             Duet = duet.Id.Value,
             Seesaw = seesaw.Id.Value,
+            SeesawMbid = seesaw.Mbid!.Value.Value,
+            AnthologyMbid = anthology.Mbid!.Value.Value,
         };
     }
 
@@ -699,5 +795,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         public Guid Duet { get; init; }
 
         public Guid Seesaw { get; init; }
+
+        public Guid SeesawMbid { get; init; }
+
+        public Guid AnthologyMbid { get; init; }
     }
 }

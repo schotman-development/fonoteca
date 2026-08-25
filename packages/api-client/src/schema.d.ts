@@ -619,6 +619,8 @@ export interface components {
             type: null | string;
             /** Format: int32 */
             trackCount: number;
+            /** Format: uuid */
+            cover: null | string;
         };
         AttributionReportResponse: {
             outcomes: components["schemas"]["OutcomeCount"][];
@@ -1206,6 +1208,8 @@ export interface components {
         ReleaseSummary: {
             /** Format: uuid */
             id: string;
+            /** Format: uuid */
+            mbid: null | string;
             title: string;
             artist: null | string;
             /** Format: int32 */

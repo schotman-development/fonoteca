@@ -6,6 +6,7 @@ import { useDeferredValue, useId, useState } from 'react'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistsPage.module.css'
+import { releaseArt } from './coverArt.ts'
 
 type ArtistSummary = components['schemas']['ArtistSummary']
 
@@ -163,6 +164,14 @@ function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
     <CatalogueCard
       variant="artist"
       title={artist.name}
+      /*
+        An album of theirs, standing in for a photograph nobody has: MusicBrainz
+        holds no artist images and the Cover Art Archive is keyed on releases.
+        Spread rather than passed as `undefined`, which `exactOptionalPropertyTypes`
+        draws a distinction between — and the absent prop is what makes the card
+        draw its monogram.
+      */
+      {...(artist.cover != null ? { image: releaseArt(artist.cover) } : {})}
       /*
         The count and nothing else. It is on every artist, it is what says
         whether a name is a whole shelf or one guest appearance, and it is

@@ -1,10 +1,11 @@
 import type { components } from '@fonoteca/api-client'
-import { Badge, Stack, Table, TableCell, TableHeaderCell, Text } from '@fonoteca/ui'
+import { Artwork, Badge, Stack, Table, TableCell, TableHeaderCell, Text } from '@fonoteca/ui'
 import { Link, useParams } from '@tanstack/react-router'
 
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistPage.module.css'
+import { releaseArt } from './coverArt.ts'
 
 type TrackRow = components['schemas']['TrackRow']
 
@@ -53,28 +54,47 @@ export function ArtistPage() {
 
       {state.status === 'ready' ? (
         <Stack direction="column" gap={20}>
-          <Stack direction="column" gap={4}>
-            <h1 className={styles.title}>
-              <Text size="xl" weight="semibold" block>
-                {state.data.artist.name}
-              </Text>
-            </h1>
+          <Stack gap={16} align="center">
+            {/*
+              An album of theirs in place of a portrait, circular like every
+              other artist in the application. There is no photograph to be had:
+              MusicBrainz holds none, and the Cover Art Archive is keyed on
+              releases. The circle is what says this is a person or a group
+              rather than a record you own — the same shape their card carries in
+              the list, drawn from the same field, so the two agree.
+            */}
+            <Artwork
+              name={state.data.artist.name}
+              shape="circle"
+              size="lg"
+              {...(state.data.artist.cover != null
+                ? { src: releaseArt(state.data.artist.cover) }
+                : {})}
+            />
 
-            <Stack gap={8} align="center" wrap>
-              {state.data.artist.type != null ? (
-                <Badge tone="neutral" size="sm">
-                  {state.data.artist.type}
-                </Badge>
-              ) : null}
-              {state.data.artist.disambiguation != null ? (
-                <Text size="sm" tone="tertiary">
-                  {state.data.artist.disambiguation}
+            <Stack direction="column" gap={4}>
+              <h1 className={styles.title}>
+                <Text size="xl" weight="semibold" block>
+                  {state.data.artist.name}
                 </Text>
-              ) : null}
-              <Text size="sm" tone="tertiary">
-                {state.data.tracks.length.toLocaleString()} track
-                {state.data.tracks.length === 1 ? '' : 's'} in the library
-              </Text>
+              </h1>
+
+              <Stack gap={8} align="center" wrap>
+                {state.data.artist.type != null ? (
+                  <Badge tone="neutral" size="sm">
+                    {state.data.artist.type}
+                  </Badge>
+                ) : null}
+                {state.data.artist.disambiguation != null ? (
+                  <Text size="sm" tone="tertiary">
+                    {state.data.artist.disambiguation}
+                  </Text>
+                ) : null}
+                <Text size="sm" tone="tertiary">
+                  {state.data.tracks.length.toLocaleString()} track
+                  {state.data.tracks.length === 1 ? '' : 's'} in the library
+                </Text>
+              </Stack>
             </Stack>
           </Stack>
 
