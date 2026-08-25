@@ -65,6 +65,38 @@ internal sealed record AcoustIdRecordingBody
 }
 
 /// <summary>
+/// The wire shape of <c>/v2/submit</c>, which shares only its error document.
+/// </summary>
+/// <remarks>
+/// Their acknowledgement, not their verdict. A submission comes back
+/// <c>pending</c> and is imported out of band, so the ids here are the only
+/// handle on it afterwards — nothing in this response says whether the claim
+/// was believed, and <c>/v2/submission_status</c> is where that would be asked.
+/// </remarks>
+internal sealed record AcoustIdSubmitResponse
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("error")]
+    public AcoustIdErrorBody? Error { get; init; }
+
+    [JsonPropertyName("submissions")]
+    public IReadOnlyList<AcoustIdSubmissionBody>? Submissions { get; init; }
+}
+
+internal sealed record AcoustIdSubmissionBody
+{
+    /// <summary>Their submission id. A long, not a Guid — this is a queue position.</summary>
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+
+    /// <summary>"pending" on the way in; "imported" once it has been processed.</summary>
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+}
+
+/// <summary>
 /// Source-generated serialisation for the shapes above.
 /// </summary>
 /// <remarks>
@@ -80,4 +112,5 @@ internal sealed record AcoustIdRecordingBody
     // order, but numbers arriving as strings would be a silent null.
     NumberHandling = JsonNumberHandling.AllowReadingFromString)]
 [JsonSerializable(typeof(AcoustIdResponse))]
+[JsonSerializable(typeof(AcoustIdSubmitResponse))]
 internal sealed partial class AcoustIdJsonContext : JsonSerializerContext;

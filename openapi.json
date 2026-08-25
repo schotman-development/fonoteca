@@ -1114,6 +1114,79 @@
           }
         }
       }
+    "/api/catalogue/releases/{id}/fingerprints": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Send this album's unknown fingerprints to AcoustID.",
+        "description": "For files whose recording a person chose by hand, which is the only kind worth sending: a pass took its answer from AcoustID in the first place. Submits each stored fingerprint bound to that recording, so the link becomes everyone's. Never automatic — nothing in Fonoteca submits anything unless somebody presses this. Nothing on disk is touched and no tag is written.",
+        "operationId": "ContributeFingerprints",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FingerprintContributionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     }
   },
   "components": {
@@ -2158,6 +2231,32 @@
           }
         }
       },
+      "FingerprintContributionResponse": {
+        "required": [
+          "release",
+          "submitted",
+          "accepted",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "release": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "submitted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "accepted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
       "FolderDisagreement": {
         "required": [
           "folder",
@@ -2891,7 +2990,8 @@
       "ReleaseDetailResponse": {
         "required": [
           "release",
-          "tracks"
+          "tracks",
+          "contributable"
         ],
         "type": "object",
         "properties": {
@@ -2903,6 +3003,10 @@
             "items": {
               "$ref": "#/components/schemas/ReleaseTrackRow"
             }
+          },
+          "contributable": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

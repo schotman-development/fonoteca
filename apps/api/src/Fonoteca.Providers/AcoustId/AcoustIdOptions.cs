@@ -23,6 +23,24 @@ public sealed class AcoustIdOptions
     /// </remarks>
     public string ApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The operator's own user API key, which submissions need and lookups do not.
+    /// </summary>
+    /// <remarks>
+    /// A second key, from the account page at <c>https://acoustid.org/</c> once
+    /// signed in, and not interchangeable with <see cref="ApiKey"/>: that one
+    /// says which application is calling, this one says who is making the claim.
+    /// AcoustID's documentation asks that it not be baked into an application —
+    /// "each user should provide their own" — which for a self-hosted library
+    /// manager is satisfied exactly by it being configuration the operator sets,
+    /// since the operator is the user.
+    ///
+    /// Empty is a supported state, as with <see cref="ApiKey"/>: everything else
+    /// works, and a submission attempted without one is refused here rather than
+    /// sent, so the message names the setting.
+    /// </remarks>
+    public string UserKey { get; set; } = string.Empty;
+
     /// <summary>The web service root. The trailing slash matters; requests are relative to it.</summary>
     public Uri BaseAddress { get; set; } = new("https://api.acoustid.org/v2/");
 

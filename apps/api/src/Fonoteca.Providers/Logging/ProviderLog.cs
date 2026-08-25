@@ -26,6 +26,12 @@ internal static partial class ProviderLog
     public static partial void AcoustIdMatched(ILogger logger, int matches, int durationSeconds);
 
     [LoggerMessage(
+        EventId = 1310,
+        Level = LogLevel.Information,
+        Message = "AcoustID accepted {Submissions} fingerprint submissions")]
+    public static partial void AcoustIdSubmitted(ILogger logger, int submissions);
+
+    [LoggerMessage(
         EventId = 1350,
         Level = LogLevel.Debug,
         Message = "MusicBrainz returned {EntityType} {Mbid}")]

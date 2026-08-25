@@ -1,10 +1,21 @@
-import type { components } from '@fonoteca/api-client'
-import { Badge, Stack, Table, TableCell, TableHeaderCell, Text } from '@fonoteca/ui'
+import { type components, describeError } from '@fonoteca/api-client'
+import {
+  Artwork,
+  Badge,
+  Button,
+  Stack,
+  Table,
+  TableCell,
+  TableHeaderCell,
+  Text,
+} from '@fonoteca/ui'
 import { Link, useParams } from '@tanstack/react-router'
+import { useState } from 'react'
 
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import { CERTAINTY } from './certainty.ts'
+import { releaseArt } from './coverArt.ts'
 import styles from './ReleasePage.module.css'
 
 type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
@@ -18,10 +29,11 @@ type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
  */
 export function ReleasePage() {
   const { releaseId } = useParams({ from: '/library/releases/$releaseId' })
+  const [contributions, setContributions] = useState(0)
 
   const state = useApiQuery(
     () => api.get('/api/catalogue/releases/{id}', { params: { path: { id: releaseId } } }),
-    [releaseId],
+    [releaseId, contributions],
   )
 
   return (
@@ -46,6 +58,13 @@ export function ReleasePage() {
       {state.status === 'ready' ? (
         <Stack direction="column" gap={20}>
           <Header release={state.data.release} />
+          <Contribute
+            releaseId={releaseId}
+            count={state.data.contributable}
+            onContributed={() => {
+              setContributions((done) => done + 1)
+            }}
+          />
           <Tracks
             tracks={state.data.tracks}
             title={state.data.release.title}

@@ -108,6 +108,29 @@ public sealed record AlbumFilingPayload
 }
 
 /// <summary>
+/// What was contributed to AcoustID, and what it acknowledged.
+/// </summary>
+/// <remarks>
+/// The only outbound claim this application makes, so this entry is the only
+/// record that it happened — the catalogue keeps a stamp per file and nothing
+/// else, and AcoustID's own copy is not readable from here. The submission ids
+/// are kept for that reason: they are the handle on
+/// <c>/v2/submission_status</c>, which nothing here calls and a person may.
+/// </remarks>
+public sealed record FingerprintContributionPayload
+{
+    public required Guid Release { get; init; }
+
+    public required string Title { get; init; }
+
+    /// <summary>Files whose fingerprint was sent.</summary>
+    public required int Submitted { get; init; }
+
+    /// <summary>AcoustID's own ids for the queued submissions.</summary>
+    public required IReadOnlyList<long> Submissions { get; init; }
+}
+
+/// <summary>
 /// Source-generated, matching <c>TaggingJson</c>.
 /// </summary>
 /// <remarks>
@@ -127,6 +150,7 @@ public sealed record AlbumFilingPayload
 [JsonSerializable(typeof(RecordingDecisionPayload))]
 [JsonSerializable(typeof(ComponentDecisionPayload))]
 [JsonSerializable(typeof(AlbumFilingPayload))]
+[JsonSerializable(typeof(FingerprintContributionPayload))]
 [JsonSerializable(typeof(AcoustIdEvidence))]
 [JsonSerializable(typeof(Fonoteca.Api.Endpoints.RecordingCandidatesResponse))]
 [JsonSerializable(typeof(Fonoteca.Api.Endpoints.ComponentCandidatesResponse))]

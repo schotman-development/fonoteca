@@ -25,7 +25,7 @@ namespace Fonoteca.Providers;
 /// </remarks>
 public static class ProviderServiceCollectionExtensions
 {
-    /// <summary>Registers <see cref="IAcoustIdLookup"/> and the HTTP client behind it.</summary>
+    /// <summary>Registers the AcoustID faces and the HTTP client behind them.</summary>
     public static IServiceCollection AddAcoustId(
         this IServiceCollection services,
         Action<AcoustIdOptions> configure)
@@ -56,7 +56,14 @@ public static class ProviderServiceCollectionExtensions
 
         AddResilienceThenGate(client, AcoustIdOptions.HttpClientName);
 
-        services.AddSingleton<IAcoustIdLookup, AcoustIdClient>();
+        // One instance behind both faces, resolved through the concrete type
+        // rather than registered twice: two registrations would be two clients,
+        // and the second would be a second reader of the same options with no
+        // way to tell them apart in a log.
+        services.AddSingleton<AcoustIdClient>();
+        services.AddSingleton<IAcoustIdLookup>(provider => provider.GetRequiredService<AcoustIdClient>());
+        services.AddSingleton<IAcoustIdSubmission>(
+            provider => provider.GetRequiredService<AcoustIdClient>());
 
         return services;
     }

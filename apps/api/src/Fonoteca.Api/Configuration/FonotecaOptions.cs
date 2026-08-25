@@ -87,6 +87,22 @@ public sealed class FonotecaOptions : IValidatableObject
     public string AcoustIdApiKey { get; init; } = string.Empty;
 
     /// <summary>
+    /// AcoustID <i>user</i> API key — the operator's own, needed only to submit.
+    /// </summary>
+    /// <remarks>
+    /// From the account page at <c>https://acoustid.org/</c> after signing in,
+    /// and a different thing from <see cref="AcoustIdApiKey"/>: that one says
+    /// which application is calling, this one says who is making the claim. It
+    /// is what makes a contribution attributable, which is why AcoustID asks
+    /// that applications not ship one of their own.
+    ///
+    /// Empty is allowed and is the ordinary state — nothing in Fonoteca submits
+    /// anything unless a person presses the button, so a library that only ever
+    /// reads never needs this set.
+    /// </remarks>
+    public string AcoustIdUserKey { get; init; } = string.Empty;
+
+    /// <summary>
     /// How well a fingerprint must match before its AcoustID is written to a file.
     /// </summary>
     /// <remarks>

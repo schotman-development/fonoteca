@@ -428,6 +428,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/releases/{id}/fingerprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send this album's unknown fingerprints to AcoustID.
+         * @description For files whose recording a person chose by hand, which is the only kind worth sending: a pass took its answer from AcoustID in the first place. Submits each stored fingerprint bound to that recording, so the link becomes everyone's. Never automatic — nothing in Fonoteca submits anything unless somebody presses this. Nothing on disk is touched and no tag is written.
+         */
+        post: operations["ContributeFingerprints"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -723,6 +743,15 @@ export interface components {
             name: string;
             value: string;
         };
+        FingerprintContributionResponse: {
+            /** Format: uuid */
+            release: string;
+            /** Format: int32 */
+            submitted: number;
+            /** Format: int32 */
+            accepted: number;
+            detail: string;
+        };
         FolderDisagreement: {
             folder: string;
             releases: components["schemas"]["AttributionShare"][];
@@ -923,6 +952,8 @@ export interface components {
         ReleaseDetailResponse: {
             release: components["schemas"]["ReleaseSummary"];
             tracks: components["schemas"]["ReleaseTrackRow"][];
+            /** Format: int32 */
+            contributable: number;
         };
         ReleaseDisagreement: {
             /** Format: uuid */
@@ -1951,6 +1982,64 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    ContributeFingerprints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FingerprintContributionResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

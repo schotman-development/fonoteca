@@ -38,11 +38,23 @@
 
 import type { components } from '@fonoteca/api-client'
 import { describeError } from '@fonoteca/api-client'
-import { Badge, Button, Dialog, Field, Input, Stack, Text, VisuallyHidden } from '@fonoteca/ui'
+import {
+  Artwork,
+  Badge,
+  Button,
+  Dialog,
+  Field,
+  Input,
+  Stack,
+  Text,
+  VisuallyHidden,
+} from '@fonoteca/ui'
+import { Link } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
+import { releaseArt } from './coverArt.ts'
 import styles from './ReleaseMatchDialog.module.css'
 import { defaultSeating, driftMs, pairsFrom, queryFor, seatKey } from './seating.ts'
 
@@ -675,6 +687,14 @@ function Filed({
         “{result.title}” is in the catalogue with its whole track list, and these files carry the
         recording each position names. They are off every pass’s worklist for good — re-running
         identification or attribution will not touch them.
+      </Text>
+
+      <Text size="sm" block>
+        <Link to="/library/releases/$releaseId" params={{ releaseId: result.release }}>
+          Open “{result.title}”
+        </Link>{' '}
+        — the fingerprints of the files you just seated can be contributed to AcoustID from there,
+        which is the only place that offer appears.
       </Text>
 
       <Button size="sm" variant="ghost" onClick={onBack}>

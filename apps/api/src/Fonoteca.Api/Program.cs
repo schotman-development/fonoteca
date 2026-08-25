@@ -144,7 +144,11 @@ builder.Services.AddHostedService<CandidateWarmService>();
 // IAcoustIdLookup is not registered.
 // ---------------------------------------------------------------------------
 
-builder.Services.AddAcoustId(options => options.ApiKey = fonoteca.AcoustIdApiKey);
+builder.Services.AddAcoustId(options =>
+{
+    options.ApiKey = fonoteca.AcoustIdApiKey;
+    options.UserKey = fonoteca.AcoustIdUserKey;
+});
 
 builder.Services.AddMusicBrainz(options =>
 {

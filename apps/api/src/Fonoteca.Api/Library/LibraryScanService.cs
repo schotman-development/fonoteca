@@ -286,6 +286,16 @@ public sealed class LibraryScanService(
                 row.AcoustIdTaggedUtc = null;
                 row.AcoustIdOutcome = AcoustIdOutcome.NotAttempted;
 
+                // Including the record of having contributed the fingerprint
+                // back, which reads at first like history rather than a derived
+                // fact and is not: what it does is suppress the offer to submit,
+                // and it was earned by a fingerprint of audio that has gone. Kept
+                // through a replacement, the new audio would be filed under an
+                // album, be eligible to contribute, and never be offered — the
+                // one shape of staleness that shows up as nothing happening. The
+                // history is in the event log, which is where it belongs.
+                row.AcoustIdSubmittedUtc = null;
+
                 // Including an answer a person gave, and that is not a slight on
                 // the person. They decided what *those* bytes were, and these are
                 // different bytes; a decision about audio that is no longer here

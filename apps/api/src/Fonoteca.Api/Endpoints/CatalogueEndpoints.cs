@@ -396,6 +396,11 @@ public static partial class CatalogueEndpoints
         // see CatalogueEndpoints.AlbumMatching.cs.
         MapAlbumMatchingEndpoints(group);
 
+        // The one thing here that talks back to a provider rather than asking
+        // it. Its own partial for that reason alone — see
+        // CatalogueEndpoints.Fingerprints.cs.
+        MapFingerprintEndpoints(group);
+
         return app;
     }
 
@@ -708,6 +713,16 @@ public static partial class CatalogueEndpoints
                 [.. track.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
             .ToList();
 
+        // Its own query rather than a column on the projection above: the
+        // predicate is shared with the endpoint that acts on it, and EF cannot
+        // take an Expression into a subquery inside a Select without reading it
+        // as a closure over the row.
+        var contributable = await db.MediaFiles
+            .Where(file => file.ReleaseId == releaseId)
+            .Where(Contributable)
+            .CountAsync(cancellationToken)
+            .ConfigureAwait(false);
+
         return TypedResults.Ok(new ReleaseDetailResponse(
             new ReleaseSummary(
                 release.Id.Value,
@@ -723,7 +738,8 @@ public static partial class CatalogueEndpoints
                 release.Files,
                 ((ReleaseAttributionOutcome)release.Certainty).ToString(),
                 release.Alternatives),
-            rows));
+            rows,
+            contributable));
     }
 
     /// <summary>
@@ -3004,7 +3020,16 @@ public sealed record ReleaseSummary(
     int EditionAlternatives);
 
 /// <summary>One release and every track on it, held or not.</summary>
-public sealed record ReleaseDetailResponse(ReleaseSummary Release, IReadOnlyList<ReleaseTrackRow> Tracks);
+/// <param name="Contributable">
+/// Files on this release whose recording a person chose by hand and whose
+/// fingerprint has not been offered to AcoustID yet. Zero on an ordinary album,
+/// because the pass took its answer from AcoustID in the first place. See
+/// <c>CatalogueEndpoints.Fingerprints.cs</c>.
+/// </param>
+public sealed record ReleaseDetailResponse(
+    ReleaseSummary Release,
+    IReadOnlyList<ReleaseTrackRow> Tracks,
+    int Contributable);
 
 /// <param name="Number">The printed number, which is not always the position: "A1", "12a".</param>
 /// <param name="Held">Whether the library has a file filed under this track.</param>

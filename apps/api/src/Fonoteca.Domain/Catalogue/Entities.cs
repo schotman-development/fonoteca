@@ -298,6 +298,30 @@ public sealed class MediaFile
     /// </remarks>
     public DateTimeOffset? AcoustIdTaggedUtc { get; set; }
 
+    /// <summary>
+    /// When this file's fingerprint was last contributed <i>to</i> AcoustID.
+    /// </summary>
+    /// <remarks>
+    /// The other direction from every other column here, and the only one
+    /// recording something this application said rather than something it was
+    /// told. It is written when a person submits the fingerprint bound to the
+    /// recording MBID they filed the file under — never by a pass, for the
+    /// reason <see cref="Fonoteca.Domain.Abstractions.IAcoustIdSubmission"/>
+    /// states.
+    ///
+    /// It exists to keep the offer from repeating. Eligibility is "a person
+    /// chose this file's recording", which is <see cref="IdentityDecidedUtc"/>
+    /// being set — and that does not change when a submission is accepted,
+    /// because the import happens out of band and nothing here polls for it.
+    /// Without this column the same thirteen fingerprints are offered again on
+    /// every visit to the album, and the count beside the button never falls.
+    ///
+    /// A resubmission is harmless at their end and this does not make it
+    /// impossible, only unprompted: clearing the column is how somebody submits
+    /// again, in the same spirit as the two decided stamps.
+    /// </remarks>
+    public DateTimeOffset? AcoustIdSubmittedUtc { get; set; }
+
     /// <summary>What the last identification attempt concluded. For display, not for the worklist.</summary>
     public AcoustIdOutcome AcoustIdOutcome { get; set; } = AcoustIdOutcome.NotAttempted;
 
