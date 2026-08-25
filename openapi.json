@@ -1187,6 +1187,56 @@
         }
       }
     },
+    "/api/catalogue/matching/folders/seed": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "A prefilled MusicBrainz “add release” form for one folder.",
+        "description": "For the case every other screen here cannot help with: the album is not in MusicBrainz at all, so there is nothing to search for and nothing to seat files onto. Live sets, private recordings and anything else nobody has entered land here.\n\nReturns the field names and values for MusicBrainz's own release editor, read from the folder's files — title, artist, date and track list, with lengths measured rather than declared. A client POSTs them to `https://musicbrainz.org/release/add`, which opens the editor prefilled in the person's own browser, under their own account. **Fonoteca sends nothing to MusicBrainz**; their write API cannot create a release, and the judgement in an edit is not ours to make. Add `redirect_uri` to the form and MusicBrainz will send the browser back with `release_mbid` on the query string once the edit is saved.\n\nSubfolders become mediums, so a `CD1`/`CD2` rip seeds as two discs. `status` is seeded as `bootleg`, which is what an unissued concert recording is; it is one dropdown to change in the editor and it is worth checking. Reads the files and nothing else — no provider call, no write, nothing touched on disk.",
+        "operationId": "SeedRelease",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSeedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3159,6 +3209,59 @@
           }
         }
       },
+      "ReleaseSeedResponse": {
+        "required": [
+          "folder",
+          "action",
+          "title",
+          "artist",
+          "year",
+          "trackCount",
+          "mediumCount",
+          "unmeasuredTracks",
+          "fields"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mediumCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unmeasuredTracks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeedField"
+            }
+          }
+        }
+      },
       "ReleaseSlotRow": {
         "required": [
           "discNumber",
@@ -3435,6 +3538,21 @@
             "items": {
               "$ref": "#/components/schemas/FileRow"
             }
+          }
+        }
+      },
+      "SeedField": {
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
           }
         }
       },

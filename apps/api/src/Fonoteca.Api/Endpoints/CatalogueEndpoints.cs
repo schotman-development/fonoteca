@@ -401,6 +401,10 @@ public static partial class CatalogueEndpoints
         // CatalogueEndpoints.Fingerprints.cs.
         MapFingerprintEndpoints(group);
 
+        // The step before any of the above can help: the album is not in
+        // MusicBrainz at all. See CatalogueEndpoints.ReleaseSeed.cs.
+        MapReleaseSeedEndpoints(group);
+
         return app;
     }
 

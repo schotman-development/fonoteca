@@ -77,12 +77,23 @@ export function ReleaseMatchDialog({
   questions,
   onClose,
   onFiled,
+  initialQuery,
 }: {
   readonly folder: string
   readonly questions: readonly OpenQuestion[]
   readonly onClose: () => void
   /** A filing reached the catalogue, so the worklist behind this dialog is stale. */
   readonly onFiled: () => void
+  /**
+   * What to search for on open, instead of a guess made from the folder name.
+   *
+   * Set on one path: somebody has just entered this concert in MusicBrainz and
+   * been sent back with its MBID. Searching for an MBID is a lookup rather than
+   * a search — {@link SearchReleases} spots one before it queries — so this
+   * arrives as a single result which is certainly the right one, and it works
+   * against a mirror where the text search does not.
+   */
+  readonly initialQuery?: string | undefined
 }) {
   return (
     <Dialog
@@ -109,6 +120,7 @@ export function ReleaseMatchDialog({
         folder={folder}
         questions={questions}
         onFiled={onFiled}
+        initialQuery={initialQuery}
       />
     </Dialog>
   )
@@ -118,18 +130,24 @@ function MatchFlow({
   folder,
   questions,
   onFiled,
+  initialQuery,
 }: {
   readonly folder: string
   readonly questions: readonly OpenQuestion[]
   readonly onFiled: () => void
+  readonly initialQuery?: string | undefined
 }) {
-  const [query, setQuery] = useState(() => queryFor(folder))
+  const [query, setQuery] = useState(() => initialQuery ?? queryFor(folder))
 
   // The search that has actually been run, which is not what is in the box. A
   // search costs a gated MusicBrainz request, so it happens on submit and not on
   // every keystroke — and the two being separate is what lets the box be edited
   // while the previous results are still readable.
-  const [asked, setAsked] = useState<string | null>(null)
+  // Asked already when the release was named for us, because it was named by
+  // somebody who has just typed the whole album into MusicBrainz — making them
+  // press Search on an MBID they did not choose to type would be asking them to
+  // confirm their own click.
+  const [asked, setAsked] = useState<string | null>(() => initialQuery ?? null)
 
   const [chosen, setChosen] = useState<ReleaseSearchRow | null>(null)
 

@@ -448,6 +448,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/matching/folders/seed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A prefilled MusicBrainz “add release” form for one folder.
+         * @description For the case every other screen here cannot help with: the album is not in MusicBrainz at all, so there is nothing to search for and nothing to seat files onto. Live sets, private recordings and anything else nobody has entered land here.
+         *
+         *     Returns the field names and values for MusicBrainz's own release editor, read from the folder's files — title, artist, date and track list, with lengths measured rather than declared. A client POSTs them to `https://musicbrainz.org/release/add`, which opens the editor prefilled in the person's own browser, under their own account. **Fonoteca sends nothing to MusicBrainz**; their write API cannot create a release, and the judgement in an edit is not ours to make. Add `redirect_uri` to the form and MusicBrainz will send the browser back with `release_mbid` on the query string once the edit is saved.
+         *
+         *     Subfolders become mediums, so a `CD1`/`CD2` rip seeds as two discs. `status` is seeded as `bootleg`, which is what an unissued concert recording is; it is one dropdown to change in the editor and it is worth checking. Reads the files and nothing else — no provider call, no write, nothing touched on disk.
+         */
+        get: operations["SeedRelease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -991,6 +1015,21 @@ export interface components {
             /** Format: int32 */
             score: null | number;
         };
+        ReleaseSeedResponse: {
+            folder: string;
+            action: string;
+            title: string;
+            artist: string;
+            /** Format: int32 */
+            year: null | number;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: int32 */
+            mediumCount: number;
+            /** Format: int32 */
+            unmeasuredTracks: number;
+            fields: components["schemas"]["SeedField"][];
+        };
         ReleaseSlotRow: {
             /** Format: int32 */
             discNumber: number;
@@ -1057,6 +1096,10 @@ export interface components {
             recordingId: string;
             held: boolean;
             files: components["schemas"]["FileRow"][];
+        };
+        SeedField: {
+            name: string;
+            value: string;
         };
         SubjectFileResponse: {
             /** Format: uuid */
@@ -2049,6 +2092,46 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SeedRelease: {
+        parameters: {
+            query?: {
+                folder?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseSeedResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

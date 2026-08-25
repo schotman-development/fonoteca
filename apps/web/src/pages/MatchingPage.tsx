@@ -1,20 +1,23 @@
-import type { components } from '@fonoteca/api-client'
+import { type components, describeError } from '@fonoteca/api-client'
 import { Badge, Button, Card, Disclosure, Stack, Text, VisuallyHidden } from '@fonoteca/ui'
-import { Link } from '@tanstack/react-router'
-import { useMemo, useRef, useState } from 'react'
+import { Link, useSearch } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
+import { CERTAINTY } from './certainty.ts'
 import { MatchingDialog, type MatchingSubjectRef } from './MatchingDialog.tsx'
 import styles from './MatchingPage.module.css'
 import { MATCHING_QUESTIONS } from './matchingFixtures.ts'
 import { kindOf, type OpenKind, type OpenReason, whyOpen } from './openQuestions.ts'
 import { ReleaseMatchDialog } from './ReleaseMatchDialog.tsx'
-import { albumFolderOf } from './seating.ts'
+import { ALBUM_FOLDER_DEPTH, albumFolderOf, mediaFileIdOf } from './seating.ts'
 
 type OpenQuestion = components['schemas']['OpenQuestion']
 type OpenQuestionCount = components['schemas']['OpenQuestionCount']
 type MatchingQueue = components['schemas']['MatchingQueueResponse']
+type ReleaseSeedResponse = components['schemas']['ReleaseSeedResponse']
+type FolderFile = components['schemas']['FolderFileRow']
 
 /**
  * How many rows a refusal is allowed to print.
@@ -116,6 +119,41 @@ export function MatchingPage() {
 
   /** The files a release is being chosen for, once somebody has asked for one. */
   const [filing, setFiling] = useState<Filing | null>(null)
+
+  /**
+   * Coming back from MusicBrainz with a release that did not exist an hour ago.
+   *
+   * The seeded editor is handed a `redirect_uri`, so a saved edit lands here
+   * with `release_mbid` and the folder it was for. The dialog is then opened on
+   * that folder with the MBID as its query, which the search endpoint resolves
+   * as a lookup — one certain result rather than a text search that would not
+   * find a release added five seconds ago even on the official server, and
+   * could not run at all against a mirror.
+   *
+   * Guarded by the MBID rather than by a boolean, so closing the dialog does not
+   * reopen it and a *second* return in the same tab still works. The folder may
+   * legitimately not be on the worklist any more — somebody may have answered it
+   * from another tab — and then nothing opens, which is the truthful outcome:
+   * there is no question left to answer.
+   */
+  const returned = useSearch({ from: '/library/matching' })
+  const [handled, setHandled] = useState<string | null>(null)
+
+  const returning =
+    returned.release_mbid !== undefined && returned.release_mbid !== handled
+      ? { mbid: returned.release_mbid, folder: returned.folder ?? '' }
+      : null
+
+  useEffect(() => {
+    if (returning === null || state.status !== 'ready') return
+
+    const questions = state.data.items.filter(
+      (question) => albumFolderOf(question.folders[0] ?? '') === returning.folder,
+    )
+
+    setHandled(returning.mbid)
+    if (questions.length > 0) setFiling({ folder: returning.folder, questions })
+  }, [returning, state])
 
   return (
     <Stack direction="column" gap={20}>
@@ -1149,4 +1187,167 @@ function WorkedExamples({ onOpen }: { readonly onOpen: (subject: MatchingSubject
       </Disclosure>
     </div>
   )
+}
+
+/**
+ * Entering a concert MusicBrainz has never heard of.
+ *
+ * **The step before every other button on this screen can do anything.** Search,
+ * candidates, seating and the fingerprint contribution all assume the album is
+ * in MusicBrainz and the only question is which one. For a concert nobody has
+ * entered there is nothing to search for, nothing to seat onto, and therefore no
+ * recording to bind a fingerprint to — the folder is stuck at step zero, and no
+ * amount of re-asking any provider moves it.
+ *
+ * **Fonoteca does not write to MusicBrainz, and this does not either.** Their
+ * write API cannot create a release at all; the supported path — Picard's path —
+ * is to POST the fields to their own release editor and let the person's browser
+ * open it, signed in as them. So this fetches the seed, shows what is in it, and
+ * then submits a form. The edit is theirs.
+ *
+ * **Two presses, not one, and the reason is mechanical as well as editorial.**
+ * Reading a folder's tags is an `ffprobe` per file — five seconds for a
+ * thirteen-track concert — and a window opened after an `await` is a pop-up as
+ * far as a browser is concerned, blocked by default. Submitting the form from a
+ * *second* click keeps it inside a gesture. That it also puts the track list in
+ * front of a person before it goes to a public database is the better half of
+ * the argument.
+ */
+function AddToMusicBrainz({
+  folder,
+  enabled,
+}: {
+  readonly folder: string
+  readonly enabled: boolean
+}) {
+  const [state, setState] = useState<
+    | { readonly status: 'idle' | 'reading' }
+    | { readonly status: 'ready'; readonly seed: ReleaseSeedResponse }
+    | { readonly status: 'error'; readonly message: string }
+  >({ status: 'idle' })
+
+  async function read() {
+    setState({ status: 'reading' })
+
+    try {
+      const seed = await api.get('/api/catalogue/matching/folders/seed', {
+        params: { query: { folder } },
+      })
+
+      setState({ status: 'ready', seed })
+    } catch (cause: unknown) {
+      setState({ status: 'error', message: describeError(cause) })
+    }
+  }
+
+  if (state.status === 'ready') {
+    const { seed } = state
+
+    return (
+      <Stack direction="column" gap={8} align="start">
+        <Text size="sm" block>
+          <strong>{seed.title}</strong>
+          {seed.year === null ? '' : ` (${seed.year})`} · {seed.artist} · {seed.trackCount} track
+          {seed.trackCount === 1 ? '' : 's'}
+          {seed.mediumCount > 1 ? ` across ${seed.mediumCount} discs` : ''}
+        </Text>
+
+        <Text size="xs" tone="tertiary" block>
+          Read from the files themselves — titles from their tags, lengths measured by the decoder
+          rather than taken from the container. MusicBrainz opens in a new tab with all of it filled
+          in, under your account, and nothing is submitted until you press Save there. It is seeded
+          as a <strong>bootleg</strong>, which is what an unissued concert recording is; change it
+          in the editor if this one was actually released.
+          {seed.unmeasuredTracks > 0
+            ? ` ${seed.unmeasuredTracks} of them have no length, so you will need to fill those in.`
+            : ''}
+        </Text>
+
+        <Stack gap={12} align="center" wrap>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => {
+              openEditor(seed, folder)
+            }}
+          >
+            Open the MusicBrainz editor
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setState({ status: 'idle' })
+            }}
+          >
+            Cancel
+          </Button>
+        </Stack>
+      </Stack>
+    )
+  }
+
+  return (
+    <Stack direction="column" gap={4} align="start">
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={!enabled || state.status === 'reading'}
+        onClick={() => {
+          void read()
+        }}
+      >
+        {state.status === 'reading' ? 'Reading the files…' : 'Add to MusicBrainz…'}
+      </Button>
+
+      {state.status === 'error' ? (
+        <Text size="xs" tone="warning" block>
+          {state.message}
+        </Text>
+      ) : null}
+    </Stack>
+  )
+}
+
+/**
+ * Hands the seed to MusicBrainz's release editor.
+ *
+ * A real form POST rather than a fetch, and that is the whole trick: the person
+ * has to *arrive* at musicbrainz.org carrying this data, signed in as
+ * themselves. A cross-origin fetch would be sending it from Fonoteca, which is
+ * both blocked and wrong — nothing here is entitled to submit an edit.
+ *
+ * `redirect_uri` is the return address. MusicBrainz appends `release_mbid` to it
+ * once the edit is saved, so the new tab comes back to this screen knowing which
+ * release was created and, from `folder`, which question it answers. If that
+ * ever stops happening the MBID is still in the address bar of the tab they are
+ * standing in, and pasting it into the search box is the same lookup.
+ */
+function openEditor(seed: ReleaseSeedResponse, folder: string): void {
+  const form = document.createElement('form')
+
+  form.method = 'post'
+  form.action = seed.action
+  form.target = '_blank'
+  form.rel = 'noopener'
+  form.hidden = true
+
+  const returnTo = new URL('/library/matching', window.location.origin)
+  returnTo.searchParams.set('folder', folder)
+
+  const fields = [...seed.fields, { name: 'redirect_uri', value: returnTo.toString() }]
+
+  for (const field of fields) {
+    const input = document.createElement('input')
+
+    input.type = 'hidden'
+    input.name = field.name
+    input.value = field.value
+    form.append(input)
+  }
+
+  document.body.append(form)
+  form.submit()
+  form.remove()
 }

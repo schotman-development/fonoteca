@@ -71,6 +71,28 @@ const matchingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/matching',
   component: MatchingPage,
+
+  /**
+   * Where MusicBrainz sends somebody back to.
+   *
+   * The one screen here with search parameters, and they are not a UI state
+   * that survived a reload — they are a return address. Adding a concert to
+   * MusicBrainz happens on musicbrainz.org, so the folder being answered has to
+   * make the round trip somehow, and `redirect_uri` on the seeded form is the
+   * mechanism their editor offers: it appends `release_mbid` to whatever URL it
+   * is given once the edit is saved. `folder` is ours, carried out and back so
+   * the returning tab knows which question was being answered.
+   *
+   * `release_mbid` is spelled in MusicBrainz's snake case rather than this
+   * codebase's camel, because they choose that name and nothing here can
+   * rename it.
+   */
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { readonly folder?: string | undefined; readonly release_mbid?: string | undefined } => ({
+    folder: typeof search.folder === 'string' ? search.folder : undefined,
+    release_mbid: typeof search.release_mbid === 'string' ? search.release_mbid : undefined,
+  }),
 })
 
 const routeTree = rootRoute.addChildren([
