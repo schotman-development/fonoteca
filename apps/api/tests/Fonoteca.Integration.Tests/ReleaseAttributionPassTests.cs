@@ -33,6 +33,8 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     private static readonly Mbid RemasterId = Mb("22222222-2222-4222-8222-222222222222");
     private static readonly Mbid CompilationId = Mb("33333333-3333-4333-8333-333333333333");
     private static readonly Mbid VinylId = Mb("44444444-4444-4444-8444-444444444444");
+    private static readonly Mbid SecondAlbumId = Mb("55555555-5555-4555-8555-555555555555");
+    private static readonly Mbid BoxSetId = Mb("66666666-6666-4666-8666-666666666666");
     private static readonly Mbid GroupId = Mb("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
     private readonly List<ServiceProvider> _providers = [];
@@ -55,19 +57,24 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
-    /// An album is found, written whole, and its files placed on it — starting
-    /// from one file and a folder layout that says something else entirely.
+    /// An album is found, written whole, and its files placed on it — from a
+    /// folder whose name says something else entirely.
     /// </summary>
+    /// <remarks>
+    /// <b>The folder is the boundary and never the label.</b> This test used to
+    /// scatter one album across three unrelated directories to prove the pass
+    /// ignored them; the grouping is now taken from the folder, so the half worth
+    /// keeping is the other half. Every file here sits in a directory naming a
+    /// 1998 compilation, the audio is a 2007 album, and the answer is the album —
+    /// which is exactly the distinction <see cref="AlbumFolder"/> draws.
+    /// </remarks>
     [Fact]
-    public async Task AnAlbumIsAssembledFromOneSeedWithoutReadingTheFolders()
+    public async Task TheFoldersNameIsStillNeverRead()
     {
-        // Three files of one album, scattered across three directories with
-        // three different album names. If any of this reached the answer the
-        // test would fail; none of it is ever read.
         await SeedAsync(
-            ("Misc/Rips/track01.flac", Song(1), 180),
+            ("Compilations/Best Of 1998/01 - unknown.flac", Song(1), 180),
             ("Compilations/Best Of 1998/07 - unknown.flac", Song(2), 200),
-            ("Downloads/incoming/x.flac", Song(3), 220));
+            ("Compilations/Best Of 1998/12 - unknown.flac", Song(3), 220));
 
         var catalogue = new StubCatalogue()
             .With(Album())
@@ -107,19 +114,186 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
+    /// Two albums glued together by one box set stay two albums.
+    /// </summary>
+    /// <remarks>
+    /// <b>The regression this rewrite exists for.</b> Under the expanding gather
+    /// the seed's browse reaches the box set, the box set's track list names the
+    /// second album's recordings, and <c>AdmitAsync</c> pulls that album's files
+    /// into the same component. Six files then face a six-track box set that
+    /// covers all of them — weight 6.0 against each album's 3.0 — and it takes
+    /// the lot. Nothing about the rule is wrong; the set handed to it was.
+    ///
+    /// Cut at the folder, the box set explains three of six slots for either
+    /// album: coverage 0.50, weight 1.50, and it does not clear the first rung at
+    /// all. Each album covers its own folder whole.
+    /// </remarks>
+    [Fact]
+    public async Task TwoAlbumsSharingABoxSetAreNotCollapsedIntoIt()
+    {
+        await SeedAsync(
+            ("Artist/First Album/01.flac", Song(1), 180),
+            ("Artist/First Album/02.flac", Song(2), 200),
+            ("Artist/First Album/03.flac", Song(3), 220),
+            ("Artist/Second Album/01.flac", Song(4), 240),
+            ("Artist/Second Album/02.flac", Song(5), 260),
+            ("Artist/Second Album/03.flac", Song(6), 280));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .With(SecondAlbum())
+            .With(BoxSet())
+            .On(Song(1), AlbumId, BoxSetId)
+            .On(Song(2), AlbumId, BoxSetId)
+            .On(Song(3), AlbumId, BoxSetId)
+            .On(Song(4), SecondAlbumId, BoxSetId)
+            .On(Song(5), SecondAlbumId, BoxSetId)
+            .On(Song(6), SecondAlbumId, BoxSetId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var written = await db.Releases.ToListAsync(Token);
+
+        Assert.DoesNotContain(written, release => release.Mbid == BoxSetId);
+        Assert.Equal(
+            ["Album", "Second Album"],
+            written.Select(release => release.Title).Order(StringComparer.Ordinal));
+
+        var files = await db.MediaFiles
+            .Include(f => f.Release)
+            .OrderBy(f => f.Path)
+            .ToListAsync(Token);
+
+        Assert.All(files, file =>
+            Assert.Equal(ReleaseAttributionOutcome.Attributed, file.AttributionOutcome));
+
+        // Each folder on its own album, and the two components decided apart:
+        // one clock read per component is what the worklist prints as an id.
+        Assert.Equal(
+            ["Album", "Album", "Album", "Second Album", "Second Album", "Second Album"],
+            files.Select(file => file.Release!.Title));
+
+        Assert.Equal(2, files.Select(file => file.ReleaseLookupUtc).Distinct().Count());
+    }
+
+    /// <summary>
+    /// A file loose under an artist does not drag that artist's albums in with it.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one shape a prefix match gets wrong, and it would be very hard to
+    /// see.</b> A file at <c>Prince/x.flac</c> has <c>Prince</c> for an album
+    /// folder, so the query that narrows by <c>Prince/</c> returns every file
+    /// that artist has — one component for a whole discography, which is the
+    /// failure the folder cut exists to remove, arriving by the back door. The
+    /// rule is applied again in memory for exactly this, and one such file is
+    /// live in the target library today.
+    ///
+    /// Two components, not one, is the assertion: the loose file is its own, and
+    /// the album is decided without it.
+    /// </remarks>
+    [Fact]
+    public async Task AFileLooseUnderAnArtistDoesNotJoinThatArtistsAlbums()
+    {
+        await SeedAsync(
+            ("Artist/loose.flac", Song(4), 240),
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .With(SecondAlbum())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId)
+            .On(Song(4), SecondAlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles
+            .Include(f => f.Release)
+            .OrderBy(f => f.Path)
+            .ToListAsync(Token);
+
+        // Two components: the loose file was never in the album's folder.
+        Assert.Equal(2, files.Select(file => file.ReleaseLookupUtc).Distinct().Count());
+
+        var album = files.Where(file => file.Path.StartsWith("Artist/Album/", StringComparison.Ordinal));
+
+        Assert.All(album, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.Attributed, file.AttributionOutcome);
+            Assert.Equal("Album", file.Release!.Title);
+        });
+
+        // One file covering one of three tracks clears no rung, so it stays open —
+        // which is the honest answer and not the album's problem either way.
+        var loose = files.Single(file => file.Path == "Artist/loose.flac");
+
+        Assert.NotNull(loose.ReleaseLookupUtc);
+        Assert.NotEqual(ReleaseAttributionOutcome.Attributed, loose.AttributionOutcome);
+    }
+
+    /// <summary>
+    /// A two-disc rip is one question, not two.
+    /// </summary>
+    /// <remarks>
+    /// <c>CD 01</c> and <c>CD 02</c> are directories of their own, and treating
+    /// them as separate components splits a three-track album into a pair of two
+    /// and one. The single file left over covers 1/3 of the album, which does not
+    /// clear even the singles rung, so it would be refused while its own album sat
+    /// written in the catalogue beside it. All 99 of the target library's
+    /// depth-three folders are discs, which is what <see cref="AlbumFolder.Depth"/>
+    /// is cut for.
+    /// </remarks>
+    [Fact]
+    public async Task DiscFoldersAreOneAlbumAndNotOnePerDisc()
+    {
+        await SeedAsync(
+            ("Artist/Album/CD 01/01.flac", Song(1), 180),
+            ("Artist/Album/CD 01/02.flac", Song(2), 200),
+            ("Artist/Album/CD 02/01.flac", Song(3), 220));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.ToListAsync(Token);
+
+        Assert.All(files, file =>
+            Assert.Equal(ReleaseAttributionOutcome.Attributed, file.AttributionOutcome));
+
+        Assert.Single(files.Select(file => file.ReleaseLookupUtc).Distinct());
+    }
+
+    /// <summary>
     /// A long album is found from one file, which the prune very nearly made
     /// impossible.
     /// </summary>
     /// <remarks>
     /// The regression test for the first live run, which refused 1,149 of 1,247
-    /// files. The prune bounds a release's coverage by the recordings a browse
-    /// has placed on it, and after the opening browse that is one — so a
-    /// twelve-track album scores 1/12, falls under the floor, and is discarded
-    /// before its track list is ever fetched. Every album in the library was.
+    /// files. The prune bounded a release's coverage by the recordings a browse
+    /// had placed on it, which after the opening browse was one — so a
+    /// twelve-track album scored 1/12, fell under the floor, and was discarded
+    /// before its track list was ever fetched. Every album in the library was.
     ///
-    /// Three tracks was not enough to catch it: 1/3 clears a floor of 0.25. It
-    /// takes an album long enough for one track to be a small fraction of it,
-    /// which is to say an album of an ordinary length.
+    /// <b>That failure is now structurally unreachable, and this still earns its
+    /// place.</b> Browsing the whole folder before pruning anything means the
+    /// album is holding twelve of twelve when the prune reads it, so the count
+    /// the arithmetic was wrong about is the count that is now correct. What the
+    /// test guards is the outcome rather than the mechanism: an album of ordinary
+    /// length, held whole, comes back attributed. Three tracks was never enough
+    /// to catch the original — 1/3 clears a floor of 0.25 — and twelve still is.
     /// </remarks>
     [Fact]
     public async Task AnAlbumTooLongForOneTrackToClearThePruneIsStillFound()
@@ -253,8 +427,8 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         var catalogue = new StubCatalogue().With(live).With(compilation);
 
         // The five shared songs are on both; the other twenty only on the album.
-        // The seed is song 1, so the opening round sees both — and the album's
-        // remaining twenty only arrive in the round after.
+        // All twenty-five are in one folder, so every one is browsed and the
+        // album is the release holding the most of them.
         for (var index = 1; index <= 5; index++) catalogue.On(Song(index), CompilationId, VinylId);
         for (var index = 6; index <= 25; index++) catalogue.On(Song(index), VinylId);
 
@@ -710,6 +884,45 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
                 Track(2, Song(2), 200),
                 Track(3, Song(3), 220),
             ]);
+
+    /// <summary>A second album, sharing nothing with the first but a box set.</summary>
+    private static MusicBrainzRelease SecondAlbum() =>
+        Album() with
+        {
+            Id = SecondAlbumId,
+            Title = "Second Album",
+            ReleaseGroupId = Mb("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+            ReleaseGroupTitle = "Second Album",
+            Tracks = [Track(1, Song(4), 240), Track(2, Song(5), 260), Track(3, Song(6), 280)],
+        };
+
+    /// <summary>
+    /// Both albums on one disc, at the same lengths.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately covers every file the library holds, so that on a merged
+    /// component it wins on weight (6.0 against each album's 3.0) and on a folder
+    /// it loses on coverage (0.50 against 1.00). Nothing but the size of the set
+    /// separates the two answers.
+    /// </remarks>
+    private static MusicBrainzRelease BoxSet() =>
+        Album() with
+        {
+            Id = BoxSetId,
+            Title = "The Collection",
+            ReleaseGroupId = Mb("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+            ReleaseGroupTitle = "The Collection",
+            SecondaryTypes = ["Compilation"],
+            Tracks =
+            [
+                Track(1, Song(1), 180),
+                Track(2, Song(2), 200),
+                Track(3, Song(3), 220),
+                Track(4, Song(4), 240),
+                Track(5, Song(5), 260),
+                Track(6, Song(6), 280),
+            ],
+        };
 
     /// <summary>Twenty tracks, three of which the library holds. Coverage 0.15.</summary>
     private static MusicBrainzRelease Compilation() =>

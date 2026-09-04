@@ -1,3 +1,4 @@
+using Fonoteca.Fixtures;
 using System.Diagnostics;
 using System.Net;
 using Fonoteca.Domain.Abstractions;

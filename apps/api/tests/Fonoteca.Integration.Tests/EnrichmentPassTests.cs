@@ -275,6 +275,122 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>
+    /// A file somebody filed under an album by hand gets its graph, without
+    /// spending an AcoustID turn to find out what it already knows.
+    /// </summary>
+    /// <remarks>
+    /// The gap this closes, measured on the target library: 615 files sat at
+    /// <see cref="EnrichmentOutcome.LinkedByPerson"/> and 433 of them had no
+    /// work at all — Beethoven's complete symphonies among them, 33 movements
+    /// whose album page therefore had nothing to group by. They are unreachable
+    /// by the first worklist on all three of its clauses: AcoustID never placed
+    /// them, so most carry no cluster; the album screen stamps
+    /// <c>RecordingLookupUtc</c>; and the decision stamps
+    /// <c>IdentityDecidedUtc</c>.
+    /// </remarks>
+    [Fact]
+    public async Task AFilePersonFiledUnderAnAlbumIsEnrichedFromTheRecordingItAlreadyHas()
+    {
+        await SeedPersonFiledAsync("Concertgebouw/Beethoven 1/01 - Adagio molto.flac");
+
+        var lookup = Answering(Recording);
+        var catalogue = Classical();
+        var services = Build(lookup, catalogue);
+
+        // It is on the worklist, so the dashboard's count is honest about it.
+        Assert.Equal(1, await PendingAsync(services));
+
+        await EnrichAsync(services);
+
+        // The recording MBID was already in the catalogue, so no AcoustID turn
+        // was spent working out what this file is.
+        Assert.Equal(0, lookup.Calls);
+        Assert.Equal(1, catalogue.RecordingCalls);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles.AsNoTracking().SingleAsync(Token);
+
+        // Now it is what the value promises: linked, with its artists.
+        Assert.Equal(EnrichmentOutcome.Linked, file.EnrichmentOutcome);
+
+        var recording = await db.Recordings
+            .AsNoTracking()
+            .Include(r => r.Work)
+            .SingleAsync(Token);
+
+        Assert.Equal("Symphony no. 40 in G minor, K. 550", recording.Work?.Title);
+
+        // The conductor and the orchestra, which a release track list never had.
+        // The soloist is absent on purpose: PrimaryCredits excludes individual
+        // instrument performers, and this pass is the same rule as the other.
+        Assert.Equal(
+            ["Berliner Philharmoniker", "Herbert von Karajan", "Wolfgang Amadeus Mozart"],
+            await db.Artists.AsNoTracking().OrderBy(a => a.Name).Select(a => a.Name)
+                .ToListAsync(Token));
+
+        // And it is off the worklist, so a second pass spends nothing.
+        Assert.Equal(0, await PendingAsync(services));
+    }
+
+    /// <summary>
+    /// A recording MusicBrainz will not produce leaves the person's decision
+    /// exactly where it was.
+    /// </summary>
+    /// <remarks>
+    /// <c>RecordingNotFound</c> is one of the two outcomes the by-hand album
+    /// screen reads as an open question, so writing it here would put somebody's
+    /// answered file back on the worklist as a question — undoing the decision
+    /// this pass exists to complete.
+    /// </remarks>
+    [Fact]
+    public async Task ARecordingMusicBrainzCannotProduceLeavesTheDecisionAlone()
+    {
+        await SeedPersonFiledAsync("Concertgebouw/Beethoven 1/01 - Adagio molto.flac");
+
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(recording: null, work: null)));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles.AsNoTracking().SingleAsync(Token);
+
+        Assert.Equal(EnrichmentOutcome.LinkedByPerson, file.EnrichmentOutcome);
+        Assert.NotNull(file.RecordingId);
+    }
+
+    /// <summary>
+    /// A file as the by-hand album screen leaves it: an identity off a release
+    /// track list, a lookup stamp, a decision stamp, and no cluster.
+    /// </summary>
+    private async Task SeedPersonFiledAsync(string path)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = new Recording
+        {
+            Id = RecordingId.New(),
+            Title = "Symphony No. 1 in C major, Op. 21: I. Adagio molto",
+            Mbid = Recording,
+        };
+
+        db.Recordings.Add(recording);
+
+        db.MediaFiles.Add(new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = path,
+            SizeBytes = 1024,
+            LastModifiedUtc = DateTimeOffset.UtcNow,
+            RecordingId = recording.Id,
+            RecordingLookupUtc = DateTimeOffset.UtcNow,
+            IdentityDecidedUtc = DateTimeOffset.UtcNow,
+            EnrichmentOutcome = EnrichmentOutcome.LinkedByPerson,
+        });
+
+        await db.SaveChangesAsync(Token);
+    }
+
+    /// <summary>
     /// Identification's cheap path adopts an AcoustID straight out of a file's
     /// tags and never fingerprints it. Those rows have an identity and nothing to
     /// ask AcoustID with — and reopening the file here is the one thing this pass

@@ -35,6 +35,36 @@ public sealed class FonotecaOptions : IValidatableObject
     /// <summary>Path to <c>ffprobe</c>. Resolved from PATH when empty.</summary>
     public string FfprobePath { get; init; } = "ffprobe";
 
+    /// <summary>
+    /// Whether an upgrade may take the album it replaced out of the library.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately not <see cref="AllowFileMutation"/>.</b> That flag means
+    /// "may rewrite a tag in place, having verified the write with a second
+    /// library and journalled the previous value" — a considered, reversible
+    /// edit. This one means "may take an album away". Somebody who turned the
+    /// first on to get their files tagged has not agreed to the second, and one
+    /// flag covering both would make that agreement implicit.
+    ///
+    /// Off, the upgrade still downloads and still says whether it would have
+    /// replaced anything — which makes a run with it off a complete dry run, the
+    /// same property <c>AcoustIdTaggedUtc</c> exists to give identification.
+    /// </remarks>
+    public bool AllowFileReplacement { get; init; }
+
+    /// <summary>
+    /// Where a replaced album is moved to. Defaults to the library root with
+    /// <c>-replaced</c> on the end.
+    /// </summary>
+    /// <remarks>
+    /// Outside the library root, always, or the next scan catalogues the archive
+    /// and the album a person just replaced appears to still be there. A sibling
+    /// by default because it is then on the same filesystem, which makes the
+    /// move a rename that cannot half-finish; pointing this at another volume
+    /// turns every replacement into a full copy of the album.
+    /// </remarks>
+    public string ReplacedPath { get; init; } = string.Empty;
+
     /// <summary>Path to <c>ffmpeg</c>. Resolved from PATH when empty.</summary>
     public string FfmpegPath { get; init; } = "ffmpeg";
 
@@ -201,6 +231,25 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public bool WarmCandidates { get; init; } = true;
 
+    /// <summary>Settings for the acquisition providers, which are nested rather than flat.</summary>
+    /// <remarks>
+    /// The odd one out in this file, and deliberately so. Every other setting
+    /// here is flat because <c>FonotecaOptions</c> is — that flatness is what
+    /// the AcoustID key spent months getting wrong, shipped as
+    /// <c>Fonoteca__Providers__AcoustId__ApiKey</c> and binding to nothing.
+    ///
+    /// These bind under <c>Fonoteca:Providers:Qobuz</c> because that is the
+    /// shape <c>.env.example</c> has reserved since before any of this existed,
+    /// and because a name people have already put in a <c>.env</c> is worth more
+    /// than consistency with the file it lands in. The lesson from last time
+    /// stands either way: the binding has to match the name, and there is a test
+    /// asserting this one does.
+    /// </remarks>
+    public ProviderSettings Providers { get; init; } = new();
+
+    /// <summary>How acquisition paces itself.</summary>
+    public DownloadSettings Download { get; init; } = new();
+
     /// <summary>Origins allowed to call the API. The web app's dev server in development.</summary>
     public IReadOnlyList<string> CorsOrigins { get; init; } = [];
 
@@ -219,6 +268,27 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        // The archive must be outside the library, and both the doc comment and
+        // .env.example said so with nothing enforcing it. Inside, the next scan
+        // catalogues the archive and the album somebody just replaced looks like
+        // it is still there — which is the failure the comment names, arriving
+        // as a puzzle rather than as an error.
+        if (!string.IsNullOrWhiteSpace(ReplacedPath) && !string.IsNullOrWhiteSpace(LibraryPath))
+        {
+            var library = Path.TrimEndingDirectorySeparator(Path.GetFullPath(LibraryPath));
+            var archive = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ReplacedPath));
+
+            if (archive.Equals(library, StringComparison.Ordinal)
+                || archive.StartsWith(library + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                yield return new ValidationResult(
+                    $"Fonoteca:ReplacedPath ('{archive}') is inside Fonoteca:LibraryPath "
+                    + $"('{library}'). A replaced album kept there is catalogued by the next scan, "
+                    + "so it looks like it was never replaced. Put it beside the library, not in it.",
+                    [nameof(ReplacedPath)]);
+            }
+        }
+
         if (!Uri.TryCreate(MusicBrainzServer, UriKind.Absolute, out var server)
             || (server.Scheme != Uri.UriSchemeHttp && server.Scheme != Uri.UriSchemeHttps))
         {
@@ -243,4 +313,66 @@ public sealed class FonotecaOptions : IValidatableObject
                 [nameof(MusicBrainzRequestIntervalMs)]);
         }
     }
+}
+
+/// <summary>The nested <c>Fonoteca:Providers</c> tree.</summary>
+public sealed class ProviderSettings
+{
+    public QobuzSettings Qobuz { get; init; } = new();
+}
+
+/// <summary>
+/// The Qobuz subscription this instance downloads with.
+/// </summary>
+/// <remarks>
+/// All three come from a signed-in web player session and belong to a person,
+/// not to the application. Every one may be empty: the app starts, and the
+/// acquisition endpoints refuse locally with a message naming the setting
+/// rather than sending a request that comes back "invalid request signature".
+/// </remarks>
+public sealed class QobuzSettings
+{
+    public string AppId { get; init; } = string.Empty;
+
+    /// <summary>Signs track URL requests. Not the app id, and not the auth token.</summary>
+    public string AppSecret { get; init; } = string.Empty;
+
+    public string UserAuthToken { get; init; } = string.Empty;
+
+    /// <summary>5 MP3 320, 6 FLAC 16/44.1, 7 FLAC to 96kHz, 27 FLAC to 192kHz.</summary>
+    public int FormatId { get; init; } = 27;
+
+    /// <summary>
+    /// Least time between Qobuz requests. Their limit is unpublished; be slow.
+    /// </summary>
+    /// <remarks>
+    /// No <c>[Range]</c>, unlike its flat siblings above, and that is not an
+    /// oversight — it is that the attribute would not run.
+    /// <c>ValidateDataAnnotations</c> is
+    /// <c>Validator.TryValidateObject(validateAllProperties: true)</c>, which
+    /// does not recurse into complex nested properties, so every annotation on
+    /// this class and on <see cref="DownloadSettings"/> is decorative. A guard
+    /// that does nothing is worse than none: it reads as a promise. The clamp
+    /// that actually holds is in <c>Program.cs</c>, where these are mapped.
+    /// </remarks>
+    public int MinRequestIntervalMs { get; init; } = 1_000;
+}
+
+/// <summary>How acquisition paces itself.</summary>
+public sealed class DownloadSettings
+{
+    /// <summary>
+    /// Pause between tracks of one album.
+    /// </summary>
+    /// <remarks>
+    /// On top of the provider's own request gate, and for a different reason:
+    /// the gate protects the JSON API, this spaces out the CDN transfers. Twelve
+    /// hi-res tracks pulled back to back with no gap is the traffic shape that
+    /// gets a personal subscription looked at.
+    ///
+    /// No <c>[Range]</c>, for the reason given on
+    /// <see cref="QobuzSettings.MinRequestIntervalMs"/>: nested annotations are
+    /// not validated. Clamped in <c>Program.cs</c>.
+    /// </remarks>
+    public int TrackDelayMs { get; init; } = 500;
 }

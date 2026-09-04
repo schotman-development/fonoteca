@@ -4,11 +4,28 @@ import { Link } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
 import { api } from '../api.ts'
+import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistsPage.module.css'
 import { releaseArt } from './coverArt.ts'
 
 type ArtistSummary = components['schemas']['ArtistSummary']
+
+/**
+ * The two orders worth having, and the reason there is not a third.
+ *
+ * Alphabetical is how you find somebody you already have in mind; by holdings
+ * is how you find out who this library is actually *about*, which on a
+ * collection assembled over years is rarely who you would guess. Everything
+ * else — by type, by year of first release — is a filter wearing a sort's
+ * clothes, and neither is a column here.
+ */
+const SORTS = [
+  ['name', 'Name'],
+  ['tracks', 'Most tracks'],
+] as const
+
+type Sort = (typeof SORTS)[number][0]
 
 /**
  * The library, by artist.
@@ -21,6 +38,7 @@ type ArtistSummary = components['schemas']['ArtistSummary']
  */
 export function ArtistsPage() {
   const [filter, setFilter] = useState('')
+  const [sort, setSort] = useState<Sort>('name')
   const searchId = useId()
 
   // The typed value drives the input and a deferred copy drives the request, so
@@ -31,9 +49,16 @@ export function ArtistsPage() {
   // The key omitted rather than set to undefined: `exactOptionalPropertyTypes`
   // draws that distinction and it is the right one here, since an empty filter
   // is the absence of a filter rather than a filter for nothing.
+  // `sort` is only sent when it is not the default, for the same reason the
+  // filter is omitted rather than sent empty: the absence of a sort is what the
+  // endpoint documents as sort name, and spelling it out would put a parameter
+  // in the URL that means "do what you were going to do anyway".
   const state = useApiQuery(
-    () => api.get('/api/catalogue/artists', { params: { query: query ? { query } : {} } }),
-    [query],
+    () =>
+      api.get('/api/catalogue/artists', {
+        params: { query: { ...(query ? { query } : {}), ...(sort === 'name' ? {} : { sort }) } },
+      }),
+    [query, sort],
   )
 
   return (
@@ -51,20 +76,24 @@ export function ArtistsPage() {
         </Text>
       </Stack>
 
-      <div className={styles.search}>
-        <label htmlFor={searchId}>
-          <Text size="xs" tone="tertiary">
-            Filter by name
-          </Text>
-        </label>
-        <Input
-          id={searchId}
-          type="search"
-          value={filter}
-          placeholder="Karajan, Bonamassa, Mozart…"
-          onChange={(event) => setFilter(event.target.value)}
-        />
-      </div>
+      <Stack gap={16} align="end" wrap>
+        <div className={styles.search}>
+          <label htmlFor={searchId}>
+            <Text size="xs" tone="tertiary">
+              Filter by name
+            </Text>
+          </label>
+          <Input
+            id={searchId}
+            type="search"
+            value={filter}
+            placeholder="Karajan, Bonamassa, Mozart…"
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </div>
+
+        <SortSelect label="Sort by" value={sort} options={SORTS} onChange={setSort} />
+      </Stack>
 
       <div role="status" aria-live="polite" aria-busy={state.status === 'loading'}>
         {state.status === 'loading' ? <Text tone="tertiary">Reading the catalogue…</Text> : null}

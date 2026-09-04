@@ -156,6 +156,7 @@ rather than returning `undefined` in a browser.
 | [0006](docs/adr/0006-musicbrainz-mirror.md) | Mirror MusicBrainz locally, without a search index — and don't try to mirror AcoustID |
 | [0007](docs/adr/0007-identification-in-process.md) | Identification runs in-process, not on a durable queue — the catalogue *is* the worklist |
 | [0008](docs/adr/0008-tanstack-router.md) | TanStack Router, routes in code — a route rename should be a build failure |
+| [0011](docs/adr/0011-the-provider-is-an-authority.md) | A provider is an authority — a Qobuz download states what it delivered, and the download is where that is believed |
 
 ## Credentials
 

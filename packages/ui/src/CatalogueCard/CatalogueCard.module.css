@@ -31,20 +31,57 @@
  * `raised` and `base` are both white, so a raised hover is a hover that does
  * nothing on half of the themes we ship.
  *
- * Scoped to `a.root` so a static tile does not advertise an interaction it does
- * not have; a card rendered through `render` gets it by being an anchor too.
+ * Scoped to the interactive elements so a static tile does not advertise an
+ * interaction it does not have.
+ *
+ * `button.root` as well as `a.root`, because `render` may return either — a
+ * tile that opens a dialog rather than navigating is a button, and that is not
+ * a workaround. Without the button here the tile silently loses hover and
+ * active feedback while keeping the focus ring, which reads as a broken link
+ * rather than as a deliberately inert card.
  */
-a.root:hover {
+a.root:hover,
+button.root:hover {
   background-color: var(--color-interactive-hover);
 }
 
-a.root:active {
+a.root:active,
+button.root:active {
   background-color: var(--color-interactive-active);
 }
 
-a.root:focus-visible {
+a.root:focus-visible,
+button.root:focus-visible {
   outline: var(--border-width-thick) solid var(--color-border-focus);
   outline-offset: 2px;
+}
+
+/*
+ * The user-agent button, undone.
+ *
+ * A `<button>` arrives with an outset 3D border, centred text, its own font and
+ * a grey background — none of which `.root` overrides, because `.root` was
+ * written when the only thing it could be was an anchor. The tile then draws
+ * with a bevel and centre-aligned titles, which is not a subtle difference
+ * across a grid of twenty-five.
+ *
+ * `width: 100%` is the one that is not cosmetic. A block-level `display: flex`
+ * box fills its containing block, which is how the anchor tile takes the track
+ * it was given — but a button is a form control, and its used width is
+ * shrink-to-fit however it is displayed. So every tile sized itself to its own
+ * longest line instead of to the 160px track: measured on a real search, three
+ * cards came out 183.45px, 178.20px and 183.45px, each overflowing its `<li>`
+ * and overlapping its neighbour by eleven pixels. The grid's whole premise is
+ * that the card has no width and follows the track; this is what makes that
+ * true for a button.
+ */
+button.root {
+  width: 100%;
+  appearance: none;
+  border: none;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
 }
 
 /*

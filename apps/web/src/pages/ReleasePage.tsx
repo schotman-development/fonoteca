@@ -10,13 +10,14 @@ import {
   Text,
 } from '@fonoteca/ui'
 import { Link, useParams } from '@tanstack/react-router'
-import { useState } from 'react'
-
+import { useCallback, useState } from 'react'
 import { api } from '../api.ts'
+import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { CERTAINTY } from './certainty.ts'
 import { releaseArt } from './coverArt.ts'
 import styles from './ReleasePage.module.css'
+import { workGroups } from './workGroups.ts'
 
 type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
 
@@ -30,6 +31,13 @@ type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
 export function ReleasePage() {
   const { releaseId } = useParams({ from: '/library/releases/$releaseId' })
   const [contributions, setContributions] = useState(0)
+
+  // Stable, because the panels below hold it in an effect's dependency array: a
+  // fresh arrow every render re-runs the effect that called it, which is a
+  // refetch loop rather than a refetch.
+  const changed = useCallback(() => {
+    setContributions((done) => done + 1)
+  }, [])
 
   const state = useApiQuery(
     () => api.get('/api/catalogue/releases/{id}', { params: { path: { id: releaseId } } }),
@@ -61,10 +69,20 @@ export function ReleasePage() {
           <Contribute
             releaseId={releaseId}
             count={state.data.contributable}
-            onContributed={() => {
-              setContributions((done) => done + 1)
-            }}
+            onContributed={changed}
           />
+          {/*
+            The album's own copy of the library-wide button. It is here because
+            this is the screen where somebody has just satisfied themselves that
+            the album is right — the track list in front of them is the thing
+            about to be written into the files.
+          */}
+          <TagWritePanel
+            scope={{ kind: 'release', id: releaseId }}
+            label="this album"
+            onWritten={changed}
+          />
+
           <Tracks
             tracks={state.data.tracks}
             title={state.data.release.title}
@@ -257,6 +275,21 @@ function Contribute({
   )
 }
 
+/**
+ * The track list, under the works its tracks perform where there are any.
+ *
+ * **One `<tbody>` per work, which is what the element is for.** A table may
+ * hold any number of them, and each is a row group with a heading of its own —
+ * so a screen reader announces "Symphony no. 40 in G minor, K. 550" once and
+ * then reads four movements under it, which is the same thing a sighted reader
+ * gets. A `<div>` between rows would break the table; a heading cell in every
+ * row would say it four times.
+ *
+ * `workGroups` returns null wherever no work covers two consecutive tracks,
+ * which is most of a library but by no means only the pop half of it — a
+ * complete-masters set gathers its alternate takes here too, and that is right.
+ * See that module for why the bar is a run of two rather than any work at all.
+ */
 function Tracks({
   tracks,
   title,
@@ -270,10 +303,15 @@ function Tracks({
     return <Text tone="tertiary">MusicBrainz lists no tracks for this release.</Text>
   }
 
+  const groups = workGroups(tracks)
+
   return (
     <div className={styles.tracks}>
       <Table density="cozy">
-        <caption className={styles.caption}>Every track on {title}, held or not</caption>
+        <caption className={styles.caption}>
+          Every track on {title}, held or not
+          {groups === null ? '' : ', grouped by the work it performs'}
+        </caption>
         <thead>
           <tr>
             <TableHeaderCell numeric>{discs > 1 ? 'Disc·No' : 'No'}</TableHeaderCell>
@@ -282,29 +320,94 @@ function Tracks({
             <TableHeaderCell>Have it</TableHeaderCell>
           </tr>
         </thead>
-        <tbody>
-          {tracks.map((track) => (
-            <Row key={`${track.discNumber}-${track.position}`} track={track} discs={discs} />
-          ))}
-        </tbody>
+
+        {groups === null ? (
+          <tbody>
+            {tracks.map((track) => (
+              <Row
+                key={`${track.discNumber}-${track.position}`}
+                track={track}
+                discs={discs}
+                strip=""
+              />
+            ))}
+          </tbody>
+        ) : (
+          groups.map((group) => (
+            <tbody key={group.key}>
+              {group.workTitle !== null ? (
+                /*
+                  Two cells, not one spanning the table, so the work sits in the
+                  Track column directly above the movements it names — a heading
+                  starting where nothing else on the row starts reads as a band
+                  laid over the table rather than as part of it.
+
+                  Both are `scope="rowgroup"`, which is what the standard defines
+                  as applying to the remaining cells of the row group; `colgroup`
+                  would claim they label a column group instead.
+                */
+                <tr>
+                  {/*
+                    An empty gutter rather than a heading spanning all four
+                    columns: the cell is what holds the work title in the Track
+                    column, above the movements it names.
+                  */}
+                  <td className={styles.workGutter} />
+                  <th className={styles.work} colSpan={3} scope="rowgroup">
+                    <Text size="sm" weight="medium">
+                      {group.workTitle}
+                    </Text>
+                  </th>
+                </tr>
+              ) : null}
+
+              {group.tracks.map((track) => (
+                <Row
+                  key={`${track.discNumber}-${track.position}`}
+                  track={track}
+                  discs={discs}
+                  strip={group.prefix}
+                />
+              ))}
+            </tbody>
+          ))
+        )}
       </Table>
     </div>
   )
 }
 
-function Row({ track, discs }: { readonly track: ReleaseTrackRow; readonly discs: number }) {
+/** A track's printed number, which is not always its position: "A1", "12a". */
+function numberOf(track: ReleaseTrackRow, discs: number): string {
+  return `${discs > 1 ? `${track.discNumber}·` : ''}${track.number ?? track.position}`
+}
+
+function Row({
+  track,
+  discs,
+  strip,
+}: {
+  readonly track: ReleaseTrackRow
+  readonly discs: number
+  /** The run-in the group heading has already said. See `workGroups`. */
+  readonly strip: string
+}) {
   return (
     <tr data-missing={track.held ? undefined : ''}>
       <TableCell numeric>
         <Text size="sm" family="mono" tone="tertiary">
-          {discs > 1 ? `${track.discNumber}·` : ''}
-          {track.number ?? track.position}
+          {numberOf(track, discs)}
         </Text>
       </TableCell>
 
-      <TableCell truncate>
+      {/*
+        The whole printed title stays in the tooltip. What is removed from the
+        row is only ever a repeat of the heading above it, but the row is still
+        the place somebody checks a title against the sleeve.
+      */}
+      <TableCell truncate title={track.title}>
         <Text truncate tone={track.held ? 'primary' : 'tertiary'}>
-          {track.title}
+          {track.title.slice(strip.length)}
         </Text>
       </TableCell>
 

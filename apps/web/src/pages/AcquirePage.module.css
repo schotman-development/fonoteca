@@ -1,0 +1,97 @@
+/*
+ * The heading exists for semantics; its type comes from the Text inside it.
+ * Same reset as the album and artist lists.
+ */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* Same reset as the page title: the level is semantics, the size is the Text. */
+.heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 520px;
+}
+
+/*
+ * The configuration reading, on a surface of its own so it reads as a fact
+ * about the whole screen rather than as more prose above the search box.
+ */
+.status {
+  max-width: 1100px;
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+/*
+ * A shelf: one row of covers, scrolled sideways.
+ *
+ * Not `CatalogueGrid`, which wraps — and wrapping is the wrong shape for these
+ * two lists. They are 520 and 47 tiles long, so a grid of them is a page of
+ * album art with the search box somewhere past the horizon; a shelf keeps each
+ * list to one row's height however long it is, which is what makes two of them
+ * plus a search box fit on one screen.
+ *
+ * The column is `--catalogue-card-album` from `CatalogueGrid.module.css`, whose
+ * own comment explains why that width is a literal rather than a token. Written
+ * again here rather than imported because a CSS custom property is not exported
+ * by a module — the number can drift, and if it does these tiles are a
+ * different size from the ones on the browse screens, which is visible.
+ *
+ * No `tabindex` on the scroller. WCAG wants a scrollable region to be reachable
+ * from the keyboard, and it already is: the tiles are buttons, so arrowing
+ * along them scrolls the shelf. Adding one would put an extra empty stop in
+ * front of each list.
+ */
+.shelf {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 160px;
+  gap: var(--space-12);
+  margin: 0;
+  padding: var(--space-4) 0 var(--space-12);
+  overflow-x: auto;
+  /* The tile a drag lands on is a whole tile, never two halves of two. */
+  scroll-snap-type: x proximity;
+  list-style: none;
+  /*
+   * Focus rings on the tiles are drawn outside their boxes, so a shelf clipped
+   * to its own edge would cut the ring off the first and last one.
+   */
+  scroll-padding-inline: var(--space-4);
+}
+
+/*
+ * The tiles are the grid items themselves — `role="toolbar"` cannot hold list
+ * items, so the `<li>` wrappers went with the `<ul>`.
+ */
+.shelf > * {
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+/*
+ * A meta line that claims the whole row.
+ *
+ * `CatalogueCard`'s meta slot is a wrapping flex row, so a line put in it lands
+ * beside its neighbour on a short album and below it on a long one — the same
+ * information on one line or two depending on the title, which reads as a
+ * rendering fault rather than as a layout. Claiming the row makes every tile on
+ * a shelf the same height, which is what stops the bottom edge going ragged.
+ *
+ * Both shelves need it: the missing track on one, the formats on the other.
+ */
+.metaRow {
+  flex: 1 0 100%;
+}

@@ -1,11 +1,25 @@
 import type { components } from '@fonoteca/api-client'
-import { Artwork, Badge, Stack, Table, TableCell, TableHeaderCell, Text } from '@fonoteca/ui'
+import {
+  Artwork,
+  Badge,
+  CatalogueCard,
+  CatalogueGrid,
+  Disclosure,
+  Stack,
+  Table,
+  TableCell,
+  TableHeaderCell,
+  Text,
+} from '@fonoteca/ui'
 import { Link, useParams } from '@tanstack/react-router'
-
 import { api } from '../api.ts'
+import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistPage.module.css'
+import type { ArtistAlbum } from './artistAlbums.ts'
+import { albumsOf, leaf } from './artistAlbums.ts'
 import { releaseArt } from './coverArt.ts'
+import { workGroups } from './workGroups.ts'
 
 type TrackRow = components['schemas']['TrackRow']
 
@@ -18,12 +32,18 @@ const ROLE_TONE: Readonly<Record<string, 'accent' | 'info' | 'neutral'>> = {
 }
 
 /**
- * One artist, and everything of theirs the library holds.
+ * One artist, and everything of theirs the library holds — as a discography.
  *
- * The roles column is what makes the page make sense on a classical library.
- * The same recording appears under four artists, and without a word saying why
- * each of them has it — billed, conductor, ensemble, composer — the fourth
- * looks like a bug.
+ * **Albums, not tracks.** The endpoint answers in recordings because that is
+ * the shape of the browse rule, but nobody browses a musician by track: a
+ * hundred rows of "II. Andante" is a database dump, and the same page folded
+ * into twelve covers is a record collection. `albumsOf` does the folding.
+ *
+ * The tracks are still here, folded into a `Disclosure`. They are
+ * the only place the roles read per recording — the same recording appears
+ * under four artists on a classical library, and without a word saying why each
+ * of them has it the fourth looks like a bug — and for a folder the passes
+ * have not placed, this page is the only place its tracks appear at all.
  */
 export function ArtistPage() {
   const { artistId } = useParams({ from: '/library/artists/$artistId' })
@@ -32,6 +52,11 @@ export function ArtistPage() {
     () => api.get('/api/catalogue/artists/{id}', { params: { path: { id: artistId } } }),
     [artistId],
   )
+
+  // Not memoised: it is a single pass over a list the same request just
+  // produced, so the fold costs less than the dependency array that would
+  // guard it, and a stale one would be a bug nobody could see.
+  const albums = state.status === 'ready' ? albumsOf(state.data.tracks) : []
 
   return (
     <Stack direction="column" gap={20}>
@@ -91,6 +116,7 @@ export function ArtistPage() {
                   </Text>
                 ) : null}
                 <Text size="sm" tone="tertiary">
+                  {albums.length.toLocaleString()} album{albums.length === 1 ? '' : 's'} ·{' '}
                   {state.data.tracks.length.toLocaleString()} track
                   {state.data.tracks.length === 1 ? '' : 's'} in the library
                 </Text>
@@ -101,27 +127,50 @@ export function ArtistPage() {
           {state.data.tracks.length === 0 ? (
             <Text tone="tertiary">Nothing in the library credits this artist.</Text>
           ) : (
-            <div className={styles.tracks}>
-              <Table density="cozy">
-                <caption className={styles.caption}>
-                  Tracks credited to {state.data.artist.name}
-                </caption>
-                <thead>
-                  <tr>
-                    <TableHeaderCell className={styles.trackCol}>Track</TableHeaderCell>
-                    <TableHeaderCell>Credited as</TableHeaderCell>
-                    <TableHeaderCell className={styles.folderCol}>Album</TableHeaderCell>
-                    <TableHeaderCell numeric>Length</TableHeaderCell>
-                    <TableHeaderCell numeric>Files</TableHeaderCell>
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.data.tracks.map((track) => (
-                    <Row key={track.recordingId} track={track} />
-                  ))}
-                </tbody>
-              </Table>
-            </div>
+            <>
+              {/*
+                Every track on this page at once, which is the unit for the case
+                the album button cannot serve: a discography enriched in one run,
+                scattered across a dozen releases. The scope is the same rule
+                this page browses by — billed, conducted, played with, or
+                composed — so what gets written is exactly what is listed below.
+              */}
+              <TagWritePanel
+                scope={{ kind: 'artist', id: artistId }}
+                label={`${state.data.artist.name}'s tracks`}
+              />
+
+              <CatalogueGrid aria-label={`Albums by ${state.data.artist.name}`}>
+                {albums.map((album) => (
+                  <AlbumCard key={album.key} album={album} />
+                ))}
+              </CatalogueGrid>
+
+              {/*
+                `Disclosure`, not `<details>`. The design system already
+                recorded that decision and its reasons — `<summary>`'s implicit
+                role differs between engines and its whole content becomes the
+                accessible name — and this page has no story, so the axe run
+                that enforces the rest of it would never have seen a hand-rolled
+                one.
+              */}
+              <Disclosure
+                className={styles.trackList}
+                size="sm"
+                summary={
+                  <Text size="sm" weight="medium">
+                    Track by track
+                  </Text>
+                }
+                aside={
+                  <Text size="sm" tone="tertiary" family="mono">
+                    {state.data.tracks.length.toLocaleString()}
+                  </Text>
+                }
+              >
+                <Tracks name={state.data.artist.name} tracks={state.data.tracks} />
+              </Disclosure>
+            </>
           )}
         </Stack>
       ) : null}
@@ -129,24 +178,194 @@ export function ArtistPage() {
   )
 }
 
-/** The album-shaped end of a library-relative directory. */
-function leaf(folder: string): string {
-  const cut = folder.lastIndexOf('/')
-  return cut < 0 ? folder : folder.slice(cut + 1)
+/**
+ * Every recording of theirs, under the works they perform where there are any.
+ *
+ * **One `<tbody>` per work, which is what the element is for.** A table may
+ * hold any number of them and each is a row group with its own heading, so a
+ * symphony reads as four movements under one line rather than as four rows each
+ * repeating the same forty characters of work title.
+ *
+ * The API orders these by work title falling back to track title, so a work's
+ * movements arrive consecutively — see the note on that `OrderBy`. That
+ * ordering is also what makes the identity check in `workGroups` load-bearing
+ * here rather than theoretical: it brings every work of the same *name*
+ * together, and this library holds four distinct pieces called "Main Theme".
+ *
+ * Grouping is not a classical-only outcome, whatever the shape it was built
+ * for: an artist's several recordings of one song gather under it too, which is
+ * the same claim honestly made.
+ */
+function Tracks({ name, tracks }: { readonly name: string; readonly tracks: readonly TrackRow[] }) {
+  const groups = workGroups(tracks)
+
+  // Per group rather than per table: a run this fold demoted carries no heading,
+  // so its rows are the only place their work is named.
+  const rows = (group: readonly TrackRow[], headed: boolean, strip: string) =>
+    group.map((track) => (
+      <Row key={track.recordingId} track={track} grouped={headed} strip={strip} />
+    ))
+
+  return (
+    <div className={styles.tracks}>
+      <Table density="cozy">
+        <caption className={styles.caption}>
+          Tracks credited to {name}
+          {groups === null ? '' : ', grouped by the work they perform'}
+        </caption>
+        <thead>
+          <tr>
+            <TableHeaderCell className={styles.trackCol}>Track</TableHeaderCell>
+            <TableHeaderCell>Credited as</TableHeaderCell>
+            <TableHeaderCell className={styles.folderCol}>Album</TableHeaderCell>
+            <TableHeaderCell numeric>Length</TableHeaderCell>
+            <TableHeaderCell numeric>Files</TableHeaderCell>
+          </tr>
+        </thead>
+
+        {groups === null ? (
+          <tbody>{rows(tracks, false, '')}</tbody>
+        ) : (
+          groups.map((group) => (
+            <tbody key={group.key}>
+              {group.workTitle !== null ? (
+                <tr>
+                  {/*
+                    `scope="rowgroup"`: the heading names the remaining cells of
+                    the row group it opens, which is what the standard defines
+                    that value as. `colgroup` would claim it labels a column
+                    group instead.
+                  */}
+                  <th className={styles.work} colSpan={5} scope="rowgroup">
+                    <Text size="sm" weight="medium">
+                      {group.workTitle}
+                    </Text>
+                  </th>
+                </tr>
+              ) : null}
+
+              {rows(group.tracks, group.workTitle !== null, group.prefix)}
+            </tbody>
+          ))
+        )}
+      </Table>
+    </div>
+  )
 }
 
-function Row({ track }: { readonly track: TrackRow }) {
+/**
+ * One album of theirs, or one folder standing in for one.
+ *
+ * **Both kinds are on the same grid and only one of them is a catalogue fact.**
+ * A release the attribution pass decided links to its page and carries its
+ * cover; a folder nothing has placed yet carries a badge saying so, in words
+ * rather than in a shade of grey, and goes nowhere — there is no page for a
+ * directory, and inventing one would be inventing the album.
+ *
+ * The folder is printed either way. On a decided album it is the second
+ * opinion the albums screen makes a whole card out of: where the directory
+ * disagrees with what the audio said, this is where a person sees it. On a
+ * folder-derived one it is the only claim there is, so the year beside it is
+ * marked as read off the directory rather than known.
+ */
+function AlbumCard({ album }: { readonly album: ArtistAlbum }) {
+  // Pulled out so the narrowing survives into the render callback below; the
+  // property access on its own does not.
+  const { releaseId } = album
+  const folders = album.folders.join('\n')
+
+  const meta = (
+    <>
+      {album.releaseId == null ? (
+        <Badge tone="warning" size="sm">
+          folder
+        </Badge>
+      ) : null}
+
+      {/*
+        The hole in a part-placed album. Only ever on a decided one — on a
+        folder card every track is unplaced, which the badge beside it already
+        says in the one word that matters.
+      */}
+      {album.releaseId != null && album.unplaced > 0 ? (
+        <Badge tone="warning" size="sm" mono>
+          {album.unplaced} unplaced
+        </Badge>
+      ) : null}
+
+      {album.roles.map((role) => (
+        <Badge key={role} tone={ROLE_TONE[role] ?? 'neutral'} size="sm">
+          {role}
+        </Badge>
+      ))}
+
+      {/*
+        More files than tracks is the same recording held in several encodings,
+        which is the dedupe question the whole schema exists to be able to ask.
+      */}
+      {album.fileCount > album.trackCount ? (
+        <Badge tone="neutral" size="sm" mono>
+          {album.fileCount} files
+        </Badge>
+      ) : null}
+    </>
+  )
+
+  const subtitle = (
+    <span title={folders}>
+      {[
+        album.year == null ? null : `${album.year}${album.yearFromFolder ? '?' : ''}`,
+        `${album.trackCount} track${album.trackCount === 1 ? '' : 's'}`,
+        leaf(album.folders[0] ?? ''),
+        album.folders.length > 1 ? `+${album.folders.length - 1}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+    </span>
+  )
+
+  return (
+    <CatalogueCard
+      variant="album"
+      title={album.title}
+      subtitle={subtitle}
+      meta={meta}
+      {...(album.mbid != null ? { image: releaseArt(album.mbid) } : {})}
+      {...(releaseId != null
+        ? {
+            render: (props) => (
+              <Link {...props} to="/library/releases/$releaseId" params={{ releaseId }} />
+            ),
+          }
+        : {})}
+    />
+  )
+}
+
+function Row({
+  track,
+  grouped,
+  strip,
+}: {
+  readonly track: TrackRow
+  readonly grouped: boolean
+  /** The run-in the group heading has already said. See `workGroups`. */
+  readonly strip: string
+}) {
   return (
     <tr>
-      <TableCell truncate>
+      {/* The whole title stays in the tooltip; see the album page's note. */}
+      <TableCell truncate title={track.title}>
         <Stack direction="column" gap={2}>
-          <Text truncate>{track.title}</Text>
+          <Text truncate>{track.title.slice(strip.length)}</Text>
           {/*
-            The work, when there is one. It is what the movement belongs to, and
-            on a classical library the track title alone ("II. Andante") says
-            almost nothing without it.
+            The work, when there is one and the table is not already grouped by
+            it. It is what the movement belongs to, and on a classical library
+            the track title alone ("II. Andante") says almost nothing without it
+            — but under a heading that has just said it, repeating it on every
+            row is the noise the grouping exists to remove.
           */}
-          {track.workTitle != null && track.workTitle !== track.title ? (
+          {!grouped && track.workTitle != null && track.workTitle !== track.title ? (
             <Text size="xs" tone="tertiary" truncate>
               {track.workTitle}
             </Text>

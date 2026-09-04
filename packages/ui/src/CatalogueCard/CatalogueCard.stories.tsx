@@ -147,6 +147,37 @@ export const CustomElement: Story = {
   ),
 }
 
+/**
+ * A tile that acts rather than navigates.
+ *
+ * `render` may return a button, and the acquisition screen does exactly that —
+ * a Qobuz search result opens a dialog rather than going anywhere, because
+ * there is no page in this application for an album it does not hold.
+ *
+ * Storied because it is the case the stylesheet used to miss: hover and active
+ * were scoped to `a.root`, so a button tile drew with the user agent's outset
+ * bevel and centred text and gave no feedback on hover. Nothing caught it — app
+ * pages have no stories, and this is the file that does.
+ */
+export const AsButton: Story = {
+  render: () => (
+    <Stack direction="column" gap={8} align="start">
+      <Frame width={160}>
+        <CatalogueCard
+          variant="album"
+          title="Rumours"
+          subtitle="Fleetwood Mac"
+          image={cover('#e8590c', '#862e9c')}
+          render={(props) => <button {...props} type="button" />}
+        />
+      </Frame>
+      <Text size="xs" tone="tertiary">
+        Rendered as a <code>button</code>: same tile, no navigation.
+      </Text>
+    </Stack>
+  ),
+}
+
 /** Both variants together, at the sizes their own grid would give them. */
 export const Variants: Story = {
   render: () => (

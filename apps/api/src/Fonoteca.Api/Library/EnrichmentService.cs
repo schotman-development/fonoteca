@@ -97,12 +97,19 @@ public sealed class EnrichmentService(
         {
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
-            return await db.MediaFiles
+            var unasked = await db.MediaFiles
                 .Where(f => f.AcoustId != null
                     && f.RecordingLookupUtc == null
                     && f.IdentityDecidedUtc == null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            var personFiled = await db.MediaFiles
+                .Where(PersonFiled)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return unasked + personFiled;
         }
     }
 
@@ -195,13 +202,18 @@ public sealed class EnrichmentService(
 
         var lastReport = clock.UtcNow;
 
-        try
+        // One loop, driven twice, because the two worklists differ only in how a
+        // file reaches a recording — everything after that is the same rows.
+        async Task DrainAsync<T>(
+            IAsyncEnumerable<T> work,
+            Func<T, Task> handle,
+            Func<T, string> pathOf)
         {
-            await foreach (var file in ClaimAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var file in work.ConfigureAwait(false))
             {
                 try
                 {
-                    await HandleAsync(file, counts, memo, cancellationToken).ConfigureAwait(false);
+                    await handle(file).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -220,7 +232,7 @@ public sealed class EnrichmentService(
 #pragma warning restore CA1031
                 {
                     counts.Failed++;
-                    Log.FileFailed(logger, file.Path, cause);
+                    Log.FileFailed(logger, pathOf(file), cause);
                 }
 
                 counts.Examined++;
@@ -230,11 +242,28 @@ public sealed class EnrichmentService(
                 if (now - lastReport >= ProgressInterval)
                 {
                     lastReport = now;
-                    _progress = new EnrichmentProgress(jobId, counts.Examined, pending, file.Path);
+                    var path = pathOf(file);
+                    _progress = new EnrichmentProgress(jobId, counts.Examined, pending, path);
 
-                    await Report(jobId, counts.Examined, pending, file.Path, "running").ConfigureAwait(false);
+                    await Report(jobId, counts.Examined, pending, path, "running").ConfigureAwait(false);
                 }
             }
+        }
+
+        try
+        {
+            await DrainAsync(
+                ClaimAsync(cancellationToken),
+                file => HandleAsync(file, counts, memo, cancellationToken),
+                file => file.Path).ConfigureAwait(false);
+
+            // Second, so a run that is cancelled part way has done the cheaper
+            // work first: these files already have an identity and are only
+            // missing their graph, where the first worklist's have neither.
+            await DrainAsync(
+                ClaimPersonFiledAsync(cancellationToken),
+                file => HandlePersonFiledAsync(file, counts, memo, cancellationToken),
+                file => file.Path).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -306,6 +335,168 @@ public sealed class EnrichmentService(
             if (fresh.Count == 0) yield break;
 
             foreach (var file in fresh) yield return file;
+        }
+    }
+
+    /// <summary>
+    /// Files a person filed under an album, which have an identity and no graph.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EnrichmentOutcome.LinkedByPerson"/> says it in as many words:
+    /// filing files under an album takes each recording's identity off the
+    /// release's track list and fetches no recording, so the catalogue knows
+    /// what these files are and cannot say who played on them or what they
+    /// perform. On the target library that is 615 files, 433 of them with no
+    /// work at all — Beethoven's complete symphonies among them, 33 movements
+    /// whose album page had nothing to group by.
+    ///
+    /// **They cannot be reached by the worklist above, on any of its three
+    /// clauses.** These are the files AcoustID never placed, so most carry no
+    /// <c>AcoustId</c>; the album screen stamps <c>RecordingLookupUtc</c> when
+    /// it files them; and a decision sets <c>IdentityDecidedUtc</c>. Hence a
+    /// second worklist rather than a widened one — and it needs no AcoustID turn
+    /// at all, because the recording MBID is already in the catalogue.
+    /// </remarks>
+    private static readonly System.Linq.Expressions.Expression<Func<MediaFile, bool>> PersonFiled =
+        file => file.EnrichmentOutcome == EnrichmentOutcome.LinkedByPerson
+            && file.Recording != null
+            && file.Recording.Mbid != null;
+
+    /// <summary>
+    /// The second worklist, a page at a time.
+    /// </summary>
+    /// <remarks>
+    /// Paged like the first, and self-draining for the same reason: a file that
+    /// is enriched becomes <see cref="EnrichmentOutcome.Linked"/> and leaves the
+    /// predicate, so an unchanged page means the pass is done. The <c>seen</c>
+    /// guard covers the rows that stayed — a transient failure, or a recording
+    /// MusicBrainz no longer knows.
+    /// </remarks>
+    private async IAsyncEnumerable<PersonFiledFile> ClaimPersonFiledAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<MediaFileId>();
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PersonFiledFile> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                var rows = await db.MediaFiles
+                    .AsNoTracking()
+                    .Where(PersonFiled)
+                    .OrderBy(f => f.Id)
+                    .Select(f => new { f.Id, f.Path, Mbid = f.Recording!.Mbid })
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                page = [.. rows.Select(r => new PersonFiledFile(r.Id, r.Path, r.Mbid!.Value))];
+            }
+
+            var fresh = page.Where(file => seen.Add(file.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var file in fresh) yield return file;
+        }
+    }
+
+    /// <summary>
+    /// One person-filed file: recording to rows, with no AcoustID turn spent.
+    /// </summary>
+    /// <remarks>
+    /// The lookup happens outside the scope's transaction, for the reason
+    /// <see cref="HandleAsync"/> gives.
+    ///
+    /// **Nothing here writes <c>RecordingLookupUtc</c> or an outcome other than
+    /// <see cref="EnrichmentOutcome.Linked"/>**, and the second half of that is
+    /// load-bearing. <c>RecordingNotFound</c> is one of the two values the
+    /// by-hand album screen reads as an open question, so writing it onto a file
+    /// somebody already answered would put their decision back on the worklist
+    /// as a question — undoing the work this pass exists to complete. A file
+    /// whose recording MusicBrainz cannot produce keeps
+    /// <see cref="EnrichmentOutcome.LinkedByPerson"/>, which is exactly what it
+    /// still is, and costs one lookup on the next run. That is a deliberate
+    /// exception to the <c>AcoustIdCheckedUtc</c> lesson about recording that we
+    /// asked: the MBID came out of MusicBrainz's own release track list and WS/2
+    /// follows merges, so the case is pathological rather than routine, and
+    /// paying for it is cheaper than a column that has to be cleared by hand.
+    /// </remarks>
+    private async Task HandlePersonFiledAsync(
+        PersonFiledFile file,
+        Tally counts,
+        Memo memo,
+        CancellationToken cancellationToken)
+    {
+        MusicBrainzRecording? recording;
+        MusicBrainzWork? work = null;
+
+        try
+        {
+            if (!memo.Recordings.TryGetValue(file.Mbid, out recording))
+            {
+                recording = await musicBrainz
+                    .GetRecordingAsync(file.Mbid, cancellationToken)
+                    .ConfigureAwait(false);
+
+                memo.Recordings[file.Mbid] = recording;
+            }
+
+            if (recording is not null)
+            {
+                work = await WorkForAsync(recording, memo, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            counts.Failed++;
+            Log.FileNotEnriched(logger, file.Path, EnrichmentOutcome.LookupFailed, cause.Message);
+            return;
+        }
+
+        if (recording is null)
+        {
+            counts.RecordingNotFound++;
+
+            // Formatted before the call, not inside it: the analyser objects to
+            // work done for a log line that may be disabled.
+            var missing = file.Mbid.Value.ToString();
+
+            Log.FileNotEnriched(
+                logger, file.Path, EnrichmentOutcome.RecordingNotFound, missing);
+
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.MediaFiles
+                .FirstOrDefaultAsync(f => f.Id == file.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Absent means a scan removed it while we were working.
+            if (row is null) return;
+
+            var writer = new CatalogueWriter(db, memo.Artists);
+
+            row.RecordingId = await writer
+                .UpsertAsync(recording, work, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Now it is what the value promises: linked, with its artists.
+            row.EnrichmentOutcome = EnrichmentOutcome.Linked;
+
+            counts.Linked++;
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -387,6 +578,9 @@ public sealed class EnrichmentService(
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>A file that has a recording MBID already, and needs its graph.</summary>
+    private sealed record PersonFiledFile(MediaFileId Id, string Path, Mbid Mbid);
 
     /// <summary>The network half: which recording is this, and what is it?</summary>
     private async Task<Resolution> ResolveAsync(

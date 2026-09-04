@@ -275,19 +275,35 @@ other half, and its own list of paid-for edges:
 | `Api/Library/ReleaseAttributionService.cs` | the pass: seed → component → decision → rows |
 | `Api/Endpoints/CatalogueEndpoints.cs` | `GET /api/catalogue/releases`, `…/{id}`, `…/attribution` |
 
-**The folders are not consulted.** That was the ask and it turned out to be
-forced: sampling 60 files with `ffprobe` found `ACOUSTID_ID` on every one and
-nothing else at all — no `ALBUM`, no `TRACKNUMBER`, no barcode. The library was
-deliberately tag-stripped, so the directory name and the audio are the only two
-claims in existence and one of them is the one not to believe. It is wrong where
-it matters, too: a folder named for a 1979 album holds the audio of the 2015
-remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
+**The folder's boundary is believed; its name never is.** For a long time
+neither was, and that was the ask at the time — sampling 60 files with `ffprobe`
+found `ACOUSTID_ID` on every one and nothing else, so the directory name and the
+audio were the only two claims in existence and one of them is the one not to
+believe. The name is still wrong where it matters: a folder named for a 1979
+album holds the audio of the 2015 remaster, and one named `(2009)` holds a
+release MusicBrainz dates to 2010.
 
-- **A single file cannot name its release, so the unit is a component** — a set
-  of files sharing candidate releases, decided and committed together. This is
-  the one pass with no per-file unit of work, so resumability is per component
-  rather than free. Components are *discovered* by following shared candidate
-  releases outward from one seed, never assumed from a directory.
+But *which files belong together* is a different claim from *which release they
+are*, and refusing both cost more than it bought. Growing a component outwards
+through shared candidate releases is exactly how a compilation welds two albums
+into one set, after which a box set reprinting both is the honest best answer —
+the rule was never wrong, the set handed to it was. `Domain/Catalogue/AlbumFolder.cs`
+now cuts at `Artist/Album`, measured: of 8,192 files, 7,084 sit at that depth and
+all 1,107 below it are in disc folders, spelled `CD 01`, `Disc 1` **and**
+`Digital Media 01` — the last a MusicBrainz *medium format*, which is why the cut
+is by depth and not by a pattern that would have to know `HDCD` and `12" Vinyl`
+too. 595 folders, median 12 files, largest 204, and the four largest are all
+genuinely single releases.
+
+- **A single file cannot name its release, so the unit is a component** — one
+  album folder's still-open files, decided and committed together. This is the
+  one pass with no per-file unit of work, so resumability is per component rather
+  than free. Files in the folder that a person or an earlier run already answered
+  stay out: the question has been narrowed, not reopened.
+- **`UpgradeScan.AlbumFolder` defers to `AlbumFolder.Of`, and had to.** It was a
+  second copy of the same two-segment cut, disagreeing on the root-file case and
+  on backslashes. Three screens quietly disagreeing about where an album stops is
+  not a bug anyone would ever report as one.
 - **`inc=releases` on a recording lookup caps at 25 and does not say so.**
   `Don't Rock the Jukebox` returns 25 where a browse of the same recording
   reports 40. `MusicBrainzRecording.Appearances` is therefore not a candidate
@@ -339,21 +355,26 @@ remaster, and one named `(2009)` holds a release MusicBrainz dates to 2010.
   kept is what makes "you are missing track 7" answerable.
 - **`held` counts distinct tracks, not files.** Five encodings of one song are
   one track of the album; counting files makes a half-ripped album read complete.
-- **Known failure: heavily anthologised catalogue.** Michael Jackson's albums do
-  not attribute correctly. `Off the Wall` — ten tracks, all ten held, with a 2015
-  remaster matching to the millisecond — never enters the component's candidate
-  set, so the files land on whichever compilation did: a five-disc box set at one
-  setting of the cap, a greatest-hits and a two-in-one at another. All 31 files
-  are decided in a *single* component (`count(DISTINCT ReleaseLookupUtc) = 1`),
-  so this is not fragmentation across components, and no cap is logged for it.
-  Reproducing the gather in Python against the same mirror *does* confirm
-  `Off the Wall` among the candidates at coverage 1.00 and drift 0.00, so the
-  rule would pick it if it arrived — which means the loss is in `GatherAsync`
-  and has not been isolated by reading. `AnAlbumIsFoundEvenUnderThirty`
-  `CompilationsThatReprintIt` builds the same shape in a fixture and **passes**,
-  so it is not the obvious structural story either. It needs a
-  candidate-by-candidate trace against the real mirror. Artists with a shallower
-  compilation history (Bonamassa, Ella Fitzgerald's albums) come out right.
+- **Known failure, expected fixed by the folder cut and NOT yet re-measured.**
+  Michael Jackson's albums did not attribute correctly: `Off the Wall` — ten
+  tracks, all ten held, with a 2015 remaster matching to the millisecond — never
+  entered the component's candidate set, so the files landed on whichever
+  compilation did. All 31 files were decided in a *single* component
+  (`count(DISTINCT ReleaseLookupUtc) = 1`) with no cap logged, and reproducing
+  the gather in Python against the same mirror *did* confirm `Off the Wall` among
+  the candidates at coverage 1.00 — so the rule would have picked it if it had
+  arrived, and the loss was in `GatherAsync`.
+
+  Two things about the folder cut should remove it, and both are arguments rather
+  than measurements. The 31 files are several albums that only shared a component
+  because the expansion welded them; each folder is now decided alone, where
+  `Off the Wall` holds ten of ten and a box set holds ten of seventy-six.
+  And candidates are ordered by hits over a *fixed* recording set, so the album
+  is at the top by construction rather than by a count still arriving.
+  `TwoAlbumsSharingABoxSetAreNotCollapsedIntoIt` reproduces the shape in a
+  fixture and fails on the old gather. **Run the pass against the real mirror
+  before believing any of that.** Artists with a shallower compilation history
+  (Bonamassa, Ella Fitzgerald's albums) already came out right.
 
 ### The worklist of refusals
 
@@ -645,10 +666,9 @@ MusicBrainz browse per recording in the component, which is a pass rather than a
 request — and that is true of *forming* a component and not of re-asking about
 one that already exists.
 
-- **The expansion is the expensive half, and it is already paid for.** The pass
-  browses a recording, fetches the releases it names, reads back which of their
-  tracks the library holds, admits those files and browses *their* recordings.
-  Unbounded, and the reason a component can reach six hundred files. None of it
+- **The gather is the expensive half, and it is already paid for.** The pass
+  browses every recording in the folder and fetches the track list of each
+  release worth one, bounded by the folder rather than by a cap. None of it
   is needed on a re-ask: the component's members are written down, in the
   `ReleaseLookupUtc` they share. What is left is one browse per distinct
   recording and one lookup per release offered — bounded at 30 and 8, and a wait
@@ -749,9 +769,9 @@ one that already exists.
   Aretha Franklin and Motown glued together by a compilation, and no album
   explains it. Answering with the one that explains two files leaves the other
   fifty-seven on the worklist under the same stamp, so re-opening asks a smaller
-  question. Measured on the real database: components run 1 to 59 files, a
-  one-file component costs about 30 seconds and the 59-file one about two
-  minutes.
+  question. Those figures were measured when a component was a discovered set;
+  a component is now a folder, so the 59-file example cannot form at all and the
+  sizes are the folder sizes above.
 - **`AttributedByPerson` is not `Attributed`, and `NoReleaseByPerson` is not
   `NoConfidentFit`.** The same distinction identification already keeps: one
   means a fit cleared the gates and the other means it did not and somebody
@@ -894,6 +914,120 @@ MusicBrainz and approving a pairing they can see is the only evidence available.
   section. Pasting an MBID or a release URL into the box is a lookup and works
   either way; `CatalogueEndpoints.AlbumMatching` detects one with a regex before
   it searches, because MusicBrainz indexes titles and not identifiers.
+
+### Writing it all back, which is the only step nobody may automate
+
+| | |
+| --- | --- |
+| `Domain/Catalogue/CatalogueTags.cs` | the rule — which tags a catalogue row implies, under Picard's names. Pure |
+| `Tagging/CatalogueTagFields.cs` | how each container spells them. Measured, not read off a spec |
+| `Tagging/TagWriter.cs` | ADR 0002's sequence, for any number of fields |
+| `Tagging/AcoustIdTagWriter.cs` | the one field the identification pass writes, named. A wrapper now |
+| `Api/Library/TagWriteService.cs` | the pass: one scope, three worklists |
+| `Api/Endpoints/CatalogueEndpoints.Tagging.cs` | `POST …/releases/{id}/tags`, `…/artists/{id}/tags` |
+| `Api/Endpoints/LibraryEndpoints.cs` | `POST /api/library/tags`, and its status and cancel |
+
+**Everything above this line writes to PostgreSQL.** Scan, identify, enrich and
+attribute between them decide what each file is, who made it and which album it
+came from — and copy the library to another machine, or open it in any other
+player, and none of that exists. This pass is what makes those answers portable,
+and it is the only one that rewrites the audio rather than a row.
+
+- **Three buttons and no fourth route.** Nothing chains into it, no timer reaches
+  it, `Fonoteca.Jobs` does not know about it, and `IdentifyAfterScan` has no
+  counterpart here. `Fonoteca:AllowFileMutation` is the second lock and is still
+  the same one identification uses: off, the run reads every file, computes the
+  whole diff, journals it and changes not one byte — which makes a disabled run
+  a complete dry run rather than a no-op, and makes "Refused" the *ordinary*
+  answer rather than an error.
+- **One pass, three scopes, rather than three mechanisms.** An album is a dozen
+  files and an artist a few hundred, so both look like they could be a request —
+  but "quick" is a property of the library rather than of the endpoint, and the
+  library-wide button is a two-hour job. All three take `LibraryWorkGate`, report
+  on the same hub channel and are watched through one `GET /api/library/tags`.
+  The artist scope is `CatalogueEndpoints.RecordingsOfAsync`, the same rule the
+  artist page browses by, so what gets written is exactly what that page lists.
+- **The sharp edge is identification's, at a hundred times the scale.** A tag
+  write changes the bytes; a row still holding the old size and mtime reads as
+  modified on the next scan, and the scan discards every derived column on it.
+  Reached one file at a time that costs one re-identification; reached over a
+  library it deletes the catalogue with the feature meant to preserve it. The
+  new size and mtime go onto the row in the same `SaveChanges`.
+  `WritingTagsDoesNotMakeTheNextScanThinkTheFileChanged`.
+- **There is no `TagsWrittenUtc` and no migration, because the diff is the
+  worklist.** A file that already says what the catalogue says comes back
+  `NothingToDo` having been read and never opened for writing, so the pass is
+  idempotent by construction and a second run costs a tag read per file. This is
+  the one place the `AcoustIdCheckedUtc` lesson does *not* apply: that column
+  exists because asking AcoustID again costs a turn at a rate limit, and reading
+  a file's own tags costs nothing anyone is waiting for.
+- **`AcoustIdTagWriter` is a wrapper over `TagWriter` now, and generalising
+  rather than copying was the point.** The write path is the only code here that
+  can destroy something a rescan cannot rebuild; two copies of it would drift in
+  exactly the way nobody notices until a library is already wrong. What stayed
+  behind is what is specific: the diff against the *normalised* AcoustID, so the
+  227 files Picard tagged in upper case are recognised rather than rewritten, and
+  its own `tagging.acoustid.*` event types.
+- **The journal payload is a list of changes now**, and old
+  `tagging.acoustid.written` rows carry the previous single-field shape. Nothing
+  reads either programmatically, and `Previous` is still nullable for the reason
+  it always was: null means the field was absent, so reversing means removing it.
+- **`SaveChanges` runs whether or not anything was committed.**
+  `IEventLog.AppendAsync` does not save itself — that is what makes one scope and
+  one save per file the resumability story — so returning early on a refusal
+  discards the journal for exactly the two cases with nothing else to show for
+  themselves: a dry run, and a write abandoned at verification.
+- **The verification exclusion is new and load-bearing.**
+  `TagSnapshot.FieldsLostIn` reports everything that moved, which on a
+  multi-field write is mostly the point, so the intended fields come out of it —
+  and `DATE` with them, because ATL derives it from the same value as `YEAR`.
+  Without that pairing every write that corrects a year fails verification and
+  rolls itself back. The same exclusion fixes a latent bug on the AcoustID path,
+  where replacing an existing *different* AcoustID always failed.
+- **The field names were measured against ATL 7.16 with ffprobe and TagLib#**,
+  the way `AcoustIdTagField`'s were, and the answer is the same two spellings:
+  `MUSICBRAINZ_TRACKID` for Vorbis and APEv2, `MusicBrainz Track Id` for ID3 and
+  MP4. Hand a FLAC the title-case spelling and ATL writes a comment called
+  `MUSICBRAINZ TRACK ID` — plausible, valid, and invisible to Picard. The
+  container's style comes from `AcoustIdTagField.For` rather than a second
+  extension table, so the two cannot disagree about which containers are taggable
+  at all.
+- **One known shortfall, and it is not fixable from here.** Picard puts the
+  *recording* id in an ID3 `UFID` frame and ATL exposes no way to write one, so
+  on an MP3 the id goes to `TXXX:MusicBrainz Track Id` — readable by most tools,
+  not where Picard would have put it. Every other identifier round-trips through
+  TagLib#'s native accessors on every container.
+- **Only the year, never a date.** ATL's `Date` is a `DateTime` and cannot hold
+  "1969" without inventing the first of January — the same claim `ReleaseDate`
+  exists to avoid making. A file already carrying a full date of the right year
+  keeps it, because the year then matches and nothing is written.
+- **A fact the catalogue does not hold produces no entry at all.** There is no
+  way to express "erase this field", deliberately: over a library at a time a
+  blank is a deletion wearing an edit's clothes, and nothing downstream could
+  tell it from a ripper that never wrote the field.
+- **All three links or none.** A file needs a recording, a track *and* a release
+  to be on the worklist. Writing an album name with no track number, or a title
+  with no album, produces something that reads as a half-tagged rip in every
+  player.
+- **No single file may end the run, and the catch is on `Exception`.** Because
+  the diff is the worklist, nothing steps over a row that threw — an escaping
+  exception ends the pass at the same file on every attempt, and one unreadable
+  file blocks every file behind it forever. `TagReadFailedException` alone is not
+  enough: `TagReader.ReadAsync` opens the stream *outside* its own try, so a
+  permissions or I/O error on open arrives as itself. Unlike the probe pass there
+  is no subprocess whose absence would fail every file identically, so there is
+  nothing here worth stopping for.
+- **A file whose album resolved only to a release group gets nothing**, not even
+  its title. All three links or none is the rule, and this is the case where it
+  costs something; widening it later means deciding what a track number means on
+  an album nobody has named.
+- **Serial, and the journal says the owner did it.** ATL renders the entire file
+  into a staged sibling, so concurrency here is a page of album-sized copies
+  competing for one disk. And the actor is `SingleUserCallerContext.OwnerId`
+  rather than the identification pass's `SystemCallerContext.SystemId`: that pass
+  runs because a scan finished, this one runs because a person pressed a button,
+  and that is the only fact worth keeping about a run that rewrote eight thousand
+  files.
 
 ### The identification providers, and what they refuse to do
 
@@ -1182,6 +1316,18 @@ Adding a component means adding stories, because that is what tests it.
   lock after the shell that started it is gone, and Testcontainers leaves its
   PostgreSQL behind too (Ryuk is disabled here, so nothing reaps it): kill the
   process by pid and `podman rm -f` the stray `postgres:18-alpine`.
+- **And the collision the other way round poisons the running API instead.**
+  Building while the dev host is up — `dotnet build` for a test run, say —
+  replaces `Fonoteca.Api.dll` under a process that has it mapped. Everything the
+  CLR has already JITted keeps working, so the API goes on answering and looks
+  healthy; the *first* type it has to load afterwards throws
+  `BadImageFormatException` — "The signature is incorrect. The format of the file
+  '…/Fonoteca.Api.dll' is invalid." Which means it surfaces on whatever code path
+  nobody has exercised yet, arbitrarily far from the build that caused it, and
+  reads as a bug in that feature. `dotnet watch` does not always catch it: the
+  build may land while a restart is already in flight. The fix is
+  `systemctl --user restart fonoteca-api.service` — the API unit alone, not
+  `fonoteca.target`, which would take Vite's dep cache down with it.
 - PostgreSQL 18 wants a single mount at `/var/lib/postgresql`, not
   `/var/lib/postgresql/data`; the old path makes the container refuse to start.
 - Testcontainers over podman needs `DOCKER_HOST` pointed at the user socket and

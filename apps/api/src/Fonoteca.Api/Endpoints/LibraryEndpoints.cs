@@ -96,6 +96,27 @@ public static class LibraryEndpoints
             .WithSummary("Ask the running pass to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/probe", StartProbe)
+            .WithName("StartLibraryProbe")
+            .WithSummary("Measure every file: codec, depth, rate, and whether it still decodes.")
+            .WithDescription(
+                "Returns immediately with a job id; progress arrives on the jobs hub. Decodes each "
+                + "file rather than reading its header, which is what lets it answer both what the "
+                + "audio is and whether it is intact — measured at 0.63s a file, so roughly twenty "
+                + "minutes for eight thousand at the default concurrency. Fills MediaFile.Quality, "
+                + "which is what the upgrade list needs to see a CD-quality rip against a hi-res "
+                + "master. Writes no file and needs the library volume mounted.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/probe", GetProbeStatus)
+            .WithName("GetLibraryProbeStatus")
+            .WithSummary("How many files have never been measured, and what the last pass found.");
+
+        group.MapDelete("/probe", CancelProbe)
+            .WithName("CancelLibraryProbe")
+            .WithSummary("Ask the running pass to stop after the page it is on.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         group.MapPost("/attribute", StartAttribution)
             .WithName("StartReleaseAttribution")
             .WithSummary("Work out which album each identified file came from.")
@@ -103,9 +124,9 @@ public static class LibraryEndpoints
                 "Returns immediately with a job id; progress arrives on the jobs hub. Decides files "
                 + "in sets rather than one at a time — a single file cannot name its release, since "
                 + "one recording appears on the album, on compilations and on every regional "
-                + "pressing. The folders are not consulted: a set is discovered by following "
-                + "shared candidate releases, and the answer is checked against the folders "
-                + "afterwards at GET /api/catalogue/attribution. Opens no file and modifies none.")
+                + "pressing. The set is one album folder: the folder's boundary is taken as the "
+                + "grouping, its name is never read, and the release is decided from the audio. "
+                + "Opens no file and modifies none.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapGet("/attribute", GetAttributionStatus)
@@ -117,8 +138,79 @@ public static class LibraryEndpoints
             .WithSummary("Ask the running pass to stop after the set it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/tags", StartTagWrite)
+            .WithName("StartLibraryTagWrite")
+            .WithSummary("Write everything the catalogue knows back into the library's files.")
+            .WithDescription(
+                "Returns immediately with a job id; progress arrives on the jobs hub. The last "
+                + "step of the chain and the only one that is never automatic: scan, identify, "
+                + "enrich and attribute all write to a database, and this is what makes their "
+                + "answers portable. Writes title, artist, album, album artist, track and disc "
+                + "numbers, the year and every MusicBrainz identifier into each file that has a "
+                + "recording, a track and a release. Each file is rendered to a staged sibling, "
+                + "read back by two independent tag libraries and length-checked before the swap, "
+                + "and the previous values are journalled. With Fonoteca:AllowFileMutation off "
+                + "the whole run happens except the write. Same pass as the per-album and "
+                + "per-artist buttons, with no scope.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/tags", GetTagWriteStatus)
+            .WithName("GetLibraryTagWriteStatus")
+            .WithSummary("Whether a tag write is running, how many files it could cover, and how the last one went.");
+
+        group.MapDelete("/tags", CancelTagWrite)
+            .WithName("CancelLibraryTagWrite")
+            .WithSummary("Ask the running tag write to stop after the file it is on.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         return app;
     }
+
+    /// <summary>
+    /// The library-wide tag write.
+    /// </summary>
+    /// <remarks>
+    /// No 503 arm, unlike the scan: the pass stats each file and leaves the ones
+    /// that are not there alone, so an unmounted volume produces a run that
+    /// writes nothing rather than a refusal. That is the same posture the probe
+    /// takes and for the same reason — refusing to start needs certainty this
+    /// endpoint does not have.
+    /// </remarks>
+    private static Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>> StartTagWrite(
+        TagWriteService tags,
+        CancellationToken cancellationToken) =>
+        CatalogueEndpoints.StartAsync(tags, TagWriteScope.Library, cancellationToken);
+
+    private static async Task<Ok<TagWriteStatusResponse>> GetTagWriteStatus(
+        TagWriteService tags,
+        CancellationToken cancellationToken)
+    {
+        var progress = tags.Progress;
+
+        return TypedResults.Ok(new TagWriteStatusResponse(
+            Running: tags.IsRunning,
+            JobId: progress?.JobId,
+            Scope: progress?.Scope,
+            Processed: progress?.Processed ?? 0,
+            Total: progress?.Total ?? 0,
+            CurrentFile: progress?.CurrentFile,
+
+            // The library-wide count, whatever scope is running: this is the
+            // number the dashboard card is about, and a card that changed its
+            // meaning while an album-scoped run was in flight would be unreadable.
+            Files: await tags.CountAsync(TagWriteScope.Library, cancellationToken).ConfigureAwait(false),
+            WillWrite: tags.MutationAllowed,
+            LastError: tags.LastError,
+            LastCompleted: tags.LastCompleted));
+    }
+
+    private static Results<Accepted, ProblemHttpResult> CancelTagWrite(TagWriteService tags) =>
+        tags.Cancel()
+            ? TypedResults.Accepted("/api/library/tags")
+            : TypedResults.Problem(
+                title: "Nothing to cancel",
+                detail: "No tag write is running.",
+                statusCode: StatusCodes.Status409Conflict);
 
     private static async Task<Results<Ok<LibraryScanSummary>, ProblemHttpResult>> ScanLibrary(
         LibraryScanService scans,
@@ -285,6 +377,65 @@ public static class LibraryEndpoints
                 statusCode: StatusCodes.Status409Conflict);
 
     /// <summary>
+    /// Starts the pass that measures the library.
+    /// </summary>
+    /// <remarks>
+    /// Unlike enrichment and attribution this one <i>does</i> open every file, so
+    /// an unmounted volume makes it fail on the first row rather than run
+    /// harmlessly. It is not refused up front for that: the probe reports a
+    /// missing file as unreadable, and refusing on a directory check would be a
+    /// second, worse copy of the same test.
+    /// </remarks>
+    private static async Task<Results<Accepted<ProbeStartedResponse>, ProblemHttpResult>>
+        StartProbe(ProbeService probes, CancellationToken cancellationToken)
+    {
+        var pending = await probes.CountPendingAsync(cancellationToken).ConfigureAwait(false);
+        var outcome = probes.Start();
+
+        return outcome switch
+        {
+            { Status: ProbeStatus.Started, JobId: { } jobId } => TypedResults.Accepted(
+                "/api/library/probe",
+                new ProbeStartedResponse(jobId, pending)),
+
+            _ => TypedResults.Problem(
+                title: "The library is already busy",
+                detail: "A scan or another pass is running. Only one at a time touches the "
+                    + "catalogue. Poll GET /api/library/probe.",
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    private static async Task<Ok<ProbeStatusResponse>> GetProbeStatus(
+        ProbeService probes,
+        CancellationToken cancellationToken)
+    {
+        var progress = probes.Progress;
+
+        return TypedResults.Ok(new ProbeStatusResponse(
+            Running: probes.IsRunning,
+            JobId: progress?.JobId,
+            Processed: progress?.Processed ?? 0,
+            Total: progress?.Total ?? 0,
+            CurrentFile: progress?.CurrentFile,
+
+            // Pending comes out of the coverage read rather than a second query
+            // beside it: two reads of a moving library disagree, and the card
+            // shows both numbers.
+            Coverage: await probes.CoverageAsync(cancellationToken).ConfigureAwait(false),
+            LastError: probes.LastError,
+            LastCompleted: probes.LastCompleted));
+    }
+
+    private static Results<Accepted, ProblemHttpResult> CancelProbe(ProbeService probes) =>
+        probes.Cancel()
+            ? TypedResults.Accepted("/api/library/probe")
+            : TypedResults.Problem(
+                title: "Nothing to cancel",
+                detail: "No probe pass is running.",
+                statusCode: StatusCodes.Status409Conflict);
+
+    /// <summary>
     /// Starts the attribution pass, which needs enrichment to have run first.
     /// </summary>
     /// <remarks>
@@ -372,6 +523,24 @@ public sealed record IdentificationStatusResponse(
 /// <summary>An enrichment pass was accepted, with the size of the job it took on.</summary>
 public sealed record EnrichmentStartedResponse(string JobId, int Pending);
 
+public sealed record ProbeStartedResponse(string JobId, int Pending);
+
+/// <param name="Coverage">What the library measures to, across every pass that has run.</param>
+/// <param name="LastError">
+/// Why the last pass stopped without finishing. Null on the ordinary path — and
+/// the difference between a button that failed and a button that did nothing,
+/// which for this pass is usually ffprobe missing from PATH.
+/// </param>
+public sealed record ProbeStatusResponse(
+    bool Running,
+    string? JobId,
+    int Processed,
+    int Total,
+    string? CurrentFile,
+    ProbeCoverage Coverage,
+    string? LastError,
+    ProbeSummary? LastCompleted);
+
 /// <summary>Everything the enrichment card needs, in one read.</summary>
 public sealed record EnrichmentStatusResponse(
     bool Running,
@@ -400,3 +569,18 @@ public sealed record AttributionStatusResponse(
     int Pending,
 
     AttributionSummary? LastCompleted);
+
+/// <param name="Files">How many files in the library hold a complete catalogue answer.</param>
+/// <param name="WillWrite">Whether <c>Fonoteca:AllowFileMutation</c> is on.</param>
+/// <param name="Scope">What the running pass covers, in words. Null when nothing is running.</param>
+public sealed record TagWriteStatusResponse(
+    bool Running,
+    string? JobId,
+    string? Scope,
+    int Processed,
+    int Total,
+    string? CurrentFile,
+    int Files,
+    bool WillWrite,
+    string? LastError,
+    TagWriteSummary? LastCompleted);

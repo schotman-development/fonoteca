@@ -264,13 +264,86 @@
         }
       }
     },
+    "/api/library/probe": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Measure every file: codec, depth, rate, and whether it still decodes.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. Decodes each file rather than reading its header, which is what lets it answer both what the audio is and whether it is intact — measured at 0.63s a file, so roughly twenty minutes for eight thousand at the default concurrency. Fills MediaFile.Quality, which is what the upgrade list needs to see a CD-quality rip against a hi-res master. Writes no file and needs the library volume mounted.",
+        "operationId": "StartLibraryProbe",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeStartedResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "How many files have never been measured, and what the last pass found.",
+        "operationId": "GetLibraryProbeStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask the running pass to stop after the page it is on.",
+        "operationId": "CancelLibraryProbe",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/library/attribute": {
       "post": {
         "tags": [
           "Library"
         ],
         "summary": "Work out which album each identified file came from.",
-        "description": "Returns immediately with a job id; progress arrives on the jobs hub. Decides files in sets rather than one at a time — a single file cannot name its release, since one recording appears on the album, on compilations and on every regional pressing. The folders are not consulted: a set is discovered by following shared candidate releases, and the answer is checked against the folders afterwards at GET /api/catalogue/attribution. Opens no file and modifies none.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. Decides files in sets rather than one at a time — a single file cannot name its release, since one recording appears on the album, on compilations and on every regional pressing. The set is one album folder: the folder's boundary is taken as the grouping, its name is never read, and the release is decided from the audio. Opens no file and modifies none.",
         "operationId": "StartReleaseAttribution",
         "responses": {
           "202": {
@@ -337,17 +410,97 @@
         }
       }
     },
+    "/api/library/tags": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Write everything the catalogue knows back into the library's files.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. The last step of the chain and the only one that is never automatic: scan, identify, enrich and attribute all write to a database, and this is what makes their answers portable. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file that has a recording, a track and a release. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write. Same pass as the per-album and per-artist buttons, with no scope.",
+        "operationId": "StartLibraryTagWrite",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagWriteStartedResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Whether a tag write is running, how many files it could cover, and how the last one went.",
+        "operationId": "GetLibraryTagWriteStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagWriteStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask the running tag write to stop after the file it is on.",
+        "operationId": "CancelLibraryTagWrite",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/artists": {
       "get": {
         "tags": [
           "Catalogue"
         ],
         "summary": "Artists with at least one track in the library.",
-        "description": "Ordered by sort name. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.",
+        "description": "Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.",
         "operationId": "GetArtists",
         "parameters": [
           {
             "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
             "in": "query",
             "schema": {
               "type": "string"
@@ -434,11 +587,18 @@
           "Catalogue"
         ],
         "summary": "Albums the library holds at least one track of.",
-        "description": "Ordered by title. `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.",
+        "description": "Ordered by title, or by `sort=year` (newest first, undated last) or `sort=artist` (the first billed name, uncredited last). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.",
         "operationId": "GetReleases",
         "parameters": [
           {
             "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
             "in": "query",
             "schema": {
               "type": "string"
@@ -526,7 +686,7 @@
           "Catalogue"
         ],
         "summary": "How the attributed albums compare with the folders on disk.",
-        "description": "The folders play no part in deciding which release a file came from. This is where they are used instead: as an independent second opinion. A folder split across releases, or a release spanning folders, is a disagreement worth a person's attention — and either side may be the wrong one.",
+        "description": "The folder's boundary decides which files are considered together; its name plays no part in deciding which release they came from. This is where the two are compared. A release spanning folders is the disagreement worth a person's attention now that a folder can no longer be split across releases by the pass — and either side may be the wrong one.",
         "operationId": "GetAttributionReport",
         "responses": {
           "200": {
@@ -1399,6 +1559,112 @@
         }
       }
     },
+    "/api/catalogue/releases/{id}/tags": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Write what the catalogue knows about this album into its files.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file that has a recording, a track and a release. Never automatic. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write.",
+        "operationId": "WriteReleaseTags",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagWriteStartedResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/artists/{id}/tags": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Write what the catalogue knows about this artist's tracks into their files.",
+        "description": "The album endpoint's rule over every recording this artist is responsible for — billed, linked as conductor or ensemble, or a writer of the work — which is the same set the artist page lists. Returns immediately with a job id. Never automatic.",
+        "operationId": "WriteArtistTags",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagWriteStartedResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/matching/folders/seed": {
       "get": {
         "tags": [
@@ -1449,6 +1715,209 @@
           }
         }
       }
+    },
+    "/api/qobuz/status": {
+      "get": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "Whether this instance can search and download, and at what quality.",
+        "operationId": "GetQobuzStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QobuzStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/qobuz/upgrades": {
+      "get": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "Albums worth buying: held in a lossy encoding, or held in part.",
+        "description": "Two lists, both read out of the catalogue with no request to Qobuz. `items` is quality — an album held in something worse than Qobuz sells. `incomplete` is completeness — an album whose release prints more tracks than the library holds, minus the ones whose folder still has unmatched files in it that could account for the gap.",
+        "operationId": "ListQobuzUpgrades",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradeListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/qobuz/albums": {
+      "get": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "Search the Qobuz catalogue for albums.",
+        "operationId": "SearchQobuzAlbums",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QobuzAlbumSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/qobuz/albums/{albumId}": {
+      "get": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "One album with its track list.",
+        "operationId": "GetQobuzAlbum",
+        "parameters": [
+          {
+            "name": "albumId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QobuzAlbumResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/qobuz/albums/{albumId}/download": {
+      "post": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "Fetch every streamable track of an album into the library.",
+        "operationId": "DownloadQobuzAlbum",
+        "parameters": [
+          {
+            "name": "albumId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumDownload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/qobuz/albums/{albumId}/upgrade": {
+      "post": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "Download an album and retire the one in the library it replaces.",
+        "description": "Downloads first, measures what landed, and only then decides. Refuses if fewer tracks arrived than the album holds, if what arrived is no better than the best file already there, or if nothing has measured the old album. Nothing is deleted — the old files are moved to Fonoteca:ReplacedPath keeping their layout, and only when Fonoteca:AllowFileReplacement is on.",
+        "operationId": "UpgradeQobuzAlbum",
+        "parameters": [
+          {
+            "name": "albumId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpgradeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumUpgrade"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1472,6 +1941,54 @@
           "recordings": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "AlbumDownload": {
+        "required": [
+          "albumId",
+          "title",
+          "artist",
+          "folder",
+          "downloaded",
+          "trackCount",
+          "finishedUtc",
+          "tracks"
+        ],
+        "type": "object",
+        "properties": {
+          "albumId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "folder": {
+            "type": "string"
+          },
+          "downloaded": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "finishedUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackDownload"
+            }
           }
         }
       },
@@ -1543,6 +2060,59 @@
           },
           "detail": {
             "type": "string"
+          }
+        }
+      },
+      "AlbumReplacement": {
+        "required": [
+          "folder",
+          "downloadedTo",
+          "verdict",
+          "archived",
+          "archivedTo",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "downloadedTo": {
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ReplacementVerdict"
+          },
+          "archived": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "archivedTo": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "AlbumUpgrade": {
+        "required": [
+          "download",
+          "replacement"
+        ],
+        "type": "object",
+        "properties": {
+          "download": {
+            "$ref": "#/components/schemas/AlbumDownload"
+          },
+          "replacement": {
+            "$ref": "#/components/schemas/AlbumReplacement"
           }
         }
       },
@@ -2891,6 +3461,82 @@
           }
         }
       },
+      "IncompleteAlbum": {
+        "required": [
+          "releaseId",
+          "mbid",
+          "folder",
+          "title",
+          "artist",
+          "year",
+          "query",
+          "mediumFormats",
+          "trackCount",
+          "held",
+          "unmatched",
+          "missing"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "query": {
+            "type": "string"
+          },
+          "mediumFormats": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "held": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unmatched": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissingTrack"
+            }
+          }
+        }
+      },
       "IncompleteRelease": {
         "required": [
           "releaseId",
@@ -3028,6 +3674,30 @@
             "items": {
               "$ref": "#/components/schemas/OpenQuestion"
             }
+          }
+        }
+      },
+      "MissingTrack": {
+        "required": [
+          "disc",
+          "position",
+          "title"
+        ],
+        "type": "object",
+        "properties": {
+          "disc": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3180,6 +3850,183 @@
           }
         }
       },
+      "ProbeCoverage": {
+        "required": [
+          "files",
+          "pending",
+          "measured",
+          "corrupt",
+          "unreadable",
+          "unchecked",
+          "damaged"
+        ],
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "measured": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "corrupt": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unreadable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unchecked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "damaged": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ProbeStartedResponse": {
+        "required": [
+          "jobId",
+          "pending"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ProbeStatusResponse": {
+        "required": [
+          "running",
+          "jobId",
+          "processed",
+          "total",
+          "currentFile",
+          "coverage",
+          "lastError",
+          "lastCompleted"
+        ],
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentFile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/ProbeCoverage"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastCompleted": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProbeSummary"
+              }
+            ]
+          }
+        }
+      },
+      "ProbeSummary": {
+        "required": [
+          "jobId",
+          "startedAtUtc",
+          "completedAtUtc",
+          "durationMilliseconds",
+          "examined",
+          "measured",
+          "complained",
+          "unreadable",
+          "failed",
+          "skipped",
+          "cancelled"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMilliseconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "examined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "measured": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "complained": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unreadable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cancelled": {
+            "type": "boolean"
+          }
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "properties": {
@@ -3213,6 +4060,167 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "QobuzAlbumResponse": {
+        "required": [
+          "album",
+          "tracks"
+        ],
+        "type": "object",
+        "properties": {
+          "album": {
+            "$ref": "#/components/schemas/QobuzAlbumSummary"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QobuzTrackResponse"
+            }
+          }
+        }
+      },
+      "QobuzAlbumSummary": {
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "releaseDate",
+          "trackCount",
+          "discCount",
+          "hiRes",
+          "maximumBitDepth",
+          "maximumSamplingRate",
+          "streamable",
+          "coverUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "releaseDate": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trackCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "discCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hiRes": {
+            "type": "boolean"
+          },
+          "maximumBitDepth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "maximumSamplingRate": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "streamable": {
+            "type": "boolean"
+          },
+          "coverUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "QobuzStatusResponse": {
+        "required": [
+          "configured",
+          "canDownload",
+          "formatId",
+          "libraryPath",
+          "busy"
+        ],
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "canDownload": {
+            "type": "boolean"
+          },
+          "formatId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "libraryPath": {
+            "type": "string"
+          },
+          "busy": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QobuzTrackResponse": {
+        "required": [
+          "id",
+          "title",
+          "discNumber",
+          "trackNumber",
+          "performer",
+          "durationSeconds",
+          "streamable"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "discNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trackNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "performer": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "durationSeconds": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "streamable": {
+            "type": "boolean"
           }
         }
       },
@@ -3909,6 +4917,7 @@
           "position",
           "number",
           "title",
+          "workTitle",
           "duration",
           "recordingId",
           "held",
@@ -3933,6 +4942,12 @@
           "title": {
             "type": "string"
           },
+          "workTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "duration": {
             "type": [
               "null",
@@ -3953,6 +4968,18 @@
             }
           }
         }
+      },
+      "ReplacementVerdict": {
+        "enum": [
+          "Replace",
+          "NothingArrived",
+          "Incomplete",
+          "NotBetter",
+          "NotMeasured",
+          "ArrivalNotMeasured",
+          "LandedInside",
+          "NotHeld"
+        ]
       },
       "SeedField": {
         "required": [
@@ -4127,9 +5154,172 @@
           }
         }
       },
+      "TagWriteStartedResponse": {
+        "required": [
+          "jobId",
+          "scope",
+          "files",
+          "willWrite"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "willWrite": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TagWriteStatusResponse": {
+        "required": [
+          "running",
+          "jobId",
+          "scope",
+          "processed",
+          "total",
+          "currentFile",
+          "files",
+          "willWrite",
+          "lastError",
+          "lastCompleted"
+        ],
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentFile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "willWrite": {
+            "type": "boolean"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastCompleted": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagWriteSummary"
+              }
+            ]
+          }
+        }
+      },
+      "TagWriteSummary": {
+        "required": [
+          "jobId",
+          "scope",
+          "startedAtUtc",
+          "completedAtUtc",
+          "durationMilliseconds",
+          "examined",
+          "written",
+          "unchanged",
+          "refused",
+          "unsupported",
+          "failed",
+          "skipped",
+          "cancelled"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMilliseconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "examined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "written": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refused": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unsupported": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cancelled": {
+            "type": "boolean"
+          }
+        }
+      },
       "TrackAlbum": {
         "required": [
           "releaseId",
+          "mbid",
           "title",
           "year"
         ],
@@ -4137,6 +5327,13 @@
         "properties": {
           "releaseId": {
             "type": "string",
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "uuid"
           },
           "title": {
@@ -4150,6 +5347,89 @@
             "format": "int32"
           }
         }
+      },
+      "TrackDownload": {
+        "required": [
+          "trackId",
+          "discNumber",
+          "trackNumber",
+          "title",
+          "outcome",
+          "path",
+          "sizeBytes",
+          "formatId",
+          "bitDepth",
+          "samplingRate",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "discNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trackNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/TrackOutcome"
+          },
+          "path": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sizeBytes": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int64"
+          },
+          "formatId": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "bitDepth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "samplingRate": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "TrackOutcome": {
+        "enum": [
+          "Downloaded",
+          "Skipped",
+          "Failed"
+        ]
       },
       "TrackRow": {
         "required": [
@@ -4209,6 +5489,124 @@
             }
           }
         }
+      },
+      "UpgradeCandidate": {
+        "required": [
+          "releaseId",
+          "mbid",
+          "folder",
+          "title",
+          "artist",
+          "year",
+          "query",
+          "reason",
+          "files",
+          "upgradable",
+          "formats"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "query": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "upgradable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UpgradeListResponse": {
+        "required": [
+          "files",
+          "items",
+          "incomplete",
+          "unmatchedAlbums"
+        ],
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpgradeCandidate"
+            }
+          },
+          "incomplete": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IncompleteAlbum"
+            }
+          },
+          "unmatchedAlbums": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "UpgradeRequest": {
+        "required": [
+          "folder",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       }
     }
   },
@@ -4221,6 +5619,9 @@
     },
     {
       "name": "Catalogue"
+    },
+    {
+      "name": "Qobuz"
     }
   ]
 }

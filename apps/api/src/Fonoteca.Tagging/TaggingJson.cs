@@ -3,37 +3,26 @@ using System.Text.Json.Serialization;
 namespace Fonoteca.Tagging;
 
 /// <summary>
-/// The undo journal's payload for one AcoustID write.
+/// The undo journal's payload for one write, however many fields it touched.
 /// </summary>
 /// <remarks>
-/// Stored as JSONB in <c>DomainEvents.PayloadJson</c>, which is deliberately
-/// opaque to the log itself so a new event type never needs a migration.
+/// The AcoustID pass writes one
+/// field and the catalogue pass writes up to sixteen; one shape for both is
+/// what lets the two share the write sequence.
 ///
-/// Two things about the shape are load-bearing:
-///
-/// <b><see cref="Previous"/> is nullable and stays that way.</b> Null means the
-/// field was absent, so reversing the write means <i>removing</i> it; an empty
-/// string would mean it existed and was blank, so reversing means restoring a
-/// blank. Collapsing the two makes undo subtly wrong forever, and nothing would
-/// ever notice.
-///
-/// <b>Artwork is counted and hashed, never carried.</b> Three megabytes of cover
-/// art times 7,735 rows is roughly 23 GB of JSONB to record a 36-character
-/// change. The digests prove the pictures survived; they never need to restore
-/// them, because a write that lost artwork is aborted before it commits.
+/// The rules that shape it are unchanged, and both are load-bearing.
+/// <see cref="TagFieldWrite.Previous"/> is nullable and stays that way — null
+/// means the field was absent, so reversing means <i>removing</i> it, while an
+/// empty string would mean it existed and was blank. And artwork is counted and
+/// hashed, never carried: three megabytes of cover art times 7,735 rows is
+/// roughly 23 GB of JSONB to record a handful of strings.
 /// </remarks>
-public sealed record AcoustIdWritePayload
+public sealed record TagWritePayload
 {
     public required string Path { get; init; }
 
-    /// <summary>The field name as this container spells it — see <see cref="AcoustIdTagField"/>.</summary>
-    public required string Field { get; init; }
-
-    /// <summary>What the field held before. Null means it was not present.</summary>
-    public required string? Previous { get; init; }
-
-    /// <summary>What was written, or would have been.</summary>
-    public required string? Written { get; init; }
+    /// <summary>Every field the write touched, in the order the plan lists them.</summary>
+    public required IReadOnlyList<TagFieldWrite> Changes { get; init; }
 
     /// <summary>Why the write was refused or abandoned. Null on a committed write.</summary>
     public string? Reason { get; init; }
@@ -49,6 +38,18 @@ public sealed record AcoustIdWritePayload
     public required string Verifier { get; init; }
 }
 
+/// <summary>One field, as this container spells it, and what became of it.</summary>
+public sealed record TagFieldWrite
+{
+    public required string Field { get; init; }
+
+    /// <summary>What the field held before. Null means it was not present.</summary>
+    public required string? Previous { get; init; }
+
+    /// <summary>What was written, or would have been.</summary>
+    public required string? Written { get; init; }
+}
+
 /// <summary>
 /// Source-generated, matching the providers. A tagging pass serialises one of
 /// these per file across a library of 100,000.
@@ -56,5 +57,5 @@ public sealed record AcoustIdWritePayload
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
-[JsonSerializable(typeof(AcoustIdWritePayload))]
+[JsonSerializable(typeof(TagWritePayload))]
 public sealed partial class TaggingJson : JsonSerializerContext;

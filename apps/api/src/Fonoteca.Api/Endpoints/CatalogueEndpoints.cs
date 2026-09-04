@@ -248,7 +248,8 @@ public static partial class CatalogueEndpoints
             .WithName("GetArtists")
             .WithSummary("Artists with at least one track in the library.")
             .WithDescription(
-                "Ordered by sort name. `query` filters on the artist's name, case-insensitively, "
+                "Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep "
+                + "the alphabetical order. `query` filters on the artist's name, case-insensitively, "
                 + "anywhere in the string. An artist appears here if they are on a recording's "
                 + "credit line, are linked to it as a conductor or ensemble, or wrote the work it "
                 + "performs — and only when at least one file in the library holds that recording.");
@@ -262,7 +263,9 @@ public static partial class CatalogueEndpoints
             .WithName("GetReleases")
             .WithSummary("Albums the library holds at least one track of.")
             .WithDescription(
-                "Ordered by title. `query` filters on the release title, case-insensitively, "
+                "Ordered by title, or by `sort=year` (newest first, undated last) or "
+                + "`sort=artist` (the first billed name, uncredited last). "
+                + "`query` filters on the release title, case-insensitively, "
                 + "anywhere in the string. `held` against `trackCount` is what an incomplete rip "
                 + "looks like — though a CD+DVD-Video release is legitimately half missing on an "
                 + "audio-only library, which is why the medium formats are returned beside them.");
@@ -280,10 +283,11 @@ public static partial class CatalogueEndpoints
             .WithName("GetAttributionReport")
             .WithSummary("How the attributed albums compare with the folders on disk.")
             .WithDescription(
-                "The folders play no part in deciding which release a file came from. This is "
-                + "where they are used instead: as an independent second opinion. A folder split "
-                + "across releases, or a release spanning folders, is a disagreement worth a "
-                + "person's attention — and either side may be the wrong one.");
+                "The folder's boundary decides which files are considered together; its name "
+                + "plays no part in deciding which release they came from. This is where the two "
+                + "are compared. A release spanning folders is the disagreement worth a person's "
+                + "attention now that a folder can no longer be split across releases by the "
+                + "pass — and either side may be the wrong one.");
 
         group.MapGet("/matching", GetOpenQuestions)
             .WithName("GetOpenQuestions")
@@ -431,6 +435,7 @@ public static partial class CatalogueEndpoints
         // it. Its own partial for that reason alone — see
         // CatalogueEndpoints.Fingerprints.cs.
         MapFingerprintEndpoints(group);
+        MapTaggingEndpoints(group);
 
         // The step before any of the above can help: the album is not in
         // MusicBrainz at all. See CatalogueEndpoints.ReleaseSeed.cs.
@@ -443,6 +448,7 @@ public static partial class CatalogueEndpoints
         FonotecaDbContext db,
         CancellationToken cancellationToken,
         string? query = null,
+        string? sort = null,
         int skip = 0,
         int take = DefaultTake)
     {
@@ -496,7 +502,19 @@ public static partial class CatalogueEndpoints
             .Where(row => row.Recordings.Count > 0)
             .ToList();
 
-        var page = withTracks
+        // Sorted here rather than in SQL because the list is already in memory:
+        // the track count is not a column, it is the size of the recording set
+        // `RecordingsByArtistAsync` built, so PostgreSQL has nothing to order by.
+        //
+        // `OrderByDescending` is stable in LINQ to Objects, so artists sharing a
+        // count keep the sort-name order the collation above put them in — which
+        // is the only reason this can drop the ICU ordering and still be
+        // alphabetical within a tie.
+        var ordered = sort == "tracks"
+            ? withTracks.OrderByDescending(row => row.Recordings.Count).ToList()
+            : withTracks;
+
+        var page = ordered
             .Skip(from)
             .Take(wanted)
             .Select(row => new ArtistSummary(
@@ -568,10 +586,19 @@ public static partial class CatalogueEndpoints
                         f.ReleaseId,
                         ReleaseTitle = f.Release == null ? null : f.Release.Title,
                         ReleaseYear = f.Release == null ? null : f.Release.ReleasedYear,
+                        ReleaseMbid = f.Release == null ? null : f.Release.Mbid,
                     })
                     .ToList(),
             })
-            .OrderBy(row => row.Title)
+            // The work's title where there is one, the recording's where there is
+            // not — one alphabetical stream either way, with a symphony's
+            // movements landing consecutively under it rather than scattered by
+            // whatever each movement happens to be called. That consecutiveness
+            // is what the page's work grouping folds on; ordering by work *then*
+            // title instead would move every unworked track to the end, which is
+            // a rearrangement of a pop artist's page to serve a classical one.
+            .OrderBy(row => row.WorkTitle ?? row.Title)
+            .ThenBy(row => row.Title)
             .ThenBy(row => row.Id)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -590,6 +617,7 @@ public static partial class CatalogueEndpoints
                     .Where(file => file.ReleaseId != null)
                     .Select(file => new TrackAlbum(
                         file.ReleaseId!.Value.Value,
+                        file.ReleaseMbid?.Value,
                         file.ReleaseTitle!,
                         file.ReleaseYear))
                     .FirstOrDefault(),
@@ -615,6 +643,7 @@ public static partial class CatalogueEndpoints
         FonotecaDbContext db,
         CancellationToken cancellationToken,
         string? query = null,
+        string? sort = null,
         int skip = 0,
         int take = DefaultTake)
     {
@@ -635,8 +664,32 @@ public static partial class CatalogueEndpoints
 
         var total = await releases.CountAsync(cancellationToken).ConfigureAwait(false);
 
-        var rows = await releases
-            .OrderBy(release => release.Title)
+        // In SQL, because this endpoint pages in SQL: sorting the returned page
+        // would order 200 of 600 albums and call it a sort.
+        //
+        // The artist key is the *first* billed credit rather than the assembled
+        // line — `CreditLine` runs in memory below and cannot be ordered on —
+        // which is the same name that line starts with, so the two agree. An
+        // album billed to nobody has no key at all and PostgreSQL puts a null
+        // last on an ascending sort, which is where an anthology belongs.
+        //
+        // Undated albums go last on newest-first too, via the coalesce: an
+        // absent year is not year zero, and it is not this year either.
+        var sorted = sort switch
+        {
+            "year" => releases
+                .OrderByDescending(release => release.ReleasedYear ?? 0)
+                .ThenBy(release => release.Title),
+            "artist" => releases
+                .OrderBy(release => release.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => credit.CreditedAs ?? credit.Artist!.Name)
+                    .FirstOrDefault())
+                .ThenBy(release => release.Title),
+            _ => releases.OrderBy(release => release.Title),
+        };
+
+        var rows = await sorted
             .ThenBy(release => release.Id)
             .Skip(skip)
             .Take(take)
@@ -742,6 +795,12 @@ public static partial class CatalogueEndpoints
                 track.Length,
                 RecordingId = track.RecordingId,
 
+                // The composition the recording performs, so the track list can
+                // gather four movements under one heading. Null on everything
+                // that is not classical, which is most of a library — the page
+                // reads the absence and stays a flat list.
+                WorkTitle = track.Recording!.Work == null ? null : track.Recording.Work.Title,
+
                 // Files linked to *this track*, not merely holding the same
                 // recording. A recording the library owns twice — once here and
                 // once on a compilation — must not make both look held.
@@ -760,6 +819,7 @@ public static partial class CatalogueEndpoints
                 track.Position,
                 track.Number,
                 track.Title ?? string.Empty,
+                track.WorkTitle,
                 Format(track.Length),
                 track.RecordingId.Value,
                 track.Files.Count > 0,
@@ -2031,14 +2091,14 @@ public static partial class CatalogueEndpoints
     /// than a request". That is true of <i>forming</i> a component and not of
     /// re-asking about one that already exists.
     ///
-    /// <b>The expansion is the expensive half, and it is already paid for.</b>
-    /// The pass browses a recording, fetches the releases it names, reads back
-    /// which of their tracks the library holds, admits those files and browses
-    /// <i>their</i> recordings — unbounded, and the reason a component can reach
-    /// six hundred files. None of that is needed here: the component's members
-    /// are written down, in the <c>ReleaseLookupUtc</c> they share. What is left
-    /// is one browse per distinct recording and one lookup per release actually
-    /// offered, which is bounded, small, and a wait rather than a job.
+    /// <b>The gather is the expensive half, and it is already paid for.</b> The
+    /// pass browses every recording in the album folder and fetches the track
+    /// list of each release worth one — bounded by the folder, which runs to
+    /// about two hundred files at the worst on this library. None of it is
+    /// needed here: the component's members are written down, in the
+    /// <c>ReleaseLookupUtc</c> they share. What is left is one browse per
+    /// distinct recording and one lookup per release actually offered, which is
+    /// bounded, small, and a wait rather than a job.
     ///
     /// <b>Nothing is cached and nothing is written.</b> A recording's candidate
     /// set is cached because a person returns to a file; a component is opened,
@@ -2047,11 +2107,12 @@ public static partial class CatalogueEndpoints
     /// says now, not what it said a week ago.
     ///
     /// <b>The prune is by support, and it is a ranking rather than a gate.</b>
-    /// The pass's <c>WorthFetching</c> is careful not to discard a release the
-    /// library owns most of, and two live runs paid for that care. Here the
-    /// equivalent mistake is unavailable: nothing is discarded, the releases are
-    /// ordered by how many of the component's recordings each holds and the tail
-    /// is simply not looked up. <c>Total</c> says how long the tail was.
+    /// The pass's <c>WorthFetching</c> does discard, and is careful about it
+    /// because two live runs paid for the care. Here nothing is discarded: the
+    /// releases are ordered by how many of the component's recordings each holds
+    /// and the tail is simply not looked up. <c>Total</c> says how long the tail
+    /// was. That asymmetry is deliberate — it is what makes this endpoint able to
+    /// answer a question the pass pruned itself out of.
     /// </remarks>
     internal static async Task<Results<Ok<ComponentCandidatesResponse>, ProblemHttpResult>>
         GetComponentCandidates(
@@ -2768,7 +2829,7 @@ public static partial class CatalogueEndpoints
     /// rather than inserted between — which is what keeps "feat." and "&amp;" and
     /// ", " each in the place the sleeve put them.
     /// </remarks>
-    private static string? CreditLine(IEnumerable<(string Name, string? JoinPhrase)> credits)
+    internal static string? CreditLine(IEnumerable<(string Name, string? JoinPhrase)> credits)
     {
         var line = string.Concat(credits.Select(credit => credit.Name + credit.JoinPhrase));
         return string.IsNullOrWhiteSpace(line) ? null : line;
@@ -3042,7 +3103,13 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>The recordings one artist is responsible for.</summary>
-    private static async Task<HashSet<RecordingId>> RecordingsOfAsync(
+    /// <remarks>
+    /// Internal rather than private because the tag-write pass scopes an
+    /// artist's button by it: the files it rewrites are exactly the tracks the
+    /// artist page lists, and a second definition of "this artist's recordings"
+    /// would put a composer's symphonies in one and not the other.
+    /// </remarks>
+    internal static async Task<HashSet<RecordingId>> RecordingsOfAsync(
         FonotecaDbContext db,
         ArtistId artist,
         CancellationToken cancellationToken)
@@ -3259,7 +3326,12 @@ public sealed record TrackRow(
     IReadOnlyList<FileRow> Files);
 
 /// <summary>The album a track was attributed to, as much of it as a row needs.</summary>
-public sealed record TrackAlbum(Guid ReleaseId, string Title, int? Year);
+/// <param name="Mbid">
+/// The MusicBrainz release id, which is also the Cover Art Archive's key — the
+/// artist page groups these rows into albums and draws a cover for each, and
+/// without it every one of them falls back to a monogram.
+/// </param>
+public sealed record TrackAlbum(Guid ReleaseId, Guid? Mbid, string Title, int? Year);
 
 public sealed record FileRow(string Path, long SizeBytes);
 
@@ -3320,12 +3392,17 @@ public sealed record ReleaseDetailResponse(
     int Contributable);
 
 /// <param name="Number">The printed number, which is not always the position: "A1", "12a".</param>
+/// <param name="WorkTitle">
+/// The composition this track performs, when MusicBrainz links one — usually
+/// null outside classical, where it is the heading four movements sit under.
+/// </param>
 /// <param name="Held">Whether the library has a file filed under this track.</param>
 public sealed record ReleaseTrackRow(
     int DiscNumber,
     int Position,
     string? Number,
     string Title,
+    string? WorkTitle,
     string? Duration,
     Guid RecordingId,
     bool Held,

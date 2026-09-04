@@ -59,3 +59,24 @@
   color: var(--color-text-tertiary);
   font-size: var(--font-size-xs);
 }
+
+/*
+ * The work heading above a row group, in two cells rather than one spanning the
+ * table.
+ *
+ * The inline padding matches Table's `.cell` exactly, which is the whole point:
+ * the work title has to start on the same pixel as the movement titles beneath
+ * it, or the heading reads as a band laid over the table instead of as its
+ * first line. A `<th>` rather than a styled row because it is the row group's
+ * name, and the element carries that for a screen reader as well as for the eye
+ * — aligned to the start against the browser's centred default.
+ */
+.work,
+.workGutter {
+  padding: var(--space-8) var(--space-8) var(--space-4);
+  background-color: var(--color-surface-sunken);
+}
+
+.work {
+  text-align: start;
+}

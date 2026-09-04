@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
@@ -120,18 +121,31 @@ builder.Services.AddSingleton(new TagWriterOptions
 builder.Services.AddScoped<IEventLog, EventLog>();
 builder.Services.AddScoped<AcoustIdTagWriter>();
 
+// The same verified write path, told what to write rather than knowing. Scoped
+// beside the one above because both need a request's IEventLog.
+builder.Services.AddScoped<TagWriter>();
+
 // One at a time across the whole library: a scan clears the very columns an
 // identification pass is filling in, so the two must not overlap.
 builder.Services.AddSingleton<LibraryWorkGate>();
 builder.Services.AddSingleton<IdentificationService>();
 builder.Services.AddSingleton<EnrichmentService>();
 builder.Services.AddSingleton<ReleaseAttributionService>();
+builder.Services.AddSingleton<ProbeService>();
+
+// The one pass that rewrites audio files, and the only one nothing may start on
+// its own — see TagWriteService. It is here because it is a pass; it is reached
+// only from a button because of what it does.
+builder.Services.AddSingleton<TagWriteService>();
+builder.Services.AddScoped<AlbumReplacementService>();
 
 // Registered as a hosted service as well as a singleton, so shutdown cancels a
 // running pass and waits for it rather than severing it mid-write.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EnrichmentService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ReleaseAttributionService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ProbeService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TagWriteService>());
 
 // The worklist's answers, built before somebody clicks rather than while they
 // wait. Hosted only — nothing else holds a reference to it.
@@ -161,6 +175,31 @@ builder.Services.AddMusicBrainz(options =>
     // to a build. An honest User-Agent is the whole basis of their rate policy.
     options.ApplicationVersion = ThisAssembly.Version;
 });
+
+// Manual acquisition. Registered unconditionally like the other two, so an
+// unconfigured instance answers "not configured" from the endpoint rather than
+// failing to resolve a service. Nothing here runs on its own: no hosted
+// service, no worklist, no schedule.
+builder.Services.AddQobuz(options =>
+{
+    var qobuz = fonoteca.Providers.Qobuz;
+
+    options.AppId = qobuz.AppId;
+    options.AppSecret = qobuz.AppSecret;
+    options.UserAuthToken = qobuz.UserAuthToken;
+    options.FormatId = qobuz.FormatId;
+
+    // Clamped here rather than annotated on the options class: these settings
+    // are nested, and ValidateDataAnnotations does not recurse into complex
+    // properties — so a [Range] on them never runs. A negative value would
+    // otherwise reach RequestGate's own guard and throw at first resolve,
+    // which is a stack trace where a slow default belongs.
+    options.MinimumRequestInterval =
+        TimeSpan.FromMilliseconds(Math.Clamp(qobuz.MinRequestIntervalMs, 0, 60_000));
+});
+
+// Singleton, because the one-at-a-time semaphore in it has to be one semaphore.
+builder.Services.AddSingleton<QobuzDownloadService>();
 
 // ---------------------------------------------------------------------------
 // Web
@@ -226,6 +265,7 @@ app.MapHealthChecks("/health");
 app.MapSystemEndpoints();
 app.MapLibraryEndpoints();
 app.MapCatalogueEndpoints();
+app.MapQobuzEndpoints();
 app.MapHub<JobsHub>(JobsHub.Route);
 
 await app.RunAsync().ConfigureAwait(false);

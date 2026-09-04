@@ -1842,8 +1842,9 @@ function TheseFiles({
 /**
  * How many of a component's files are named before the list starts counting.
  *
- * A component can legitimately reach six hundred files. Enough to recognise the
- * record, then the count — the same judgement `FOLDERS_SHOWN` makes.
+ * A component is an album folder, which reaches two hundred files at the worst
+ * on this library. Enough to recognise the record, then the count — the same
+ * judgement `FOLDERS_SHOWN` makes.
  */
 const FILES_SHOWN = 12
 

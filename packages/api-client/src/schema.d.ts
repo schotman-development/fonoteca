@@ -103,6 +103,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many files have never been measured, and what the last pass found. */
+        get: operations["GetLibraryProbeStatus"];
+        put?: never;
+        /**
+         * Measure every file: codec, depth, rate, and whether it still decodes.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. Decodes each file rather than reading its header, which is what lets it answer both what the audio is and whether it is intact — measured at 0.63s a file, so roughly twenty minutes for eight thousand at the default concurrency. Fills MediaFile.Quality, which is what the upgrade list needs to see a CD-quality rip against a hi-res master. Writes no file and needs the library volume mounted.
+         */
+        post: operations["StartLibraryProbe"];
+        /** Ask the running pass to stop after the page it is on. */
+        delete: operations["CancelLibraryProbe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/attribute": {
         parameters: {
             query?: never;
@@ -115,11 +137,33 @@ export interface paths {
         put?: never;
         /**
          * Work out which album each identified file came from.
-         * @description Returns immediately with a job id; progress arrives on the jobs hub. Decides files in sets rather than one at a time — a single file cannot name its release, since one recording appears on the album, on compilations and on every regional pressing. The folders are not consulted: a set is discovered by following shared candidate releases, and the answer is checked against the folders afterwards at GET /api/catalogue/attribution. Opens no file and modifies none.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. Decides files in sets rather than one at a time — a single file cannot name its release, since one recording appears on the album, on compilations and on every regional pressing. The set is one album folder: the folder's boundary is taken as the grouping, its name is never read, and the release is decided from the audio. Opens no file and modifies none.
          */
         post: operations["StartReleaseAttribution"];
         /** Ask the running pass to stop after the set it is on. */
         delete: operations["CancelReleaseAttribution"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether a tag write is running, how many files it could cover, and how the last one went. */
+        get: operations["GetLibraryTagWriteStatus"];
+        put?: never;
+        /**
+         * Write everything the catalogue knows back into the library's files.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. The last step of the chain and the only one that is never automatic: scan, identify, enrich and attribute all write to a database, and this is what makes their answers portable. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file that has a recording, a track and a release. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write. Same pass as the per-album and per-artist buttons, with no scope.
+         */
+        post: operations["StartLibraryTagWrite"];
+        /** Ask the running tag write to stop after the file it is on. */
+        delete: operations["CancelLibraryTagWrite"];
         options?: never;
         head?: never;
         patch?: never;
@@ -134,7 +178,7 @@ export interface paths {
         };
         /**
          * Artists with at least one track in the library.
-         * @description Ordered by sort name. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.
+         * @description Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.
          */
         get: operations["GetArtists"];
         put?: never;
@@ -171,7 +215,7 @@ export interface paths {
         };
         /**
          * Albums the library holds at least one track of.
-         * @description Ordered by title. `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
+         * @description Ordered by title, or by `sort=year` (newest first, undated last) or `sort=artist` (the first billed name, uncredited last). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
          */
         get: operations["GetReleases"];
         put?: never;
@@ -211,7 +255,7 @@ export interface paths {
         };
         /**
          * How the attributed albums compare with the folders on disk.
-         * @description The folders play no part in deciding which release a file came from. This is where they are used instead: as an independent second opinion. A folder split across releases, or a release spanning folders, is a disagreement worth a person's attention — and either side may be the wrong one.
+         * @description The folder's boundary decides which files are considered together; its name plays no part in deciding which release they came from. This is where the two are compared. A release spanning folders is the disagreement worth a person's attention now that a folder can no longer be split across releases by the pass — and either side may be the wrong one.
          */
         get: operations["GetAttributionReport"];
         put?: never;
@@ -542,6 +586,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/releases/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write what the catalogue knows about this album into its files.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file that has a recording, a track and a release. Never automatic. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write.
+         */
+        post: operations["WriteReleaseTags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/artists/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write what the catalogue knows about this artist's tracks into their files.
+         * @description The album endpoint's rule over every recording this artist is responsible for — billed, linked as conductor or ensemble, or a writer of the work — which is the same set the artist page lists. Returns immediately with a job id. Never automatic.
+         */
+        post: operations["WriteArtistTags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/matching/folders/seed": {
         parameters: {
             query?: never;
@@ -566,6 +650,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/qobuz/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether this instance can search and download, and at what quality. */
+        get: operations["GetQobuzStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/qobuz/upgrades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Albums worth buying: held in a lossy encoding, or held in part.
+         * @description Two lists, both read out of the catalogue with no request to Qobuz. `items` is quality — an album held in something worse than Qobuz sells. `incomplete` is completeness — an album whose release prints more tracks than the library holds, minus the ones whose folder still has unmatched files in it that could account for the gap.
+         */
+        get: operations["ListQobuzUpgrades"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/qobuz/albums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search the Qobuz catalogue for albums. */
+        get: operations["SearchQobuzAlbums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/qobuz/albums/{albumId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One album with its track list. */
+        get: operations["GetQobuzAlbum"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/qobuz/albums/{albumId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch every streamable track of an album into the library. */
+        post: operations["DownloadQobuzAlbum"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/qobuz/albums/{albumId}/upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download an album and retire the one in the library it replaces.
+         * @description Downloads first, measures what landed, and only then decides. Refuses if fewer tracks arrived than the album holds, if what arrived is no better than the best file already there, or if nothing has measured the old album. Nothing is deleted — the old files are moved to Fonoteca:ReplacedPath keeping their layout, and only when Fonoteca:AllowFileReplacement is on.
+         */
+        post: operations["UpgradeQobuzAlbum"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -577,6 +769,19 @@ export interface components {
             score: number;
             /** Format: int32 */
             recordings: number;
+        };
+        AlbumDownload: {
+            albumId: string;
+            title: string;
+            artist: null | string;
+            folder: string;
+            /** Format: int32 */
+            downloaded: number;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: date-time */
+            finishedUtc: string;
+            tracks: components["schemas"]["TrackDownload"][];
         };
         AlbumFilingPair: {
             /** Format: uuid */
@@ -600,6 +805,19 @@ export interface components {
             /** Format: int32 */
             skipped: number;
             detail: string;
+        };
+        AlbumReplacement: {
+            folder: string;
+            downloadedTo: string;
+            verdict: components["schemas"]["ReplacementVerdict"];
+            /** Format: int32 */
+            archived: number;
+            archivedTo: null | string;
+            detail: null | string;
+        };
+        AlbumUpgrade: {
+            download: components["schemas"]["AlbumDownload"];
+            replacement: components["schemas"]["AlbumReplacement"];
         };
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];
@@ -975,6 +1193,26 @@ export interface components {
             failed: number;
             cancelled: boolean;
         };
+        IncompleteAlbum: {
+            /** Format: uuid */
+            releaseId: string;
+            /** Format: uuid */
+            mbid: null | string;
+            folder: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            query: string;
+            mediumFormats: null | string;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: int32 */
+            held: number;
+            /** Format: int32 */
+            unmatched: number;
+            missing: components["schemas"]["MissingTrack"][];
+        };
         IncompleteRelease: {
             /** Format: uuid */
             releaseId: string;
@@ -1016,6 +1254,13 @@ export interface components {
             reasons: components["schemas"]["OpenQuestionCount"][];
             items: components["schemas"]["OpenQuestion"][];
         };
+        MissingTrack: {
+            /** Format: int32 */
+            disc: number;
+            /** Format: int32 */
+            position: number;
+            title: null | string;
+        };
         MusicBrainzHealthResponse: {
             server: string;
             isOfficialServer: boolean;
@@ -1055,6 +1300,60 @@ export interface components {
             /** Format: int32 */
             files: number;
         };
+        ProbeCoverage: {
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            pending: number;
+            /** Format: int32 */
+            measured: number;
+            /** Format: int32 */
+            corrupt: number;
+            /** Format: int32 */
+            unreadable: number;
+            /** Format: int32 */
+            unchecked: number;
+            damaged: string[];
+        };
+        ProbeStartedResponse: {
+            jobId: string;
+            /** Format: int32 */
+            pending: number;
+        };
+        ProbeStatusResponse: {
+            running: boolean;
+            jobId: null | string;
+            /** Format: int32 */
+            processed: number;
+            /** Format: int32 */
+            total: number;
+            currentFile: null | string;
+            coverage: components["schemas"]["ProbeCoverage"];
+            lastError: null | string;
+            lastCompleted: null | components["schemas"]["ProbeSummary"];
+        };
+        ProbeSummary: {
+            jobId: string;
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number;
+            /** Format: int32 */
+            examined: number;
+            /** Format: int32 */
+            measured: number;
+            /** Format: int32 */
+            complained: number;
+            /** Format: int32 */
+            unreadable: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            skipped: number;
+            cancelled: boolean;
+        };
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
@@ -1062,6 +1361,48 @@ export interface components {
             status?: null | number;
             detail?: null | string;
             instance?: null | string;
+        };
+        QobuzAlbumResponse: {
+            album: components["schemas"]["QobuzAlbumSummary"];
+            tracks: components["schemas"]["QobuzTrackResponse"][];
+        };
+        QobuzAlbumSummary: {
+            id: string;
+            title: string;
+            artist: null | string;
+            releaseDate: null | string;
+            /** Format: int32 */
+            trackCount: number;
+            /** Format: int32 */
+            discCount: number;
+            hiRes: boolean;
+            /** Format: int32 */
+            maximumBitDepth: null | number;
+            /** Format: double */
+            maximumSamplingRate: null | number;
+            streamable: boolean;
+            coverUrl: null | string;
+        };
+        QobuzStatusResponse: {
+            configured: boolean;
+            canDownload: boolean;
+            /** Format: int32 */
+            formatId: number;
+            libraryPath: string;
+            busy: boolean;
+        };
+        QobuzTrackResponse: {
+            /** Format: int64 */
+            id: number;
+            title: string;
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            trackNumber: number;
+            performer: null | string;
+            /** Format: int32 */
+            durationSeconds: null | number;
+            streamable: boolean;
         };
         RecordingCandidateRow: {
             /** Format: uuid */
@@ -1236,12 +1577,15 @@ export interface components {
             position: number;
             number: null | string;
             title: string;
+            workTitle: null | string;
             duration: null | string;
             /** Format: uuid */
             recordingId: string;
             held: boolean;
             files: components["schemas"]["FileRow"][];
         };
+        /** @enum {unknown} */
+        ReplacementVerdict: "Replace" | "NothingArrived" | "Incomplete" | "NotBetter" | "NotMeasured" | "ArrivalNotMeasured" | "LandedInside" | "NotHeld";
         SeedField: {
             name: string;
             value: string;
@@ -1282,13 +1626,84 @@ export interface components {
             fileMutationAllowed: boolean;
             counts: components["schemas"]["CatalogueCounts"];
         };
+        TagWriteStartedResponse: {
+            jobId: string;
+            scope: string;
+            /** Format: int32 */
+            files: number;
+            willWrite: boolean;
+        };
+        TagWriteStatusResponse: {
+            running: boolean;
+            jobId: null | string;
+            scope: null | string;
+            /** Format: int32 */
+            processed: number;
+            /** Format: int32 */
+            total: number;
+            currentFile: null | string;
+            /** Format: int32 */
+            files: number;
+            willWrite: boolean;
+            lastError: null | string;
+            lastCompleted: null | components["schemas"]["TagWriteSummary"];
+        };
+        TagWriteSummary: {
+            jobId: string;
+            scope: string;
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number;
+            /** Format: int32 */
+            examined: number;
+            /** Format: int32 */
+            written: number;
+            /** Format: int32 */
+            unchanged: number;
+            /** Format: int32 */
+            refused: number;
+            /** Format: int32 */
+            unsupported: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            skipped: number;
+            cancelled: boolean;
+        };
         TrackAlbum: {
             /** Format: uuid */
             releaseId: string;
+            /** Format: uuid */
+            mbid: null | string;
             title: string;
             /** Format: int32 */
             year: null | number;
         };
+        TrackDownload: {
+            /** Format: int64 */
+            trackId: number;
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            trackNumber: number;
+            title: string;
+            outcome: components["schemas"]["TrackOutcome"];
+            path: null | string;
+            /** Format: int64 */
+            sizeBytes: null | number;
+            /** Format: int32 */
+            formatId: null | number;
+            /** Format: int32 */
+            bitDepth: null | number;
+            /** Format: double */
+            samplingRate: null | number;
+            detail: null | string;
+        };
+        /** @enum {unknown} */
+        TrackOutcome: "Downloaded" | "Skipped" | "Failed";
         TrackRow: {
             /** Format: uuid */
             recordingId: string;
@@ -1299,6 +1714,37 @@ export interface components {
             album: null | components["schemas"]["TrackAlbum"];
             folder: string;
             files: components["schemas"]["FileRow"][];
+        };
+        UpgradeCandidate: {
+            /** Format: uuid */
+            releaseId: null | string;
+            /** Format: uuid */
+            mbid: null | string;
+            folder: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            query: string;
+            reason: string;
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            upgradable: number;
+            formats: string[];
+        };
+        UpgradeListResponse: {
+            /** Format: int32 */
+            files: number;
+            items: components["schemas"]["UpgradeCandidate"][];
+            incomplete: components["schemas"]["IncompleteAlbum"][];
+            /** Format: int32 */
+            unmatchedAlbums: number;
+        };
+        UpgradeRequest: {
+            folder: string;
+            /** Format: int32 */
+            files: number;
         };
     };
     responses: never;
@@ -1568,6 +2014,82 @@ export interface operations {
             };
         };
     };
+    GetLibraryProbeStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeStatusResponse"];
+                };
+            };
+        };
+    };
+    StartLibraryProbe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeStartedResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelLibraryProbe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     GetReleaseAttributionStatus: {
         parameters: {
             query?: never;
@@ -1644,10 +2166,87 @@ export interface operations {
             };
         };
     };
+    GetLibraryTagWriteStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagWriteStatusResponse"];
+                };
+            };
+        };
+    };
+    StartLibraryTagWrite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagWriteStartedResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelLibraryTagWrite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     GetArtists: {
         parameters: {
             query?: {
                 query?: string;
+                sort?: string;
                 skip?: number;
                 take?: number;
             };
@@ -1703,6 +2302,7 @@ export interface operations {
         parameters: {
             query?: {
                 query?: string;
+                sort?: string;
                 skip?: number;
                 take?: number;
             };
@@ -2417,6 +3017,86 @@ export interface operations {
             };
         };
     };
+    WriteReleaseTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagWriteStartedResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    WriteArtistTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagWriteStartedResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     SeedRelease: {
         parameters: {
             query?: {
@@ -2448,6 +3128,155 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetQobuzStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QobuzStatusResponse"];
+                };
+            };
+        };
+    };
+    ListQobuzUpgrades: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradeListResponse"];
+                };
+            };
+        };
+    };
+    SearchQobuzAlbums: {
+        parameters: {
+            query: {
+                query: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QobuzAlbumSummary"][];
+                };
+            };
+        };
+    };
+    GetQobuzAlbum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                albumId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QobuzAlbumResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    DownloadQobuzAlbum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                albumId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumDownload"];
+                };
+            };
+        };
+    };
+    UpgradeQobuzAlbum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                albumId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpgradeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumUpgrade"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

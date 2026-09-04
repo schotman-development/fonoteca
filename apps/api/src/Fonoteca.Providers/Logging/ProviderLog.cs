@@ -10,6 +10,7 @@ namespace Fonoteca.Providers.Logging;
 /// continued here because these live in another assembly:
 ///   1300-1349  AcoustID
 ///   1350-1399  MusicBrainz
+///   1400-1449  Qobuz
 ///
 /// Deliberately sparse. An identification pass makes one of these calls per
 /// file, so anything logged per lookup is logged 100,000 times — Debug is where
@@ -59,4 +60,10 @@ internal static partial class ProviderLog
         string server,
         double intervalMs,
         string userAgent);
+
+    [LoggerMessage(
+        EventId = 1400,
+        Level = LogLevel.Debug,
+        Message = "Qobuz search for {Query} returned {Matches} albums")]
+    public static partial void QobuzSearched(ILogger logger, string query, int matches);
 }

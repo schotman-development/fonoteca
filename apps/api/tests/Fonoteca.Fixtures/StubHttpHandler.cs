@@ -3,7 +3,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Text;
 
-namespace Fonoteca.Providers.Tests;
+namespace Fonoteca.Fixtures;
 
 /// <summary>
 /// The fake socket: answers from a delegate and records everything that was sent.
@@ -14,8 +14,12 @@ namespace Fonoteca.Providers.Tests;
 /// settings — is still in the chain above it. That is what makes these tests
 /// worth more than a mocked client would be: the thing under test is the wiring
 /// as much as the code.
+///
+/// In Fonoteca.Fixtures rather than beside the provider tests because two suites
+/// now need it: the adapters, and the download path in Fonoteca.Api. A second
+/// copy would be a second set of rules about what counts as a recorded request.
 /// </remarks>
-internal sealed class StubHttpHandler(
+public sealed class StubHttpHandler(
     Func<RecordedRequest, CancellationToken, Task<HttpResponseMessage>> respond)
     : HttpMessageHandler
 {
@@ -36,7 +40,7 @@ internal sealed class StubHttpHandler(
     {
         var body = request.Content is null
             ? []
-            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
 
         var recorded = new RecordedRequest
         {
@@ -48,6 +52,10 @@ internal sealed class StubHttpHandler(
             ContentEncoding = request.Content is null
                 ? []
                 : [.. request.Content.Headers.ContentEncoding],
+            AllHeaders = request.Headers.ToDictionary(
+                static header => header.Key,
+                static header => (IReadOnlyList<string>)[.. header.Value],
+                StringComparer.OrdinalIgnoreCase),
             Body = body,
         };
 
@@ -56,7 +64,7 @@ internal sealed class StubHttpHandler(
         // The token is passed on so a stub can model a server that never
         // answers — the caller's timeout is then what ends the wait, which is
         // the only way to test that there is one.
-        return await respond(recorded, cancellationToken);
+        return await respond(recorded, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Always answers with this status and body.</summary>
@@ -68,13 +76,25 @@ internal sealed class StubHttpHandler(
 }
 
 /// <summary>One request as it left the pipeline.</summary>
-internal sealed record RecordedRequest
+public sealed record RecordedRequest
 {
     public required HttpMethod Method { get; init; }
     public required Uri Uri { get; init; }
     public required string? UserAgent { get; init; }
     public required IReadOnlyList<string> ContentEncoding { get; init; }
+
+    /// <summary>Every request header that reached the wire, by name.</summary>
+    /// <remarks>
+    /// Case-insensitive, because HTTP header names are — and because the whole
+    /// point of asserting on one is to prove a client put it there, which a
+    /// lookup that missed on casing would silently deny.
+    /// </remarks>
+    public required IReadOnlyDictionary<string, IReadOnlyList<string>> AllHeaders { get; init; }
     public required byte[] Body { get; init; }
+
+    /// <summary>The values sent under one header name; empty when it was not sent.</summary>
+    public IReadOnlyList<string> Headers(string name) =>
+        AllHeaders.TryGetValue(name, out var values) ? values : [];
 
     public bool IsGzipped =>
         ContentEncoding.Contains("gzip", StringComparer.OrdinalIgnoreCase);

@@ -1,3 +1,4 @@
+using Fonoteca.Domain.Acquisition;
 using Fonoteca.Domain.Catalogue;
 
 namespace Fonoteca.Api.Logging;
@@ -15,10 +16,11 @@ namespace Fonoteca.Api.Logging;
 /// EventId ranges, so a message's origin is obvious from its id alone:
 ///   1000-1099  startup and host lifecycle
 ///   1100-1199  realtime / SignalR
-///   1200-1219  library scanning
+///   1200-1219  library scanning and measuring
 ///   1220-1249  identification — fingerprinting, AcoustID, tag writing
 ///   1250-1279  enrichment — recordings, works and artists from MusicBrainz
-///   1280-1299  candidate warming — filling the worklist's answers ahead of a click
+///   1280-1289  candidate warming — filling the worklist's answers ahead of a click
+///   1290-1299  acquisition — manual Qobuz downloads into staging
 ///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
 ///              another assembly, but the same numbering
 /// </remarks>
@@ -289,6 +291,83 @@ internal static partial class Log
         Message = "Enrichment stopped early: {Reason}")]
     public static partial void EnrichmentAborted(ILogger logger, string reason);
 
+    [LoggerMessage(
+        EventId = 1206,
+        Level = LogLevel.Information,
+        Message = "Probe started ({JobId}): {Pending} files have never been measured.")]
+    public static partial void ProbeStarted(ILogger logger, string jobId, int pending);
+
+    [LoggerMessage(
+        EventId = 1207,
+        Level = LogLevel.Information,
+        Message = "Probe finished ({JobId}): {Measured} measured, {Complained} the decoder "
+            + "objected to, {Unreadable} with no audio, {Failed} failed, in {ElapsedMs}ms.")]
+    public static partial void ProbeCompleted(
+        ILogger logger,
+        string jobId,
+        int measured,
+        int complained,
+        int unreadable,
+        int failed,
+        long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1208,
+        Level = LogLevel.Warning,
+        Message = "Probe requested while {ActiveKind} is running; the request was rejected.")]
+    public static partial void ProbeBusy(ILogger logger, string activeKind);
+
+    [LoggerMessage(
+        EventId = 1209,
+        Level = LogLevel.Warning,
+        Message = "Probe stopped early: {Reason}")]
+    public static partial void ProbeAborted(ILogger logger, string reason);
+
+    /// <remarks>
+    /// Warning rather than Debug, unlike its identification counterpart: this is
+    /// the decoder saying these particular bytes are wrong, and on the target
+    /// library it fires on roughly one file in sixty rather than on hundreds.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1210,
+        Level = LogLevel.Warning,
+        Message = "The decoder objected while reading {Path}: {Complaint}")]
+    public static partial void FileDecodeComplaint(ILogger logger, string path, string complaint);
+
+    [LoggerMessage(
+        EventId = 1295,
+        Level = LogLevel.Information,
+        Message = "Replacement refused for '{Folder}': {Verdict}. Nothing was moved.")]
+    public static partial void ReplacementRefused(
+        ILogger logger, string folder, ReplacementVerdict verdict);
+
+    [LoggerMessage(
+        EventId = 1294,
+        Level = LogLevel.Warning,
+        Message = "Retiring '{Folder}': moving {Files} files to '{Destination}'.")]
+    public static partial void ReplacementStarting(
+        ILogger logger, string folder, string destination, int files);
+
+    [LoggerMessage(
+        EventId = 1296,
+        Level = LogLevel.Warning,
+        Message = "Replaced '{Folder}' with '{DownloadedTo}': {Moved} files moved to the archive.")]
+    public static partial void ReplacementDone(
+        ILogger logger, string folder, string downloadedTo, int moved);
+
+    [LoggerMessage(
+        EventId = 1297,
+        Level = LogLevel.Warning,
+        Message = "A just-downloaded file could not be measured, so it does not count towards the "
+            + "replacement: {Path}")]
+    public static partial void ReplacementFileNotMeasured(ILogger logger, string path);
+
+    [LoggerMessage(
+        EventId = 1211,
+        Level = LogLevel.Debug,
+        Message = "{Path} could not be measured: {Reason}")]
+    public static partial void FileNotProbed(ILogger logger, string path, string reason);
+
     /// <summary>
     /// One file that did not resolve.
     /// </summary>
@@ -347,25 +426,30 @@ internal static partial class Log
     public static partial void AttributionAborted(ILogger logger, string reason);
 
     /// <summary>
-    /// A component that stopped growing because it hit a cap rather than because
-    /// it closed.
+    /// A folder with more candidate releases than are worth a track list.
     /// </summary>
     /// <remarks>
     /// Warning rather than debug, and deliberately so: a capped component was
     /// decided on partial evidence, and from the outside that is indistinguishable
-    /// from one that used all of it. Jazz standards are where this fires — one
-    /// recording on hundreds of anthologies, each naming hundreds more.
+    /// from one that used all of it. Jazz standards are where this fires — a
+    /// hundred-and-fifty-file box of standards has hundreds of releases holding
+    /// two or more of them, and only the first sixty get a lookup.
+    ///
+    /// What is cut is always the tail: candidates are ordered by how many of the
+    /// folder's recordings each holds, and nothing can hold more of a folder than
+    /// the record the folder is. <paramref name="worthFetching"/> against the cap
+    /// is what says how much tail went unread.
     /// </remarks>
     [LoggerMessage(
         EventId = 1264,
         Level = LogLevel.Warning,
-        Message = "Component from {Path} hit a cap at {Files} files and {Releases} candidate releases; "
-            + "it was decided on what had been gathered, and the rest stay on the worklist.")]
+        Message = "Component from {Path} ({Files} files) had {WorthFetching} candidate releases worth "
+            + "a track list and fetched the best-supported few; the rest were not looked up.")]
     public static partial void AttributionComponentCapped(
         ILogger logger,
         string path,
         int files,
-        int releases);
+        int worthFetching);
 
     [LoggerMessage(
         EventId = 1280,
@@ -395,4 +479,99 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Candidate warming failed; the next sweep tries again.")]
     public static partial void CandidateWarmSweepFailed(ILogger logger, Exception cause);
+
+    /// <summary>An album a person asked Qobuz for, once every track has landed.</summary>
+    /// <remarks>
+    /// Information, and one line per album rather than per track: acquisition is
+    /// a manual act, so there are tens of these a day rather than 100,000.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1290,
+        Level = LogLevel.Information,
+        Message = "Qobuz album {AlbumId} downloaded: {Downloaded} of {Total} tracks into {Folder}")]
+    public static partial void QobuzAlbumDownloaded(
+        ILogger logger, string albumId, int downloaded, int total, string folder);
+
+    /// <summary>One track of an album that could not be fetched.</summary>
+    /// <remarks>
+    /// Warning rather than an abort: a compilation with one unlicensed track is
+    /// still eleven tracks worth having, and the response says which failed.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1291,
+        Level = LogLevel.Warning,
+        Message = "Qobuz track {TrackId} of album {AlbumId} was not downloaded")]
+    public static partial void QobuzTrackFailed(
+        ILogger logger, long trackId, string albumId, Exception cause);
+
+    /// <summary>An album given up on because the refusal was not about one track.</summary>
+    /// <remarks>
+    /// Error rather than Warning: unlike a track Qobuz will not serve, this one
+    /// means nothing will download until a person changes a setting.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1292,
+        Level = LogLevel.Error,
+        Message = "Qobuz album {AlbumId} abandoned after {Attempted} tracks; the refusal was not "
+            + "about a track")]
+    public static partial void QobuzAlbumAbandoned(
+        ILogger logger, string albumId, int attempted, Exception cause);
+
+    /// <summary>An album a person moved out of staging and into the library.</summary>
+    /// <remarks>
+    /// Information, and the only record that it happened: the move touches no
+    /// catalogue row and writes no domain event, because until the next scan
+    /// runs the library has files the catalogue has never heard of. This line is
+    /// what connects the two halves in a log.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1293,
+        Level = LogLevel.Information,
+        Message = "Imported {Folder} from staging into the library: {Tracks} tracks, {Bytes} bytes")]
+    public static partial void StagedAlbumImported(
+        ILogger logger, string folder, int tracks, long bytes);
+
+    [LoggerMessage(
+        EventId = 1300,
+        Level = LogLevel.Information,
+        Message = "Tag write started ({JobId}) over {Scope}: {Pending} files hold catalogue data")]
+    public static partial void TagWriteStarted(ILogger logger, string jobId, string scope, int pending);
+
+    [LoggerMessage(
+        EventId = 1301,
+        Level = LogLevel.Information,
+        Message = "Tag write finished ({JobId}): {Written} written, {Unchanged} already correct, "
+            + "{Refused} refused, {Failed} failed, in {ElapsedMs}ms.")]
+    public static partial void TagWriteCompleted(
+        ILogger logger,
+        string jobId,
+        int written,
+        int unchanged,
+        int refused,
+        int failed,
+        long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1302,
+        Level = LogLevel.Information,
+        Message = "Tag write refused: {ActiveKind} already holds the library")]
+    public static partial void TagWriteBusy(ILogger logger, string activeKind);
+
+    [LoggerMessage(
+        EventId = 1303,
+        Level = LogLevel.Warning,
+        Message = "Tag write stopped early: {Reason}")]
+    public static partial void TagWriteAborted(ILogger logger, string reason);
+
+    /// <remarks>
+    /// Warning, not Debug: this is a verification failure on a file this
+    /// application was about to rewrite, and the staged copy has been discarded.
+    /// One of these means one file was left alone; a page of them means
+    /// something about the write path is wrong.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1304,
+        Level = LogLevel.Warning,
+        Message = "Tags not written to {Path}: {Reason}")]
+    public static partial void TagsNotWritten(ILogger logger, string path, string reason);
 }

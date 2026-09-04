@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Providers.AcoustId;
 using Fonoteca.Providers.MusicBrainz;
+using Fonoteca.Providers.Qobuz;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
@@ -116,6 +117,69 @@ public static class ProviderServiceCollectionExtensions
         // supply a clock before they can ask whether a server is up would be a
         // silly thing to make them discover at runtime.
         services.TryAddSingleton<IClock, SystemClock>();
+
+        return services;
+    }
+
+    /// <summary>Registers <see cref="QobuzClient"/> and the two HTTP clients behind it.</summary>
+    /// <remarks>
+    /// <b>Two</b> clients, and that is the part worth reading. The API client
+    /// gets the standard treatment — gate, retries, 30-second attempts, the
+    /// account headers on every request. The content client gets none of it:
+    /// audio comes off a CDN on a URL that is already signed, a retry of a
+    /// 300 MB body re-downloads everything already received, and an attempt
+    /// timeout sized for a JSON call fails every hi-res track there is.
+    ///
+    /// Registered unconditionally, missing configuration and all, for
+    /// <see cref="AddAcoustId"/>'s reason: a message naming the setting beats a
+    /// container error naming a type.
+    /// </remarks>
+    public static IServiceCollection AddQobuz(
+        this IServiceCollection services,
+        Action<QobuzOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(QobuzOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<QobuzOptions>(provider).MinimumRequestInterval));
+
+        var api = services.AddHttpClient(QobuzOptions.HttpClientName, (provider, http) =>
+        {
+            var config = Options<QobuzOptions>(provider);
+
+            http.BaseAddress = config.BaseAddress;
+            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            // On the client rather than per request, so no call path can forget
+            // them — the same reasoning as the MusicBrainz User-Agent, for
+            // headers Qobuz answers 400 without.
+            http.DefaultRequestHeaders.Add("X-App-Id", config.AppId);
+            http.DefaultRequestHeaders.Add("X-User-Auth-Token", config.UserAuthToken);
+        });
+
+        api.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        });
+
+        AddResilienceThenGate(api, QobuzOptions.HttpClientName);
+
+        var content = services.AddHttpClient(QobuzClient.ContentHttpClientName, static http =>
+        {
+            // No overall timeout. The caller's CancellationToken is what stops a
+            // download, and the alternative is a number that has to be wrong for
+            // either a 5 MB MP3 or a 400 MB 24/192 side of a box set.
+            http.Timeout = Timeout.InfiniteTimeSpan;
+        });
+
+        // No decompression: the body is already-compressed audio, and asking a
+        // CDN to gzip a FLAC spends CPU at both ends to make it slightly bigger.
+        content.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler());
+
+        services.AddSingleton<QobuzClient>();
 
         return services;
     }

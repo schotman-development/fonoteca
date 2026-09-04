@@ -1,0 +1,11 @@
+/*
+ * The damaged-file sample. A plain list, bounded and scrollable, because the
+ * card is one cell of a grid and twenty-five library paths are longer than it.
+ */
+.damaged {
+  max-height: 140px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}

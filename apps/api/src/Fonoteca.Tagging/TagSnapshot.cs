@@ -67,6 +67,33 @@ public sealed record TagSnapshot
     }
 
     /// <summary>
+    /// What this reading holds for a field, tolerating the case-folding each
+    /// format applies.
+    /// </summary>
+    /// <remarks>
+    /// The snapshot's half of <see cref="TagReader.Lookup"/>, and it exists for
+    /// the same two reasons that one does: ATL uppercases Vorbis keys on the way
+    /// in, and MP4 strips the <c>----:com.apple.iTunes:</c> prefix it added
+    /// itself. A diff that compared keys exactly would decide every FLAC needed
+    /// rewriting on every pass, forever.
+    /// </remarks>
+    public string? Find(string field)
+    {
+        if (Fields.TryGetValue(field, out var exact)) return exact;
+
+        foreach (var (key, value) in Fields)
+        {
+            var name = key.AsSpan();
+            var colon = name.LastIndexOf(':');
+            if (colon >= 0) name = name[(colon + 1)..];
+
+            if (name.Equals(field, StringComparison.OrdinalIgnoreCase)) return value;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Every field this reading has that <paramref name="after"/> lost or changed.
     /// </summary>
     /// <remarks>

@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 
 import { AppShell } from './AppShell.tsx'
+import { AcquirePage } from './pages/AcquirePage.tsx'
 import { ArtistPage } from './pages/ArtistPage.tsx'
 import { ArtistsPage } from './pages/ArtistsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
@@ -95,6 +96,20 @@ const matchingRoute = createRoute({
   }),
 })
 
+/**
+ * Manual acquisition.
+ *
+ * Outside `/library` deliberately: everything under that path browses the
+ * catalogue, and nothing on this screen is in it. A download writes audio into
+ * the library directory, but the catalogue does not learn about it until the
+ * next scan — so this screen is about acquiring, not about what is held.
+ */
+const acquireRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/acquire',
+  component: AcquirePage,
+})
+
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
   artistsRoute,
@@ -102,6 +117,7 @@ const routeTree = rootRoute.addChildren([
   releasesRoute,
   releaseRoute,
   matchingRoute,
+  acquireRoute,
 ])
 
 export const router = createRouter({
@@ -111,7 +127,15 @@ export const router = createRouter({
   defaultPreload: false,
 })
 
-export { artistRoute, artistsRoute, dashboardRoute, matchingRoute, releaseRoute, releasesRoute }
+export {
+  acquireRoute,
+  artistRoute,
+  artistsRoute,
+  dashboardRoute,
+  matchingRoute,
+  releaseRoute,
+  releasesRoute,
+}
 
 /**
  * Teaches `Link`, `useParams` and the rest about this tree.

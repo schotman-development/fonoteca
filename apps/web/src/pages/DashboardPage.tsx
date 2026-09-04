@@ -8,6 +8,8 @@ import { IdentificationPanel } from '../components/IdentificationPanel.tsx'
 import { JobsPanel } from '../components/JobsPanel.tsx'
 import { LibraryScanPanel } from '../components/LibraryScanPanel.tsx'
 import { MusicBrainzPanel } from '../components/MusicBrainzPanel.tsx'
+import { ProbePanel } from '../components/ProbePanel.tsx'
+import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import styles from './DashboardPage.module.css'
 
 /**
@@ -55,6 +57,27 @@ export function DashboardPage() {
 
         <Card title="Library — attribute">
           <AttributionPanel onAttributed={catalogueChanged} />
+        </Card>
+
+        {/*
+          Last of the passes and independent of the other three: it asks the
+          bytes what they are rather than asking anybody what the music is, so
+          it neither needs nor feeds identification. What it does feed is the
+          upgrade list, which cannot see a CD rip against a hi-res master until
+          something has measured the depth and rate.
+        */}
+        <Card title="Library — measure">
+          <ProbePanel onProbed={catalogueChanged} />
+        </Card>
+
+        {/*
+          After all five, and deliberately last: the four above write to a
+          database that can be dropped and rebuilt from the audio, and this one
+          rewrites the audio. Nothing chains into it — it is the only card here
+          whose work has no automatic path to it at all.
+        */}
+        <Card title="Library — write tags">
+          <TagWritePanel />
         </Card>
 
         <Card title="API — via generated client">

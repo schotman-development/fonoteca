@@ -421,9 +421,11 @@ public static partial class CatalogueEndpoints
         // overstate the matched half — on precisely the folders too big to read.
         var open = await files
             .CountAsync(
-                file => file.IdentityDecidedUtc == null
-                    && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
-                        || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)),
+                file => (file.IdentityDecidedUtc == null
+                        && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                            || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)))
+                    || (file.ReleaseDecidedUtc == null
+                        && UnattributedOutcomes.Contains(file.AttributionOutcome)),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -440,6 +442,7 @@ public static partial class CatalogueEndpoints
                 file.EnrichmentOutcome,
                 file.AttributionOutcome,
                 file.IdentityDecidedUtc,
+                file.ReleaseDecidedUtc,
                 Recording = file.Recording == null ? null : file.Recording.Title,
                 ReleaseId = file.Release == null ? (Guid?)null : file.Release.Id.Value,
                 Release = file.Release == null ? null : file.Release.Title,
@@ -454,9 +457,22 @@ public static partial class CatalogueEndpoints
         var items = rows
             .Select(row =>
             {
-                var unanswered = row.IdentityDecidedUtc is null
+                var unidentified = row.IdentityDecidedUtc is null
                     && (UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
                         || UnlinkedOutcomes.Contains(row.EnrichmentOutcome));
+
+                // The attribution leg, for the reason the unreleased handler
+                // already gives: a folder holding files attribution refused is a
+                // folder with an open question in it, and a screen that lists
+                // the folder while hiding those rows offers no way to answer
+                // them. It is the *only* way to answer some of them — a file
+                // whose AcoustID names a recording MusicBrainz lists on no
+                // edition of this album cannot be recovered by asking again,
+                // because the candidate set is browsed from that same recording.
+                var unattributed = row.ReleaseDecidedUtc is null
+                    && UnattributedOutcomes.Contains(row.AttributionOutcome);
+
+                var unanswered = unidentified || unattributed;
 
                 return new FolderFileRow(
                     row.Id.Value,
@@ -469,11 +485,13 @@ public static partial class CatalogueEndpoints
                     // the worklist folds it: a file AcoustID could not place is
                     // left `NotAttempted` by enrichment, and reading that later
                     // silence would report a consequence instead of a cause.
-                    unanswered
-                        ? UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
+                    !unanswered
+                        ? null
+                        : UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
                             ? row.AcoustIdOutcome.ToString()
-                            : row.EnrichmentOutcome.ToString()
-                        : null,
+                            : unidentified
+                                ? row.EnrichmentOutcome.ToString()
+                                : row.AttributionOutcome.ToString(),
                     row.Recording,
                     row.ReleaseId,
                     row.Release,
@@ -571,9 +589,11 @@ public static partial class CatalogueEndpoints
         // that should look different.
         var rows = await db.MediaFiles
             .Where(file => wanted.Contains(file.Id)
-                && file.IdentityDecidedUtc == null
-                && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
-                    || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)))
+                && ((file.IdentityDecidedUtc == null
+                        && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                            || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)))
+                    || (file.ReleaseDecidedUtc == null
+                        && UnattributedOutcomes.Contains(file.AttributionOutcome))))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

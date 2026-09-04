@@ -4,12 +4,31 @@ import { Link } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
 import { api } from '../api.ts'
+import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { CERTAINTY } from './certainty.ts'
 import { releaseArt } from './coverArt.ts'
 import styles from './ReleasesPage.module.css'
 
 type ReleaseSummary = components['schemas']['ReleaseSummary']
+
+/**
+ * The three orders worth having.
+ *
+ * Title is how you find an album you already have in mind. Artist is what turns
+ * an alphabetical soup of titles back into a shelf, since a person's records
+ * sit together nowhere else on this screen. Year is the one that answers a
+ * question nothing else here does — what this library is made of, decade by
+ * decade — and it is worth remembering the year came from MusicBrainz's dating
+ * of *this pressing*, so a remaster sorts as the remaster it is.
+ */
+const SORTS = [
+  ['title', 'Title'],
+  ['artist', 'Artist'],
+  ['year', 'Newest first'],
+] as const
+
+type Sort = (typeof SORTS)[number][0]
 
 /**
  * The library, by album.
@@ -21,13 +40,19 @@ type ReleaseSummary = components['schemas']['ReleaseSummary']
  */
 export function ReleasesPage() {
   const [filter, setFilter] = useState('')
+  const [sort, setSort] = useState<Sort>('title')
   const searchId = useId()
 
   const query = useDeferredValue(filter.trim())
 
+  // The default is left out of the request rather than sent, so the URL carries
+  // only what somebody actually chose. See the artist list for the whole note.
   const state = useApiQuery(
-    () => api.get('/api/catalogue/releases', { params: { query: query ? { query } : {} } }),
-    [query],
+    () =>
+      api.get('/api/catalogue/releases', {
+        params: { query: { ...(query ? { query } : {}), ...(sort === 'title' ? {} : { sort }) } },
+      }),
+    [query, sort],
   )
 
   return (
@@ -46,20 +71,24 @@ export function ReleasesPage() {
 
       <Validation />
 
-      <div className={styles.search}>
-        <label htmlFor={searchId}>
-          <Text size="xs" tone="tertiary">
-            Filter by title
-          </Text>
-        </label>
-        <Input
-          id={searchId}
-          type="search"
-          value={filter}
-          placeholder="Sloe Gin, Off the Wall…"
-          onChange={(event) => setFilter(event.target.value)}
-        />
-      </div>
+      <Stack gap={16} align="end" wrap>
+        <div className={styles.search}>
+          <label htmlFor={searchId}>
+            <Text size="xs" tone="tertiary">
+              Filter by title
+            </Text>
+          </label>
+          <Input
+            id={searchId}
+            type="search"
+            value={filter}
+            placeholder="Sloe Gin, Off the Wall…"
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </div>
+
+        <SortSelect label="Sort by" value={sort} options={SORTS} onChange={setSort} />
+      </Stack>
 
       <div role="status" aria-live="polite" aria-busy={state.status === 'loading'}>
         {state.status === 'loading' ? <Text tone="tertiary">Reading the catalogue…</Text> : null}

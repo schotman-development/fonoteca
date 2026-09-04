@@ -73,7 +73,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             new Uri("/api/catalogue/artists", UriKind.Relative), Token);
 
         Assert.NotNull(body);
-        Assert.Equal(5, body.Total);
+        Assert.Equal(6, body.Total);
 
         // Sort name, not display name: "Karajan, Herbert von" belongs under K.
         Assert.Equal(
@@ -83,6 +83,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
                 "Hart, Beth",
                 "Karajan, Herbert von",
                 "Mozart, Wolfgang Amadeus",
+                "Satie, Erik",
             ],
             body.Items.Select(a => a.SortName));
 
@@ -146,9 +147,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.NotNull(detail);
         Assert.Equal(_seed.SeesawMbid, detail.Artist.Cover);
 
-        // Karajan's files were never attributed to a release, so there is
+        // Satie's one file was never attributed to a release, so there is
         // nothing to draw and the card falls back to its monogram.
-        Assert.Null(body.Items.Single(a => a.Id == _seed.Karajan).Cover);
+        Assert.Null(body.Items.Single(a => a.Id == _seed.Satie).Cover);
     }
 
     [Fact]
@@ -190,8 +191,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(body);
 
-        // "showing 2 of 5", answerable without a second request.
-        Assert.Equal(5, body.Total);
+        // "showing 2 of 6", answerable without a second request.
+        Assert.Equal(6, body.Total);
         Assert.Equal(["Bonamassa, Joe", "Hart, Beth"], body.Items.Select(a => a.SortName));
     }
 
@@ -435,6 +436,133 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Empty(missing.Files);
     }
 
+    /// <summary>
+    /// The heading four movements sit under, carried on every track row.
+    /// </summary>
+    /// <remarks>
+    /// Read off the recording's work, one hop from the track — which is a join
+    /// EF has to translate rather than a column, so a silent null here would
+    /// look on screen exactly like a pop album and nothing would notice.
+    /// </remarks>
+    [Fact]
+    public async Task ATrackListCarriesTheWorkItsTracksPerform()
+    {
+        using var client = _factory!.CreateClient();
+
+        var symphony = await client.GetFromJsonAsync<ReleaseDetailResponse>(
+            new Uri($"/api/catalogue/releases/{_seed.Symphony}", UriKind.Relative), Token);
+
+        Assert.NotNull(symphony);
+
+        Assert.All(
+            symphony.Tracks,
+            track => Assert.Equal("Symphony no. 40 in G minor, K. 550", track.WorkTitle));
+
+        // And an album that performs no work says so, rather than repeating the
+        // track title back as one.
+        var seesaw = await client.GetFromJsonAsync<ReleaseDetailResponse>(
+            new Uri($"/api/catalogue/releases/{_seed.Seesaw}", UriKind.Relative), Token);
+
+        Assert.NotNull(seesaw);
+        Assert.All(seesaw.Tracks, track => Assert.Null(track.WorkTitle));
+    }
+
+    /// <summary>
+    /// The album list's three orders, each one a different answer.
+    /// </summary>
+    /// <remarks>
+    /// Sorted in SQL because the endpoint pages in SQL, and every case here asks
+    /// for <b>two of the three</b> deliberately. Asking for the whole list would
+    /// pass identically against an implementation that sorted only the page it
+    /// had already taken — which is the bug worth pinning, since a library of
+    /// five hundred albums pages for real. The seed is chosen so all three
+    /// orders name a different first two.
+    /// </remarks>
+    [Fact]
+    public async Task AlbumsSortByTitleArtistOrYear()
+    {
+        using var client = _factory!.CreateClient();
+
+        Assert.Equal(
+            ["Blues Summit 100", "Mozart: Symphony no. 40"],
+            await TitlesAsync(client, sort: null));
+
+        // The first billed name, which is the one the assembled credit line
+        // starts with. The anthology is billed to nobody and sorts last, so a
+        // page taken by title and then reordered would not produce this.
+        Assert.Equal(
+            ["Seesaw", "Mozart: Symphony no. 40"],
+            await TitlesAsync(client, sort: "artist"));
+
+        Assert.Equal(
+            ["Blues Summit 100", "Seesaw"],
+            await TitlesAsync(client, sort: "year"));
+
+        // An order nobody asked for is the default, not an error page.
+        Assert.Equal(
+            ["Blues Summit 100", "Mozart: Symphony no. 40"],
+            await TitlesAsync(client, sort: "nonsense"));
+    }
+
+    private static async Task<IReadOnlyList<string>> TitlesAsync(HttpClient client, string? sort)
+    {
+        var body = await client.GetFromJsonAsync<ReleaseListResponse>(
+            new Uri(
+                sort is null
+                    ? "/api/catalogue/releases?take=2"
+                    : $"/api/catalogue/releases?take=2&sort={sort}",
+                UriKind.Relative),
+            Token);
+
+        Assert.NotNull(body);
+
+        // The page is cut, the total is not — so a sort cannot quietly shrink
+        // the list it is ordering.
+        Assert.Equal(3, body.Total);
+
+        return [.. body.Items.Select(item => item.Title)];
+    }
+
+    /// <summary>
+    /// Who this library is actually about, which is rarely who you would guess.
+    /// </summary>
+    /// <remarks>
+    /// The count is not a column — it is the size of the recording set the
+    /// endpoint assembles — so this sort happens in memory, and the tie between
+    /// three artists holding two tracks each is what proves it stayed stable and
+    /// kept PostgreSQL's collation order underneath.
+    /// </remarks>
+    [Fact]
+    public async Task ArtistsSortByHoldingsWithAlphabeticalTies()
+    {
+        using var client = _factory!.CreateClient();
+
+        var body = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?sort=tracks", UriKind.Relative), Token);
+
+        Assert.NotNull(body);
+
+        Assert.Equal(
+            [
+                "Bonamassa, Joe",
+                "Berliner Philharmoniker",
+                "Karajan, Herbert von",
+                "Mozart, Wolfgang Amadeus",
+                "Hart, Beth",
+                "Satie, Erik",
+            ],
+            body.Items.Select(a => a.SortName));
+
+        Assert.Equal([4, 2, 2, 2, 1, 1], body.Items.Select(a => a.TrackCount));
+
+        // An order nobody asked for is the default here too.
+        var nonsense = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?sort=nonsense", UriKind.Relative), Token);
+
+        Assert.NotNull(nonsense);
+        Assert.Equal("Berliner Philharmoniker", nonsense.Items[0].SortName);
+    }
+
     [Fact]
     public async Task AnUnknownReleaseIsAProblemDocument()
     {
@@ -464,9 +592,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(report);
 
-        // Three folders, each internally consistent, each naming one release.
-        Assert.Equal(3, report.Folders);
-        Assert.Equal(3, report.FoldersAgreeing);
+        // Four folders, each internally consistent, each naming one release.
+        Assert.Equal(4, report.Folders);
+        Assert.Equal(4, report.FoldersAgreeing);
         Assert.Empty(report.FoldersSplit);
 
         var spanning = Assert.Single(report.ReleasesSpanningFolders);
@@ -485,13 +613,14 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
         var mozart = Artist("Wolfgang Amadeus Mozart", "Mozart, Wolfgang Amadeus", "Person");
+        var satie = Artist("Erik Satie", "Satie, Erik", "Person");
         var karajan = Artist("Herbert von Karajan", "Karajan, Herbert von", "Person");
         var berliner = Artist("Berliner Philharmoniker", "Berliner Philharmoniker", "Orchestra");
         var hart = Artist("Beth Hart", "Hart, Beth", "Person");
         var bonamassa = Artist("Joe Bonamassa", "Bonamassa, Joe", "Person");
         var orphan = Artist("Nobody At All", "Nobody At All", "Group");
 
-        db.Artists.AddRange(mozart, karajan, berliner, hart, bonamassa, orphan);
+        db.Artists.AddRange(mozart, satie, karajan, berliner, hart, bonamassa, orphan);
 
         var work = new Work
         {
@@ -509,8 +638,48 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         var first = Movement(db, work, "I. Molto allegro", karajan, berliner);
         var second = Movement(db, work, "II. Andante", karajan, berliner);
 
-        db.MediaFiles.Add(File("Karajan/Mozart 40/01 - Molto allegro.flac", first));
-        db.MediaFiles.Add(File("Karajan/Mozart 40/02 - Andante.flac", second));
+        // A release whose every track performs one work, which is what the track
+        // list groups on. Nothing else in this seed has a work *and* a release,
+        // and the two together are the whole classical case.
+        var symphonyGroup = new ReleaseGroup
+        {
+            Id = ReleaseGroupId.New(),
+            Title = "Mozart: Symphony no. 40",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PrimaryType = "Album",
+        };
+
+        var symphony = new Release
+        {
+            Id = ReleaseId.New(),
+            Title = "Mozart: Symphony no. 40",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            ReleaseGroupId = symphonyGroup.Id,
+            Released = new ReleaseDate(1985, null, null),
+            Status = "Official",
+            MediumFormats = "CD",
+            TrackCount = 2,
+            DiscCount = 1,
+        };
+
+        db.ReleaseGroups.Add(symphonyGroup);
+        db.Releases.Add(symphony);
+        db.ArtistCredits.Add(ReleaseCredit(karajan, symphony, 0, null));
+
+        var movementOne = TrackOn(db, symphony, first, 1, "I. Molto allegro", 437);
+        var movementTwo = TrackOn(db, symphony, second, 2, "II. Andante", 437);
+
+        db.MediaFiles.Add(Attributed(
+            File("Karajan/Mozart 40/01 - Molto allegro.flac", first),
+            symphony,
+            symphonyGroup,
+            movementOne));
+
+        db.MediaFiles.Add(Attributed(
+            File("Karajan/Mozart 40/02 - Andante.flac", second),
+            symphony,
+            symphonyGroup,
+            movementTwo));
 
         var duet = new Recording
         {
@@ -635,6 +804,21 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
                 slot));
         }
 
+        // Held, but on nothing the attribution pass has placed. There is no
+        // release to draw, so the card falls back to a monogram — and sorted
+        // last, so the paging above still pages over the same names.
+        var gymnopedie = new Recording
+        {
+            Id = RecordingId.New(),
+            Title = "Gymnopédie no. 1",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Duration = TimeSpan.FromSeconds(212),
+        };
+
+        db.Recordings.Add(gymnopedie);
+        db.ArtistCredits.Add(Credit(satie, gymnopedie, 0, null));
+        db.MediaFiles.Add(File("Satie/Gymnopedies/01 - Gymnopedie no. 1.flac", gymnopedie));
+
         // Credited on a recording the library does not hold. Enrichment cannot
         // produce this, but a rescan that unlinks every file of a recording can.
         var absent = new Recording { Id = RecordingId.New(), Title = "Never Ripped" };
@@ -646,6 +830,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         return new Seeded
         {
             Mozart = mozart.Id.Value,
+            Satie = satie.Id.Value,
             Karajan = karajan.Id.Value,
             Berliner = berliner.Id.Value,
             Hart = hart.Id.Value,
@@ -654,6 +839,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             FirstMovement = first.Id.Value,
             Duet = duet.Id.Value,
             Seesaw = seesaw.Id.Value,
+            Symphony = symphony.Id.Value,
             SeesawMbid = seesaw.Mbid!.Value.Value,
             AnthologyMbid = anthology.Mbid!.Value.Value,
         };
@@ -780,6 +966,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         public Guid Mozart { get; init; }
 
+        public Guid Satie { get; init; }
+
         public Guid Karajan { get; init; }
 
         public Guid Berliner { get; init; }
@@ -795,6 +983,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         public Guid Duet { get; init; }
 
         public Guid Seesaw { get; init; }
+
+        public Guid Symphony { get; init; }
 
         public Guid SeesawMbid { get; init; }
 

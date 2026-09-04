@@ -1,0 +1,28 @@
+/*
+ * A box set is a hundred rows and the dialog is not that tall. Scrolling the
+ * table rather than the dialog keeps the footer — and therefore the download
+ * button — where it was.
+ */
+.scroll {
+  max-height: 46vh;
+  overflow-y: auto;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.caption {
+  text-align: start;
+  padding-block-end: var(--space-4);
+}
+
+/*
+ * The album about to be traded away. On its own surface because it is the one
+ * thing in this dialog that is about the library rather than about Qobuz, and
+ * the one thing a person must read before pressing the button.
+ */
+.replacing {
+  padding: var(--space-8) var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}

@@ -1,0 +1,29 @@
+/*
+ * Same shape as the filter beside it — a label above its control.
+ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/*
+ * A native <select>, styled the way the seating dialog's is and for the same
+ * reason: the platform's control already carries the role, the typeahead, the
+ * keyboard behaviour and a phone's picker, and the design system has no
+ * combobox to build one on.
+ */
+.select {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background-color: var(--color-surface-raised);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+}
+
+.select:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 1px;
+}

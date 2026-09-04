@@ -57,7 +57,14 @@
   vertical-align: middle;
 }
 
-.root tbody tr:last-child .cell {
+/*
+ * The rule under the very last row, and only that one. `tbody:last-child` is
+ * load-bearing: a table may carry any number of row groups — the album and
+ * artist track lists open one per work — and without it every group's closing
+ * row loses its separator, which reads as a gap in the ruling rather than as
+ * the end of anything.
+ */
+.root tbody:last-child tr:last-child .cell {
   border-block-end: none;
 }
 

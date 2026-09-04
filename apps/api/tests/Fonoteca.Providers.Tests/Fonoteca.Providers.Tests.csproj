@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Fonoteca.Providers/Fonoteca.Providers.csproj" />
     <ProjectReference Include="../../src/Fonoteca.Domain/Fonoteca.Domain.csproj" />
+    <ProjectReference Include="../Fonoteca.Fixtures/Fonoteca.Fixtures.csproj" />
   </ItemGroup>
 
   <ItemGroup>

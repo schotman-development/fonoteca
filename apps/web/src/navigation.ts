@@ -10,7 +10,7 @@
  * A new section is a compile error here until the route exists.
  */
 export type NavItem = {
-  readonly to: '/' | '/library' | '/library/releases' | '/library/matching'
+  readonly to: '/' | '/library' | '/library/releases' | '/library/matching' | '/acquire'
   readonly label: string
   /**
    * Whether the link is current only on exactly this path.
@@ -42,5 +42,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Identify',
     exact: false,
     keywords: ['matching', 'questions', 'unmatched'],
+  },
+  // Last, and separate from the three above it in more than order: those browse
+  // and correct what is already here, this one spends money on something that
+  // is not.
+  {
+    to: '/acquire',
+    label: 'Acquire',
+    exact: true,
+    keywords: ['qobuz', 'download', 'buy', 'purchase', 'acquire'],
   },
 ]

@@ -190,6 +190,20 @@ public sealed class TagReader(IAudioFileStore files)
         AddIfPresent(fields, "COMPOSER", track.Composer);
         AddIfPresent(fields, "COMMENT", track.Comment);
 
+        // The numbers, so a catalogue write can be diffed and verified against
+        // them. Reported under the same names CatalogueTags uses, which is what
+        // lets one desired-value map serve as both the plan's input and the
+        // thing this reading is compared with.
+        //
+        // Zero is not a track number: ATL answers 0 rather than null for several
+        // containers with no such tag, and stored as "0" it would make every
+        // desired "1" look like a change on every pass.
+        AddIfPresent(fields, "TRACKNUMBER", Count(track.TrackNumber));
+        AddIfPresent(fields, "TRACKTOTAL", Count(track.TrackTotal));
+        AddIfPresent(fields, "DISCNUMBER", Count(track.DiscNumber));
+        AddIfPresent(fields, "DISCTOTAL", Count(track.DiscTotal));
+        AddIfPresent(fields, "YEAR", Count(track.Year));
+
         var digests = track.EmbeddedPictures
             .Select(picture => TagSnapshot.Digest(picture.PictureData))
             .ToArray();
@@ -209,6 +223,10 @@ public sealed class TagReader(IAudioFileStore files)
     {
         if (!string.IsNullOrEmpty(value)) fields[key] = value;
     }
+
+    /// <summary>A count ATL actually holds, or null. Zero counts as null.</summary>
+    private static string? Count(int? value) =>
+        value is > 0 ? value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
 
     /// <summary>Trimmed and lowercased, so "the same AcoustID" is one string.</summary>
     internal static string? Normalise(string? value)

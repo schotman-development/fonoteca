@@ -72,9 +72,24 @@ export function Dialog({
    */
   const pressedBackdrop = useRef(false)
 
-  // `showModal()` is imperative and the DOM owns "is it open" — the browser
-  // closes the dialog on Escape without telling us first. So state drives the
-  // element here, and the element's `close` event drives the state back.
+  /*
+   * `showModal()` is imperative and the DOM owns "is it open" — the browser
+   * closes the dialog on Escape without telling us first. So the prop drives
+   * the element here, and the element's `close` event drives the caller back.
+   *
+   * **No dependency array, deliberately.** Keyed on `[open]` this reconciles
+   * only when the prop changes, and the browser can close the element while the
+   * prop stays `true` — Escape does exactly that, and a caller whose `onClose`
+   * declines to act on it (one guarding against dismissal mid-operation) is
+   * then left with `open === true` and a dialog that is gone. Nothing re-opens
+   * it: the effect never re-runs, so the element stays closed for the life of
+   * the mount and the only recovery is a page reload.
+   *
+   * Running every render makes `open` mean what it says. The guards below are
+   * what keep that cheap — a render where the element already agrees does
+   * nothing at all, and `showModal()` is never called on an open dialog (which
+   * throws).
+   */
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
@@ -83,7 +98,7 @@ export function Dialog({
     } else if (!open && dialog.open) {
       dialog.close()
     }
-  }, [open])
+  })
 
   /**
    * Closed on unmount, if it is still open.

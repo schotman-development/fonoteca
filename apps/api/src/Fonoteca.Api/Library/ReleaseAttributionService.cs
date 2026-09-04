@@ -29,26 +29,34 @@ namespace Fonoteca.Api.Library;
 /// one file, ask a question about it, and commit the answer; each file is a
 /// transaction and resumability comes for free. A single file cannot name its
 /// release — see <see cref="ReleaseAttribution"/> — so the unit here is a
-/// <b>component</b>: a set of files that share candidate releases, decided
-/// together and committed together. A component is usually an album and
-/// occasionally an artist's whole catalogue, which is small enough that
-/// interrupting the pass loses seconds.
+/// <b>component</b>: a set of files decided together and committed together.
+/// A component is an album folder — a dozen files at the median, two hundred at
+/// the worst — which is small enough that interrupting the pass loses seconds.
 ///
-/// <b>Components are discovered, not assumed.</b> The obvious grouping is the
-/// directory, and using it is exactly what the whole design refuses: the folder
-/// is a claim made by whatever wrote the files. So a component starts from one
-/// unattributed file and grows outwards — browse its recording's releases, fetch
-/// those releases' track lists, and every track naming a recording this library
-/// also holds pulls that file in and puts its recording on the frontier. What
-/// closes is a real component of the file-to-release graph.
+/// <b>A component is a folder.</b> It was a discovered set for a long time — one
+/// unattributed file, then outwards through every release naming a recording the
+/// library also holds — and that expansion is precisely what glued separate
+/// albums into box sets. A compilation holding one track of <i>Off the Wall</i>
+/// and one of <i>Thriller</i> puts both albums' files in one component, and the
+/// box set that reprints both is then the honest best explanation of the merged
+/// set. The rule was never wrong; the set handed to it was.
+///
+/// The objection the design used to raise — the folder is a claim made by
+/// whatever wrote the files — is an objection to reading the folder's
+/// <i>name</i>, which nothing here does. <see cref="AlbumFolder"/> reads only
+/// where one album stops, and a library is nearly always right about that.
+/// Measured on the target library: 594 folders, median twelve files, and the
+/// four largest are a game soundtrack, Wagner's <i>Ring</i>, a Nat King Cole box
+/// and a <i>Swan Lake</i> — every one a single release.
 ///
 /// <b>Two stages, forced by the web service.</b> A browse cannot carry track
 /// lists (asking for them makes it silently drop releases — see
 /// <c>MusicBrainzCatalogue.BrowseIncludes</c>), and a lookup cannot carry the
 /// full candidate set (it caps at 25). So candidates come from a browse and
 /// track lists from a lookup, with a prune in between so that a 150-track
-/// anthology contributing one song is not worth a request. The prune is a
-/// heuristic and calling it a bound was worth two failed live runs — see
+/// anthology contributing one song is not worth a request. That prune used to
+/// be a heuristic dressed as a bound, which was worth two failed live runs; a
+/// fixed file set is what makes its arithmetic honest — see
 /// <see cref="WorthFetching"/>.
 ///
 /// <b>Everything is memoised for the whole run.</b> The same compilations recur
@@ -71,45 +79,29 @@ public sealed class ReleaseAttributionService(
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// How far a component may grow before expansion stops.
+    /// How many of a folder's candidate releases are worth a track list.
     /// </summary>
     /// <remarks>
-    /// Jazz standards are the reason. One recording of a standard appears on
-    /// hundreds of anthologies, each of which names hundreds of other recordings,
-    /// and a component allowed to close naturally would swallow half the library
-    /// and spend an hour doing it. The caps stop the <i>expansion</i>, never the
-    /// attribution: whatever has been gathered is still decided on, and the files
-    /// that were not reached stay on the worklist for a component of their own.
+    /// The one cap left, where there were three. The other two —
+    /// <c>MaximumComponentFiles</c> and a soft ceiling on confirmations — existed
+    /// to stop an expansion that no longer happens: a folder bounds itself, so a
+    /// component cannot run away into an artist's whole catalogue and a jazz
+    /// standard cannot drag half the library in behind it.
     ///
-    /// Reaching a cap is logged. A silent cap would look exactly like a component
-    /// that closed on its own, and the difference is whether the answer used all
-    /// the evidence.
-    /// </remarks>
-    private const int MaximumComponentFiles = 600;
-
-    /// <summary>
-    /// Where a component stops fetching the long tail of one-song appearances.
-    /// </summary>
-    /// <remarks>
-    /// A flat ceiling is the wrong shape here and both settings of one proved it.
-    /// Candidates are confirmed in order of how many of the component's
-    /// recordings each holds, so a flat cut takes the tail — but at 400 the tail
-    /// reached up into releases the library owns whole, and <i>Off the Wall</i>
-    /// was discarded in favour of a box set that merely reprints it. Raising the
-    /// number to 2,000 fixed that and made one component spend 1,662 requests on
-    /// 21 files, which is the same mistake pointed the other way.
+    /// Candidates are ordered by how many of the folder's recordings each release
+    /// holds, which puts the album itself at the top <i>by construction</i> —
+    /// nothing can hold more of the folder than the record the folder is. That is
+    /// the property the expanding gather did not have, and the reason it could
+    /// fetch a box set reprinting <i>Off the Wall</i> while never fetching
+    /// <i>Off the Wall</i>: with the recording set still growing, the counts it
+    /// ordered by were not yet the counts that mattered.
     ///
-    /// So the cut is by <i>kind</i> rather than by count. A release sharing two
-    /// or more recordings with the component is one the library plausibly owns
-    /// part of, and is always fetched — that is the same judgement
-    /// <see cref="WorthFetching"/> makes, applied to the ceiling as well. A
-    /// release sharing exactly one is a long-tail appearance, and past this many
-    /// confirmations those stop being worth a request.
+    /// Sixty is generous against a median folder of twelve files. What it stops
+    /// is the tail — a dozen recordings browse to several hundred distinct
+    /// releases between them, nearly all anthologies holding one song, and every
+    /// track list is the 10.3-second request.
     /// </remarks>
-    private const int SoftCandidateCap = 300;
-
-    /// <summary>The backstop, for a component where even the plausible releases run away.</summary>
-    private const int MaximumComponentCandidates = 2_000;
+    private const int MaximumComponentCandidates = 60;
 
     private readonly SemaphoreSlim _finished = new(0, 1);
 
@@ -531,6 +523,16 @@ public sealed class ReleaseAttributionService(
     {
         if (refused.Count == 0) return;
 
+        // A shortlist with nothing on it must not be stored. `Usable` treats an
+        // empty-but-present candidate list as fresh, so this would be believed
+        // for a week — and the endpoint's own live gather does not apply
+        // `WorthFetching`, so it would have found candidates the pass pruned.
+        // Storing nothing sends the question back to that gather, which is what
+        // happened for every component before this cache existed. Reachable on a
+        // one-file component, where a single hit cannot clear the floor unless
+        // the release is four tracks or shorter: eight folders on this library.
+        if (component.Candidates.Count == 0) return;
+
         var open = new HashSet<MediaFileId>(refused);
 
         var members = component.Files
@@ -605,150 +607,178 @@ public sealed class ReleaseAttributionService(
     }
 
     /// <summary>
-    /// Expands outwards from a seed until the component closes or a cap stops it.
+    /// Everything still open in the seed's album folder, and the releases that
+    /// might explain it.
     /// </summary>
     /// <remarks>
-    /// The frontier is recordings, not files: a recording is what a browse takes,
-    /// and every file holding it shares its candidates exactly. Each round browses
-    /// the new recordings, prunes, fetches the surviving track lists, and reads
-    /// back from the database which of those tracks the library actually holds.
+    /// <b>One round, and the absence of a second one is the whole change.</b>
+    /// The folder fixes the file set before the first request, so there is no
+    /// frontier, nothing to admit, and no way for one album's candidate releases
+    /// to reach into another album's files.
     ///
-    /// Files already attributed by an earlier component are never pulled in.
-    /// Without that the last component of a large artist would re-decide the first
-    /// one, and a run would not converge.
+    /// Files the folder holds that are already answered are left out, by the same
+    /// predicate the seed was chosen with. A person who has filed part of a
+    /// folder by hand has narrowed the question rather than reopened it, and
+    /// re-deciding their answer is not this pass's to do.
+    ///
+    /// The seed is always a member even if the query somehow does not return it.
+    /// A component that came back empty would leave the seed unstamped and the
+    /// pass would choose it again forever.
     /// </remarks>
     private async Task<Component> GatherAsync(
         PendingFile seed,
         Memo memo,
         CancellationToken cancellationToken)
     {
-        var files = new Dictionary<MediaFileId, PendingFile> { [seed.Id] = seed };
-        var confirmed = new Dictionary<Mbid, MusicBrainzRelease>();
-        var formats = new Dictionary<Mbid, string?>();
+        var files = await FolderFilesAsync(seed, cancellationToken).ConfigureAwait(false);
 
-        // Which of *our* recordings each candidate release is known to contain.
-        // This is what makes the prune exact, and it is why browsing happens a
-        // round at a time rather than one recording at a time: a single browse
-        // says only that one recording is on a release, which is never enough to
-        // rule the release out. The counts here only ever grow, so a release
-        // pruned in one round can be admitted in the next.
+        // Which of *our* recordings each candidate release holds. Final once the
+        // browses finish, which is what <see cref="WorthFetching"/> now relies on.
         var hits = new Dictionary<Mbid, HashSet<Mbid>>();
         var summaries = new Dictionary<Mbid, MusicBrainzReleaseCandidate>();
+        var browsed = new HashSet<Mbid>();
         var placed = new HashSet<Mbid>();
 
-        var browsed = new HashSet<Mbid>();
-        var frontier = new List<Mbid> { seed.Recording };
-        var capped = false;
-
-        while (frontier.Count > 0 && !capped)
+        foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var round = frontier;
-            frontier = [];
+            if (!browsed.Add(file.Recording)) continue;
 
-            foreach (var recording in round)
+            var candidates = await BrowseAsync(file.Recording, memo, cancellationToken).ConfigureAwait(false);
+
+            if (candidates.Count > 0) placed.Add(file.Recording);
+
+            foreach (var candidate in candidates)
             {
-                if (!browsed.Add(recording)) continue;
+                summaries[candidate.Id] = candidate;
 
-                var candidates = await BrowseAsync(recording, memo, cancellationToken).ConfigureAwait(false);
-
-                if (candidates.Count > 0) placed.Add(recording);
-
-                foreach (var candidate in candidates)
+                if (!hits.TryGetValue(candidate.Id, out var holding))
                 {
-                    summaries[candidate.Id] = candidate;
-
-                    if (!hits.TryGetValue(candidate.Id, out var holding))
-                    {
-                        holding = [];
-                        hits[candidate.Id] = holding;
-                    }
-
-                    holding.Add(recording);
-                }
-            }
-
-            // Best-supported first, so that if a cap does stop the round, what
-            // was fetched is the part most likely to matter.
-            foreach (var (id, holding) in hits.OrderByDescending(entry => entry.Value.Count))
-            {
-                if (confirmed.ContainsKey(id)) continue;
-
-                // Not applied on the opening round, where every release has
-                // exactly one hit and a twelve-track album would score 1/12.
-                if (browsed.Count > 1 && !WorthFetching(summaries[id], holding.Count)) continue;
-
-                var release = await LookupAsync(id, memo, cancellationToken).ConfigureAwait(false);
-                if (release is null) continue;
-
-                confirmed[release.Id] = release;
-                formats[release.Id] = Formats(summaries[id]);
-
-                // Sorted by hits descending, so once the one-hit tail is reached
-                // everything after it is tail too, and breaking here loses
-                // nothing the library plausibly owns.
-                if (confirmed.Count >= MaximumComponentCandidates
-                    || (confirmed.Count >= SoftCandidateCap && holding.Count < 2))
-                {
-                    capped = true;
-                    break;
+                    holding = [];
+                    hits[candidate.Id] = holding;
                 }
 
-                foreach (var joined in await AdmitAsync(release, files, cancellationToken).ConfigureAwait(false))
-                {
-                    if (files.Count >= MaximumComponentFiles)
-                    {
-                        capped = true;
-                        break;
-                    }
-
-                    files[joined.Id] = joined;
-
-                    if (!browsed.Contains(joined.Recording)) frontier.Add(joined.Recording);
-                }
-
-                if (capped) break;
+                holding.Add(file.Recording);
             }
         }
 
-        if (capped) Log.AttributionComponentCapped(logger, seed.Path, files.Count, confirmed.Count);
+        // Best-supported first, then by id so that a rerun cannot change its mind
+        // about which releases the cap cuts off.
+        var worth = hits
+            .Where(entry => WorthFetching(summaries[entry.Key], entry.Value.Count))
+            .OrderByDescending(entry => entry.Value.Count)
+            .ThenBy(entry => entry.Key.Value)
+            .ToList();
 
-        return new Component([.. files.Values], [.. confirmed.Values], formats, browsed, placed);
+        var confirmed = new List<MusicBrainzRelease>();
+        var formats = new Dictionary<Mbid, string?>();
+        var capped = false;
+
+        foreach (var (id, _) in worth)
+        {
+            if (confirmed.Count >= MaximumComponentCandidates)
+            {
+                capped = true;
+                break;
+            }
+
+            var release = await LookupAsync(id, memo, cancellationToken).ConfigureAwait(false);
+            if (release is null) continue;
+
+            confirmed.Add(release);
+            formats[release.Id] = Formats(summaries[id]);
+        }
+
+        if (capped) Log.AttributionComponentCapped(logger, seed.Path, files.Count, worth.Count);
+
+        return new Component(files, confirmed, formats, browsed, placed);
     }
 
     /// <summary>
-    /// Is this release worth a request, given what the component knows so far?
+    /// The seed's album folder, as files still waiting on an album.
     /// </summary>
     /// <remarks>
-    /// <b>Not a bound on the final coverage, and treating it as one was a bug
-    /// that reached live data twice.</b> The tempting formulation —
-    /// <c>hits / trackCount</c> must already clear the floor — reads like an
-    /// exact bound and is not one: <c>hits</c> counts only the recordings a
-    /// browse has <i>so far</i> placed on the release, and the whole point of
-    /// the expansion is that more are still arriving. A 25-track live album
-    /// sharing five songs with a compilation scores 5/25, falls under a floor of
-    /// 0.25, and is discarded — so the compilation keeps those five files and the
-    /// other twenty sit unattributed. That is exactly what happened to
-    /// <i>Muddy Wolf at Red Rocks</i>.
+    /// <b>The prefix narrows and <see cref="AlbumFolder"/> decides.</b> A
+    /// <c>StartsWith</c> alone is wrong in a way that would be very hard to see:
+    /// the one file in the target library sitting loose under its artist has
+    /// <c>Prince</c> for a folder, and <c>Prince/</c> as a prefix matches that
+    /// artist's every album — one component for a whole discography, which is the
+    /// exact failure this rewrite exists to remove. So the query is a coarse cut
+    /// and the rule is applied again in memory, where it is the same rule the
+    /// worklist and the matching screen group by.
     ///
-    /// So the test is deliberately generous, and the two clauses cover different
-    /// shapes:
+    /// The trailing slash is not optional. Without it <c>Artist/Album</c> also
+    /// matches <c>Artist/Album Live</c> — a lesson the by-hand album screen
+    /// already paid for. EF Core's <c>StartsWith</c> over a parameter does not
+    /// treat <c>%</c> or <c>_</c> as wildcards, which was measured rather than
+    /// assumed, and matters here because <c>_</c> is not exotic in this library.
+    /// </remarks>
+    private async Task<List<PendingFile>> FolderFilesAsync(
+        PendingFile seed,
+        CancellationToken cancellationToken)
+    {
+        var folder = AlbumFolder.Of(seed.Path);
+
+        // A file at the library root has no folder to group by, so it is its own
+        // component. Grouping every such file together would be a claim that
+        // "loose at the root" is an album.
+        if (folder.Length == 0) return [seed];
+
+        var prefix = folder + "/";
+
+        var scope = scopeFactory.CreateAsyncScope();
+
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var rows = await db.MediaFiles
+                .AsNoTracking()
+                .Where(f => f.RecordingId != null
+                    && f.ReleaseLookupUtc == null
+                    && f.ReleaseDecidedUtc == null
+                    && f.Recording!.Mbid != null
+                    && f.Path.StartsWith(prefix))
+                .OrderBy(f => f.Path)
+                .Select(f => new PendingFile(
+                    f.Id,
+                    f.Path,
+                    f.Recording!.Title,
+                    f.Recording!.Mbid!.Value,
+                    f.FingerprintDuration ?? f.Quality!.Duration,
+                    f.SizeBytes))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var members = rows.Where(row => AlbumFolder.Of(row.Path) == folder).ToList();
+
+            return members.Exists(row => row.Id == seed.Id) ? members : [seed, .. members];
+        }
+    }
+
+    /// <summary>
+    /// Is this release worth a track list, now that the whole folder is known?
+    /// </summary>
+    /// <remarks>
+    /// <b>The same two clauses as before, and they are honest now.</b> Under the
+    /// expanding gather this read like an exact bound and was not one:
+    /// <paramref name="held"/> counted the recordings a browse had placed
+    /// <i>so far</i>, while the entire point of the expansion was that more were
+    /// still arriving — so a twenty-five-track live album sharing five songs with
+    /// the compilation that seeded the component scored 5/25, fell under the
+    /// floor, and was discarded before its own twenty files could arrive. That is
+    /// what happened to <i>Muddy Wolf at Red Rocks</i>, and it is why the opening
+    /// round had to skip the prune entirely.
     ///
-    /// <list type="bullet">
-    /// <item><b>Two or more shared recordings</b> means a release this library
-    /// plausibly owns a chunk of. Fetching its track list is what lets the rest
-    /// of that chunk be found — the five hits become twenty-five once its own
-    /// files are admitted and browsed.</item>
-    /// <item><b>One shared recording</b> is only worth fetching when the release
-    /// is small enough for one track to matter: a two-track single at 1/2 clears
-    /// any floor, a 150-track anthology at 1/150 never will.</item>
-    /// </list>
+    /// A folder fixes the recording set before the first browse. The count is
+    /// final when it is read, the arithmetic means what it says, and the prune
+    /// applies to every round because there is only one.
     ///
-    /// What is discarded is therefore only the long anthology contributing a
-    /// single song, which is the case the prune was for. Nothing is lost even
-    /// then: files it would have claimed stay on the worklist and get a component
-    /// of their own, seeded from a file whose album is in the opening round.
+    /// Still deliberately generous, and the second clause is the interesting one:
+    /// a release listing one recording twice can explain more files than it has
+    /// hits, so <c>held / trackCount</c> is not quite a ceiling on coverage. The
+    /// cost of being wrong here is a missing album, which is worse than a request.
     /// </remarks>
     private bool WorthFetching(MusicBrainzReleaseCandidate candidate, int held)
     {
@@ -768,48 +798,6 @@ public sealed class ReleaseAttributionService(
             .ToList();
 
         return named.Count == 0 ? null : string.Join("+", named);
-    }
-
-    /// <summary>
-    /// Which of this release's tracks the library holds and has not yet filed.
-    /// </summary>
-    private async Task<List<PendingFile>> AdmitAsync(
-        MusicBrainzRelease release,
-        Dictionary<MediaFileId, PendingFile> known,
-        CancellationToken cancellationToken)
-    {
-        var recordings = release.Tracks
-            .Select(track => track.RecordingId)
-            .OfType<Mbid>()
-            .Distinct()
-            .ToList();
-
-        if (recordings.Count == 0) return [];
-
-        var scope = scopeFactory.CreateAsyncScope();
-
-        await using (scope.ConfigureAwait(false))
-        {
-            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
-
-            var rows = await db.MediaFiles
-                .AsNoTracking()
-                .Where(f => f.ReleaseLookupUtc == null
-                    && f.ReleaseDecidedUtc == null
-                    && f.Recording!.Mbid != null
-                    && recordings.Contains(f.Recording.Mbid.Value))
-                .Select(f => new PendingFile(
-                    f.Id,
-                    f.Path,
-                    f.Recording!.Title,
-                    f.Recording!.Mbid!.Value,
-                    f.FingerprintDuration ?? f.Quality!.Duration,
-                    f.SizeBytes))
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            return [.. rows.Where(row => !known.ContainsKey(row.Id))];
-        }
     }
 
     private async Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseAsync(
@@ -864,16 +852,17 @@ public sealed class ReleaseAttributionService(
         /// Recordings a browse was actually sent for.
         /// </summary>
         /// <remarks>
-        /// Every recording in a component that closed, and fewer when a cap
-        /// stopped the expansion. Carried so the stored candidate document can
-        /// say which — a list cut because half the set was never asked about
-        /// looks exactly like a complete one otherwise.
+        /// Every distinct recording in the folder, since the browses are what
+        /// the gather now consists of. Carried because the stored candidate
+        /// document reports it against the recording count: the two agreeing is
+        /// what tells a person the shortlist was drawn from the whole album
+        /// rather than from part of it.
         /// </remarks>
         IReadOnlySet<Mbid> Browsed,
 
         /// <summary>
         /// Recordings a browse returned at least one release for, whether or not
-        /// that release survived the prune.
+        /// that release survived the prune or the cap.
         /// </summary>
         /// <remarks>
         /// Kept because the prune destroys the difference between the two refusal
