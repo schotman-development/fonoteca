@@ -29,15 +29,46 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("BeganYear")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Country")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<string>("Disambiguation")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("Ended")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("EndedYear")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Gender")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Genres")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset?>("LookupUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset?>("PortraitLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PortraitUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
@@ -50,6 +81,10 @@ namespace Fonoteca.Data.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Id")
+                        .HasDatabaseName("IX_Artists_Unasked")
+                        .HasFilter("\"LookupUtc\" IS NULL AND \"Mbid\" IS NOT NULL");
 
                     b.HasIndex("Mbid")
                         .IsUnique()

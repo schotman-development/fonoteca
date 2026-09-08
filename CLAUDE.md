@@ -218,6 +218,8 @@ records what would reopen that.
 | `Domain/Catalogue/PrimaryCredits.cs` | the rule — which artists a track is browsable under. Pure |
 | `Api/Library/EnrichmentService.cs` | the pass: cluster → recording → rows, one file at a time |
 | `Api/Endpoints/CatalogueEndpoints.cs` | `GET /api/catalogue/artists`, `…/artists/{id}` |
+| `Providers/MusicBrainz/MusicBrainzCatalogue.cs` | `GetArtistAsync` — the third stage's one call |
+| `web/src/pages/artistFacts.ts` | the pure half — life spans and country names. `node --test` |
 
 A fully identified library still has **zero artists**: identification decides an
 AcoustID cluster, writes it into the file's tags and discards the MusicBrainz
@@ -265,6 +267,126 @@ other half, and its own list of paid-for edges:
   expressing it as a union of `(artist, recording)` pairs is refused too
   ("unable to translate set operation after client projection has been applied").
   `TheListAndTheDetailPageAgree` is what stops the two copies drifting.
+
+#### The artist stage, and the worklist that is not the set already in hand
+
+Every artist in the catalogue is a **byproduct**. `CatalogueWriter.UpsertArtistAsync`
+mints a row from whichever `MusicBrainzCredit` reached it first and fills the
+rest with `??=`, so a name, a sort name and a type are whatever one release
+happened to print. That is enough to browse by and it is not a description of a
+musician: measured on the target library, **2,838 artists, every one with an
+MBID, and not one with a country, a life span or a genre** — because a credit
+line is a line on a sleeve and carries none of those.
+
+`GetArtistAsync` is the third stage of the same pass. Same trigger, same
+`LibraryWorkGate`, same hub channel, one more drain in `RunAsync` — and about
+2,838 more gated MusicBrainz turns on a pass that used to end when the files ran
+out, which against the public server is an extra 45 minutes holding the gate
+against all three passes. Nothing auto-starts enrichment (`StartEnrichment` is
+the only caller of `Start()`), so it is always a deliberate press.
+
+- **The worklist is `Artists.LookupUtc IS NULL`, not `Memo.Artists`.** The set
+  the writer already collects is sitting right there and draining it is the
+  wrong answer in the direction that is hard to see: a library whose files are
+  all enriched has an empty file worklist, so the pass would touch no artists
+  and describe none — the 2,838 already in the catalogue would have needed every
+  file re-enriched to be reached. Keyed on the artist's own column, the backlog
+  and the new arrivals are one query.
+  `AnArtistNoFileInThisRunCreditedIsStillDescribed`.
+- **`LookupUtc` is keyed on the asking, and this is the fourth time.**
+  `AcoustIdCheckedUtc`, `RecordingLookupUtc` and `ReleaseLookupUtc` each paid for
+  this separately. Keyed on `Country IS NULL` instead, every artist MusicBrainz
+  holds no country for — every orchestra, every "Various Artists" — is re-asked
+  about on every run forever and the worklist never empties. Set when the answer
+  is "no such artist" too; left null **only** when the lookup did not happen, so
+  a transient outage retries and a real answer does not.
+  `AnUnknownArtistIsStampedAndAnUnreachableOneIsNot`.
+- **`CountPendingAsync` returns two numbers now, and that is where the stage
+  leaks into an existing screen.** The count used to be "identified files nobody
+  has asked about yet" and `EnrichmentPanel` printed it in those words — so the
+  moment artists joined the total, a library whose files are all enriched
+  rendered **"2,838 identified files with no recording yet"**, wrong in both
+  nouns and pointing a person at the wrong screen. `Pending` stays on the wire
+  as the sum, because "is there anything to do" is what the button's enable rule
+  asks and that question did not change; `PendingFiles` and `PendingArtists`
+  travel with it because the total is no longer describable in one noun.
+- **The name is overwritten, but only when there is one.** MusicBrainz sends
+  `""` for absent text rather than null, and `ToArtist` maps that to
+  `string.Empty`; `Artists.Name` is `NOT NULL` and `""` satisfies it. Unguarded,
+  a blank answer replaces a usable credit-line name with nothing and the stamp
+  goes on in the same save, so no run ever revisits it. The three fields beside
+  it are guarded because they were always nullable.
+- **`Artists.Genres` is clamped on length, not on count.** Twelve genres is
+  about 560 characters and would never have tripped `varchar(1000)` — but "in
+  practice" is not what the column checks, and an overrun throws out of
+  `SaveChangesAsync`, rolls the stamp back with it, and lands the row on the
+  worklist forever, failing identically at the rate limit on every run. The cut
+  is between genres, never mid-word: a clamp that can store "progressive ro"
+  puts a genre in the catalogue that does not exist.
+- **`ArtistCredit.CreditedAs` written before a rename goes stale, and it is not
+  fixed.** `CatalogueWriter` stores `credit.Name == artist.Name ? null : credit.Name`,
+  so credits written while the row still said "Bowie" recorded `null` — read
+  back after the lookup renames it to "David Bowie", they claim a billing the
+  sleeve never printed. Only credits written before the artist was described;
+  new ones compare against the corrected name and are right. The fix is
+  recomputing every credit on a rename, which is a pass of its own.
+- **This stage overwrites what the credit line wrote.** `UpsertArtistAsync` uses
+  `??=` and leaves the name alone on purpose — a sleeve printing "Bowie" must not
+  rename David Bowie — but an artist lookup is the artist's own record rather
+  than a sleeve, and deferring to it would make the stage unable to correct the
+  one thing it exists to improve. It is the only place in the application with a
+  source better than a credit.
+- **Last of the three drains, because it depends on the first two.** The artists
+  those files just credited are in the catalogue by the time it starts, so one
+  stage covers both them and the backlog. A run cancelled part way has done the
+  file work, which is the part that cannot be resumed as cheaply.
+- **The life span is a year, and that is the opposite of `ReleaseDate`'s
+  decision on purpose.** A release keeps its month and day because editions are
+  *sorted* by date and a reissue outranking an original is a real failure;
+  nothing sorts artists by birthday, and the page prints "1908–1989". Three
+  columns instead of seven.
+- **`Ended` is a column beside `EndedYear`, not derived from it.** MusicBrainz
+  records "this life span is over" separately from when it ended, and a great
+  many groups carry the flag with no date. Read from the year alone every one of
+  them prints as still going, which is wrong in the direction nobody checks.
+  `artistFacts.ts` renders that case `1962–?`.
+- **Genres, never tags.** Both arrive in the same response; the tag list is the
+  raw free-text one, where "seen live", "favourites" and a misspelling of the
+  artist's own name outvote anything about the music. Stored `", "`-joined,
+  which is `ReleaseGroup.SecondaryTypes`' bargain and taken for the same reason
+  — nothing queries them yet, and the split happens once, in
+  `CatalogueEndpoints.Describe`, so the wire format is not a fact about the
+  column.
+- **`describedAtUtc` is on the wire beside the fields it fills.** Without it a
+  screen cannot tell "MusicBrainz holds no country for this orchestra" from
+  "nobody has asked yet", and those want opposite things on the page.
+- **`Intl.DisplayNames` turns `AT` into Austria.** A table of two hundred
+  countries is data the platform already ships. MusicBrainz's own non-ISO codes
+  — `XW` worldwide, `XE` Europe, `SU` — come back as themselves through
+  `fallback: 'code'`, and the two-letter regex is what stops a malformed code
+  raising `RangeError` out of a render. It localises for the viewer, which is
+  right in a browser and is why `countryName` takes a locale the *test* pins:
+  asserting "Austria" against the runtime default is green here and red on any
+  machine whose ICU default is not English.
+- **The mapper has its own fixtures, because the stub bypasses it.** Every other
+  lookup here has a verbatim WS/2 document under `Providers.Tests/Responses/`
+  and the artist one had none — so genre vote-ordering, the `ended` flag and the
+  year narrowing were exercised only through a hand-written double that never
+  ran `ToArtist`. `artist-tom-petty.json` is the one that earns its place:
+  MusicBrainz sends the genres **alphabetically** with `rock` third and vote
+  counts `1, 1, 3, 1`, so a mapper that passes them through and one that sorts
+  by votes disagree on that document — and the screen only prints the first
+  three.
+- **Deliberately not fetched, though they arrive in the same document or one
+  `Include` away**: aliases (nothing searches the catalogue yet), URL relations
+  and the Wikidata QID behind them (no screen has an external link, and storing
+  the seed for a portrait feature that does not exist is scaffolding for later),
+  areas (`Country` answers "where from"; "formed in Düsseldorf" is one more
+  field the day a page wants it), IPIs and ISNIs. Widening is one `Include` and
+  one column each.
+- **Not on the artist *card*.** The list sends every field, and the card's
+  subtitle truncates to one line with the track count already owning it. The
+  detail page is where "who is this" belongs.
 
 ### The attribution pass, and why its unit is a set
 
@@ -1029,6 +1151,221 @@ and it is the only one that rewrites the audio rather than a row.
   and that is the only fact worth keeping about a run that rewrote eight thousand
   files.
 
+### The file manager, and the one rename that must not go through a scan
+
+| | |
+| --- | --- |
+| `Domain/Catalogue/FolderRollup.cs` | the rule — which immediate child of a folder a path belongs to. Pure |
+| `Ingest/FileSystemAudioFileStore.cs` | `OpenForCreateAsync`, and `PruneEmptyDirectories` now shared with the archive |
+| `Api/Library/FileManagerService.cs` | list, trash, move, save |
+| `Api/Endpoints/FileEndpoints.cs` | `GET /api/files`, `POST …/trash`, `…/move`, `…/upload` |
+| `Domain/Catalogue/FilePreview.cs` | the rule — which extensions may be previewed, and as what. Pure |
+| `Api/Endpoints/FileEndpoints.Preview.cs` | `GET …/content`, `…/detail`, `…/art` |
+| `web/src/pages/FilesPage.tsx` | breadcrumb, table, three buttons |
+| `web/src/pages/FilePreviewPane.tsx` | what the selected entry actually is |
+| `web/src/pages/files.ts` | the pure half — breadcrumbs, rename, upload paths. `node --test` |
+
+**Every other screen here is about music. This one is about files, and it exists
+because the two disagree.** A duplicate rip is one album to MusicBrainz and two
+folders on disk, and nothing that reasons about recordings can say which of the
+two is the mess.
+
+- **What is there comes from the disk; what it means comes from the catalogue.**
+  `MediaFiles` holds audio and only audio — `LibraryScanner` filters on
+  `AudioFormats` — so a tree derived from `Path` cannot show a stray `cover.jpg`,
+  a leftover `.m3u`, or an album uploaded four seconds ago. Those are exactly
+  what somebody opens a file manager for. One prefix query per listing, grouped
+  onto the folder's immediate children by `FolderRollup`, is what puts "12 filed"
+  beside "31 unmatched".
+- **A rename updates the rows, and that is the whole reason this is an endpoint
+  rather than a `mv` and a rescan.** Renaming changes no bytes, but to the
+  reconciler it is a path that vanished and a path that arrived: the old row is
+  deleted and an empty one takes its place, taking every AcoustID, recording
+  link, album decision and human answer under the folder with it. Hours of
+  rate-limited lookups, lost to a typo correction, reported as nothing at all —
+  the album simply reappears on the worklist.
+  `RenamingAFolderKeepsWhatTheIdentificationPassEarned` is the guard, and it is
+  `TaggingAFileDoesNotMakeTheNextScanThinkItChanged` one level up.
+- **Rows first, then the bytes, in one transaction.** A rename that fails —
+  cross-device, permissions, a name the filesystem refuses — rolls the paths
+  back. The other order can only be undone by a scan, and by then the scan has
+  discarded everything derived.
+- **The destination is checked in the catalogue as well as on disk.**
+  `MediaFiles.Path` is unique, so a row left by a file deleted outside this
+  application makes the prefix rewrite collide halfway through. A refusal naming
+  the problem beats a constraint violation out of an `UPDATE`.
+- **Nothing is deleted; trash is a move**, to `Fonoteca:TrashPath` under a
+  timestamp, keeping the library-relative layout. `AllowFileReplacement`'s
+  bargain, and the right one for the same reason. It is a *separate* directory
+  from `ReplacedPath` although the mechanism is identical: that one holds albums
+  an upgrade judged worse, this one holds what a person threw away, and mixed,
+  the only thing telling a mistaken click from a mistaken upgrade is a timestamp.
+- **Trash does delete the rows, and that is not the scan's act.** The scan
+  refuses to remove rows for files it did not see, because an unreadable
+  directory and an unmounted volume both look like a deletion from outside. Here
+  there is direct evidence: this process moved these files and knows their paths.
+  Left behind, the rows keep the folder on every other screen until somebody
+  thinks to rescan.
+- **`PruneEmptyDirectories` moved onto the store, and had to.** It is the one
+  function here that deletes something nobody named, and its own remarks record
+  why the obvious guard deletes the library root. Two copies is how one of them
+  ends up with that guard. `AlbumReplacementService` now calls the same one.
+- **Upload is a raw body, not a form.** `IFormFile` buffers anything over 64 KB
+  to a temporary file — for an album that is writing every byte twice, and on a
+  host where `/tmp` is tmpfs, into RAM. The largest FLAC in the target library is
+  475 MB. The body is the file, the path is a query parameter, and
+  `CopyToAsync` is the implementation. Kestrel's 30 MB limit is lifted on that
+  request only, through `IHttpMaxRequestBodySizeFeature`.
+- **`OpenForCreateAsync` stages like `OpenForReplaceAsync` and shares its loop.**
+  An upload arrives over a socket that can close mid-album, and a half-written
+  FLAC left at its final name is a file the next scan catalogues, fingerprints
+  and files under an artist. Written to a hidden sibling it is invisible to the
+  walk twice over, and abandoning it is a delete rather than a repair.
+- **`webkitRelativePath` is what keeps `CD1` and `CD2` apart.** A directory
+  picker sets it; a file picker leaves it empty. Dropping the leading segment
+  would empty a two-disc set into one folder and renumber nothing, which reads
+  downstream as a rip that lost its discs.
+- **The upload takes `folder` and `name` separately, and sanitises only `name`.**
+  One `path` parameter meant `StagedFileName.Segment` ran over the browsed prefix
+  too — and it drops `:`, which **seven album folders in the target library
+  contain**, the duplicated Brahms one included. Uploading into
+  `Essential Brahms, Volume 1: 50 Tracks…` therefore created a *new* sibling
+  without the colon: a third duplicate, minted silently by the feature meant to
+  remove the second. The folder already exists and its name is a fact about the
+  disk; only the half the browser invented is sanitised, and containment is
+  `Resolve`'s job either way.
+- **`Accepts<Stream>("application/octet-stream")` is a `Consumes` constraint, not
+  a doc comment.** `fetch(url, { body: file })` sends the file's own type, so
+  every real upload came back **415** while the service-level test passed and a
+  Playwright probe that aborted the route never reached the server to find out.
+  The client states the header. `FileEndpointTests` pins both directions.
+- **`Fonoteca:TrashPath` is validated to sit outside the library root**, the way
+  `ReplacedPath` already was and for a worse reason: a replaced album kept inside
+  merely looks unreplaced, but a *trashed* folder inside is re-scanned as new
+  files **after** its rows have been deleted — every identity, album and decision
+  under it gone. The exact catastrophe the feature exists to prevent, caused by
+  one misconfigured path.
+- **One entry refusing does not fail the batch.** `RemoveRowsAsync` autocommits,
+  so a throw on the third of five escaped with two albums already moved and their
+  rows already deleted, while the endpoint answered "the move failed" and nothing
+  was journalled. Being told nothing happened when two albums have gone is worse
+  than either outcome alone. Caught per entry; the response names what would not
+  move.
+- **A directory symlink is not listed.** `LibraryTreeEnumerator` refuses to
+  recurse through one to avoid an infinite walk; here it is containment, because
+  `Resolve` is lexical — a link out of the library would be listed, navigable,
+  and a way to trash files the catalogue has never seen. Symlinked *files* stay,
+  as they do in the walk.
+- **Move and rename are one control with two fields, because they are one act.**
+  The API takes a whole destination path either way, so two code paths building
+  that path would only be two chances to build it differently. `destinationFor`
+  in `files.ts` is where it is decided, under `node --test`.
+- **The name's separators are stripped; the folder's are kept, and `..` is
+  dropped from both.** A folder is a path and slashes belong in it; a name is one
+  segment, and a slash typed there is somebody relocating an entry from a box
+  labelled "name". Honoured literally, `../Mahler` walks out of the folder and
+  the API's containment check refuses it — a plausible-looking path answered by
+  an opaque 400. The failure actually being guarded against is the one where it
+  *works*.
+- **A file failing mid-upload must not abandon the album.** A 409 on one track
+  already came back as `!ok` and carried on; a dropped connection *threw*, out of
+  the loop — so one transient failure on track 3 silently skipped tracks 4 to 12
+  and reported the ones that landed as a success. Caught per file. Found by
+  driving the page in Chromium with the upload route aborted, not by reading it.
+- **`Identified` counts `AcoustId`, not `RecordingId`.** The pair reads as one
+  glance — "31 files, 0 identified" is AcoustID refusing, "31 identified, 0
+  filed" is attribution refusing. Reading the enrichment column here would name
+  the second failure after the first and send a person to the wrong screen.
+- **Trash and move take `LibraryWorkGate`; listing and upload do not.** A pass
+  may be holding a file in an in-flight page. An upload only adds paths nothing
+  knows about yet, and every pass's worklist is over rows that do not exist until
+  a scan — which is also why the scan button is on this page. Note the gate's
+  standing limitation: **the scan has never been on it**, so a scan arriving
+  mid-move runs anyway.
+- **There is no `DELETE /api/files`.** Trashing is a move, and naming it a delete
+  would be the one place in this application where the wire says something the
+  implementation does not do.
+#### The previews, and the one new risk in the feature
+
+The listing answers "what is here"; three more endpoints answer "what is
+*this*", and between them they are what makes it a file browser rather than a
+table of names.
+
+- **Serving bytes out of the library is the genuinely new risk, and
+  `FilePreview` is the whole answer.** It is an allowlist, so a media type is
+  never guessed from an extension: anything it does not name is
+  `application/octet-stream` sent as an attachment, and every response carries
+  `nosniff`. Two absences are load-bearing — **no `text/html`** and **no
+  `image/svg+xml`**, both documents that run script, either of which turns
+  dropping a file into a music folder into script on this application's origin.
+  `AFileThatCouldRunScriptIsServedAsAnOpaqueDownload` is the guard, and the
+  folder-cover lookup goes through the same list so a `cover.svg` is not a
+  folder's picture.
+- **The art path walked around the allowlist, and it was a live XSS.** An
+  embedded cover has no filename — only a MIME string a tagger wrote *inside* the
+  file — so the extension table never saw it, and the check was
+  `StartsWith("image/")`, which passes `image/svg+xml`. One PICTURE block in a
+  FLAC served a script-bearing document from this application's origin,
+  demonstrated against a running server. `nosniff` is no defence: it stops a
+  browser guessing a type, not honouring the one it was given. The constraint is
+  `FilePreview.IsSafeImageMediaType`, applied in `AudioFileDescriber` where
+  **both** art endpoints route through — the pre-existing catalogue one had the
+  same hole and no `nosniff` at all.
+- **Lexical containment is not containment, and a directory symlink proved it.**
+  `Resolve` compares strings, so `ln -s /etc secretdir` inside the library gives
+  a path under the root by every comparison and `/etc` on the disk — a listing of
+  `/etc` and the bytes of `/etc/hostname`, through the library root. It was
+  harmless for exactly as long as nothing served bytes, because
+  `LibraryTreeEnumerator` refuses to recurse through a link so nothing behind one
+  was ever catalogued; a file manager that reads arbitrary paths ended that.
+  `EnsureNoLinkedDirectory` walks the chain (.NET has no `realpath`) and refuses,
+  in `Resolve` rather than at the three endpoints, because every caller in the
+  application resolves through it. **Symlinked *files* are still allowed** — the
+  walk catalogues those deliberately, and refusing them would take every one out
+  of reach of the passes already holding rows for them.
+- **`PreviewKind.Audio` means a browser can play it, not that it is audio.**
+  Monkey's Audio, WavPack and DSD are audio to `AudioFormats` and to every pass
+  here, and no browser decodes them. Filed as `None` they offer no player, which
+  is the truth; their tags and measured quality still show, because those come
+  from a decoder on the server.
+- **`kind` rides along on every listing row**, from that same allowlist, so the
+  row that offers to show a picture and the endpoint that refuses to send one
+  cannot disagree. That is one table, not two — the client has no extension map.
+- **Range support is ASP.NET's.** `PhysicalFile` with `enableRangeProcessing`
+  handles `Range`, `If-Range` and the 206, which is what lets an `<audio>`
+  element seek into a 400 MB FLAC without reading the first 399, and what makes
+  a text preview cost 8 KB rather than the file. Note what this does *not* do:
+  **`IAudioFileStore.OpenRangeAsync` is still unimplemented and still has no
+  caller.** It was written for exactly this and turned out not to be needed.
+- **`detail` is keyed on a path, not on a media file id**, and that is the point:
+  an album uploaded four seconds ago has no catalogue row, and it is precisely
+  the file somebody wants to look at. `AudioFileDescriber` already worked by
+  path; nothing about it had to change.
+- **This is the first thing in the application that plays a note.**
+  `PlaybackProvider` has been mounted at the root and `AudioTransport` has sat in
+  the shell since they were built, rendering nothing, because no screen ever
+  handed them a track. `PlayButton` takes one and does the rest.
+- **`files.ts` may not import `api.ts`.** Doing it for one `apiBaseUrl` pulled in
+  the generated client, whose `ApiError` uses TypeScript parameter properties —
+  which Node's strip-only type stripping refuses outright, taking the whole file
+  out of `node --test`. The URL builders take the base as a parameter instead.
+  The same rule `seating.ts` states, learned again.
+- **A null byte is a 400, not a 500.** `Path.GetFullPath` throws
+  `ArgumentException` for one, and only `UnauthorizedAccessException` was caught
+  — so a malformed query parameter returned a stack trace. Caught in `Resolve`
+  and re-thrown as the exception every caller already treats as "not a path in
+  this library".
+- **The selected row's highlight was invisible and measuring is how that was
+  found.** `--color-surface-raised` resolves to pure white in the light theme
+  against a page that is also white, so the rule applied and could not be seen.
+  It is `--color-accent-subtle` with an inset bar now, checked in Chromium in
+  both themes.
+
+- **No config flag gates it, deliberately.** `AllowFileMutation` and
+  `AllowFileReplacement` exist because a *pass* can rewrite a library unattended.
+  Nothing here runs unattended: every act is one click on one named entry, and
+  the reversibility is in the trash rather than in a switch.
+
 ### The identification providers, and what they refuse to do
 
 | | |
@@ -1308,7 +1645,17 @@ Adding a component means adding stories, because that is what tests it.
   `./apps/api/tests/Fonoteca.Integration.Tests/bin/Debug/net10.0/Fonoteca.Integration.Tests`
   runs all 103 integration tests in **18 seconds** against `dotnet test`'s
   several minutes. It still hangs occasionally, for the same reason, but it fails
-  fast enough to just re-run. Per-class `--filter` runs are reliable.
+  fast enough to just re-run. Per-class runs are reliable **for every class but
+  one**: `-class Fonoteca.Integration.Tests.LibraryScanEndpointTests` hung
+  **three times out of three**, and — measured in a clean worktree at `ce113bc`
+  — three out of three there too, on the identical signature. So it is not
+  intermittent when that class is run alone, and it is not anybody's recent
+  change. It is the same class this note already fingers as the correlation, for
+  the same reason: `Fonoteca:IdentifyAfterScan` starts a pass inside it. The
+  three tests in it only pass as part of a whole-assembly run that happens not
+  to hang. Note the flag is `-class` with a fully qualified name, not `--filter`
+  — the xUnit v3 executable is not the VSTest bridge and does not take VSTest's
+  syntax.
 - **A running `dotnet run` API stalls `dotnet test`.** The test build wants to
   write `Fonoteca.Api.dll`, the running host holds it, and MSBuild waits rather
   than failing — so the run sits at zero output for as long as you let it. Stop

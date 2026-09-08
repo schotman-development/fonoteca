@@ -23,6 +23,53 @@ const POLL_MS = 5000
  * re-run freely — every fingerprint it needs is already stored, so it opens no
  * file and runs with the library volume unmounted.
  */
+/**
+ * What is left to do, in the nouns it is actually left to do it to.
+ *
+ * Every clause that applies, which on a partly enriched library is two of them
+ * and is also the only rendering that says why the run will take as long as it
+ * will — an artist costs a MusicBrainz turn just as a file does, and a picture
+ * costs a fraction of one batched query.
+ */
+function pendingSentence(status: {
+  readonly pendingFiles: number
+  readonly pendingArtists: number
+  readonly pendingPortraits: number
+}): string {
+  const parts: string[] = []
+
+  if (status.pendingFiles > 0) {
+    parts.push(
+      `${status.pendingFiles.toLocaleString()} identified file${
+        status.pendingFiles === 1 ? '' : 's'
+      } with no recording yet`,
+    )
+  }
+
+  if (status.pendingArtists > 0) {
+    parts.push(
+      `${status.pendingArtists.toLocaleString()} artist${
+        status.pendingArtists === 1 ? '' : 's'
+      } to describe`,
+    )
+  }
+
+  // Third clause, and on a library described before pictures existed it is the
+  // only one — which is exactly why it is here. The count is deliberately not
+  // added to the artist one: they are the same rows and different work, and a
+  // person reading "2,902 artists to describe" would be told to expect the
+  // forty-five minutes that number used to mean.
+  if (status.pendingPortraits > 0) {
+    parts.push(
+      `${status.pendingPortraits.toLocaleString()} picture${
+        status.pendingPortraits === 1 ? '' : 's'
+      } to look for`,
+    )
+  }
+
+  return `${parts.join(' · ')}.`
+}
+
 export function EnrichmentPanel({ onEnriched }: { readonly onEnriched?: () => void }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -144,10 +191,16 @@ export function EnrichmentPanel({ onEnriched }: { readonly onEnriched?: () => vo
             ) : null}
           </Stack>
         ) : (
+          /*
+            Two clauses, because the pass now asks two kinds of question and one
+            noun cannot cover both. Written as one sentence per kind and joined,
+            rather than as a count of "things": on a library whose files are all
+            enriched this line used to read "2,838 identified files with no
+            recording yet", which was wrong in both nouns and pointed a person at
+            the wrong screen.
+          */
           <Text size="sm" tone={status.pending === 0 ? 'tertiary' : 'primary'}>
-            {status.pending === 0
-              ? 'Every identified file has been looked up.'
-              : `${status.pending.toLocaleString()} identified file${status.pending === 1 ? '' : 's'} with no recording yet.`}
+            {status.pending === 0 ? 'Everything has been looked up.' : pendingSentence(status)}
           </Text>
         )}
 

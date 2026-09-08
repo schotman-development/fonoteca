@@ -1,0 +1,212 @@
+/*
+ * The heading exists for semantics; its type comes from the Text inside it.
+ */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/*
+ * A file input styled as a button by hiding the control and labelling it.
+ * The input stays in the accessibility tree and keeps its own keyboard
+ * behaviour — `display: none` would take both away, which is why it is clipped
+ * rather than hidden.
+ */
+.upload {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-raised);
+  cursor: pointer;
+}
+
+.upload:focus-within {
+  outline: var(--border-width-medium) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The checkbox column: as narrow as the control, and never the one that grows. */
+.pick {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.paths {
+  margin: 0;
+  padding-left: var(--space-16);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/*
+ * The name column takes whatever the other four leave, and wraps.
+ *
+ * `truncate` was wrong here specifically: the two folders this screen exists to
+ * tell apart are `Essential Brahms, Volume 1 50 Tracks…` and `Essential Brahms,
+ * Volume 1: 50 Tracks…`, and an ellipsis lands on character 24 — three
+ * characters before the colon that is the entire difference between them.
+ * `width: 100%` on one cell of a fixed-width row is what makes it absorb the
+ * slack rather than share it.
+ */
+.name {
+  width: 100%;
+}
+
+/*
+ * A folder is a link to a folder, so it is a button that reads as text rather
+ * than a ghost Button — that component centres and refuses to wrap, which is
+ * right for an action and wrong for a hundred-character album title.
+ */
+.folder {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-text-link);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder:hover {
+  text-decoration: underline;
+}
+
+.folder:focus-visible {
+  outline: var(--border-width-medium) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* "669.7 MB" wrapping onto two lines because the name column took the slack. */
+.number {
+  white-space: nowrap;
+}
+
+/*
+ * Listing and preview, side by side.
+ *
+ * The pane is a fixed 340px and the listing takes the rest — `minmax(0, 1fr)`
+ * rather than `1fr`, because a grid track's default minimum is `auto` and a
+ * hundred-character album title would push the pane off the screen instead of
+ * wrapping.
+ */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--space-20);
+  align-items: start;
+}
+
+/* One column under the width where two would each be too narrow to read. */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * The selected row.
+ *
+ * `--color-accent-subtle`, not `--color-surface-raised`: measured in Chromium,
+ * raised resolves to pure white in the light theme against a page that is also
+ * white, so the highlight applied and could not be seen. The inset bar carries
+ * it for anyone who cannot pick the tint out at all.
+ */
+.row[data-current] {
+  background-color: var(--color-accent-subtle);
+  box-shadow: inset 3px 0 0 var(--color-accent-solid);
+}
+
+.entry {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.icon {
+  flex: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.icon[data-kind="audio"] {
+  color: var(--color-text-link);
+}
+
+/*
+ * The name selects; it is a button so it is reachable by keyboard, and styled
+ * as text so it does not read as an action.
+ */
+.select {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.select:hover {
+  text-decoration: underline;
+}
+
+.select:focus-visible,
+.enter:focus-visible {
+  outline: var(--border-width-medium) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The chevron that goes into a folder. */
+.enter {
+  flex: none;
+  padding: 0 var(--space-4);
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-md);
+  line-height: 1;
+  color: var(--color-text-link);
+  cursor: pointer;
+}

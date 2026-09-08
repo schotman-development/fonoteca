@@ -1,0 +1,106 @@
+.pane {
+  position: sticky;
+  top: var(--space-16);
+  align-self: start;
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  /*
+   * Its own scroll, so a file with forty tags does not push the listing beside
+   * it into a page three screens tall.
+   */
+  max-height: calc(100vh - var(--space-32) * 3);
+  overflow-y: auto;
+}
+
+.image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  /* A checkerboard would be better; this at least makes a transparent PNG visible. */
+  background-color: var(--color-surface-sunken);
+}
+
+/*
+ * `pre` wraps here, which it does not by default. A cue sheet has short lines
+ * and a rip log has very long ones, and a horizontal scrollbar inside a 340px
+ * pane is unreadable.
+ */
+.text {
+  margin: 0;
+  padding: var(--space-8);
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-sunken);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-relaxed, 1.5);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tags {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.tag {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: baseline;
+}
+
+.tag dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.open,
+.download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-base);
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.open:hover,
+.download:hover {
+  background-color: var(--color-surface-raised);
+}
+
+.open:focus-visible,
+.download:focus-visible {
+  outline: var(--border-width-medium) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * The path, clamped.
+ *
+ * A classical filename runs to 120 characters and the folder above it to
+ * another 60, so unclamped the pane spent five lines on a path before showing
+ * the cover — the one thing on it that identifies the record at a glance. Three
+ * lines, then an ellipsis; the whole path is still in the title attribute.
+ */
+.path {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}

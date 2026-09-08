@@ -6,6 +6,7 @@ using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Acquisition;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Ingest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -68,6 +69,7 @@ namespace Fonoteca.Api.Acquisition;
 public sealed class AlbumReplacementService(
     FonotecaDbContext db,
     IAudioProbe probe,
+    FileSystemAudioFileStore store,
     IOptions<FonotecaOptions> options,
     IClock clock,
     ILogger<AlbumReplacementService> logger)
@@ -236,6 +238,10 @@ public sealed class AlbumReplacementService(
 
         var moved = Archive(config, trimmed, destination, [.. old.Select(file => file.Path)]);
 
+        // The folders the move emptied. One copy of this lives on the store, for
+        // the reason its own remarks give.
+        store.PruneEmptyDirectories(new LibraryPath(trimmed));
+
         Log.ReplacementDone(logger, trimmed, download.Folder, moved.Count);
 
         return new AlbumReplacement(
@@ -322,8 +328,6 @@ public sealed class AlbumReplacementService(
             moved.Add(path);
         }
 
-        PruneEmptyDirectories(Path.Combine(root, folder.Replace('/', Path.DirectorySeparatorChar)), root);
-
         return moved;
     }
 
@@ -344,43 +348,6 @@ public sealed class AlbumReplacementService(
         }
 
         return Path.TrimEndingDirectorySeparator(Path.GetFullPath(config.LibraryPath)) + "-replaced";
-    }
-
-    /// <summary>
-    /// Removes the directories the move emptied, and stops at the library root.
-    /// </summary>
-    /// <remarks>
-    /// An album folder holding nothing but the cover art it came with is not
-    /// empty, so it stays — which is right: those bytes were not replaced by
-    /// anything and deleting them is not this operation's business.
-    /// </remarks>
-    private static void PruneEmptyDirectories(string directory, string root)
-    {
-        // Normalised, and compared against the root plus a separator.
-        //
-        // The obvious guard — `current.Length > root.Length` and a bare
-        // StartsWith — is neither a containment check nor a boundary: `root/.`
-        // is longer than `root`, starts with it, and exists, so the loop deletes
-        // the library root; and `/mnt/music-replaced` starts with `/mnt/music`.
-        // Two guards upstream make both unreachable today, and neither of them
-        // is in this method.
-        var boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root))
-            + Path.DirectorySeparatorChar;
-
-        var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
-
-        while (current.StartsWith(boundary, StringComparison.Ordinal)
-            && Directory.Exists(current)
-            && !Directory.EnumerateFileSystemEntries(current).Any())
-        {
-            var parent = Path.GetDirectoryName(current);
-
-            Directory.Delete(current);
-
-            if (parent is null) return;
-
-            current = Path.TrimEndingDirectorySeparator(parent);
-        }
     }
 
     private static string Explain(ReplacementVerdict verdict, int heldTracks, int arrived) => verdict switch

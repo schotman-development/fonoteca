@@ -866,6 +866,97 @@ public sealed class Artist
 
     public string? Disambiguation { get; set; }
 
+    /// <summary>ISO 3166-1 code of the country MusicBrainz primarily associates them with.</summary>
+    public string? Country { get; set; }
+
+    /// <summary>Male, female, non-binary. Set on people, absent on groups.</summary>
+    public string? Gender { get; set; }
+
+    /// <summary>Born, or formed.</summary>
+    public int? BeganYear { get; set; }
+
+    /// <summary>Died, or dissolved.</summary>
+    public int? EndedYear { get; set; }
+
+    /// <summary>
+    /// Whether MusicBrainz says the life span is over.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="EndedYear"/> because it is a separate claim. A
+    /// band everybody knows split up but nobody has dated carries the flag with
+    /// no year; a page that reads the year alone reports them as still going.
+    /// </remarks>
+    public bool Ended { get; set; }
+
+    /// <summary>
+    /// MusicBrainz's curated genres, most-voted first, joined with ", ".
+    /// </summary>
+    /// <remarks>
+    /// A delimited string rather than a table, which is
+    /// <see cref="ReleaseGroup.SecondaryTypes"/>'s bargain and taken for the same
+    /// reason: nothing queries them yet, and a join table for a field that is
+    /// only ever printed is four files nobody reads. Faceting the artist list by
+    /// genre is when this becomes a table.
+    /// </remarks>
+    public string? Genres { get; set; }
+
+    /// <summary>
+    /// When MusicBrainz was last asked about this artist.
+    /// </summary>
+    /// <remarks>
+    /// <b>The worklist, and it is keyed on the asking rather than on the
+    /// answer</b> — the same lesson <c>AcoustIdCheckedUtc</c>,
+    /// <c>RecordingLookupUtc</c> and <c>ReleaseLookupUtc</c> each paid for
+    /// separately. Keyed on <c>Country IS NULL</c> instead, every artist
+    /// MusicBrainz holds no country for — every orchestra, every "Various
+    /// Artists", every one-line credit for somebody's uncle — is re-asked about
+    /// on every run forever, and the worklist never reaches empty.
+    ///
+    /// Set when the answer is "no such artist" too, which is also an answer.
+    /// Left null only when the lookup did not happen: a transient failure keeps
+    /// the row on the worklist, exactly as a failed enrichment keeps a file.
+    /// </remarks>
+    public DateTimeOffset? LookupUtc { get; set; }
+
+    /// <summary>
+    /// A picture of the artist, on somebody else's CDN.
+    /// </summary>
+    /// <remarks>
+    /// Wikidata's <c>P18</c>, as a Wikimedia Commons <c>Special:FilePath</c>
+    /// URL — the one thing in this catalogue that is neither a fact about the
+    /// music nor a path on this disk. A URL rather than an image because the
+    /// browser fetches it directly, the way it already fetches sleeves from the
+    /// Cover Art Archive.
+    ///
+    /// Null is the ordinary answer, and how ordinary depends on who is being
+    /// asked about: measured, 26% of the artists an album is billed to have no
+    /// photograph anywhere, against <b>52% of the whole catalogue</b> — the
+    /// second number being every session player, songwriter and small ensemble
+    /// that a credit line drags in. The card falls back to an album and then to
+    /// its monogram.
+    /// </remarks>
+    public string? PortraitUrl { get; set; }
+
+    /// <summary>
+    /// When a picture was last looked for.
+    /// </summary>
+    /// <remarks>
+    /// <b>Keyed on the asking, and this is the fifth time.</b>
+    /// <c>AcoustIdCheckedUtc</c>, <c>RecordingLookupUtc</c>,
+    /// <c>ReleaseLookupUtc</c> and <see cref="LookupUtc"/> each paid for this
+    /// separately. Keyed on <see cref="PortraitUrl"/> being null instead, the
+    /// 73 artists in 307 that Wikidata holds no image for are asked about on
+    /// every run forever and the worklist never empties.
+    ///
+    /// Separate from <see cref="LookupUtc"/> rather than folded into it, because
+    /// they are two different services answering two different questions — and
+    /// because the artists this catalogue already holds were all described
+    /// before pictures existed. Sharing the stamp would mean re-asking
+    /// MusicBrainz about 2,902 artists, at a turn each, to find out what they
+    /// look like.
+    /// </remarks>
+    public DateTimeOffset? PortraitLookupUtc { get; set; }
+
     /// <summary>Billed credits — the printed credit line, with its order.</summary>
     public ICollection<ArtistCredit> Credits { get; init; } = [];
 

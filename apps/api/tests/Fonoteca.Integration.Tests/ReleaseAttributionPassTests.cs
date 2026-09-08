@@ -1022,6 +1022,11 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             throw new InvalidOperationException(
                 "Attribution reads recordings from the catalogue; nothing here should call this.");
 
+        public Task<MusicBrainzArtist?> GetArtistAsync(
+            Mbid id,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzArtist?>(null);
+
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(
                 "Attribution does not look up works; nothing here should call this.");

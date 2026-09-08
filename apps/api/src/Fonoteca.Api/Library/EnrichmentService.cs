@@ -6,8 +6,12 @@ using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Identification;
+using Fonoteca.Providers.AudioDb;
+using Fonoteca.Providers.Qobuz;
+using Fonoteca.Providers.Wikidata;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Fonoteca.Api.Library;
 
@@ -58,6 +62,10 @@ public sealed class EnrichmentService(
     IServiceScopeFactory scopeFactory,
     IAcoustIdLookup acoustId,
     IMusicBrainzCatalogue musicBrainz,
+    [FromKeyedServices(ArtistPortraitSources.Wikidata)] IArtistPortraits portraits,
+    [FromKeyedServices(ArtistPortraitSources.Qobuz)] IArtistPortraits pressPhotos,
+    [FromKeyedServices(ArtistPortraitSources.AudioDb)] IArtistPortraits audioDbPhotos,
+    IOptions<WikidataOptions> portraitOptions,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
     IClock clock,
@@ -68,6 +76,32 @@ public sealed class EnrichmentService(
 
     /// <summary>Rows claimed per query. Bounded so a cancelled pass stops promptly.</summary>
     private const int PageSize = 500;
+
+    /// <summary>
+    /// The widest <c>Artists.Genres</c> the column can hold.
+    /// </summary>
+    /// <remarks>
+    /// <b>A clamp on the string, because the column's limit is on the string.</b>
+    /// This was a cap on the <i>count</i> first, which is not the same bound:
+    /// twelve genres is about 560 characters in practice and would not have
+    /// tripped, but "in practice" is not what a <c>varchar(1000)</c> checks. A
+    /// write that overruns throws out of <c>SaveChangesAsync</c>, the backstop
+    /// rolls back the stamp with it, and the row is then re-asked about on every
+    /// run forever, spending a turn at the rate limit each time to fail
+    /// identically — which is precisely the failure the bound exists to prevent.
+    /// </remarks>
+    private const int MaxGenresLength = 1000;
+
+    /// <summary>
+    /// Genres kept per artist, most-voted first.
+    /// </summary>
+    /// <remarks>
+    /// Four times what any screen prints, and the mapper has already ordered
+    /// them by votes — so the ones dropped are the ones somebody would argue
+    /// with. Unlike <see cref="MaxGenresLength"/> this one is a preference, and
+    /// it is what keeps the clamp below from ever having anything to do.
+    /// </remarks>
+    private const int MaxGenres = 12;
 
     /// <summary>How often progress reaches the browser. Not per file.</summary>
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(250);
@@ -89,8 +123,23 @@ public sealed class EnrichmentService(
     /// <remarks>In memory, like the scan's and the identification pass's.</remarks>
     public EnrichmentSummary? LastCompleted => _lastCompleted;
 
-    /// <summary>Identified files nobody has asked about yet — the size of the job.</summary>
-    public async Task<int> CountPendingAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// What is left to ask about, split by what kind of question it is.
+    /// </summary>
+    /// <remarks>
+    /// <b>Two numbers rather than one, and that is the artist stage leaking into
+    /// an existing screen.</b> It used to be "identified files nobody has asked
+    /// about yet", and `EnrichmentPanel` prints it in those words — so the
+    /// moment artists joined the total, a library whose files are all enriched
+    /// rendered "2,838 identified files with no recording yet", which is false
+    /// in both nouns. Summing them here and letting the caller word it would
+    /// only move the lie.
+    ///
+    /// <see cref="EnrichmentPending.Total"/> is what the button's "anything to
+    /// do?" test reads, and is the sum, so the enable rule did not change.
+    /// </remarks>
+    public async Task<EnrichmentPending> CountPendingAsync(
+        CancellationToken cancellationToken = default)
     {
         var scope = scopeFactory.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
@@ -109,7 +158,17 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return unasked + personFiled;
+            var artists = await db.Artists
+                .Where(UnaskedArtist)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var portraits = await db.Artists
+                .Where(UnpicturedArtist)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return new EnrichmentPending(unasked + personFiled, artists, portraits);
         }
     }
 
@@ -194,7 +253,7 @@ public sealed class EnrichmentService(
         var counts = new Tally();
         var memo = new Memo();
 
-        var pending = await CountPendingAsync(cancellationToken).ConfigureAwait(false);
+        var pending = (await CountPendingAsync(cancellationToken).ConfigureAwait(false)).Total;
 
         Log.EnrichmentStarted(logger, jobId, pending);
 
@@ -202,8 +261,10 @@ public sealed class EnrichmentService(
 
         var lastReport = clock.UtcNow;
 
-        // One loop, driven twice, because the two worklists differ only in how a
-        // file reaches a recording — everything after that is the same rows.
+        // One loop, driven three times. The two file worklists differ only in how
+        // a file reaches a recording, and the artist one shares the shape rather
+        // than the subject: claim, ask, commit, report, and no single item may
+        // end the pass.
         async Task DrainAsync<T>(
             IAsyncEnumerable<T> work,
             Func<T, Task> handle,
@@ -264,6 +325,20 @@ public sealed class EnrichmentService(
                 ClaimPersonFiledAsync(cancellationToken),
                 file => HandlePersonFiledAsync(file, counts, memo, cancellationToken),
                 file => file.Path).ConfigureAwait(false);
+
+            // Third, and last because it depends on the first two: the artists
+            // those files just credited are in the catalogue by now, so one
+            // stage drains both them and whatever backlog was already there.
+            await DrainAsync(
+                ClaimArtistsAsync(cancellationToken),
+                artist => DescribeAsync(artist, counts, cancellationToken),
+                artist => artist.Name).ConfigureAwait(false);
+
+            // Fourth, and not through DrainAsync, because its unit is a set —
+            // see PicturesAsync. Last because it is the cheapest thing here by
+            // two orders of magnitude: the whole library is a dozen requests, so
+            // a run cancelled before it has lost seconds rather than hours.
+            await PicturesAsync(counts, jobId, pending, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -283,11 +358,14 @@ public sealed class EnrichmentService(
             Recordings: memo.Recordings.Count,
             Works: memo.Works.Count,
             Artists: memo.Artists.Count,
+            ArtistsDescribed: counts.ArtistsDescribed,
+            ArtistsPictured: counts.ArtistsPictured,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.EnrichmentCompleted(
             logger, jobId, counts.Linked, counts.NoRecording, counts.RecordingNotFound,
-            counts.Failed, memo.Recordings.Count, memo.Artists.Count, summary.DurationMilliseconds);
+            counts.Failed, memo.Recordings.Count, memo.Artists.Count, counts.ArtistsDescribed,
+            summary.DurationMilliseconds);
 
         await Report(jobId, counts.Examined, pending, null, "completed").ConfigureAwait(false);
 
@@ -582,6 +660,558 @@ public sealed class EnrichmentService(
     /// <summary>A file that has a recording MBID already, and needs its graph.</summary>
     private sealed record PersonFiledFile(MediaFileId Id, string Path, Mbid Mbid);
 
+    /// <summary>
+    /// Artists nobody has asked MusicBrainz about — the third worklist.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every unasked artist, not only the ones this run credited.</b> The
+    /// obvious wiring is to drain <c>Memo.Artists</c>, which is already sitting
+    /// there holding exactly the artists <see cref="CatalogueWriter"/> touched —
+    /// and it is wrong in the direction that is hard to notice: a library whose
+    /// files are all enriched has an empty file worklist, so the pass would
+    /// touch no artists, so it would describe none. The 2,838 artists already in
+    /// the catalogue when this was written would have needed every file
+    /// re-enriched to be reached. Keyed on the artist's own column instead, the
+    /// backlog and the new arrivals are the same query.
+    ///
+    /// <c>Mbid != null</c> is a real filter and not defensive noise: nothing
+    /// mints an artist without one today, but a name is not something
+    /// MusicBrainz can be asked about, and a null here would be an infinite
+    /// worklist rather than a failure.
+    /// </remarks>
+    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnaskedArtist =
+        artist => artist.LookupUtc == null && artist.Mbid != null;
+
+    /// <summary>
+    /// The third worklist, a page at a time.
+    /// </summary>
+    /// <remarks>
+    /// Paged and self-draining like the two above it, and the <c>seen</c> guard
+    /// covers the same case: an artist whose lookup failed transiently keeps a
+    /// null stamp and would otherwise be claimed forever.
+    /// </remarks>
+    private async IAsyncEnumerable<PendingArtist> ClaimArtistsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<ArtistId>();
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PendingArtist> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                page = await db.Artists
+                    .AsNoTracking()
+                    .Where(UnaskedArtist)
+                    .OrderBy(a => a.Id)
+                    .Select(a => new PendingArtist(a.Id, a.Name, a.Mbid!.Value))
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var fresh = page.Where(artist => seen.Add(artist.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var artist in fresh) yield return artist;
+        }
+    }
+
+    /// <summary>
+    /// Artists nobody has looked for a picture of — the fourth worklist.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="UnaskedArtist"/> and deliberately not
+    /// <c>PortraitUrl == null</c>. The first would tie a picture to a
+    /// description and the 2,902 artists this catalogue already holds were all
+    /// described before pictures existed — sharing the stamp means re-asking
+    /// MusicBrainz about every one of them, at a gated turn each, to find out
+    /// what they look like. The second is the mistake this codebase has now paid
+    /// for five times: keyed on the answer, the 73 artists in 307 that Wikidata
+    /// holds no image for are asked about on every run forever.
+    ///
+    /// <b>No partial index, where <c>LookupUtc</c> has one.</b> The asymmetry is
+    /// deliberate rather than an omission: measured on the real catalogue, the
+    /// sequential scan behind this is 0.9ms over 2,906 rows, and the panel polls
+    /// it every five seconds. An index for that is a write cost on every artist
+    /// upsert to save under a millisecond on a read nobody is waiting for. It
+    /// becomes worth adding at the same point the artists table does — which is
+    /// a long way past a hundred thousand files, since a library has an order of
+    /// magnitude fewer artists than tracks.
+    /// </remarks>
+    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnpicturedArtist =
+        artist => artist.PortraitLookupUtc == null && artist.Mbid != null;
+
+    /// <summary>
+    /// Find a picture for every artist that has not been looked for.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one stage here whose unit is a batch, which is why it does not go
+    /// through <c>DrainAsync</c>.</b> Every other worklist in this application is
+    /// per item because every other provider answers about one thing and queues
+    /// behind a gate at one request a second; asked that way this stage would be
+    /// 2,902 turns and the better part of an hour. Wikidata's query language
+    /// takes a list, so the same question is a dozen requests, and the shape of
+    /// the loop has to match the shape of the question rather than the shape of
+    /// its neighbours.
+    ///
+    /// <b>Every artist in the batch is stamped, found or not, in the same
+    /// <c>SaveChanges</c> as the pictures.</b> That is what makes the worklist
+    /// reach empty — see <see cref="UnpicturedArtist"/> — and doing it in one
+    /// save is what stops a crash mid-batch recording "we asked" for artists
+    /// whose answer was lost.
+    ///
+    /// <b>A failed batch stamps nothing and ends the stage.</b> Nothing is known
+    /// about any artist in it, so leaving them null is the honest record and the
+    /// next run retries them; ending rather than continuing is not politeness
+    /// but termination — the claim query is keyed on the stamp, so a batch that
+    /// fails without stamping is a batch the next iteration claims again,
+    /// forever. The two file worklists solve the same problem with a
+    /// <c>seen</c> set because their unit is small enough to skip past; here the
+    /// whole remaining worklist is behind one failure, and a service that just
+    /// refused a request is not one to ask eleven more times.
+    ///
+    /// <b>Nothing but cancellation leaves this method, and the claim and the
+    /// save are inside the guard rather than around it.</b> The drains above
+    /// rethrow <see cref="ProviderRejectedException"/> so a missing key stops
+    /// the pass on the first file instead of the hundred-thousandth — but they
+    /// are the first three stages, and this is the last. A throw from here
+    /// unwinds past the summary, so <c>_lastCompleted</c> is never assigned and
+    /// a run that did every file and every artist reports nothing at all,
+    /// because it could not find a photograph. Ending the stage achieves
+    /// everything the rethrow would: there is no later work to protect.
+    ///
+    /// The database calls are inside for the same reason and it is not
+    /// theoretical symmetry — an exception out of the claim or the save is the
+    /// one thing here that is not the provider's fault, and it is the case where
+    /// discarding a completed run's summary would be least explicable.
+    /// </remarks>
+    private async Task PicturesAsync(
+        Tally counts,
+        string jobId,
+        int pending,
+        CancellationToken cancellationToken)
+    {
+        var size = Math.Max(portraitOptions.Value.BatchSize, 1);
+
+        // Read once for the run rather than per batch: it is a scan of every
+        // credit in the catalogue, it does not move while a pass holds the gate,
+        // and there are a dozen batches.
+        var shelf = await AlbumArtistMbidsAsync(cancellationToken).ConfigureAwait(false);
+
+        var down = new HashSet<string>(StringComparer.Ordinal);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            PictureBatch batch;
+
+            try
+            {
+                batch = await PictureBatchAsync(
+                        size, shelf, down, counts, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // The backstop: see the remarks. Nothing else leaves here.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                counts.Failed++;
+                Log.PicturesNotFound(logger, size, cause.Message);
+                return;
+            }
+
+            if (batch.Claimed == 0) return;
+
+            counts.Examined += batch.Claimed;
+
+            await Report(jobId, counts.Examined, pending, "artist pictures", "running")
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The MusicBrainz ids of the artists an album is billed to.
+    /// </summary>
+    /// <remarks>
+    /// <c>CatalogueEndpoints.AlbumArtistsAsync</c> is the rule and this is the
+    /// only translation: it answers in <see cref="ArtistId"/> because that is
+    /// what the artist list filters on, and the picture sources are keyed on
+    /// MBIDs because that is what a provider can be asked about. Artists with no
+    /// MBID drop out, which is the same set <see cref="UnpicturedArtist"/>
+    /// already excludes.
+    /// </remarks>
+    private async Task<IReadOnlySet<Mbid>> AlbumArtistMbidsAsync(
+        CancellationToken cancellationToken)
+    {
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var billed = await Endpoints.CatalogueEndpoints
+                .AlbumArtistsAsync(db, cancellationToken)
+                .ConfigureAwait(false);
+
+            var mbids = await db.Artists
+                .AsNoTracking()
+                .Where(artist => artist.Mbid != null && billed.Contains(artist.Id))
+                .Select(artist => artist.Mbid!.Value)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return mbids.ToHashSet();
+        }
+    }
+
+    /// <summary>
+    /// One batch: claim, ask, and stamp every artist in it. Returns how many
+    /// were claimed, which is zero when the worklist is empty.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="PicturesAsync"/> only so that one <c>try</c> can
+    /// cover the claim, the lookup and the save together — see its remarks.
+    /// </remarks>
+    private async Task<PictureBatch> PictureBatchAsync(
+        int size,
+        IReadOnlySet<Mbid> shelf,
+        HashSet<string> down,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        List<PendingArtist> page;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            page = await db.Artists
+                .AsNoTracking()
+                .Where(UnpicturedArtist)
+                .OrderBy(a => a.Id)
+                .Select(a => new PendingArtist(a.Id, a.Name, a.Mbid!.Value))
+                .Take(size)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (page.Count == 0) return new PictureBatch(0);
+
+        var wanted = page
+            .Select(artist => new ArtistToPicture(artist.Mbid, artist.Name))
+            .ToList();
+
+        // The source that covers everyone, first and unguarded: a failure here
+        // means nothing is known about any artist in the batch, so it ends the
+        // stage without stamping. Asking it first is also what keeps a Wikidata
+        // outage from spending a batch of Qobuz's hourly allowance to be thrown
+        // away.
+        //
+        // Outside the scope, like every other lookup here, so a round trip does
+        // not hold a connection from the pool.
+        var found = new Dictionary<Mbid, Uri>(
+            await portraits.FindAsync(wanted, cancellationToken).ConfigureAwait(false));
+
+        // And the better picture, for the artists a person actually browses.
+        // Overwriting rather than filling in: these are the preferred sources,
+        // so an artist Wikidata also answered for gets the better photograph.
+        var billed = wanted.Where(artist => shelf.Contains(artist.Id)).ToList();
+
+        var upgraded = await UpgradeAsync(billed, down, counts, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var better in upgraded)
+        {
+            found[better.Key] = better.Value;
+        }
+
+        var stampedAt = StoreTime.ToStorePrecision(clock.UtcNow);
+
+        var save = scopeFactory.CreateAsyncScope();
+        await using (save.ConfigureAwait(false))
+        {
+            var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var ids = page.Select(artist => artist.Id).ToList();
+
+            var rows = await db.Artists
+                .Where(artist => ids.Contains(artist.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                row.PortraitLookupUtc = stampedAt;
+
+                if (row.Mbid is { } mbid && found.TryGetValue(mbid, out var picture))
+                {
+                    row.PortraitUrl = picture.AbsoluteUri;
+                    counts.ArtistsPictured++;
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return new PictureBatch(page.Count);
+    }
+
+    /// <summary>How many artists a batch claimed.</summary>
+    /// <remarks>
+    /// Which sources have given up travels beside this in a set the caller owns,
+    /// rather than living in a field, because it is state for one run and this
+    /// service outlives a run. A source that has failed once is not asked again
+    /// for the rest of the pass: every remaining batch would fail identically,
+    /// and a dozen more requests to be told so is the traffic pattern this
+    /// codebase's provider notes are about. <b>It is per source</b> — Qobuz
+    /// being down must not stop Deezer being asked, which is the whole point of
+    /// there being four of them.
+    /// </remarks>
+    private readonly record struct PictureBatch(int Claimed);
+
+    /// <summary>
+    /// The per-artist picture sources, best first.
+    /// </summary>
+    /// <remarks>
+    /// <b>The order is a claim about what kind of picture comes back.</b> Both
+    /// cost one request per artist.
+    ///
+    /// The rule this codebase now holds is that <b>an album sleeve is never an
+    /// artist's picture</b> — it was the fallback once and it read backwards on
+    /// the page, because the artists reaching a fallback are very nearly the
+    /// artists who are not on the front of their own records. Dropping the
+    /// catalogue-derived fallback does not finish that job: <b>a source can hand
+    /// back a sleeve too</b>, and one of these routinely does.
+    ///
+    /// <list type="bullet">
+    /// <item><b>Qobuz</b> is the press photograph on their own artist page.
+    /// Rationed at 600 an hour, shared with downloading, and asked first because
+    /// it is the one measured against this library.</item>
+    /// <item><b>TheAudioDB</b> keeps artist thumbnails in a different field from
+    /// album art, so <c>strArtistThumb</c> is a photograph of somebody by
+    /// construction. It is looked up by MusicBrainz id, so it also cannot be
+    /// wrong about <i>who</i> — and it is the only source that reaches an artist
+    /// whose name is not written in Latin script.</item>
+    /// </list>
+    ///
+    /// <b>A wider source was measured and left out, which is the part worth
+    /// keeping.</b> Deezer's search API is open and answers for 30 of the 40
+    /// album artists Qobuz cannot place, against TheAudioDB's 16 — and
+    /// inspected one by one, <b>16 of those 20 pictures were album covers</b>,
+    /// because its artist image is whatever the label supplied. It filled the
+    /// grid and filled it with sleeves. Coverage is not the thing being
+    /// maximised here.
+    ///
+    /// Wikidata is in neither list — it runs over the whole batch first and is
+    /// what these upgrade <i>from</i>.
+    /// </remarks>
+    private IEnumerable<(string Name, IArtistPortraits Source)> PictureSources =>
+    [
+        (QobuzPortraits.ProviderName, pressPhotos),
+        (AudioDbPortraits.ProviderName, audioDbPhotos),
+    ];
+
+    /// <summary>
+    /// The better picture, from the first preferred source that has one.
+    /// </summary>
+    /// <remarks>
+    /// <b>Each source is asked only about the artists still without an
+    /// answer</b>, so the second costs a request only for the gaps the first
+    /// left. On this library that is 326 Qobuz requests and then about 40.
+    ///
+    /// <b>A preferred source is allowed to fail without taking the others with
+    /// it.</b> Written as a plain await, a Qobuz outage — an expired
+    /// subscription, a rotated token, or their unofficial API changing, which it
+    /// does without warning — discarded the whole batch and ended the stage. So
+    /// the failure of the source that makes pictures <i>better</i> meant no
+    /// artist got a picture <i>at all</i>, which is the exact opposite of what a
+    /// preferred source is for. Now it means the next source answers, and
+    /// failing that, the fallback's picture stands.
+    ///
+    /// <b>A source that fails once is not asked again this run.</b> Every
+    /// remaining batch would fail identically; <paramref name="down"/> is how
+    /// that is remembered, and it is per source rather than a single flag
+    /// precisely so one dead service does not silence the others.
+    ///
+    /// The artists a dead source would have improved are still stamped, with
+    /// whatever a live one or the fallback found. That is a deliberate trade and
+    /// it is the direction that fails quietly: nothing clears the stamp, so they
+    /// keep the lesser photograph until somebody re-asks by hand. The
+    /// alternative — leaving them unstamped — makes a broken subscription into a
+    /// worklist that never empties and an enrichment button that never goes
+    /// quiet, which is worse and also silent.
+    ///
+    /// Cancellation passes straight through, or a person pressing stop would
+    /// mark every source dead for the rest of the run.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<Mbid, Uri>> UpgradeAsync(
+        List<ArtistToPicture> artists,
+        HashSet<string> down,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        var found = new Dictionary<Mbid, Uri>();
+
+        foreach (var (name, source) in PictureSources)
+        {
+            var missing = artists.Where(artist => !found.ContainsKey(artist.Id)).ToList();
+
+            if (missing.Count == 0) break;
+            if (down.Contains(name)) continue;
+
+            try
+            {
+                var answered = await source.FindAsync(missing, cancellationToken)
+                    .ConfigureAwait(false);
+
+                foreach (var picture in answered) found[picture.Key] = picture.Value;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // A preferred source failing is not the pass failing.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                counts.Failed++;
+                down.Add(name);
+                Log.PicturesNotFound(logger, missing.Count, $"{name}: {cause.Message}");
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// One artist: ask MusicBrainz who they are, and write it onto the row.
+    /// </summary>
+    /// <remarks>
+    /// The lookup happens outside the scope, as everywhere else here, so a
+    /// MusicBrainz round trip does not hold a connection from the pool.
+    ///
+    /// <b>The name and the sort name are overwritten; the type and the
+    /// disambiguation are not merely filled in.</b> This is the one place in the
+    /// application where those four fields have a source better than a credit
+    /// line. <see cref="CatalogueWriter.UpsertArtistAsync"/> deliberately writes
+    /// them with <c>??=</c> and leaves the name alone, because a sleeve printing
+    /// "Bowie" must not rename David Bowie — but an artist lookup is not a
+    /// sleeve, it is the artist's own record, and deferring to what one release
+    /// happened to print would make this pass unable to correct the very thing
+    /// it exists to improve.
+    /// </remarks>
+    private async Task DescribeAsync(
+        PendingArtist artist,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.UtcNow;
+
+        MusicBrainzArtist? described;
+
+        try
+        {
+            described = await musicBrainz
+                .GetArtistAsync(artist.Mbid, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            // Transient. LookupUtc stays null, so the row stays on the worklist
+            // and the next run retries it — the same bargain a failed file
+            // enrichment takes, and the reason the stamp is separate from every
+            // field it fills.
+            counts.Failed++;
+            Log.ArtistNotDescribed(logger, artist.Name, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.Artists
+                .FirstOrDefaultAsync(a => a.Id == artist.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Gone since the page was claimed — a cascade from a recording a
+            // scan removed. Nothing to update, and nothing wrong.
+            if (row is null) return;
+
+            // Stamped whether or not MusicBrainz had them. "We asked and the
+            // artist has been merged away" is an answer, and a row left unstamped
+            // on it is re-asked about on every run forever.
+            row.LookupUtc = now;
+
+            if (described is null)
+            {
+                Log.ArtistNotDescribed(logger, artist.Name, "no such artist");
+            }
+            else
+            {
+                // Guarded where the three below are, and for a reason they do not
+                // have: MusicBrainz sends "" for absent text rather than null,
+                // so `ToArtist`'s `source.Name ?? string.Empty` can hand over a
+                // blank. `Name` is NOT NULL and "" satisfies that, so an
+                // unguarded write replaces a usable credit-line name with
+                // nothing — permanently, because the stamp goes on in the same
+                // save and no endpoint clears it.
+                if (!string.IsNullOrWhiteSpace(described.Name)) row.Name = described.Name;
+
+                row.SortName = described.SortName ?? row.SortName;
+                row.Type = described.Type ?? row.Type;
+                row.Disambiguation = described.Disambiguation ?? row.Disambiguation;
+                row.Country = described.Country;
+                row.Gender = described.Gender;
+                row.BeganYear = described.BeganYear;
+                row.EndedYear = described.EndedYear;
+                row.Ended = described.HasEnded;
+                row.Genres = Joined(described.Genres);
+
+                counts.ArtistsDescribed++;
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The genres as the column stores them, or null when there are none.</summary>
+    /// <remarks>
+    /// Cut on a separator rather than mid-word: a clamp that can leave
+    /// "progressive ro" would put a genre in the catalogue that does not exist,
+    /// which is worse than dropping it.
+    /// </remarks>
+    private static string? Joined(IReadOnlyList<string> genres)
+    {
+        var kept = new List<string>(Math.Min(genres.Count, MaxGenres));
+        var length = 0;
+
+        foreach (var genre in genres.Take(MaxGenres))
+        {
+            var cost = genre.Length + (kept.Count == 0 ? 0 : 2);
+
+            if (length + cost > MaxGenresLength) break;
+
+            kept.Add(genre);
+            length += cost;
+        }
+
+        return kept.Count == 0 ? null : string.Join(", ", kept);
+    }
+
+    /// <summary>An artist the catalogue holds and MusicBrainz has not been asked about.</summary>
+    private readonly record struct PendingArtist(ArtistId Id, string Name, Mbid Mbid);
+
     /// <summary>The network half: which recording is this, and what is it?</summary>
     private async Task<Resolution> ResolveAsync(
         PendingFile file,
@@ -723,6 +1353,9 @@ public sealed class EnrichmentService(
         public int NoRecording;
         public int RecordingNotFound;
         public int Failed;
+        public int ArtistsDescribed;
+
+        public int ArtistsPictured;
     }
 
     /// <summary>
@@ -818,6 +1451,27 @@ public enum EnrichmentStatus
     AlreadyRunning = 1,
 }
 
+/// <summary>What a run would have to ask about, by kind of question.</summary>
+/// <param name="Files">Identified files with no recording yet.</param>
+/// <param name="Artists">Artists MusicBrainz has never been asked to describe.</param>
+/// <param name="Portraits">
+/// Artists nobody has looked for a picture of. Counted separately because it is
+/// not the same work: a described artist cost a gated MusicBrainz turn, and a
+/// picture costs a two-hundred-and-fiftieth of one batched query.
+/// </param>
+public sealed record EnrichmentPending(int Files, int Artists, int Portraits)
+{
+    /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
+    /// <remarks>
+    /// Portraits are in the sum, and they had to be. Every artist in this
+    /// catalogue was described before pictures existed, so on the library this
+    /// was written against <see cref="Files"/> and <see cref="Artists"/> are both
+    /// zero and the button is disabled — a stage left out of this total is a
+    /// stage that can never be reached.
+    /// </remarks>
+    public int Total => Files + Artists + Portraits;
+}
+
 /// <summary>Where a running pass has got to.</summary>
 public sealed record EnrichmentProgress(string JobId, int Processed, int Total, string? CurrentFile);
 
@@ -864,5 +1518,26 @@ public sealed record EnrichmentSummary(
 
     /// <summary>Distinct artists this run credited.</summary>
     int Artists,
+
+    /// <summary>
+    /// Artists MusicBrainz described this run.
+    /// </summary>
+    /// <remarks>
+    /// Not a subset of <see cref="Artists"/> and routinely much larger than it:
+    /// that count is the artists this run's <i>files</i> credited, and this one
+    /// is the artists the catalogue held that nobody had asked about — which on
+    /// the first run is every artist in the library and on later runs is
+    /// whatever the files added.
+    /// </remarks>
+    int ArtistsDescribed,
+
+    /// <summary>Artists a picture was found for this run.</summary>
+    /// <remarks>
+    /// Reported beside <paramref name="ArtistsDescribed"/> and not folded into
+    /// it: they are two services answering two questions, and about a quarter of
+    /// a library has a description and no photograph. A single number would make
+    /// that quarter look like a failure of the artist stage.
+    /// </remarks>
+    int ArtistsPictured,
 
     bool Cancelled);

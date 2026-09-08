@@ -346,7 +346,11 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         var enrichment = scope.ServiceProvider.GetRequiredService<EnrichmentService>();
 
         Assert.Equal(0, await identification.CountPendingAsync(Token));
-        Assert.Equal(0, await enrichment.CountPendingAsync(Token));
+
+        // `.Files`, not the total: this test is about a file, and the decision
+        // just wrote the artists behind its recording into a catalogue nobody
+        // has described yet — which is a real question and not this one.
+        Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Files);
     }
 
     /// <summary>
@@ -1067,6 +1071,11 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
             Mbid id,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzRelease?>(null);
+
+        public Task<MusicBrainzArtist?> GetArtistAsync(
+            Mbid id,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzArtist?>(null);
 
         public Task<MusicBrainzWork?> GetWorkAsync(
             Mbid id,

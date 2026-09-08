@@ -483,13 +483,337 @@
         }
       }
     },
+    "/api/files": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "One directory of the library, from disk, annotated from the catalogue.",
+        "description": "Lists what is actually on disk — including files nothing has scanned and files that are not audio at all — and puts the catalogue's own counts on each row: how many audio files it holds beneath, how many are identified, and how many are filed under an album.",
+        "operationId": "ListLibraryFolder",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderListing"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/trash": {
+      "post": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Move files or folders out of the library, into the trash.",
+        "description": "Nothing is deleted: entries move to Fonoteca:TrashPath under a timestamp, keeping their library-relative layout, so undoing a wrong click is a mv. Their catalogue rows are removed in the same operation, because this process moved the files itself and does not have to infer their absence from a scan.",
+        "operationId": "TrashLibraryEntries",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrashRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileOperation"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/move": {
+      "post": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Rename or move one file or folder within the library.",
+        "description": "The catalogue rows move with it. A rename changes no bytes, so nothing derived is cleared — which is the whole reason this is an endpoint rather than a mv and a rescan, since a scan reads a rename as a deletion and an arrival and discards every AcoustID, recording link and album decision beneath the folder.",
+        "operationId": "MoveLibraryEntry",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileOperation"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/upload": {
+      "post": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Write one file into the library at the given path.",
+        "description": "The request body is the file itself — no multipart, so nothing is buffered to a temporary copy on the way in and an album-sized file costs one write. Upload one file per request; the catalogue learns about them at the next scan. 'folder' is a folder that already exists and is taken as it is; 'name' is the file's own path — one segment from a file picker, 'Album/CD1/01.flac' from a directory one — and is sanitised, because it is the only half the browser invented.",
+        "operationId": "UploadLibraryFile",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "$ref": "#/components/schemas/Stream"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileOperation"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/content": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "The bytes of one file, with range support.",
+        "description": "What an <img>, an <audio> or a partial fetch of a rip log reads. Range requests are handled, so seeking into a large FLAC does not read the part before it.\n\n**The media type comes from an allowlist, never from the extension itself.** Anything not on it is served as application/octet-stream and as an attachment, and every response carries X-Content-Type-Options: nosniff — an .html in a music folder is a download, not a page on this origin.",
+        "operationId": "GetLibraryFileContent",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/detail": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "What one file says about itself, by path.",
+        "description": "The decoder's measurements and the file's own tags, for any audio file in the library — including one no scan has seen yet, which is why this is keyed on a path rather than on a media file id.\n\n**It cannot fail on the file.** A truncated FLAC, an unmounted volume and a tag parser that dereferences null all come back as a reading with a note in it, because a screen that 500s on the file you opened it for is worse than one that says the decoder would not read it.",
+        "operationId": "GetLibraryFileDetail",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilePreviewResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/art": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "A picture of one entry: a file's embedded cover, or a folder's own.",
+        "description": "For an audio file, the front cover stored inside it, served unchanged. For a directory, the first of cover/folder/front/album it holds.\n\n**404 is the ordinary answer, not an error.** Plenty of files carry no picture and plenty of folders hold none, and the screen draws a monogram for both.",
+        "operationId": "GetLibraryEntryArt",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/artists": {
       "get": {
         "tags": [
           "Catalogue"
         ],
-        "summary": "Artists with at least one track in the library.",
-        "description": "Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.",
+        "summary": "Album artists in the library, or everyone credited on one.",
+        "description": "Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists an album is billed to: the release's own credit line, collaborators included, plus anyone billed on every track of an album — which is how a conductor and an orchestra are found on a release the sleeve bills to the composer — and the track's own credit line for files no release has been attributed to yet. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names.",
         "operationId": "GetArtists",
         "parameters": [
           {
@@ -501,6 +825,13 @@
           },
           {
             "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
             "in": "query",
             "schema": {
               "type": "string"
@@ -2161,7 +2492,14 @@
           "disambiguation",
           "type",
           "trackCount",
-          "cover"
+          "portrait",
+          "country",
+          "gender",
+          "beganYear",
+          "endedYear",
+          "ended",
+          "genres",
+          "describedAtUtc"
         ],
         "type": "object",
         "properties": {
@@ -2194,12 +2532,53 @@
             "type": "integer",
             "format": "int32"
           },
-          "cover": {
+          "portrait": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "country": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "gender": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "beganYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "endedYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "describedAtUtc": {
             "type": [
               "null",
               "string"
             ],
-            "format": "uuid"
+            "format": "date-time"
           }
         }
       },
@@ -2927,6 +3306,9 @@
           "total",
           "currentFile",
           "pending",
+          "pendingFiles",
+          "pendingArtists",
+          "pendingPortraits",
           "lastCompleted"
         ],
         "type": "object",
@@ -2958,6 +3340,18 @@
             "type": "integer",
             "format": "int32"
           },
+          "pendingFiles": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingArtists": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingPortraits": {
+            "type": "integer",
+            "format": "int32"
+          },
           "lastCompleted": {
             "oneOf": [
               {
@@ -2984,6 +3378,8 @@
           "recordings",
           "works",
           "artists",
+          "artistsDescribed",
+          "artistsPictured",
           "cancelled"
         ],
         "type": "object",
@@ -3035,8 +3431,128 @@
             "type": "integer",
             "format": "int32"
           },
+          "artistsDescribed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "artistsPictured": {
+            "type": "integer",
+            "format": "int32"
+          },
           "cancelled": {
             "type": "boolean"
+          }
+        }
+      },
+      "FileOperation": {
+        "required": [
+          "applied",
+          "entries",
+          "catalogueRows",
+          "destination",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "catalogueRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "destination": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "FilePreviewResponse": {
+        "required": [
+          "path",
+          "name",
+          "sizeBytes",
+          "modifiedUtc",
+          "kind",
+          "mediaType",
+          "isAudio",
+          "durationSeconds",
+          "decodedCleanly",
+          "audio",
+          "tags",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "modifiedUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "isAudio": {
+            "type": "boolean"
+          },
+          "durationSeconds": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "decodedCleanly": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "audio": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AudioQualityRow"
+              }
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileTagRow"
+            }
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3143,6 +3659,58 @@
           }
         }
       },
+      "FolderEntry": {
+        "required": [
+          "name",
+          "path",
+          "isDirectory",
+          "sizeBytes",
+          "modifiedUtc",
+          "isAudio",
+          "kind",
+          "cataloguedFiles",
+          "identified",
+          "attributed"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "isDirectory": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "modifiedUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isAudio": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "cataloguedFiles": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "identified": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "attributed": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "FolderFileRow": {
         "required": [
           "mediaFileId",
@@ -3235,6 +3803,35 @@
           },
           "certainty": {
             "type": "string"
+          }
+        }
+      },
+      "FolderListing": {
+        "required": [
+          "path",
+          "parent",
+          "exists",
+          "entries"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "parent": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FolderEntry"
+            }
           }
         }
       },
@@ -3698,6 +4295,21 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "MoveRequest": {
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
           }
         }
       },
@@ -4996,6 +5608,10 @@
           }
         }
       },
+      "Stream": {
+        "type": "string",
+        "format": "binary"
+      },
       "SubjectFileResponse": {
         "required": [
           "mediaFileId",
@@ -5490,6 +6106,20 @@
           }
         }
       },
+      "TrashRequest": {
+        "required": [
+          "paths"
+        ],
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "UpgradeCandidate": {
         "required": [
           "releaseId",
@@ -5616,6 +6246,9 @@
     },
     {
       "name": "Library"
+    },
+    {
+      "name": "Files"
     },
     {
       "name": "Catalogue"

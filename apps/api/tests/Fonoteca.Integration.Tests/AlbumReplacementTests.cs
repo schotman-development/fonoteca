@@ -468,6 +468,7 @@ public sealed class AlbumReplacementTests(PostgresFixture postgres) : IAsyncLife
     private AlbumReplacementService Service(bool allowReplacement = true, IClock? clock = null) =>
         new(PostgresFixture.CreateContext(_connectionString),
             new FfprobeAudioProbe(new FileSystemAudioFileStore(_root), "ffprobe"),
+            new FileSystemAudioFileStore(_root),
             Options.Create(new FonotecaOptions
             {
                 LibraryPath = _root,

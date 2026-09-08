@@ -21,6 +21,7 @@ namespace Fonoteca.Api.Logging;
 ///   1250-1279  enrichment — recordings, works and artists from MusicBrainz
 ///   1280-1289  candidate warming — filling the worklist's answers ahead of a click
 ///   1290-1299  acquisition — manual Qobuz downloads into staging
+///   1400-1409  the file manager — trashing, moving and uploading by hand
 ///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
 ///              another assembly, but the same numbering
 /// </remarks>
@@ -267,7 +268,8 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Enrichment finished ({JobId}): {Linked} linked, {NoRecording} clusters with no "
             + "MusicBrainz recording, {NotFound} recordings merged away, {Failed} failed; "
-            + "{Recordings} recordings and {Artists} artists looked up, in {ElapsedMs}ms")]
+            + "{Recordings} recordings and {Artists} artists looked up, {Described} artists "
+            + "described, in {ElapsedMs}ms")]
     public static partial void EnrichmentCompleted(
         ILogger logger,
         string jobId,
@@ -277,6 +279,7 @@ internal static partial class Log
         int failed,
         int recordings,
         int artists,
+        int described,
         long elapsedMs);
 
     [LoggerMessage(
@@ -387,6 +390,29 @@ internal static partial class Log
         string path,
         EnrichmentOutcome outcome,
         string? detail);
+
+    /// <remarks>
+    /// Debug, like <see cref="FileNotEnriched"/> above it and for the same
+    /// reason: on a first run over a library this fires for every artist
+    /// MusicBrainz cannot describe, and a warning per row would bury the
+    /// summary line that says how the run actually went.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1255,
+        Level = LogLevel.Debug,
+        Message = "{Artist} was not described: {Reason}")]
+    public static partial void ArtistNotDescribed(ILogger logger, string artist, string reason);
+
+    /// <remarks>
+    /// Warning rather than Debug, unlike its neighbours, because its subject is
+    /// a batch of up to two hundred and fifty artists rather than one — and
+    /// because it ends the stage. One line for the whole of it is not noise.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1256,
+        Level = LogLevel.Warning,
+        Message = "No pictures were found for a batch of {Artists} artists: {Reason}")]
+    public static partial void PicturesNotFound(ILogger logger, int artists, string reason);
 
     [LoggerMessage(
         EventId = 1260,
@@ -574,4 +600,35 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Tags not written to {Path}: {Reason}")]
     public static partial void TagsNotWritten(ILogger logger, string path, string reason);
+
+    [LoggerMessage(
+        EventId = 1400,
+        Level = LogLevel.Warning,
+        Message = "Trashing '{Path}' to '{Destination}'.")]
+    public static partial void FilesTrashing(ILogger logger, string path, string destination);
+
+    [LoggerMessage(
+        EventId = 1401,
+        Level = LogLevel.Warning,
+        Message = "Trashed {Entries} entries to '{Destination}'; {Rows} catalogue rows removed.")]
+    public static partial void FilesTrashed(
+        ILogger logger, int entries, string destination, int rows);
+
+    [LoggerMessage(
+        EventId = 1402,
+        Level = LogLevel.Warning,
+        Message = "Moved '{From}' to '{To}'; {Rows} catalogue rows repointed.")]
+    public static partial void FilesMoved(ILogger logger, string from, string to, int rows);
+
+    [LoggerMessage(
+        EventId = 1403,
+        Level = LogLevel.Information,
+        Message = "Uploaded '{Path}' into the library.")]
+    public static partial void FileUploaded(ILogger logger, string path);
+
+    [LoggerMessage(
+        EventId = 1404,
+        Level = LogLevel.Warning,
+        Message = "'{Path}' would not move: {Reason}")]
+    public static partial void FilesTrashRefused(ILogger logger, string path, string reason);
 }

@@ -65,6 +65,26 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public string ReplacedPath { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Where a file the file manager trashed is moved to. Defaults to the
+    /// library root with <c>-trash</c> on the end.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not <see cref="ReplacedPath"/>, though the mechanism is identical.</b>
+    /// That directory holds albums an upgrade decided were worse, which is a
+    /// judgement this application made and can explain. This one holds what a
+    /// person threw away. Mixed, the only way to tell a mistaken click from a
+    /// mistaken upgrade is the timestamp on the folder — and they are undone
+    /// differently, because a replacement has a better copy sitting in the
+    /// library and a trashed folder has nothing.
+    ///
+    /// Outside the library root for the reason the archive is: the next scan
+    /// would otherwise catalogue it and the folder somebody just deleted would
+    /// appear to still be there. A sibling by default, so the move is a rename
+    /// on one filesystem rather than a copy of an album.
+    /// </remarks>
+    public string TrashPath { get; init; } = string.Empty;
+
     /// <summary>Path to <c>ffmpeg</c>. Resolved from PATH when empty.</summary>
     public string FfmpegPath { get; init; } = "ffmpeg";
 
@@ -289,6 +309,30 @@ public sealed class FonotecaOptions : IValidatableObject
             }
         }
 
+        // And the trash, for a worse version of the same reason. A replaced album
+        // kept inside the library merely looks unreplaced; a *trashed* folder
+        // kept inside it is re-catalogued as brand-new files after its rows have
+        // already been deleted — every AcoustID, recording link, album decision
+        // and human answer under it gone, which is the exact catastrophe the
+        // feature exists to prevent. One rule per option rather than a shared
+        // loop, because the message is the whole value.
+        if (!string.IsNullOrWhiteSpace(TrashPath) && !string.IsNullOrWhiteSpace(LibraryPath))
+        {
+            var library = Path.TrimEndingDirectorySeparator(Path.GetFullPath(LibraryPath));
+            var trash = Path.TrimEndingDirectorySeparator(Path.GetFullPath(TrashPath));
+
+            if (trash.Equals(library, StringComparison.Ordinal)
+                || trash.StartsWith(library + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                yield return new ValidationResult(
+                    $"Fonoteca:TrashPath ('{trash}') is inside Fonoteca:LibraryPath "
+                    + $"('{library}'). Trashing deletes the catalogue rows and moves the files, so "
+                    + "a bin inside the library is re-scanned as new files with every identity, "
+                    + "album and decision on them lost. Put it beside the library, not in it.",
+                    [nameof(TrashPath)]);
+            }
+        }
+
         if (!Uri.TryCreate(MusicBrainzServer, UriKind.Absolute, out var server)
             || (server.Scheme != Uri.UriSchemeHttp && server.Scheme != Uri.UriSchemeHttps))
         {
@@ -319,6 +363,25 @@ public sealed class FonotecaOptions : IValidatableObject
 public sealed class ProviderSettings
 {
     public QobuzSettings Qobuz { get; init; } = new();
+
+    public AudioDbSettings AudioDb { get; init; } = new();
+}
+
+/// <summary>
+/// TheAudioDB, one of the four artist-picture sources.
+/// </summary>
+/// <remarks>
+/// One setting, and it is optional: they publish a test key and the options
+/// class defaults to it, so leaving this blank gives a working — if shared and
+/// rate-limited — source rather than a disabled one. A Patreon key goes here.
+///
+/// Deezer has no counterpart because its search API needs no credential at all.
+/// <c>Fonoteca:Providers:Deezer:Arl</c> in the environment is reserved for a
+/// download feature that does not exist and is not read by the picture source.
+/// </remarks>
+public sealed class AudioDbSettings
+{
+    public string ApiKey { get; init; } = string.Empty;
 }
 
 /// <summary>

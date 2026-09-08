@@ -95,6 +95,64 @@ public sealed class QobuzClient(
         return albums;
     }
 
+    /// <summary>
+    /// Artists matching a search, as Qobuz ranks them.
+    /// </summary>
+    /// <remarks>
+    /// <b>Their ranking is not an answer to "is this the same artist".</b>
+    /// Measured across forty of this library's artists, the top hit for
+    /// "Tom Petty" is <i>Tom Petty &amp; The Heartbreakers</i> and the top hit
+    /// for "Daniel de Borah" is a Barenboim compilation whose credit line runs
+    /// to six names. So this returns the list and the caller decides — see
+    /// <c>QobuzPortraits</c>, which accepts only an exact match on the name.
+    ///
+    /// Five rather than one for that reason: the exact match is frequently not
+    /// first, and asking for more of a list costs the same single request.
+    /// </remarks>
+    public async Task<IReadOnlyList<QobuzArtist>> SearchArtistsAsync(
+        string query,
+        int limit = 5,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var payload = await GetAsync(
+            "artist/search",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["query"] = query,
+                ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        var body = Deserialize(payload, QobuzJsonContext.Default.QobuzArtistSearchBody, "artist/search");
+        var items = body?.Artists?.Items ?? [];
+
+        var artists = new List<QobuzArtist>(items.Count);
+
+        foreach (var item in items)
+        {
+            if (string.IsNullOrWhiteSpace(item.Name)) continue;
+
+            // Their canonical URL, which is the `large` one. It is NOT a fixed
+            // size: measured across 251 of them the median is 211 KB and the
+            // largest is 13.3 MB at 4480x6720, because for some artists `large`
+            // is simply the original. The renditions are path segments rather
+            // than query parameters — `/small/`, `/medium/`, `/large/` — so the
+            // client picks the one it can use, exactly as it appends a width for
+            // Commons. Storing the biggest is what keeps that choice open.
+            //
+            // `extralarge` is deliberately not read although the field arrives:
+            // that URL 403s at their CDN.
+            var picture = item.Image?.Large ?? item.Image?.Medium;
+
+            artists.Add(new QobuzArtist(item.Name, picture, item.AlbumsCount ?? 0));
+        }
+
+        return artists;
+    }
+
     /// <summary>One album with its track list.</summary>
     public async Task<QobuzAlbum?> GetAlbumAsync(
         string albumId,
@@ -458,6 +516,22 @@ public sealed class QobuzClient(
             : new ProviderUnavailableException(
                 ProviderName, $"Qobuz {operation} failed: {reason}.", cause);
 }
+
+/// <summary>One artist as Qobuz knows them, for the one thing we ask them.</summary>
+/// <param name="Name">
+/// As Qobuz spell it. The whole of the matching decision is made on this, so it
+/// is carried rather than discarded.
+/// </param>
+/// <param name="ImageUrl">
+/// Their press photograph, or null. Null is common and is not a failure: they
+/// carry pictures for the artists they sell records by.
+/// </param>
+/// <param name="AlbumCount">
+/// How many albums Qobuz carry by them. <b>Zero means the field was absent, not
+/// that they have none</b> — so it is an unknown rather than a small number, and
+/// <c>QobuzPortraits.Dwarfs</c> refuses to compare against one.
+/// </param>
+public sealed record QobuzArtist(string Name, string? ImageUrl, int AlbumCount);
 
 /// <summary>One album as an acquisition sees it.</summary>
 /// <param name="TrackCount">Qobuz's own count. Higher than <c>Tracks.Count</c> means the list was cut.</param>

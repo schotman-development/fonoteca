@@ -61,10 +61,66 @@ internal sealed record QobuzArtistBody
 {
     [JsonPropertyName("name")]
     public string? Name { get; init; }
+
+    [JsonPropertyName("id")]
+    public long? Id { get; init; }
+
+    /// <summary>
+    /// The artist's press photograph, in five sizes.
+    /// </summary>
+    /// <remarks>
+    /// Absent on plenty of artists — Qobuz carry a picture for the people they
+    /// sell records by and not for every credited session player, which is the
+    /// same shape of gap Wikidata has and not the same artists.
+    /// </remarks>
+    [JsonPropertyName("image")]
+    public QobuzImageBody? Image { get; init; }
+
+    /// <summary>
+    /// How many albums Qobuz carry by them.
+    /// </summary>
+    /// <remarks>
+    /// The only fact in a search result that is about the artist rather than
+    /// about the search, which is what makes it the one usable discriminator
+    /// between two rows of the same name — see <c>QobuzPortraits.Picture</c>.
+    /// Absent on an <c>artist/get</c>, which is why it is nullable.
+    /// </remarks>
+    [JsonPropertyName("albums_count")]
+    public int? AlbumsCount { get; init; }
 }
 
+internal sealed record QobuzArtistSearchBody
+{
+    [JsonPropertyName("artists")]
+    public QobuzArtistListBody? Artists { get; init; }
+}
+
+internal sealed record QobuzArtistListBody
+{
+    [JsonPropertyName("items")]
+    public IReadOnlyList<QobuzArtistBody>? Items { get; init; }
+}
+
+/// <summary>
+/// A picture at several widths — an album's sleeve, or an artist's photograph.
+/// </summary>
+/// <remarks>
+/// One record for both because Qobuz send the same shape for both, and the
+/// squareness that makes it work for a sleeve is most of why the artist half is
+/// worth having: Wikidata's P18 is "an image of the subject", which for a band
+/// is very often a wide concert photograph — in a 112px circle that is a
+/// stadium, with the band eight pixels of it. Qobuz's are cropped to the faces,
+/// because they are the pictures on their own artist pages.
+///
+/// <c>extralarge</c> arrives for artists and is deliberately not read: that URL
+/// 403s at their CDN. <c>large</c> is the biggest one that resolves, and for an
+/// artist it is not a fixed size — see <c>SearchArtistsAsync</c>.
+/// </remarks>
 internal sealed record QobuzImageBody
 {
+    [JsonPropertyName("medium")]
+    public string? Medium { get; init; }
+
     [JsonPropertyName("large")]
     public string? Large { get; init; }
 }
@@ -177,6 +233,7 @@ internal sealed record QobuzErrorBody
     NumberHandling = JsonNumberHandling.AllowReadingFromString)]
 [JsonSerializable(typeof(QobuzAlbumBody))]
 [JsonSerializable(typeof(QobuzSearchBody))]
+[JsonSerializable(typeof(QobuzArtistSearchBody))]
 [JsonSerializable(typeof(QobuzFileUrlBody))]
 [JsonSerializable(typeof(QobuzErrorBody))]
 internal sealed partial class QobuzJsonContext : JsonSerializerContext;

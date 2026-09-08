@@ -51,6 +51,47 @@ internal static class MusicBrainzMapper
             Type: NullIfBlank(source.Type),
             Relations: ToRelations(source.Relationships));
 
+    /// <summary>
+    /// An artist, flattened to the fields a credit line cannot carry.
+    /// </summary>
+    /// <remarks>
+    /// The life span is reduced to two years here rather than downstream,
+    /// because this is the file that owns the decision about how much of
+    /// MusicBrainz's precision the catalogue keeps — and it is the same
+    /// decision <see cref="ToReleaseDate"/> makes in the other direction, for
+    /// the reason given there. A release date decides which pressing outranks
+    /// which; nothing sorts artists by birthday.
+    /// </remarks>
+    public static MusicBrainzArtist ToArtist(IArtist source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        var genres = new List<string>();
+
+        // Ordered by votes, most first, because MusicBrainz sends them
+        // alphabetically and a page prints the first two or three of them.
+        foreach (var genre in (source.Genres ?? []).OrderByDescending(g => g.VoteCount))
+        {
+            if (NullIfBlank(genre.Name) is { } name) genres.Add(name);
+        }
+
+        return new MusicBrainzArtist(
+            Id: new Mbid(source.Id),
+            Name: source.Name ?? string.Empty,
+            SortName: NullIfBlank(source.SortName),
+            Type: NullIfBlank(source.Type),
+            Disambiguation: NullIfBlank(source.Disambiguation),
+            Country: NullIfBlank(source.Country),
+            Gender: NullIfBlank(source.Gender),
+            BeganYear: ToYear(source.LifeSpan?.Begin),
+            EndedYear: ToYear(source.LifeSpan?.End),
+
+            // Absent means "not known to have ended", which is how MusicBrainz
+            // means it and what a living artist's document looks like.
+            HasEnded: source.LifeSpan?.Ended ?? false,
+            Genres: genres);
+    }
+
     public static MusicBrainzRelease ToRelease(IRelease source)
     {
         var tracks = new List<MusicBrainzTrack>();
@@ -291,6 +332,10 @@ internal static class MusicBrainzMapper
     /// </remarks>
     private static ReleaseDate? ToReleaseDate(PartialDate? date) =>
         date is { IsEmpty: false, Year: { } year } ? new ReleaseDate(year, date.Month, date.Day) : null;
+
+    /// <summary>The year of a partial date, which is the part that is always there.</summary>
+    private static int? ToYear(PartialDate? date) =>
+        date is { IsEmpty: false, Year: { } year } ? year : null;
 
     /// <summary>
     /// MusicBrainz sends <c>""</c> for absent text, not null. Both mean the same

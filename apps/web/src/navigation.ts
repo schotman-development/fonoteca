@@ -10,7 +10,7 @@
  * A new section is a compile error here until the route exists.
  */
 export type NavItem = {
-  readonly to: '/' | '/library' | '/library/releases' | '/library/matching' | '/acquire'
+  readonly to: '/' | '/library' | '/library/releases' | '/library/matching' | '/files' | '/acquire'
   readonly label: string
   /**
    * Whether the link is current only on exactly this path.
@@ -42,6 +42,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Identify',
     exact: false,
     keywords: ['matching', 'questions', 'unmatched'],
+  },
+  // The disk, rather than the catalogue. It sits after the three catalogue
+  // screens because it is where somebody goes when one of them is wrong about
+  // something — a duplicate folder, a stray rip — and before Acquire because
+  // nothing on it spends money.
+  {
+    to: '/files',
+    label: 'Files',
+    exact: false,
+    keywords: ['files', 'folders', 'disk', 'upload', 'delete', 'trash', 'rename'],
   },
   // Last, and separate from the three above it in more than order: those browse
   // and correct what is already here, this one spends money on something that

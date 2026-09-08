@@ -1,5 +1,5 @@
 import type { components } from '@fonoteca/api-client'
-import { Badge, CatalogueCard, CatalogueGrid, Input, Stack, Text } from '@fonoteca/ui'
+import { Badge, Button, CatalogueCard, CatalogueGrid, Input, Stack, Text } from '@fonoteca/ui'
 import { Link } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
@@ -7,7 +7,7 @@ import { api } from '../api.ts'
 import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistsPage.module.css'
-import { releaseArt } from './coverArt.ts'
+import { artistImageUrl } from './coverArt.ts'
 
 type ArtistSummary = components['schemas']['ArtistSummary']
 
@@ -28,17 +28,34 @@ const SORTS = [
 type Sort = (typeof SORTS)[number][0]
 
 /**
+ * Which names count as artists here.
+ *
+ * The union the catalogue can reach a track through — credit lines, conductors,
+ * ensembles and the composer of the work — is 2,860 names on the author's
+ * library, of which 2,157 are songwriters and lyricists with one track each.
+ * That is the right answer to "whose page can I reach this recording from" and a
+ * useless front page. The default is the sleeve: who the album is *by*.
+ */
+const SCOPES = [
+  ['album', 'Album artists'],
+  ['all', 'Everyone credited'],
+] as const
+
+type Scope = (typeof SCOPES)[number][0]
+
+/**
  * The library, by artist.
  *
- * Everyone the catalogue can reach a track through — the names on credit lines,
- * the conductors, the orchestras and the composers — as one alphabetical list.
- * A classical library makes that mixture obvious and it is the point rather than
- * a wrinkle: Karajan and Mozart are both artists you would want to browse to,
- * and only one of them is ever on a credit line.
+ * A shelf of records by default — who the albums are by, which is the question
+ * somebody opening this page is asking. The wider list is still one select away
+ * and it is a genuinely different question: Karajan and Mozart are both artists
+ * you would want to browse to, and only one of them is ever on a sleeve as the
+ * album's own artist.
  */
 export function ArtistsPage() {
   const [filter, setFilter] = useState('')
   const [sort, setSort] = useState<Sort>('name')
+  const [scope, setScope] = useState<Scope>('album')
   const searchId = useId()
 
   // The typed value drives the input and a deferred copy drives the request, so
@@ -56,9 +73,15 @@ export function ArtistsPage() {
   const state = useApiQuery(
     () =>
       api.get('/api/catalogue/artists', {
-        params: { query: { ...(query ? { query } : {}), ...(sort === 'name' ? {} : { sort }) } },
+        params: {
+          query: {
+            ...(query ? { query } : {}),
+            ...(sort === 'name' ? {} : { sort }),
+            ...(scope === 'album' ? {} : { scope }),
+          },
+        },
       }),
-    [query, sort],
+    [query, sort, scope],
   )
 
   return (
@@ -71,8 +94,9 @@ export function ArtistsPage() {
           </Text>
         </h1>
         <Text tone="secondary" block>
-          Everyone credited on something you own — billed, conducting, playing as an ensemble, or
-          named as the composer of the work.
+          {scope === 'album'
+            ? 'Who your albums are by, collaborations included — the name on the sleeve rather than everyone on the record.'
+            : 'Everyone credited on something you own — billed, conducting, playing as an ensemble, or named as the composer of the work.'}
         </Text>
       </Stack>
 
@@ -93,6 +117,14 @@ export function ArtistsPage() {
         </div>
 
         <SortSelect label="Sort by" value={sort} options={SORTS} onChange={setSort} />
+
+        {/*
+          The same native select, because this is the same control with different
+          words in it — and the value goes to the server for the same reason the
+          sort does: the list is paged there, so narrowing the page in the browser
+          would narrow one slice of a library and look like it had worked.
+        */}
+        <SortSelect label="Show" value={scope} options={SCOPES} onChange={setScope} />
       </Stack>
 
       <div role="status" aria-live="polite" aria-busy={state.status === 'loading'}>
@@ -114,7 +146,11 @@ export function ArtistsPage() {
 
       {state.status === 'ready' ? (
         state.data.items.length === 0 ? (
-          <Empty filtered={query.length > 0} />
+          <Empty
+            filtered={query.length > 0}
+            narrowed={scope === 'album'}
+            onWiden={() => setScope('all')}
+          />
         ) : (
           /*
             No `size` prop: the grid reads its own contents, and everything in
@@ -159,14 +195,42 @@ function Results({ total, shown }: { readonly total: number; readonly shown: num
 }
 
 /**
- * Empty means two different things and they deserve different sentences: a
- * filter that matched nothing is the user's next keystroke, an empty catalogue
- * is a pass that has not been run.
+ * Empty means three things now, and the third one is a trap.
+ *
+ * A filter that matched nothing is the user's next keystroke and an empty
+ * catalogue is a pass that has not been run — but a filter that matched nothing
+ * *on the shelf* is neither. 2,534 of the artists this catalogue holds are off
+ * it, every one with a page and some with substantial holdings: searching a band
+ * member by name returns nothing here while their page lists seventy tracks.
+ * Answered with "No artist matches that" a person concludes the library does not
+ * hold them, which is the one wrong conclusion available. So the sentence names
+ * the narrowing and the button undoes it.
  */
-function Empty({ filtered }: { readonly filtered: boolean }) {
-  return filtered ? (
-    <Text tone="tertiary">No artist matches that.</Text>
-  ) : (
+function Empty({
+  filtered,
+  narrowed,
+  onWiden,
+}: {
+  readonly filtered: boolean
+  readonly narrowed: boolean
+  readonly onWiden: () => void
+}) {
+  if (filtered) {
+    return narrowed ? (
+      <Stack direction="column" gap={8} align="start">
+        <Text tone="tertiary" block>
+          No album artist matches that.
+        </Text>
+        <Button variant="secondary" onClick={onWiden}>
+          Search everyone credited
+        </Button>
+      </Stack>
+    ) : (
+      <Text tone="tertiary">No artist matches that.</Text>
+    )
+  }
+
+  return (
     <Stack direction="column" gap={4} align="start">
       <Text tone="tertiary" block>
         Nothing here yet.
@@ -189,18 +253,25 @@ function Empty({ filtered }: { readonly filtered: boolean }) {
  * whole page the album width.
  */
 function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
+  const image = artistImageUrl(artist)
+
   return (
     <CatalogueCard
       variant="artist"
       title={artist.name}
       /*
-        An album of theirs, standing in for a photograph nobody has: MusicBrainz
-        holds no artist images and the Cover Art Archive is keyed on releases.
+        A photograph where Wikidata has one, and an album of theirs where it does
+        not. The order is the whole point: a page of sleeves answers "what do I
+        own" and a page of faces answers "who is this", and only the second is
+        the question somebody scanning three hundred names is asking. The
+        fallback stays because roughly a quarter of them have no picture
+        anywhere.
+
         Spread rather than passed as `undefined`, which `exactOptionalPropertyTypes`
         draws a distinction between — and the absent prop is what makes the card
         draw its monogram.
       */
-      {...(artist.cover != null ? { image: releaseArt(artist.cover) } : {})}
+      {...(image != null ? { image } : {})}
       /*
         The count and nothing else. It is on every artist, it is what says
         whether a name is a whole shelf or one guest appearance, and it is

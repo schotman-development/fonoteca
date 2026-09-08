@@ -69,11 +69,13 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
+        // `scope=all`, because the union is what this asserts: the default list
+        // is the sleeve, and Mozart is not on one.
         var body = await client.GetFromJsonAsync<ArtistListResponse>(
-            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
 
         Assert.NotNull(body);
-        Assert.Equal(6, body.Total);
+        Assert.Equal(7, body.Total);
 
         // Sort name, not display name: "Karajan, Herbert von" belongs under K.
         Assert.Equal(
@@ -84,6 +86,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
                 "Karajan, Herbert von",
                 "Mozart, Wolfgang Amadeus",
                 "Satie, Erik",
+                "Solti, Georg",
             ],
             body.Items.Select(a => a.SortName));
 
@@ -92,6 +95,113 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         // Both movements, reached through the work rather than a credit line.
         Assert.Equal(2, mozart.TrackCount);
         Assert.Equal("Person", mozart.Type);
+    }
+
+    /// <summary>
+    /// The default list is a shelf of records, not everyone on them.
+    /// </summary>
+    /// <remarks>
+    /// Measured against the real library, the union reaches 2,860 artists and
+    /// 2,157 of them arrive as writers of a work — every songwriter of every pop
+    /// song, most with one track. A front page of that is unusable, so the
+    /// default is who the albums are by.
+    ///
+    /// Four artists, and each is here for one of the rule's branches:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Hart and Bonamassa</b> are the release's own credit line, and
+    /// between them are what "collaborations" means — one release, two names,
+    /// and the release credit is the only source carrying both.</item>
+    /// <item><b>Satie</b> would otherwise be lost silently. His file was never
+    /// attributed, so there is no release credit to find him by, and on the real
+    /// library 987 of 8,411 files are in that position — without the fallback a
+    /// refused album takes its artist off this page with nothing to say
+    /// why.</item>
+    /// <item><b>Solti</b> is the classical case, and the one this endpoint gets
+    /// wrong if it reads release credits alone. The sleeve of his Ring names
+    /// Wagner; Solti is on the credit line of every recording on it. He is here
+    /// on that strength — three of three — and the guest spots on the anthology
+    /// are what shows the rule is not merely "credited on something".</item>
+    /// <item><b>Karajan</b> is billed on a release the library holds.</item>
+    /// </list>
+    ///
+    /// Mozart and the Berliner Philharmoniker are the exclusions, and both are
+    /// the point: a composer reached through the work hop and an orchestra
+    /// linked to a recording it is not billed on are exactly the names that turn
+    /// a shelf into a phone book. Both still have a page, and both are one
+    /// <c>scope=all</c> away.
+    /// </remarks>
+    [Fact]
+    public async Task TheDefaultListIsAlbumArtistsRatherThanEveryoneCredited()
+    {
+        using var client = _factory!.CreateClient();
+
+        var shelf = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(shelf);
+
+        Assert.Equal(
+            [
+                "Bonamassa, Joe",
+                "Hart, Beth",
+                "Karajan, Herbert von",
+                "Satie, Erik",
+                "Solti, Georg",
+            ],
+            shelf.Items.Select(a => a.SortName));
+
+        Assert.Equal(5, shelf.Total);
+
+        // The track counts are the artist's whole holdings either way: this
+        // narrows who is listed, never what a listed artist has.
+        var everyone = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
+
+        Assert.NotNull(everyone);
+
+        Assert.Equal(
+            everyone.Items.Single(a => a.Id == _seed.Karajan).TrackCount,
+            shelf.Items.Single(a => a.Id == _seed.Karajan).TrackCount);
+    }
+
+    /// <summary>
+    /// Being on every track of an album is what makes somebody its artist; being
+    /// on one of them is a guest.
+    /// </summary>
+    /// <remarks>
+    /// The rule that recovers Solti has to not recover the anthology's guests,
+    /// and the seed is built so that a rule reading "credited on a track of a
+    /// release" cannot tell them apart: both are recording credits on a release
+    /// billed to somebody else. Three of three against one of three is the only
+    /// thing separating them.
+    ///
+    /// The count is the tracks the library <i>holds</i>, not the ones the
+    /// release prints — a box set held one disc of is still an album to whoever
+    /// is browsing it.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistOnEveryTrackOfAnAlbumIsItsArtistAndAGuestIsNot()
+    {
+        using var client = _factory!.CreateClient();
+
+        var shelf = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(shelf);
+
+        // Three recordings of the Ring, all three credited to him, and no
+        // release credit anywhere in the catalogue.
+        var solti = shelf.Items.Single(a => a.Id == _seed.Solti);
+        Assert.Equal(3, solti.TrackCount);
+
+        // Wagner is on the sleeve and on no recording, so he is on the shelf's
+        // set and off the page — the same rule that has always excluded an
+        // artist with nothing to show.
+        Assert.DoesNotContain(shelf.Items, a => a.Name == "Richard Wagner");
+
+        // And the composer who is only ever a composer stays out.
+        Assert.DoesNotContain(shelf.Items, a => a.Id == _seed.Mozart);
     }
 
     /// <summary>
@@ -104,28 +214,40 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
+        // `scope=all`, or the assertion passes on the strength of the shelf
+        // filter and would go on passing if the rule it names broke.
         var body = await client.GetFromJsonAsync<ArtistListResponse>(
-            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
 
         Assert.NotNull(body);
         Assert.DoesNotContain(body.Items, a => a.Id == _seed.Orphan);
     }
 
     /// <summary>
-    /// An artist's picture is one of their albums, because there is no
-    /// photograph of anybody to be had — MusicBrainz holds none and the Cover
-    /// Art Archive is keyed on releases.
+    /// An artist with no photograph sends no picture, rather than an album.
     /// </summary>
     /// <remarks>
-    /// Which album is the whole question, and the greedy answer is wrong in the
-    /// way this codebase keeps meeting: the release holding most of an artist's
-    /// tracks is a compilation about as often as it is theirs. Measured against
-    /// the real library, Joe Bonamassa's 454 tracks put a hundred-track
-    /// anthology on top with 32 of them, ahead of every record with his name on
-    /// the sleeve — so the seed here reproduces that shape at three against two.
+    /// <b>An album sleeve used to travel here as the fallback, and it was
+    /// removed because of how it read on the page rather than because the
+    /// derivation was wrong.</b> The artists reaching a fallback are by
+    /// definition the ones no picture source has heard of, which is very nearly
+    /// the same set as the artists who are not on the front of their own
+    /// sleeves — so in practice the tile with a face was a household name and
+    /// the tile with a cover was a conductor, a session player or a guest
+    /// wearing somebody else's record. A monogram says "no picture"; a sleeve
+    /// says "this is them", and is wrong.
+    ///
+    /// Asserted on the list and the detail page together for the reason their
+    /// track counts are: a tile and the page it opens disagreeing about one
+    /// artist is the failure somebody notices immediately, having just clicked
+    /// the first.
+    ///
+    /// The seed still holds the shape the old rule was measured against —
+    /// Bonamassa billed on <c>Seesaw</c> and guesting on a bigger anthology — so
+    /// a reinstated fallback would have something to be caught picking.
     /// </remarks>
     [Fact]
-    public async Task AnArtistsPictureIsAnAlbumTheyAreBilledOnRatherThanTheBiggerOneTheyGuestOn()
+    public async Task AnArtistWithNoPhotographSendsNoPictureRatherThanAnAlbum()
     {
         using var client = _factory!.CreateClient();
 
@@ -134,22 +256,63 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(body);
 
+        // Billed on one album, guesting on a bigger one, and photographed by
+        // nobody: the row carries no picture of any kind.
         var bonamassa = body.Items.Single(a => a.Id == _seed.Bonamassa);
+        Assert.Null(bonamassa.Portrait);
 
-        Assert.Equal(_seed.SeesawMbid, bonamassa.Cover);
-        Assert.NotEqual(_seed.AnthologyMbid, bonamassa.Cover);
-
-        // The same rule on the detail page, from the same input — a tile and the
-        // page it opens must not show two different faces for one artist.
         var detail = await client.GetFromJsonAsync<ArtistDetailResponse>(
             new Uri($"/api/catalogue/artists/{_seed.Bonamassa}", UriKind.Relative), Token);
 
         Assert.NotNull(detail);
-        Assert.Equal(_seed.SeesawMbid, detail.Artist.Cover);
+        Assert.Null(detail.Artist.Portrait);
 
-        // Satie's one file was never attributed to a release, so there is
-        // nothing to draw and the card falls back to its monogram.
-        Assert.Null(body.Items.Single(a => a.Id == _seed.Satie).Cover);
+        // And the wire carries no album for an artist at all — the check that
+        // fails if the field comes back, rather than merely if a client stops
+        // reading it.
+        Assert.DoesNotContain(
+            "\"cover\"",
+            await client.GetStringAsync(
+                new Uri("/api/catalogue/artists", UriKind.Relative), Token),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The photograph is the artist's picture, and it is the only one.
+    /// </summary>
+    /// <remarks>
+    /// Four sources stand behind it — two searched by name and two looked up by
+    /// MusicBrainz id — which is what made dropping the album fallback
+    /// affordable rather than merely correct.
+    ///
+    /// Asserted on the list and the detail page together, for the reason above.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistsPhotographIsTheSameOnTheListAndTheDetailPage()
+    {
+        using var client = _factory!.CreateClient();
+
+        var list = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(list);
+
+        var hart = list.Items.Single(a => a.Id == _seed.Hart);
+
+        Assert.Equal(
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Beth%20Hart.jpg",
+            hart.Portrait);
+
+        var detail = await client.GetFromJsonAsync<ArtistDetailResponse>(
+            new Uri($"/api/catalogue/artists/{_seed.Hart}", UriKind.Relative), Token);
+
+        Assert.NotNull(detail);
+        Assert.Equal(hart.Portrait, detail.Artist.Portrait);
+
+        // Nobody has photographed Joe Bonamassa as far as this catalogue knows,
+        // which is null rather than an empty string — the difference between
+        // "no picture" and "a picture at no address".
+        Assert.Null(list.Items.Single(a => a.Id == _seed.Bonamassa).Portrait);
     }
 
     [Fact]
@@ -187,12 +350,12 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         using var client = _factory!.CreateClient();
 
         var body = await client.GetFromJsonAsync<ArtistListResponse>(
-            new Uri("/api/catalogue/artists?skip=1&take=2", UriKind.Relative), Token);
+            new Uri("/api/catalogue/artists?scope=all&skip=1&take=2", UriKind.Relative), Token);
 
         Assert.NotNull(body);
 
-        // "showing 2 of 6", answerable without a second request.
-        Assert.Equal(6, body.Total);
+        // "showing 2 of 7", answerable without a second request.
+        Assert.Equal(7, body.Total);
         Assert.Equal(["Bonamassa, Joe", "Hart, Beth"], body.Items.Select(a => a.SortName));
     }
 
@@ -345,8 +508,12 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
+        // `scope=all`: the two artists this could drift on — Mozart through the
+        // work hop and the Berliner through a recording relationship — are
+        // exactly the two the shelf leaves out, so the default list would
+        // exercise only the credit-line branch of the rule under test.
         var list = await client.GetFromJsonAsync<ArtistListResponse>(
-            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
 
         Assert.NotNull(list);
         Assert.NotEmpty(list.Items);
@@ -518,7 +685,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         // The page is cut, the total is not — so a sort cannot quietly shrink
         // the list it is ordering.
-        Assert.Equal(3, body.Total);
+        Assert.Equal(4, body.Total);
 
         return [.. body.Items.Select(item => item.Title)];
     }
@@ -538,13 +705,14 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         using var client = _factory!.CreateClient();
 
         var body = await client.GetFromJsonAsync<ArtistListResponse>(
-            new Uri("/api/catalogue/artists?sort=tracks", UriKind.Relative), Token);
+            new Uri("/api/catalogue/artists?scope=all&sort=tracks", UriKind.Relative), Token);
 
         Assert.NotNull(body);
 
         Assert.Equal(
             [
                 "Bonamassa, Joe",
+                "Solti, Georg",
                 "Berliner Philharmoniker",
                 "Karajan, Herbert von",
                 "Mozart, Wolfgang Amadeus",
@@ -553,11 +721,11 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             ],
             body.Items.Select(a => a.SortName));
 
-        Assert.Equal([4, 2, 2, 2, 1, 1], body.Items.Select(a => a.TrackCount));
+        Assert.Equal([4, 3, 2, 2, 2, 1, 1], body.Items.Select(a => a.TrackCount));
 
         // An order nobody asked for is the default here too.
         var nonsense = await client.GetFromJsonAsync<ArtistListResponse>(
-            new Uri("/api/catalogue/artists?sort=nonsense", UriKind.Relative), Token);
+            new Uri("/api/catalogue/artists?scope=all&sort=nonsense", UriKind.Relative), Token);
 
         Assert.NotNull(nonsense);
         Assert.Equal("Berliner Philharmoniker", nonsense.Items[0].SortName);
@@ -592,9 +760,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(report);
 
-        // Four folders, each internally consistent, each naming one release.
-        Assert.Equal(4, report.Folders);
-        Assert.Equal(4, report.FoldersAgreeing);
+        // Five folders, each internally consistent, each naming one release.
+        Assert.Equal(5, report.Folders);
+        Assert.Equal(5, report.FoldersAgreeing);
         Assert.Empty(report.FoldersSplit);
 
         var spanning = Assert.Single(report.ReleasesSpanningFolders);
@@ -617,10 +785,13 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         var karajan = Artist("Herbert von Karajan", "Karajan, Herbert von", "Person");
         var berliner = Artist("Berliner Philharmoniker", "Berliner Philharmoniker", "Orchestra");
         var hart = Artist("Beth Hart", "Hart, Beth", "Person");
+        hart.PortraitUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/Beth%20Hart.jpg";
         var bonamassa = Artist("Joe Bonamassa", "Bonamassa, Joe", "Person");
+        var solti = Artist("Sir Georg Solti", "Solti, Georg", "Person");
+        var wagner = Artist("Richard Wagner", "Wagner, Richard", "Person");
         var orphan = Artist("Nobody At All", "Nobody At All", "Group");
 
-        db.Artists.AddRange(mozart, satie, karajan, berliner, hart, bonamassa, orphan);
+        db.Artists.AddRange(mozart, satie, karajan, berliner, hart, bonamassa, solti, wagner, orphan);
 
         var work = new Work
         {
@@ -819,6 +990,63 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         db.ArtistCredits.Add(Credit(satie, gymnopedie, 0, null));
         db.MediaFiles.Add(File("Satie/Gymnopedies/01 - Gymnopedie no. 1.flac", gymnopedie));
 
+        // The shape the release credit line alone gets wrong, measured on the real
+        // library and reproduced here at three tracks instead of 178: the sleeve
+        // names Wagner and nobody else, while the conductor is on the credit line
+        // of every recording on it. Read from the release, the largest work in
+        // the library browses under a man who died in 1883 and under nobody who
+        // played it.
+        //
+        // Wagner has no track of his own here — no work relation, no recording
+        // credit — so he is on the shelf's list and filtered off the page by the
+        // same rule that has always excluded an artist with nothing to show.
+        var ringGroup = new ReleaseGroup
+        {
+            Id = ReleaseGroupId.New(),
+            Title = "Wagner: Der Ring des Nibelungen",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PrimaryType = "Album",
+        };
+
+        var ring = new Release
+        {
+            Id = ReleaseId.New(),
+            Title = "Wagner: Der Ring des Nibelungen",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            ReleaseGroupId = ringGroup.Id,
+            Released = new ReleaseDate(1997, null, null),
+            Status = "Official",
+            MediumFormats = "CD",
+            TrackCount = 3,
+            DiscCount = 1,
+        };
+
+        db.ReleaseGroups.Add(ringGroup);
+        db.Releases.Add(ring);
+        db.ArtistCredits.Add(ReleaseCredit(wagner, ring, 0, null));
+
+        for (var n = 1; n <= 3; n++)
+        {
+            var scene = new Recording
+            {
+                Id = RecordingId.New(),
+                Title = $"Das Rheingold: Scene {n}",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                Duration = TimeSpan.FromSeconds(600),
+            };
+
+            db.Recordings.Add(scene);
+            db.ArtistCredits.Add(Credit(solti, scene, 0, null));
+
+            var slot = TrackOn(db, ring, scene, n, $"Das Rheingold: Scene {n}", 600);
+
+            db.MediaFiles.Add(Attributed(
+                File($"Wagner/Der Ring des Nibelungen/0{n} - Das Rheingold Scene {n}.flac", scene),
+                ring,
+                ringGroup,
+                slot));
+        }
+
         // Credited on a recording the library does not hold. Enrichment cannot
         // produce this, but a rescan that unlinks every file of a recording can.
         var absent = new Recording { Id = RecordingId.New(), Title = "Never Ripped" };
@@ -835,6 +1063,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Berliner = berliner.Id.Value,
             Hart = hart.Id.Value,
             Bonamassa = bonamassa.Id.Value,
+            Solti = solti.Id.Value,
             Orphan = orphan.Id.Value,
             FirstMovement = first.Id.Value,
             Duet = duet.Id.Value,
@@ -975,6 +1204,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         public Guid Hart { get; init; }
 
         public Guid Bonamassa { get; init; }
+
+        public Guid Solti { get; init; }
 
         public Guid Orphan { get; init; }
 

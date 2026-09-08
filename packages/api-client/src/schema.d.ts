@@ -169,6 +169,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One directory of the library, from disk, annotated from the catalogue.
+         * @description Lists what is actually on disk — including files nothing has scanned and files that are not audio at all — and puts the catalogue's own counts on each row: how many audio files it holds beneath, how many are identified, and how many are filed under an album.
+         */
+        get: operations["ListLibraryFolder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move files or folders out of the library, into the trash.
+         * @description Nothing is deleted: entries move to Fonoteca:TrashPath under a timestamp, keeping their library-relative layout, so undoing a wrong click is a mv. Their catalogue rows are removed in the same operation, because this process moved the files itself and does not have to infer their absence from a scan.
+         */
+        post: operations["TrashLibraryEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename or move one file or folder within the library.
+         * @description The catalogue rows move with it. A rename changes no bytes, so nothing derived is cleared — which is the whole reason this is an endpoint rather than a mv and a rescan, since a scan reads a rename as a deletion and an arrival and discards every AcoustID, recording link and album decision beneath the folder.
+         */
+        post: operations["MoveLibraryEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write one file into the library at the given path.
+         * @description The request body is the file itself — no multipart, so nothing is buffered to a temporary copy on the way in and an album-sized file costs one write. Upload one file per request; the catalogue learns about them at the next scan. 'folder' is a folder that already exists and is taken as it is; 'name' is the file's own path — one segment from a file picker, 'Album/CD1/01.flac' from a directory one — and is sanitised, because it is the only half the browser invented.
+         */
+        post: operations["UploadLibraryFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The bytes of one file, with range support.
+         * @description What an <img>, an <audio> or a partial fetch of a rip log reads. Range requests are handled, so seeking into a large FLAC does not read the part before it.
+         *
+         *     **The media type comes from an allowlist, never from the extension itself.** Anything not on it is served as application/octet-stream and as an attachment, and every response carries X-Content-Type-Options: nosniff — an .html in a music folder is a download, not a page on this origin.
+         */
+        get: operations["GetLibraryFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What one file says about itself, by path.
+         * @description The decoder's measurements and the file's own tags, for any audio file in the library — including one no scan has seen yet, which is why this is keyed on a path rather than on a media file id.
+         *
+         *     **It cannot fail on the file.** A truncated FLAC, an unmounted volume and a tag parser that dereferences null all come back as a reading with a note in it, because a screen that 500s on the file you opened it for is worse than one that says the decoder would not read it.
+         */
+        get: operations["GetLibraryFileDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/art": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A picture of one entry: a file's embedded cover, or a folder's own.
+         * @description For an audio file, the front cover stored inside it, served unchanged. For a directory, the first of cover/folder/front/album it holds.
+         *
+         *     **404 is the ordinary answer, not an error.** Plenty of files carry no picture and plenty of folders hold none, and the screen draws a monogram for both.
+         */
+        get: operations["GetLibraryEntryArt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/artists": {
         parameters: {
             query?: never;
@@ -177,8 +323,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Artists with at least one track in the library.
-         * @description Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. An artist appears here if they are on a recording's credit line, are linked to it as a conductor or ensemble, or wrote the work it performs — and only when at least one file in the library holds that recording.
+         * Album artists in the library, or everyone credited on one.
+         * @description Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists an album is billed to: the release's own credit line, collaborators included, plus anyone billed on every track of an album — which is how a conductor and an orchestra are found on a release the sleeve bills to the composer — and the track's own credit line for files no release has been attributed to yet. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names.
          */
         get: operations["GetArtists"];
         put?: never;
@@ -837,8 +983,17 @@ export interface components {
             type: null | string;
             /** Format: int32 */
             trackCount: number;
-            /** Format: uuid */
-            cover: null | string;
+            portrait: null | string;
+            country: null | string;
+            gender: null | string;
+            /** Format: int32 */
+            beganYear: null | number;
+            /** Format: int32 */
+            endedYear: null | number;
+            ended: boolean;
+            genres: string[];
+            /** Format: date-time */
+            describedAtUtc: null | string;
         };
         AttributionReportResponse: {
             outcomes: components["schemas"]["OutcomeCount"][];
@@ -1044,6 +1199,12 @@ export interface components {
             currentFile: null | string;
             /** Format: int32 */
             pending: number;
+            /** Format: int32 */
+            pendingFiles: number;
+            /** Format: int32 */
+            pendingArtists: number;
+            /** Format: int32 */
+            pendingPortraits: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {
@@ -1070,7 +1231,37 @@ export interface components {
             works: number;
             /** Format: int32 */
             artists: number;
+            /** Format: int32 */
+            artistsDescribed: number;
+            /** Format: int32 */
+            artistsPictured: number;
             cancelled: boolean;
+        };
+        FileOperation: {
+            applied: boolean;
+            /** Format: int32 */
+            entries: number;
+            /** Format: int32 */
+            catalogueRows: number;
+            destination: null | string;
+            detail: null | string;
+        };
+        FilePreviewResponse: {
+            path: string;
+            name: string;
+            /** Format: int64 */
+            sizeBytes: number;
+            /** Format: date-time */
+            modifiedUtc: string;
+            kind: string;
+            mediaType: string;
+            isAudio: boolean;
+            /** Format: double */
+            durationSeconds: null | number;
+            decodedCleanly: null | boolean;
+            audio: null | components["schemas"]["AudioQualityRow"];
+            tags: components["schemas"]["FileTagRow"][];
+            note: null | string;
         };
         FileRow: {
             path: string;
@@ -1102,6 +1293,23 @@ export interface components {
             folder: string;
             releases: components["schemas"]["AttributionShare"][];
         };
+        FolderEntry: {
+            name: string;
+            path: string;
+            isDirectory: boolean;
+            /** Format: int64 */
+            sizeBytes: number;
+            /** Format: date-time */
+            modifiedUtc: string;
+            isAudio: boolean;
+            kind: string;
+            /** Format: int32 */
+            cataloguedFiles: number;
+            /** Format: int32 */
+            identified: number;
+            /** Format: int32 */
+            attributed: number;
+        };
         FolderFileRow: {
             /** Format: uuid */
             mediaFileId: string;
@@ -1122,6 +1330,12 @@ export interface components {
             position: null | number;
             track: null | string;
             certainty: string;
+        };
+        FolderListing: {
+            path: string;
+            parent: null | string;
+            exists: boolean;
+            entries: components["schemas"]["FolderEntry"][];
         };
         FolderReopenRequest: {
             folder: string;
@@ -1260,6 +1474,10 @@ export interface components {
             /** Format: int32 */
             position: number;
             title: null | string;
+        };
+        MoveRequest: {
+            from: string;
+            to: string;
         };
         MusicBrainzHealthResponse: {
             server: string;
@@ -1590,6 +1808,8 @@ export interface components {
             name: string;
             value: string;
         };
+        /** Format: binary */
+        Stream: string;
         SubjectFileResponse: {
             /** Format: uuid */
             mediaFileId: string;
@@ -1714,6 +1934,9 @@ export interface components {
             album: null | components["schemas"]["TrackAlbum"];
             folder: string;
             files: components["schemas"]["FileRow"][];
+        };
+        TrashRequest: {
+            paths: string[];
         };
         UpgradeCandidate: {
             /** Format: uuid */
@@ -2242,11 +2465,254 @@ export interface operations {
             };
         };
     };
+    ListLibraryFolder: {
+        parameters: {
+            query?: {
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderListing"];
+                };
+            };
+        };
+    };
+    TrashLibraryEntries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrashRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileOperation"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    MoveLibraryEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileOperation"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    UploadLibraryFile: {
+        parameters: {
+            query: {
+                folder: string;
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": components["schemas"]["Stream"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileOperation"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryFileContent: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryFileDetail: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilePreviewResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryEntryArt: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     GetArtists: {
         parameters: {
             query?: {
                 query?: string;
                 sort?: string;
+                scope?: string;
                 skip?: number;
                 take?: number;
             };

@@ -214,17 +214,84 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
                 $"Cannot replace '{path.Value}' because it does not exist.", target);
         }
 
-        EnsureRoomFor(info);
+        EnsureRoomFor(info.DirectoryName ?? info.FullName, info.Length, info.Name);
+
+        return Task.FromResult<IStagedWrite>(Stage(target, inheritModeFrom: target));
+    }
+
+    /// <summary>
+    /// Begin a write to a path that does not exist yet, staged the same way.
+    /// </summary>
+    /// <remarks>
+    /// The upload half of the file manager, and it is
+    /// <see cref="OpenForReplaceAsync"/> minus the one thing that made that
+    /// method refuse: a target to replace. Everything else is shared rather than
+    /// copied — the sibling staging file, the retried CreateNew, the flush to
+    /// disk before the rename — because a second copy of that sequence is how one
+    /// of them ends up without the flush.
+    ///
+    /// Staging matters more here than it looks. An upload arrives over a socket
+    /// that can close mid-album, and a half-written FLAC left at its final name
+    /// is a file the next scan catalogues, fingerprints and files under an
+    /// artist. Written to a hidden sibling it is invisible to the walk twice
+    /// over, and abandoning it is a delete rather than a repair.
+    ///
+    /// Containing directories are created, because the point of an upload is
+    /// that the album is not there yet.
+    /// </remarks>
+    /// <param name="expectedBytes">
+    /// What the caller expects to write, for the free-space check. Zero skips
+    /// it — a chunked upload does not always know.
+    /// </param>
+    /// <exception cref="IOException">Something is already at that path.</exception>
+    public Task<IStagedWrite> OpenForCreateAsync(
+        LibraryPath path,
+        long expectedBytes = 0,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var target = Resolve(path);
+
+        // Never an overwrite. Replacing a file is OpenForReplaceAsync's job and
+        // it verifies what it wrote; silently accepting one here would make an
+        // upload with a colliding name destroy the copy already held.
+        if (File.Exists(target) || Directory.Exists(target))
+        {
+            throw new IOException($"'{path.Value}' already exists.");
+        }
 
         var directory = Path.GetDirectoryName(target)
             ?? throw new IOException($"'{target}' has no containing directory.");
+
+        Directory.CreateDirectory(directory);
+
+        if (expectedBytes > 0)
+        {
+            EnsureRoomFor(directory, expectedBytes, Path.GetFileName(target));
+        }
+
+        return Task.FromResult<IStagedWrite>(Stage(target, inheritModeFrom: null));
+    }
+
+    /// <summary>The staging file, and the retry that keeps two writers apart.</summary>
+    /// <param name="inheritModeFrom">
+    /// The file whose permission bits the commit should copy forward, or null
+    /// when nothing is being replaced and the process umask is the right answer.
+    /// </param>
+    private StagedFileWrite Stage(string target, string? inheritModeFrom)
+    {
+        var directory = Path.GetDirectoryName(target)
+            ?? throw new IOException($"'{target}' has no containing directory.");
+
+        var name = Path.GetFileName(target);
 
         // CreateNew, retried: two passes over one library must not be able to
         // pick the same staging name, and a collision should cost a retry rather
         // than someone else's data.
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var staging = Path.Combine(directory, StagingNameFor(info.Name));
+            var staging = Path.Combine(directory, StagingNameFor(name));
 
             FileStream content;
 
@@ -248,11 +315,49 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
                 continue;
             }
 
-            return Task.FromResult<IStagedWrite>(
-                new StagedFileWrite(content, staging, target, ToLibraryPath(staging)));
+            return new StagedFileWrite(
+                content, staging, target, ToLibraryPath(staging), inheritModeFrom);
         }
 
         throw new IOException($"Could not create a staging file next to '{target}'.");
+    }
+
+    /// <summary>
+    /// Removes the directories a move emptied, and stops at the library root.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than at either call site because it is the one function in
+    /// this feature that can delete something nobody named. Two copies of it is
+    /// how one of them ends up with the obvious guard — <c>current.Length &gt;
+    /// root.Length</c> and a bare <c>StartsWith</c> — which is neither a
+    /// containment check nor a boundary: <c>root/.</c> is longer than
+    /// <c>root</c>, starts with it, and exists, so the loop deletes the library
+    /// root; and <c>/mnt/music-replaced</c> starts with <c>/mnt/music</c>.
+    ///
+    /// An album folder holding nothing but the cover art it came with is not
+    /// empty, so it stays — which is right: those bytes were not moved anywhere
+    /// and deleting them is not this operation's business.
+    /// </remarks>
+    public void PruneEmptyDirectories(LibraryPath directory)
+    {
+        // Resolved, so a caller cannot ask this to walk up from outside the root
+        // — and compared against the root plus a separator, so the root itself
+        // is never a candidate.
+        var boundary = _root + Path.DirectorySeparatorChar;
+        var current = Resolve(directory);
+
+        while (current.StartsWith(boundary, StringComparison.Ordinal)
+            && Directory.Exists(current)
+            && !Directory.EnumerateFileSystemEntries(current).Any())
+        {
+            var parent = Path.GetDirectoryName(current);
+
+            Directory.Delete(current);
+
+            if (parent is null) return;
+
+            current = Path.TrimEndingDirectorySeparator(parent);
+        }
     }
 
     /// <summary>
@@ -326,13 +431,13 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
     /// that into a clean refusal naming the file. It is advisory: if the free
     /// space cannot be determined, that is not a reason to refuse.
     /// </remarks>
-    private static void EnsureRoomFor(FileInfo file)
+    private static void EnsureRoomFor(string directory, long bytes, string name)
     {
         long available;
 
         try
         {
-            available = new DriveInfo(file.DirectoryName ?? file.FullName).AvailableFreeSpace;
+            available = new DriveInfo(directory).AvailableFreeSpace;
         }
         catch (ArgumentException)
         {
@@ -349,12 +454,12 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
 
         // A tenth over, because the rewritten file can be marginally larger than
         // the original and a volume this close to full has other problems.
-        var needed = (long)(file.Length * 1.1);
+        var needed = (long)(bytes * 1.1);
 
         if (available < needed)
         {
             throw new IOException(
-                $"Replacing '{file.Name}' needs about {needed / 1024 / 1024} MB of free space; "
+                $"Writing '{name}' needs about {needed / 1024 / 1024} MB of free space; "
                 + $"{available / 1024 / 1024} MB is available.");
         }
     }
@@ -364,7 +469,8 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
         FileStream content,
         string stagingAbsolute,
         string targetAbsolute,
-        LibraryPath stagingRelative) : IStagedWrite
+        LibraryPath stagingRelative,
+        string? inheritModeFrom) : IStagedWrite
     {
         private bool _committed;
 
@@ -384,7 +490,9 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
             content.Flush(flushToDisk: true);
             await content.DisposeAsync().ConfigureAwait(false);
 
-            CopyPermissions(targetAbsolute, stagingAbsolute);
+            // Nothing to inherit from on a create, where the target is the file
+            // about to exist for the first time.
+            if (inheritModeFrom is not null) CopyPermissions(inheritModeFrom, stagingAbsolute);
 
             // The whole point: one syscall, and afterwards the name refers to
             // either the old file or the new one. Never to neither.
@@ -437,13 +545,26 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
     private string Resolve(LibraryPath path)
     {
         var relative = path.Value ?? string.Empty;
+        string absolute;
 
-        // Path.Combine silently discards the root when handed an absolute
-        // second argument, so "/etc/passwd" would resolve to itself. The prefix
-        // check below is what actually enforces containment; this is only the
-        // normalisation that makes it meaningful.
-        var absolute = Path.TrimEndingDirectorySeparator(
-            Path.GetFullPath(Path.Combine(_root, relative)));
+        try
+        {
+            // Path.Combine silently discards the root when handed an absolute
+            // second argument, so "/etc/passwd" would resolve to itself. The
+            // prefix check below is what actually enforces containment; this is
+            // only the normalisation that makes it meaningful.
+            absolute = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(Path.Combine(_root, relative)));
+        }
+        catch (ArgumentException)
+        {
+            // A null byte, which GetFullPath refuses outright. Caught here
+            // because every caller already handles this exception as "not a path
+            // in this library", and the alternative was a 500 with a stack trace
+            // for a malformed query parameter.
+            throw new UnauthorizedAccessException(
+                $"Path '{relative}' is not a usable library path.");
+        }
 
         var contained = absolute.Equals(_root, StringComparison.Ordinal)
             || absolute.StartsWith(_root + Path.DirectorySeparatorChar, StringComparison.Ordinal);
@@ -454,7 +575,73 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
                 $"Path '{relative}' resolves outside the library root.");
         }
 
+        EnsureNoLinkedDirectory(absolute, relative);
+
         return absolute;
+    }
+
+    /// <summary>
+    /// Refuses a path that reaches its target through a directory symlink.
+    /// </summary>
+    /// <remarks>
+    /// <b>The containment check above is lexical, and a symlink is not.</b>
+    /// <c>ln -s /etc secretdir</c> inside the library produces
+    /// <c>music/secretdir/hostname</c>, which is under the root by every string
+    /// comparison and is <c>/etc/hostname</c> on the disk. That was harmless for
+    /// as long as nothing served bytes — the walk refuses to recurse through a
+    /// link, so nothing behind one was ever catalogued — and stopped being
+    /// harmless the moment a file manager could read and list arbitrary paths.
+    /// Demonstrated: a listing of <c>/etc</c> and the contents of
+    /// <c>/etc/hostname</c>, both through the library root.
+    ///
+    /// Here rather than at the three endpoints, because it is the same mistake
+    /// the lexical check is already here to prevent and every caller resolves
+    /// through this method.
+    ///
+    /// <b>Directories only.</b> A symlinked <i>file</i> is still allowed: the
+    /// walk catalogues those deliberately, so refusing them here would take
+    /// every one of them out of reach of the passes that already hold rows for
+    /// them. It is the same policy <c>LibraryTreeEnumerator</c> applies, moved
+    /// to the other side of the boundary.
+    ///
+    /// .NET has no <c>realpath</c>, so this walks the chain instead — a handful
+    /// of attribute reads on a path that is about to be opened anyway.
+    /// </remarks>
+    private void EnsureNoLinkedDirectory(string absolute, string relative)
+    {
+        // The final component when it is itself a directory, then every
+        // directory above it, stopping at the root.
+        var current = Directory.Exists(absolute) ? absolute : Path.GetDirectoryName(absolute);
+
+        while (current is not null
+            && current.Length > _root.Length
+            && current.StartsWith(_root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            FileAttributes attributes;
+
+            try
+            {
+                attributes = File.GetAttributes(current);
+            }
+            catch (FileNotFoundException)
+            {
+                // Does not exist yet — an upload's destination folder. Nothing
+                // to follow, so nothing to refuse.
+                break;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                break;
+            }
+
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new UnauthorizedAccessException(
+                    $"Path '{relative}' reaches outside the library through a linked directory.");
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
     }
 
     private LibraryPath ToLibraryPath(string absolute) =>

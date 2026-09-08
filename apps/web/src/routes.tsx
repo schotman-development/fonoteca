@@ -5,6 +5,7 @@ import { AcquirePage } from './pages/AcquirePage.tsx'
 import { ArtistPage } from './pages/ArtistPage.tsx'
 import { ArtistsPage } from './pages/ArtistsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
+import { FilesPage } from './pages/FilesPage.tsx'
 import { MatchingPage } from './pages/MatchingPage.tsx'
 import { ReleasePage } from './pages/ReleasePage.tsx'
 import { ReleasesPage } from './pages/ReleasesPage.tsx'
@@ -97,6 +98,29 @@ const matchingRoute = createRoute({
 })
 
 /**
+ * The library as a directory tree.
+ *
+ * Outside `/library` for the reason `/acquire` is: everything under that path
+ * browses the catalogue, and half of what this screen lists is not in it —
+ * artwork, playlists, and the album that was uploaded four seconds ago. It is
+ * about files, and the catalogue is the annotation rather than the subject.
+ *
+ * The folder is a search parameter rather than a route parameter. A library
+ * path can be 4096 characters and contains slashes by definition, so it is not
+ * a segment — but it is not component state either: held there, walking six
+ * folders down left the URL saying `/files` the whole way, so Back left the
+ * screen entirely and undid the whole descent in one press.
+ */
+const filesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/files',
+  component: FilesPage,
+  validateSearch: (search: Record<string, unknown>): { readonly path?: string | undefined } => ({
+    path: typeof search.path === 'string' && search.path !== '' ? search.path : undefined,
+  }),
+})
+
+/**
  * Manual acquisition.
  *
  * Outside `/library` deliberately: everything under that path browses the
@@ -117,6 +141,7 @@ const routeTree = rootRoute.addChildren([
   releasesRoute,
   releaseRoute,
   matchingRoute,
+  filesRoute,
   acquireRoute,
 ])
 
@@ -132,6 +157,7 @@ export {
   artistRoute,
   artistsRoute,
   dashboardRoute,
+  filesRoute,
   matchingRoute,
   releaseRoute,
   releasesRoute,

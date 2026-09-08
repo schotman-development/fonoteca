@@ -138,6 +138,7 @@ builder.Services.AddSingleton<ProbeService>();
 // only from a button because of what it does.
 builder.Services.AddSingleton<TagWriteService>();
 builder.Services.AddScoped<AlbumReplacementService>();
+builder.Services.AddScoped<FileManagerService>();
 
 // Registered as a hosted service as well as a singleton, so shutdown cancels a
 // running pass and waits for it rather than severing it mid-write.
@@ -174,6 +175,30 @@ builder.Services.AddMusicBrainz(options =>
     // The real version, so a request MusicBrainz has to ask about can be traced
     // to a build. An honest User-Agent is the whole basis of their rate policy.
     options.ApplicationVersion = ThisAssembly.Version;
+});
+
+// Pictures of artists, which no other provider here has. The contact is
+// MusicBrainz's, not a second setting: Wikimedia's user-agent policy asks the
+// same question, and making an operator answer it twice is how one of the two
+// ends up blank.
+builder.Services.AddWikidata(options =>
+{
+    options.Contact = fonoteca.MusicBrainzContact;
+});
+
+// A third picture of artists, and the one that is looked up by MusicBrainz id
+// rather than searched by name — so it is the only source that can reach an
+// artist whose name is not spelled in Latin script. It needs no credential
+// (they ship a public test key), so it works on a fresh install, which is what
+// lets it sit in the chain rather than behind a flag.
+builder.Services.AddAudioDbPortraits(options =>
+{
+    var audioDb = fonoteca.Providers.AudioDb;
+
+    // Empty means "use their published test key", which is the default on the
+    // options class. Assigning the empty string over it would turn a blank line
+    // in a .env file into a source that refuses every lookup.
+    if (!string.IsNullOrWhiteSpace(audioDb.ApiKey)) options.ApiKey = audioDb.ApiKey;
 });
 
 // Manual acquisition. Registered unconditionally like the other two, so an
@@ -264,6 +289,7 @@ app.UseCors(CorsPolicy);
 app.MapHealthChecks("/health");
 app.MapSystemEndpoints();
 app.MapLibraryEndpoints();
+app.MapFileEndpoints();
 app.MapCatalogueEndpoints();
 app.MapQobuzEndpoints();
 app.MapHub<JobsHub>(JobsHub.Route);

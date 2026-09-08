@@ -335,7 +335,9 @@ public static class LibraryEndpoints
     private static async Task<Results<Accepted<EnrichmentStartedResponse>, ProblemHttpResult>>
         StartEnrichment(EnrichmentService enrichment, CancellationToken cancellationToken)
     {
-        var pending = await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false);
+        var pending = (await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false))
+            .Total;
+
         var outcome = enrichment.Start();
 
         return outcome switch
@@ -358,13 +360,18 @@ public static class LibraryEndpoints
     {
         var progress = enrichment.Progress;
 
+        var pending = await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false);
+
         return TypedResults.Ok(new EnrichmentStatusResponse(
             Running: enrichment.IsRunning,
             JobId: progress?.JobId,
             Processed: progress?.Processed ?? 0,
             Total: progress?.Total ?? 0,
             CurrentFile: progress?.CurrentFile,
-            Pending: await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false),
+            Pending: pending.Total,
+            PendingFiles: pending.Files,
+            PendingArtists: pending.Artists,
+            PendingPortraits: pending.Portraits,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -549,8 +556,34 @@ public sealed record EnrichmentStatusResponse(
     int Total,
     string? CurrentFile,
 
-    /// <summary>Identified files that have never been asked what they are.</summary>
+    /// <summary>
+    /// Everything left to ask about — the sum of the two below.
+    /// </summary>
+    /// <remarks>
+    /// Still here, and still the total, because "is there anything to do" is
+    /// what the button's enable rule asks and that question did not change when
+    /// the pass grew an artist stage. What did change is that the total is no
+    /// longer describable in one noun, which is why the parts travel with it.
+    /// </remarks>
     int Pending,
+
+    /// <summary>Identified files that have never been asked what they are.</summary>
+    int PendingFiles,
+
+    /// <summary>Artists MusicBrainz has never been asked to describe.</summary>
+    int PendingArtists,
+
+    /// <summary>
+    /// Artists nobody has looked for a picture of.
+    /// </summary>
+    /// <remarks>
+    /// The third noun, and it is on the wire for the reason the second one is:
+    /// the moment a stage joins <see cref="Pending"/>, a total the panel cannot
+    /// break down is a total it renders as a sentence about the wrong work. It
+    /// is also the one that will usually be non-zero alone — every artist in
+    /// this catalogue was described before pictures existed.
+    /// </remarks>
+    int PendingPortraits,
 
     EnrichmentSummary? LastCompleted);
 

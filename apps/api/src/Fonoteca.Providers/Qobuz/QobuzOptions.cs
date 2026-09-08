@@ -38,6 +38,18 @@ public sealed class QobuzOptions
     /// </remarks>
     public string UserAuthToken { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Whether Qobuz can be asked anything at all.
+    /// </summary>
+    /// <remarks>
+    /// The two credentials every call needs. <see cref="AppSecret"/> is
+    /// deliberately not among them: it is only needed to sign a download, so an
+    /// installation without it can still search and browse — which is the
+    /// distinction <c>QobuzStatusResponse</c> reports as two separate fields.
+    /// </remarks>
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(AppId) && !string.IsNullOrWhiteSpace(UserAuthToken);
+
     /// <summary>The web service root. The trailing slash matters; requests are relative to it.</summary>
     public Uri BaseAddress { get; set; } = new("https://www.qobuz.com/api.json/0.2/");
 

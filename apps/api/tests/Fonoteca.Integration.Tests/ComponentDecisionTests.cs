@@ -689,6 +689,11 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
             return Task.FromResult<MusicBrainzRelease?>(null);
         }
 
+        public Task<MusicBrainzArtist?> GetArtistAsync(
+            Mbid id,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzArtist?>(null);
+
         public Task<MusicBrainzWork?> GetWorkAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>

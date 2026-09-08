@@ -11,6 +11,7 @@ namespace Fonoteca.Providers.Logging;
 ///   1300-1349  AcoustID
 ///   1350-1399  MusicBrainz
 ///   1400-1449  Qobuz
+///   1450-1499  Wikidata
 ///
 /// Deliberately sparse. An identification pass makes one of these calls per
 /// file, so anything logged per lookup is logged 100,000 times — Debug is where
@@ -66,4 +67,41 @@ internal static partial class ProviderLog
         Level = LogLevel.Debug,
         Message = "Qobuz search for {Query} returned {Matches} albums")]
     public static partial void QobuzSearched(ILogger logger, string query, int matches);
+
+    /// <remarks>
+    /// Warning, and rare by construction: it means Qobuz named the right artist
+    /// and gave a picture on a host this application will not serve. Either
+    /// their CDN moved or something is wrong, and both are worth one line.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1401,
+        Level = LogLevel.Warning,
+        Message = "Qobuz's picture for {Artist} was not served from the expected host: {Url}")]
+    public static partial void QobuzPortraitRejected(ILogger logger, string artist, string url);
+
+    /// <remarks>
+    /// Information rather than Warning: two people sharing a name is the world
+    /// being as it is, not something going wrong. It is worth a line because the
+    /// consequence — this artist keeps the lesser picture — is otherwise
+    /// invisible.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1402,
+        Level = LogLevel.Information,
+        Message = "Qobuz has {Matches} artists called {Artist}; none of them can be assumed to "
+            + "be this one")]
+    public static partial void QobuzArtistAmbiguous(ILogger logger, string artist, int matches);
+
+    [LoggerMessage(
+        EventId = 1430,
+        Level = LogLevel.Warning,
+        Message = "TheAudioDB offered {Url} for {Artist}, which is not a picture this application "
+            + "will serve")]
+    public static partial void AudioDbPortraitRejected(ILogger logger, string artist, string url);
+
+    [LoggerMessage(
+        EventId = 1450,
+        Level = LogLevel.Information,
+        Message = "Wikidata has a picture for {Found} of {Asked} artists")]
+    public static partial void WikidataPortraitsFound(ILogger logger, int found, int asked);
 }

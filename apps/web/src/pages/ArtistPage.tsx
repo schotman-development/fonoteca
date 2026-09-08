@@ -18,7 +18,8 @@ import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistPage.module.css'
 import type { ArtistAlbum } from './artistAlbums.ts'
 import { albumsOf, leaf } from './artistAlbums.ts'
-import { releaseArt } from './coverArt.ts'
+import { countryName, lifeSpan } from './artistFacts.ts'
+import { artistImageUrl, releaseArt } from './coverArt.ts'
 import { workGroups } from './workGroups.ts'
 
 type TrackRow = components['schemas']['TrackRow']
@@ -53,10 +54,30 @@ export function ArtistPage() {
     [artistId],
   )
 
+  // The default size, not a larger one: measured in Chromium this portrait is
+  // 86px — smaller than a tile in the list, which is 112. Asking for 500 here
+  // was a guess about the layout that the layout does not share. Undefined where
+  // there is neither a photograph nor an album, which is what makes Artwork draw
+  // its monogram.
+  const portrait = state.status === 'ready' ? artistImageUrl(state.data.artist) : undefined
+
   // Not memoised: it is a single pass over a list the same request just
   // produced, so the fold costs less than the dependency array that would
   // guard it, and a stale one would be a bug nobody could see.
   const albums = state.status === 'ready' ? albumsOf(state.data.tracks) : []
+
+  // Only the parts MusicBrainz actually stated. `describedAtUtc` is what tells
+  // "no country is recorded for this orchestra" from "nobody has asked yet", and
+  // an empty line is the honest rendering of both — so it is not read here, and
+  // is on the wire for the screen that wants to offer the ask.
+  const facts =
+    state.status === 'ready'
+      ? [
+          countryName(state.data.artist.country),
+          lifeSpan(state.data.artist),
+          state.data.artist.gender,
+        ].filter((fact): fact is string => fact != null)
+      : []
 
   return (
     <Stack direction="column" gap={20}>
@@ -81,20 +102,20 @@ export function ArtistPage() {
         <Stack direction="column" gap={20}>
           <Stack gap={16} align="center">
             {/*
-              An album of theirs in place of a portrait, circular like every
-              other artist in the application. There is no photograph to be had:
-              MusicBrainz holds none, and the Cover Art Archive is keyed on
-              releases. The circle is what says this is a person or a group
-              rather than a record you own — the same shape their card carries in
-              the list, drawn from the same field, so the two agree.
+              A photograph of them where Wikidata holds one, and an album of
+              theirs where it does not — `artistImageUrl` decides, so this and
+              their card in the list cannot disagree about which. Circular either
+              way: the shape is what says this is a person or a group rather than
+              a record you own.
+
+              At the same size as the list asks for, because this box is not
+              bigger than a tile — it measures 86px against the tile's 112.
             */}
             <Artwork
               name={state.data.artist.name}
               shape="circle"
               size="lg"
-              {...(state.data.artist.cover != null
-                ? { src: releaseArt(state.data.artist.cover) }
-                : {})}
+              {...(portrait != null ? { src: portrait } : {})}
             />
 
             <Stack direction="column" gap={4}>
@@ -121,6 +142,39 @@ export function ArtistPage() {
                   {state.data.tracks.length === 1 ? '' : 's'} in the library
                 </Text>
               </Stack>
+
+              {/*
+                Who they are, rather than what of theirs is on the disk — the
+                half of an artist a credit line cannot carry, and the whole
+                point of the enrichment pass's artist stage.
+
+                Joined into one sentence rather than laid out as a field list,
+                because two of the three are usually absent: MusicBrainz holds
+                no country for a great many ensembles and no life span for most
+                session players, and a labelled grid of empty cells reads as
+                broken where a shorter line reads as brief.
+              */}
+              {facts.length > 0 ? (
+                <Text size="sm" tone="secondary">
+                  {facts.join(' · ')}
+                </Text>
+              ) : null}
+
+              {/*
+                MusicBrainz's curated genres, most-voted first, capped at three.
+                Capped because the tail is where the disagreement lives — an
+                artist with nine genres has four that somebody would argue with
+                — and because this is a subtitle rather than a taxonomy.
+              */}
+              {state.data.artist.genres.length > 0 ? (
+                <Stack gap={4} wrap>
+                  {state.data.artist.genres.slice(0, 3).map((genre) => (
+                    <Badge key={genre} tone="info" size="sm">
+                      {genre}
+                    </Badge>
+                  ))}
+                </Stack>
+              ) : null}
             </Stack>
           </Stack>
 

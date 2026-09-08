@@ -256,9 +256,28 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.SortName).HasMaxLength(1000);
             e.Property(x => x.Type).HasMaxLength(100);
             e.Property(x => x.Disambiguation).HasMaxLength(1000);
+            e.Property(x => x.Country).HasMaxLength(10);
+            e.Property(x => x.Gender).HasMaxLength(100);
+            e.Property(x => x.Genres).HasMaxLength(1000);
+
+            // A Commons filename is capped at 240 bytes and arrives
+            // percent-encoded, so three times that plus the Special:FilePath
+            // prefix is the real bound. The provider drops anything longer
+            // rather than let a URL nobody will ever click roll back the stamp
+            // that stops it being asked for again — Genres' lesson.
+            e.Property(x => x.PortraitUrl).HasMaxLength(1000);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops");
             e.HasIndex(x => x.SortName);
+
+            // The enrichment pass's third worklist: artists nobody has asked
+            // MusicBrainz about. Partial, because it is only ever queried for
+            // the nulls and the whole point is that it empties — a full index
+            // would grow to every artist in the library to answer a question
+            // that ends up returning nothing.
+            e.HasIndex(x => x.Id)
+                .HasDatabaseName("IX_Artists_Unasked")
+                .HasFilter("\"LookupUtc\" IS NULL AND \"Mbid\" IS NOT NULL");
         });
 
         modelBuilder.Entity<ArtistCredit>(e =>

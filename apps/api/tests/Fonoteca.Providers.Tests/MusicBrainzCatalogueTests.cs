@@ -50,6 +50,14 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     private static readonly Mbid JukeboxRecordingId =
         new(Guid.Parse("c0035654-9b35-482d-ae42-5b3455c9b661"));
 
+    /// <summary>A person MusicBrainz knows the end of. Genres arrive alphabetically.</summary>
+    private static readonly Mbid PettyId =
+        new(Guid.Parse("5ca3f318-d028-4151-ac73-78e2b2d6cdcc"));
+
+    /// <summary>A person MusicBrainz does not know the end of, because there is not one.</summary>
+    private static readonly Mbid WinwoodId =
+        new(Guid.Parse("885f90ef-6bd9-409a-b2df-e165e553c68e"));
+
     private readonly List<ServiceProvider> _providers = [];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -246,6 +254,96 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         Assert.Equal(2, recording.Relations.Count);
         Assert.DoesNotContain(recording.Relations, r => r.Type == "performance");
         Assert.All(recording.Relations, r => Assert.NotNull(r.ArtistId));
+    }
+
+    /// <summary>
+    /// Everything a credit line cannot carry, off an artist document.
+    /// </summary>
+    /// <remarks>
+    /// <b>The genre order is the assertion worth having.</b> MusicBrainz sends
+    /// them alphabetically — <c>heartland rock, pop rock, rock, southern
+    /// rock</c> — with vote counts <c>1, 1, 3, 1</c>, so a mapper that passed
+    /// them through unchanged and one that sorts by votes differ on this exact
+    /// document, and the screen only ever prints the first three.
+    ///
+    /// The dates are the other half: MusicBrainz knows this artist's birthday to
+    /// the day and the catalogue deliberately keeps the year, so a mapper that
+    /// widened or narrowed differently would show here.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistCarriesTheirCountryLifeSpanAndGenresMostVotedFirst()
+    {
+        var (catalogue, stub) = Build(Recorded("artist-tom-petty.json"));
+
+        var artist = await catalogue.GetArtistAsync(PettyId, Token);
+
+        Assert.NotNull(artist);
+        Assert.Equal(PettyId, artist.Id);
+        Assert.Equal("Tom Petty", artist.Name);
+        Assert.Equal("Petty, Tom", artist.SortName);
+        Assert.Equal("Person", artist.Type);
+        Assert.Equal("US", artist.Country);
+        Assert.Equal("Male", artist.Gender);
+
+        // 1950-10-20 and 2017-10-02 on the wire; the year is what is kept.
+        Assert.Equal(1950, artist.BeganYear);
+        Assert.Equal(2017, artist.EndedYear);
+        Assert.True(artist.HasEnded);
+
+        Assert.Equal(
+            ["rock", "heartland rock", "pop rock", "southern rock"],
+            artist.Genres);
+
+        var request = Assert.Single(stub.Requests);
+        Assert.Contains("/artist/", request.Uri.AbsolutePath, StringComparison.Ordinal);
+        Assert.Contains("genres", request.Uri.Query, StringComparison.Ordinal);
+
+        // Not the discography. Those are thousands of rows, paginated, and the
+        // catalogue already knows which of them the library holds.
+        Assert.DoesNotContain("releases", request.Uri.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("recordings", request.Uri.Query, StringComparison.Ordinal);
+
+        // Tags are the free-text list, where "seen live" outvotes the music.
+        Assert.DoesNotContain("tags", request.Uri.Query, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A living artist has a beginning and no end, and the two facts that say so
+    /// are separate on the wire.
+    /// </summary>
+    /// <remarks>
+    /// <c>"end": null</c> beside <c>"ended": false</c>. A mapper reading either
+    /// one alone is right about this document and wrong about the other case —
+    /// a group known to have split that nobody has dated — so both are carried.
+    /// </remarks>
+    [Fact]
+    public async Task ALivingArtistHasNoEndYearAndIsNotMarkedEnded()
+    {
+        var (catalogue, _) = Build(Recorded("artist-steve-winwood.json"));
+
+        var artist = await catalogue.GetArtistAsync(WinwoodId, Token);
+
+        Assert.NotNull(artist);
+        Assert.Equal(1948, artist.BeganYear);
+        Assert.Null(artist.EndedYear);
+        Assert.False(artist.HasEnded);
+
+        // Seven genres, four distinct vote counts, and "pop" at 4 leads them.
+        Assert.Equal("pop", artist.Genres[0]);
+        Assert.Equal(7, artist.Genres.Count);
+    }
+
+    /// <summary>
+    /// An artist MusicBrainz has merged away is an answer, not a failure — the
+    /// same arm every other lookup here takes, and what lets the pass stamp the
+    /// row and stop asking.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistThatHasBeenMergedAwayComesBackNull()
+    {
+        var (catalogue, _) = Build(_ => StubHttpHandler.Json(HttpStatusCode.NotFound, "{}"));
+
+        Assert.Null(await catalogue.GetArtistAsync(PettyId, Token));
     }
 
     [Fact]

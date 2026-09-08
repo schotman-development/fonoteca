@@ -58,6 +58,24 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// </remarks>
     private const Include WorkIncludes = Include.ArtistRelationships;
 
+    /// <summary>
+    /// An artist is asked only for what describes them.
+    /// </summary>
+    /// <remarks>
+    /// Country, gender and life span need no <c>inc</c> at all — WS/2 puts them
+    /// in every artist document — so this is one flag, and it is
+    /// <c>Genres</c> rather than <c>Tags</c>: the tag list is the raw
+    /// free-text one, where "seen live" and "favourites" outvote anything about
+    /// the music.
+    ///
+    /// Notably <b>not</b> <c>Include.Releases</c>, <c>ReleaseGroups</c>,
+    /// <c>Recordings</c> or <c>Works</c>. Those are the artist's whole
+    /// discography, paginated, and the catalogue already knows which of it the
+    /// library holds — asking MusicBrainz would be fetching several thousand
+    /// rows to discard all but the twelve already on the page.
+    /// </remarks>
+    private const Include ArtistIncludes = Include.Genres;
+
     private const Include ReleaseIncludes =
         Include.Artists
         | Include.ArtistCredits
@@ -253,6 +271,17 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
 
         return matches ?? [];
     }
+
+    public Task<MusicBrainzArtist?> GetArtistAsync(
+        Mbid id,
+        CancellationToken cancellationToken = default) =>
+        LookupAsync(
+            "artist",
+            id,
+            async token => MusicBrainzMapper.ToArtist(
+                await _query.LookupArtistAsync(id.Value, ArtistIncludes, cancellationToken: token)
+                    .ConfigureAwait(false)),
+            cancellationToken);
 
     public Task<MusicBrainzWork?> GetWorkAsync(
         Mbid id,

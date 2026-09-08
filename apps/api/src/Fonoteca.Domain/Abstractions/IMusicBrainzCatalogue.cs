@@ -111,6 +111,32 @@ public interface IMusicBrainzCatalogue
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// One artist, as MusicBrainz describes them rather than as a sleeve billed them.
+    /// </summary>
+    /// <remarks>
+    /// <b>The only call here whose subject the catalogue already holds a row
+    /// for.</b> Every other method answers "what is this thing" about something
+    /// nothing in the library knows yet; artists arrive the other way round —
+    /// <c>CatalogueWriter</c> mints one from whichever <c>MusicBrainzCredit</c>
+    /// reached it first and fills the fields with <c>??=</c>, so a row's name,
+    /// sort name and type are whatever one release happened to print. That is
+    /// enough to browse by and it is not a description of a musician: a credit
+    /// line carries no country, no life span and no genre, because it is a line
+    /// on a sleeve.
+    ///
+    /// Asked once per artist and never again, which is what makes it affordable
+    /// at all: a library of eight thousand files is under three thousand
+    /// artists, and they change on the timescale of MusicBrainz edits rather
+    /// than of scans.
+    /// </remarks>
+    /// <returns>Null when MusicBrainz has no such artist — merged away, or deleted.</returns>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">The request was refused.</exception>
+    Task<MusicBrainzArtist?> GetArtistAsync(
+        Mbid id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// One composition, with the people MusicBrainz says wrote it.
     /// </summary>
     /// <remarks>
@@ -218,6 +244,63 @@ public sealed record MusicBrainzWork(
     string? Type,
 
     IReadOnlyList<MusicBrainzRelation> Relations);
+
+/// <summary>An artist as MusicBrainz describes them, rather than as a credit line does.</summary>
+/// <remarks>
+/// Narrower than the WS/2 response on purpose. Aliases, IPIs, ISNIs, areas and
+/// URL relations all arrive in the same document and none of them has a reader:
+/// there is no catalogue search for aliases to feed, and no screen with a
+/// external link on it. Widening this is one <c>Include</c> and one field the day
+/// something wants them.
+/// </remarks>
+public sealed record MusicBrainzArtist(
+    Mbid Id,
+    string Name,
+    string? SortName,
+
+    /// <summary>Person, Group, Orchestra, Choir, Character, Other.</summary>
+    string? Type,
+
+    string? Disambiguation,
+
+    /// <summary>ISO 3166-1 code of the country MusicBrainz primarily associates them with.</summary>
+    string? Country,
+
+    /// <summary>Male, female, non-binary — set on people, absent on groups.</summary>
+    string? Gender,
+
+    /// <summary>Born, or formed. The year alone, which is the part that is always known.</summary>
+    /// <remarks>
+    /// A year rather than a <see cref="ReleaseDate"/>, and the narrowing is
+    /// deliberate rather than a shortcut. The <i>reason</i> release dates keep
+    /// their month and day is that an edition sorted by date decides which
+    /// pressing outranks which; nothing sorts artists by birthday. What a page
+    /// prints is "1962–1970", so the year is the whole of what is read back.
+    /// </remarks>
+    int? BeganYear,
+
+    /// <summary>Died, or dissolved. Null both when they have not and when nobody recorded it.</summary>
+    int? EndedYear,
+
+    /// <summary>
+    /// Whether MusicBrainz says the life span is over.
+    /// </summary>
+    /// <remarks>
+    /// Not <c>EndedYear is not null</c>. A band everybody knows split up but
+    /// nobody has dated carries the flag with no year, and reading the year
+    /// alone reports them as still going.
+    /// </remarks>
+    bool HasEnded,
+
+    /// <summary>
+    /// MusicBrainz's curated genres, most-voted first.
+    /// </summary>
+    /// <remarks>
+    /// Genres and not tags. The two arrive in the same response and the tag list
+    /// is the raw free-text one, where "seen live", "favourites" and a
+    /// misspelling of the artist's own name outvote anything about the music.
+    /// </remarks>
+    IReadOnlyList<string> Genres);
 
 /// <summary>One typed link from an entity to an artist.</summary>
 /// <remarks>

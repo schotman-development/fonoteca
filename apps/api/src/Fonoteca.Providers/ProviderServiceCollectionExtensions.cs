@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Providers.AcoustId;
+using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
+using Fonoteca.Providers.Wikidata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
@@ -181,8 +183,97 @@ public static class ProviderServiceCollectionExtensions
 
         services.AddSingleton<QobuzClient>();
 
+        // Keyed, because there are two sources of artist pictures and the caller
+        // has to be able to name which one it wants first — they differ in cost
+        // by two orders of magnitude, so "inject them all and try each" would
+        // hide the only decision that matters.
+        services.AddKeyedSingleton<IArtistPortraits, QobuzPortraits>(ArtistPortraitSources.Qobuz);
+
         return services;
     }
+
+    /// <summary>Registers <see cref="IArtistPortraits"/> and the HTTP client behind it.</summary>
+    /// <remarks>
+    /// The same shape as the two above it — gate under the retries, contact in
+    /// the User-Agent, registered whether or not it is configured — with one
+    /// difference worth stating: <b>there is no decompression handler.</b> The
+    /// bodies here are a few hundred bytes of JSON per artist and the endpoint
+    /// is asked a dozen times in the life of a library, so the gzip that pays
+    /// for itself a hundred thousand times over on AcoustID pays for nothing
+    /// here.
+    /// </remarks>
+    public static IServiceCollection AddWikidata(
+        this IServiceCollection services,
+        Action<WikidataOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(WikidataOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<WikidataOptions>(provider).MinimumRequestInterval));
+
+        var client = services.AddHttpClient(WikidataOptions.HttpClientName, (provider, http) =>
+        {
+            var config = Options<WikidataOptions>(provider);
+
+            http.BaseAddress = WikidataOptions.Server;
+
+            // On the client for the MusicBrainz reason: Wikimedia's user-agent
+            // policy is the same policy, enforced the same way.
+            http.DefaultRequestHeaders.Add("User-Agent", UserAgentFor(config));
+        });
+
+        AddResilienceThenGate(client, WikidataOptions.HttpClientName);
+
+        services.AddKeyedSingleton<IArtistPortraits, WikidataPortraits>(
+            ArtistPortraitSources.Wikidata);
+
+        return services;
+    }
+
+    /// <summary>Registers the TheAudioDB picture source and the client behind it.</summary>
+    public static IServiceCollection AddAudioDbPortraits(
+        this IServiceCollection services,
+        Action<AudioDbOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(AudioDbOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<AudioDbOptions>(provider).MinimumRequestInterval));
+
+        var client = services.AddHttpClient(AudioDbOptions.HttpClientName, static (_, http) =>
+        {
+            http.BaseAddress = AudioDbOptions.Server;
+            http.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
+        client.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        });
+
+        AddResilienceThenGate(client, AudioDbOptions.HttpClientName);
+
+        services.AddKeyedSingleton<IArtistPortraits, AudioDbPortraits>(
+            ArtistPortraitSources.AudioDb);
+
+        return services;
+    }
+
+    /// <summary>How this application introduces itself to Wikimedia.</summary>
+    /// <remarks>
+    /// Deliberately the same shape as the MusicBrainz one, contact and all:
+    /// they are two services with the same policy, and an operator who has
+    /// filled in one contact has answered the question both of them ask.
+    /// </remarks>
+    internal static string UserAgentFor(WikidataOptions config) =>
+        $"Fonoteca/0.1 ( {config.Contact} )";
 
     /// <summary>
     /// Retries on the outside, the rate gate on the inside.

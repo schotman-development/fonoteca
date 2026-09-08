@@ -258,15 +258,21 @@ public sealed class AudioFileDescriber(IAudioFileStore files, IAudioProbe probe)
 
                 if (chosen is null) return null;
 
-                // A declared type that is not an image type is a tagger's typo,
-                // not a format: browsers refuse to paint `image/` or
+                // A declared type outside the raster set is a tagger's typo, not
+                // a format: browsers refuse to paint `image/` or
                 // `application/octet-stream`, and every embedded cover in
                 // practice is one of two formats. Guessing the commoner one
                 // renders; honouring the typo never does.
-                var mime = chosen.MimeType is { Length: > 0 } declared
-                    && declared.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
-                        ? declared
-                        : "image/jpeg";
+                //
+                // <b>The check is an allowlist and it has to be.</b> It was
+                // `StartsWith("image/")`, which passes `image/svg+xml` — a
+                // document that runs script, echoed back from this application's
+                // origin, put there by one PICTURE block in a FLAC. Both callers
+                // serve these bytes to a browser, so the constraint belongs here
+                // rather than at either of them.
+                var mime = FilePreview.IsSafeImageMediaType(chosen.MimeType)
+                    ? chosen.MimeType
+                    : "image/jpeg";
 
                 return new EmbeddedArtwork(chosen.Data.Data, mime);
             }
