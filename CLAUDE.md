@@ -293,6 +293,21 @@ the only caller of `Start()`), so it is always a deliberate press.
   file re-enriched to be reached. Keyed on the artist's own column, the backlog
   and the new arrivals are one query.
   `AnArtistNoFileInThisRunCreditedIsStillDescribed`.
+- **The lookup now asks for `artist-rels`, and every artist already stamped is
+  invisible to it.** `ArtistIncludes` went from `Include.Genres` to
+  `Genres | ArtistRelationships` so the stage can record `member of band` — the
+  one fact that separates a member's own record from a cover of their song, and
+  what `TrackAlbum.ViaBand` and the artist page's "With the band" shelf are
+  built on. It costs no extra request: same lookup, one more include. But the
+  worklist is `LookupUtc IS NULL`, so **artists described before this change are
+  never re-asked** and their bands stay unknown; on this library that was 2,636
+  of 2,906. Re-asking is the hand-written `UPDATE` this file already documents
+  for `AcoustIdCheckedUtc`, and it is worth narrowing to the artists that have a
+  page rather than clearing the column outright — the rest are credit rows
+  nothing browses, and at 1.5s a turn the difference is seven minutes against
+  seventy. Only the *member* side is stored: MusicBrainz serves the relation
+  from both artists, and reading a group's copy records the band as belonging to
+  each of its own members.
 - **`LookupUtc` is keyed on the asking, and this is the fourth time.**
   `AcoustIdCheckedUtc`, `RecordingLookupUtc` and `ReleaseLookupUtc` each paid for
   this separately. Keyed on `Country IS NULL` instead, every artist MusicBrainz

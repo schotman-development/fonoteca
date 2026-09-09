@@ -16,8 +16,8 @@ import { api } from '../api.ts'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistPage.module.css'
-import type { ArtistAlbum } from './artistAlbums.ts'
-import { albumsOf, leaf } from './artistAlbums.ts'
+import type { AlbumSectionKey, ArtistAlbum } from './artistAlbums.ts'
+import { albumsOf, leaf, sameArtist, sectionsOf } from './artistAlbums.ts'
 import { countryName, lifeSpan } from './artistFacts.ts'
 import { artistImageUrl, releaseArt } from './coverArt.ts'
 import { workGroups } from './workGroups.ts'
@@ -30,6 +30,43 @@ const ROLE_TONE: Readonly<Record<string, 'accent' | 'info' | 'neutral'>> = {
   conductor: 'info',
   ensemble: 'info',
   composer: 'neutral',
+  member: 'info',
+}
+
+/**
+ * What each grid is a list of, in the words a person would use for it.
+ *
+ * Four shelves rather than one, because "records by them", "records by a group
+ * they were in", "records they played on" and "records of their music that
+ * somebody else made" are four different questions and one grid answers none of
+ * them: on a composer's page the pieces they wrote and the pieces they
+ * conducted run together in year order, and the only thing separating them is a
+ * badge on each card.
+ *
+ * The detail line is doing the work the heading cannot. "Collaborations" is
+ * ambiguous on its own — a reader's first guess is a duet, not an orchestra —
+ * and "Composer" reads as a job title rather than as a list.
+ */
+const SECTIONS: Readonly<Record<AlbumSectionKey, { title: string; detail: string }>> = {
+  discography: {
+    title: 'Discography',
+    detail: 'Albums they are billed on.',
+  },
+  // The heading a band section falls back to when the sleeve named no group.
+  // The ordinary one names it — "With Dire Straits" — because "the band" is the
+  // one thing a reader of this shelf already knows.
+  band: {
+    title: 'With the band',
+    detail: 'Albums by groups they were a member of.',
+  },
+  collaborations: {
+    title: 'Collaborations',
+    detail: "Somebody else's albums that they appear on.",
+  },
+  composer: {
+    title: 'Composer',
+    detail: 'Their music, recorded by somebody else.',
+  },
 }
 
 /**
@@ -65,6 +102,10 @@ export function ArtistPage() {
   // produced, so the fold costs less than the dependency array that would
   // guard it, and a stale one would be a bug nobody could see.
   const albums = state.status === 'ready' ? albumsOf(state.data.tracks) : []
+
+  // Split for the same reason and at the same cost: one pass over a list this
+  // render already holds.
+  const sections = state.status === 'ready' ? sectionsOf(albums, state.data.artist.name) : []
 
   // Only the parts MusicBrainz actually stated. `describedAtUtc` is what tells
   // "no country is recorded for this orchestra" from "nobody has asked yet", and
@@ -194,11 +235,46 @@ export function ArtistPage() {
                 label={`${state.data.artist.name}'s tracks`}
               />
 
-              <CatalogueGrid aria-label={`Albums by ${state.data.artist.name}`}>
-                {albums.map((album) => (
-                  <AlbumCard key={album.key} album={album} />
-                ))}
-              </CatalogueGrid>
+              {/*
+                One shelf per way of being responsible for a record. `<h2>`
+                under the page's one `<h1>`, so a screen reader's outline of
+                this page is the split itself — and an artist with only their
+                own records still gets the heading, because a condition that
+                hides it would make the page's shape depend on the library.
+              */}
+              {sections.map((section) => {
+                // A band section names its group and needs no sentence under
+                // it; every other shelf keeps the line saying what it lists.
+                // The key alone is no longer unique — one artist can have
+                // several bands — so the band joins it.
+                const title =
+                  section.band == null ? SECTIONS[section.key].title : `With ${section.band}`
+
+                return (
+                  <Stack key={`${section.key}:${section.band ?? ''}`} direction="column" gap={4}>
+                    <Stack gap={8} align="center">
+                      <h2 className={styles.heading}>
+                        <Text weight="semibold">{title}</Text>
+                      </h2>
+                      <Badge tone="info" size="sm">
+                        {section.albums.length}
+                      </Badge>
+                    </Stack>
+
+                    {section.band == null ? (
+                      <Text size="sm" tone="secondary" block>
+                        {SECTIONS[section.key].detail}
+                      </Text>
+                    ) : null}
+
+                    <CatalogueGrid aria-label={`${title}: ${state.data.artist.name}`}>
+                      {section.albums.map((album) => (
+                        <AlbumCard key={album.key} album={album} artist={state.data.artist.name} />
+                      ))}
+                    </CatalogueGrid>
+                  </Stack>
+                )
+              })}
 
               {/*
                 `Disclosure`, not `<details>`. The design system already
@@ -322,7 +398,7 @@ function Tracks({ name, tracks }: { readonly name: string; readonly tracks: read
  * folder-derived one it is the only claim there is, so the year beside it is
  * marked as read off the directory rather than known.
  */
-function AlbumCard({ album }: { readonly album: ArtistAlbum }) {
+function AlbumCard({ album, artist }: { readonly album: ArtistAlbum; readonly artist: string }) {
   // Pulled out so the narrowing survives into the render callback below; the
   // property access on its own does not.
   const { releaseId } = album
@@ -369,6 +445,15 @@ function AlbumCard({ album }: { readonly album: ArtistAlbum }) {
     <span title={folders}>
       {[
         album.year == null ? null : `${album.year}${album.yearFromFolder ? '?' : ''}`,
+        // Whose record it is, printed only when it is not this artist's —
+        // asking `sameArtist`, the same test the shelf is chosen by, so the
+        // line and the placement cannot disagree. It is what makes a card on
+        // the Collaborations shelf explain itself ("one track on a Joe
+        // Bonamassa album" rather than an album of theirs that has mysteriously
+        // moved), and it stays quiet where the name would only repeat the one
+        // at the top of the page — including on the Composer shelf, where a
+        // musician's own band is still not somebody else.
+        sameArtist(album, artist) ? null : album.albumArtist,
         `${album.trackCount} track${album.trackCount === 1 ? '' : 's'}`,
         leaf(album.folders[0] ?? ''),
         album.folders.length > 1 ? `+${album.folders.length - 1}` : null,

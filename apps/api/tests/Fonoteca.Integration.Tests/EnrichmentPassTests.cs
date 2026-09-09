@@ -32,6 +32,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     private static readonly Mbid Mozart = Mb("b972f589-fb0e-474e-b64a-803b0364fa75");
     private static readonly Mbid Karajan = Mb("5b11f4ce-a62d-471e-81fc-a69a8278c7da");
     private static readonly Mbid Berliner = Mb("d0e5b1e2-9d3b-4d6b-9a0b-7c8f9a0b1c2d");
+    private static readonly Mbid Unheld = Mb("f1e2d3c4-b5a6-4978-8695-a4b3c2d1e0f9");
     private static readonly Mbid Soloist = Mb("c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f");
 
     private readonly List<ServiceProvider> _providers = [];
@@ -907,6 +908,97 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>An artist row as a credit line would have left it: a name and an MBID.</summary>
+    /// <summary>
+    /// A member's bands are stored as links, and only to artists the library has.
+    /// </summary>
+    /// <remarks>
+    /// The fact behind the "With the band" shelf. MusicBrainz credits a Dire
+    /// Straits recording to the <i>group</i>, so a member reaches the catalogue
+    /// only as the composer of the work and every one of the band's albums reads
+    /// as somebody else covering them.
+    ///
+    /// Two artists are named and only one is seeded, because the interesting
+    /// half is the one that is dropped: MusicBrainz knows every band a session
+    /// player passed through, and minting a row for each would put artists with
+    /// no tracks into a list whose whole promise is that it browses what you own.
+    /// </remarks>
+    [Fact]
+    public async Task AMembersBandsAreLinkedButOnlyToArtistsTheLibraryHolds()
+    {
+        await SeedArtistAsync(Karajan, "Karajan");
+        await SeedArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        var catalogue = new StubCatalogue(
+            recording: null,
+            work: null,
+            artist: Conductor() with { Bands = [Berliner, Unheld] });
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var member = await db.Artists.AsNoTracking().SingleAsync(a => a.Mbid == Karajan, Token);
+        var band = await db.Artists.AsNoTracking().SingleAsync(a => a.Mbid == Berliner, Token);
+
+        var links = await db.Relationships
+            .AsNoTracking()
+            .Where(r => r.Type == RelationshipTargets.Member)
+            .ToListAsync(Token);
+
+        var link = Assert.Single(links);
+        Assert.Equal(member.Id, link.ArtistId);
+        Assert.Equal(band.Id.Value, link.TargetId);
+        Assert.Equal(RelationshipTargets.Artist, link.SourceType);
+        Assert.Equal(RelationshipTargets.Artist, link.TargetType);
+
+        // Neither end is a recording or a work, which is what keeps these rows
+        // invisible to every query that reaches relationships through those.
+        Assert.Null(link.RecordingId);
+        Assert.Null(link.WorkId);
+
+        // The band nothing in the library is by was not minted.
+        Assert.False(await db.Artists.AnyAsync(a => a.Mbid == Unheld, Token));
+    }
+
+    /// <summary>
+    /// Re-asking an artist does not record the same membership twice.
+    /// </summary>
+    /// <remarks>
+    /// There is no unique index on <c>Relationships</c>, and re-asking the whole
+    /// artist worklist is a hand-written <c>UPDATE</c> clearing
+    /// <c>LookupUtc</c> — the documented path, the same one
+    /// <c>AcoustIdCheckedUtc</c> takes. So this method runs again over artists it
+    /// has already described, and a membership counted twice would double a band
+    /// on every screen that ever groups by it.
+    /// </remarks>
+    [Fact]
+    public async Task ReAskingAnArtistDoesNotRecordTheSameBandTwice()
+    {
+        await SeedArtistAsync(Karajan, "Karajan");
+        await SeedArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        var described = Conductor() with { Bands = [Berliner] };
+
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(recording: null, work: null, artist: described)));
+
+        // Exactly what the documented re-ask does.
+        await using (var reset = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var row in await reset.Artists.ToListAsync(Token)) row.LookupUtc = null;
+
+            await reset.SaveChangesAsync(Token);
+        }
+
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(recording: null, work: null, artist: described)));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Single(await db.Relationships
+            .AsNoTracking()
+            .Where(r => r.Type == RelationshipTargets.Member)
+            .ToListAsync(Token));
+    }
+
     private async Task SeedArtistAsync(Mbid mbid, string name)
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
@@ -989,7 +1081,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             BeganYear: 1908,
             EndedYear: 1989,
             HasEnded: true,
-            Genres: ["classical", "opera"]);
+            Genres: ["classical", "opera"],
+            Bands: []);
 
     private static async Task EnrichAsync(ServiceProvider services)
     {

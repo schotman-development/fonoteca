@@ -300,7 +300,36 @@ public sealed record MusicBrainzArtist(
     /// is the raw free-text one, where "seen live", "favourites" and a
     /// misspelling of the artist's own name outvote anything about the music.
     /// </remarks>
-    IReadOnlyList<string> Genres);
+    IReadOnlyList<string> Genres,
+
+    /// <summary>
+    /// The groups this artist has been a member of, by MusicBrainz id.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one fact that separates a member's own record from a cover of
+    /// their song.</b> MusicBrainz credits a Dire Straits recording to the
+    /// <i>group</i>, which is an artist entity of its own, so Mark Knopfler
+    /// reaches the catalogue only through the work's composer relation — and a
+    /// rule reading roles alone files <i>Brothers in Arms</i> under "somebody
+    /// else recorded their music", which is exactly wrong about the person who
+    /// played and sang it.
+    ///
+    /// Ids alone, and no name, dates or instruments. The rule asks one question
+    /// — is the artist credited on this release a band this artist was in — and
+    /// answers it by identity. The group's name is already on its own artist row
+    /// whenever the library holds any of its music, and storing a copy for a
+    /// band the library holds nothing by would put an artist with no tracks in
+    /// the browse list.
+    ///
+    /// <b>Only forward relations.</b> MusicBrainz serves <c>member of band</c>
+    /// from both artists — forward from the person with the group on the far
+    /// end, backward from the group with the member there — so this is filled
+    /// by looking up the <i>member</i> and is empty for every group. Reading the
+    /// backward ones too would record a band as belonging to each of its own
+    /// members, which puts a band's albums on its members' shelves and none on
+    /// its own.
+    /// </remarks>
+    IReadOnlyList<Mbid> Bands);
 
 /// <summary>One typed link from an entity to an artist.</summary>
 /// <remarks>

@@ -1064,6 +1064,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Hart = hart.Id.Value,
             Bonamassa = bonamassa.Id.Value,
             Solti = solti.Id.Value,
+            Wagner = wagner.Id.Value,
             Orphan = orphan.Id.Value,
             FirstMovement = first.Id.Value,
             Duet = duet.Id.Value,
@@ -1191,6 +1192,103 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         EnrichmentOutcome = EnrichmentOutcome.Linked,
     };
 
+    /// <summary>
+    /// Whose album it is, as three separate facts, and none of them is the role.
+    /// </summary>
+    /// <remarks>
+    /// <b>The shelf an album lands on is decided from these three fields, and
+    /// every one of them was a bug before it existed.</b> A track's "billed"
+    /// role is a claim about a <i>recording</i>; whose record it is, is a claim
+    /// about the <i>release</i>. Reading the first as the second put a B.B. King
+    /// tribute album into Marc Broussard's discography — he sings one song on
+    /// it, and the record is Joe Bonamassa's.
+    ///
+    /// The seed already carries all three shapes, which is why this test seeds
+    /// almost nothing:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Seesaw</b> prints both names, so Bonamassa is on the release's
+    /// own line: <c>true</c>.</item>
+    /// <item><b>The Ring</b> is billed to Wagner with Solti on every recording:
+    /// <c>false</c>, which is the demotion.</item>
+    /// <item><b>Blues Summit 100</b> is billed to nobody at all, and that is
+    /// <c>null</c> rather than <c>false</c>. The distinction is load-bearing: a
+    /// release the catalogue holds no credit for is the catalogue not knowing,
+    /// and demoting on it would move an artist's own record off their
+    /// discography on the strength of a row nobody wrote.</item>
+    /// </list>
+    ///
+    /// <c>Band</c> is the fourth fact and the one no credit can carry.
+    /// The membership seeded below is <i>synthetic</i> — Solti was not a member
+    /// of Wagner, and no rule here cares — because what is under test is the
+    /// join: the release's credited artist id, matched against the set of bands
+    /// the page's artist belongs to. Nothing else in the application can tell
+    /// Mark Knopfler's Dire Straits albums from somebody covering him.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumCarriesItsOwnBillingLineAndWhetherItIsTheirBand()
+    {
+        using var client = _factory!.CreateClient();
+
+        var bonamassa = await ArtistAsync(client, _seed.Bonamassa);
+
+        var seesaw = bonamassa.Tracks
+            .Select(t => t.Album)
+            .First(a => a is not null && a.Title == "Seesaw")!;
+
+        Assert.Equal("Beth Hart & Joe Bonamassa", seesaw.Artist);
+        Assert.True(seesaw.Billed);
+        Assert.Null(seesaw.Band);
+
+        // Billed to nobody: null, and not false.
+        var anthology = bonamassa.Tracks
+            .Select(t => t.Album)
+            .First(a => a is not null && a.Title == "Blues Summit 100")!;
+
+        Assert.Null(anthology.Artist);
+        Assert.Null(anthology.Billed);
+        Assert.Null(anthology.Band);
+
+        // Somebody else's sleeve, with him on every recording of it.
+        var solti = await ArtistAsync(client, _seed.Solti);
+        var ring = solti.Tracks.Select(t => t.Album).First(a => a is not null)!;
+
+        Assert.Equal("Richard Wagner", ring.Artist);
+        Assert.False(ring.Billed);
+        Assert.Null(ring.Band);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Relationships.Add(new Relationship
+            {
+                Id = Guid.CreateVersion7(),
+                SourceType = RelationshipTargets.Artist,
+                SourceId = _seed.Solti,
+                TargetType = RelationshipTargets.Artist,
+                TargetId = _seed.Wagner,
+                Type = RelationshipTargets.Member,
+                ArtistId = new ArtistId(_seed.Solti),
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var afterwards = await ArtistAsync(client, _seed.Solti);
+        var sameRing = afterwards.Tracks.Select(t => t.Album).First(a => a is not null)!;
+
+        // The same release, the same credit line, the same "not on it" — and now
+        // a group he belongs to, which is the only thing that changed.
+        Assert.Equal(ring.ReleaseId, sameRing.ReleaseId);
+        Assert.False(sameRing.Billed);
+        Assert.NotNull(sameRing.Band);
+
+        // The group's own name, not the release's printed credit — which is what
+        // keeps one band from becoming two shelves when two sleeves spell it
+        // differently.
+        Assert.Equal(_seed.Wagner, sameRing.Band.Id);
+        Assert.Equal("Richard Wagner", sameRing.Band.Name);
+    }
+
     private sealed record Seeded
     {
         public Guid Mozart { get; init; }
@@ -1206,6 +1304,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         public Guid Bonamassa { get; init; }
 
         public Guid Solti { get; init; }
+
+        public Guid Wagner { get; init; }
 
         public Guid Orphan { get; init; }
 

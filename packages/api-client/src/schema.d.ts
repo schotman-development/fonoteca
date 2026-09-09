@@ -1901,6 +1901,14 @@ export interface components {
             title: string;
             /** Format: int32 */
             year: null | number;
+            artist: null | string;
+            billed: null | boolean;
+            band: null | components["schemas"]["TrackBand"];
+        };
+        TrackBand: {
+            /** Format: uuid */
+            id: string;
+            name: string;
         };
         TrackDownload: {
             /** Format: int64 */

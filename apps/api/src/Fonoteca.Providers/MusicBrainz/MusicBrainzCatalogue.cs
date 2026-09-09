@@ -74,7 +74,13 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// library holds — asking MusicBrainz would be fetching several thousand
     /// rows to discard all but the twelve already on the page.
     /// </remarks>
-    private const Include ArtistIncludes = Include.Genres;
+    /// <remarks>
+    /// <c>ArtistRelationships</c> is what carries <c>member of band</c>, and it
+    /// rides on the lookup the artist stage already makes — one more include on
+    /// one request, not a request of its own, so the backlog costs turns only
+    /// because the rows are already stamped and have to be re-asked.
+    /// </remarks>
+    private const Include ArtistIncludes = Include.Genres | Include.ArtistRelationships;
 
     private const Include ReleaseIncludes =
         Include.Artists

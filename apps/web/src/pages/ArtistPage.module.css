@@ -110,3 +110,10 @@
   padding: var(--space-8) var(--space-8) var(--space-4);
   background-color: var(--color-surface-sunken);
 }
+
+/* Same reset as the page title: the level is semantics, the size is the Text. */
+.heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}

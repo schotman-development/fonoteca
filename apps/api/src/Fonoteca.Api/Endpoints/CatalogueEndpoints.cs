@@ -549,6 +549,42 @@ public static partial class CatalogueEndpoints
 
         var theirs = await RecordingsOfAsync(db, artistId, cancellationToken).ConfigureAwait(false);
 
+        // The groups this artist played in, as a set of local ids. One query for
+        // the whole page: the question below is asked of every album and the
+        // answer does not vary by album, so a subquery in the projection would be
+        // the same rows read once per track.
+        //
+        // Read as bare `TargetId` guids rather than joined back to `Artists`,
+        // because nothing here needs the band's name — the comparison is against
+        // ids the release credits already carry, and a join would buy a string no
+        // caller reads.
+        var memberOf = await db.Relationships
+            .AsNoTracking()
+            .Where(r => r.ArtistId == artistId && r.Type == RelationshipTargets.Member)
+            .Select(r => r.TargetId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Named, not merely counted. The screen groups a band shelf by the group,
+        // and grouping on the release's printed credit splits one band across two
+        // headings the moment two sleeves disagree — this library prints both
+        // "The Robert Cray Band" and "Robert Cray Band". The artist row's own
+        // name is the one spelling all of them share.
+        //
+        // A second query rather than a join: `Relationship.TargetId` is a bare
+        // `Guid` and `Artist.Id` is value-converted, so EF can translate a
+        // comparison against a list of typed ids and cannot translate
+        // `a.Id.Value` inside one.
+        var typed = memberOf.ConvertAll(id => new ArtistId(id));
+
+        var bands = (await db.Artists
+            .AsNoTracking()
+            .Where(a => typed.Contains(a.Id))
+            .Select(a => new { a.Id, a.Name })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .ToDictionary(a => a.Id.Value, a => a.Name);
+
         var tracks = await db.Recordings
             .Where(recording => theirs.Contains(recording.Id))
             .AsNoTracking()
@@ -579,6 +615,24 @@ public static partial class CatalogueEndpoints
                         ReleaseTitle = f.Release == null ? null : f.Release.Title,
                         ReleaseYear = f.Release == null ? null : f.Release.ReleasedYear,
                         ReleaseMbid = f.Release == null ? null : f.Release.Mbid,
+
+                        // The release's *own* billing line, which is a different
+                        // claim from the recording's and the whole point of the
+                        // two fields below. `release.Credits` is the same
+                        // navigation the album list projects; nothing new is
+                        // fetched and no second query is issued.
+                        ReleaseCredits = f.Release == null
+                            ? null
+                            : f.Release.Credits
+                                .OrderBy(credit => credit.Position)
+                                .Select(credit => new
+                                {
+                                    credit.ArtistId,
+                                    credit.CreditedAs,
+                                    credit.JoinPhrase,
+                                    ArtistName = credit.Artist!.Name,
+                                })
+                                .ToList(),
                     })
                     .ToList(),
             })
@@ -611,7 +665,30 @@ public static partial class CatalogueEndpoints
                         file.ReleaseId!.Value.Value,
                         file.ReleaseMbid?.Value,
                         file.ReleaseTitle!,
-                        file.ReleaseYear))
+                        file.ReleaseYear,
+                        CreditLine(file.ReleaseCredits!
+                            .Select(credit => (credit.CreditedAs ?? credit.ArtistName, credit.JoinPhrase))),
+                        // Null where the release records no credit at all, and
+                        // that is not the same answer as false. Eight of this
+                        // library's 644 releases are in that state, and reading
+                        // their silence as "not the album artist" would move an
+                        // artist's own record off their discography on the
+                        // strength of a row nobody wrote.
+                        file.ReleaseCredits!.Count == 0
+                            ? null
+                            : file.ReleaseCredits!.Exists(credit => credit.ArtistId == artistId),
+                        // The act on the sleeve, where it is a band this artist
+                        // was in. Null both when the release names somebody else
+                        // and when no credit is recorded at all: unlike `Billed`
+                        // those are one answer here, because both mean "no
+                        // evidence of membership" and leave the album where it
+                        // already was.
+                        file.ReleaseCredits!
+                            .Where(credit => bands.ContainsKey(credit.ArtistId.Value))
+                            .Select(credit => new TrackBand(
+                                credit.ArtistId.Value,
+                                bands[credit.ArtistId.Value]))
+                            .FirstOrDefault()))
                     .FirstOrDefault(),
                 Folder: FolderOf(row.Files[0].Path),
                 Files: [.. row.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
@@ -2848,10 +2925,89 @@ public static partial class CatalogueEndpoints
     /// is wanted, which is what lets the list and the detail page share one copy
     /// of the rule rather than drifting apart. <c>TheListAndTheDetailPageAgree</c>
     /// asserts they still do.
+    ///
+    /// <b>A fourth source, and it is a hop rather than a link: the bands the
+    /// artist played in.</b> The three above all require a row naming the artist
+    /// on the recording or its work, and for a band member there usually is not
+    /// one — MusicBrainz credits a Dire Straits recording to the <i>group</i>.
+    /// What reached the page before was whatever the artist happened to be
+    /// credited as writer of, which is a fact about MusicBrainz's editing
+    /// coverage rather than about the music: measured here, Mark Knopfler had a
+    /// writer credit on all 11 Dire Straits albums and Robert Cray on 3 of his
+    /// band's 8, so one page looked complete and the other looked like a man who
+    /// wandered through his own group. Membership is the claim that the whole
+    /// discography is his.
+    ///
+    /// One hop, not a closure. A band that is itself a member of something does
+    /// not carry its members further, which is a real limit and not one this
+    /// catalogue has an example of.
     /// </remarks>
     private static async Task<HashSet<ArtistTrack>> BrowsableAsync(
         FonotecaDbContext db,
         ArtistId? artist,
+        CancellationToken cancellationToken)
+    {
+        var pairs = await CreditedAsync(
+            db,
+            artist is { } only ? [only] : null,
+            cancellationToken).ConfigureAwait(false);
+
+        var memberships = db.Relationships
+            .AsNoTracking()
+            .Where(r => r.Type == RelationshipTargets.Member && r.ArtistId != null);
+
+        if (artist is { } member) memberships = memberships.Where(r => r.ArtistId == member);
+
+        var bands = await memberships
+            .Select(r => new { Member = r.ArtistId!.Value, r.TargetId })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (bands.Count == 0) return pairs;
+
+        // The same rule, asked about the bands — so what a member inherits is
+        // exactly what the band's own page shows, and the two cannot drift.
+        var theirs = await CreditedAsync(
+            db,
+            [.. bands.Select(b => new ArtistId(b.TargetId)).Distinct()],
+            cancellationToken).ConfigureAwait(false);
+
+        var byBand = new Dictionary<ArtistId, List<RecordingId>>();
+
+        foreach (var pair in theirs)
+        {
+            if (!byBand.TryGetValue(pair.ArtistId, out var recordings))
+            {
+                recordings = [];
+                byBand[pair.ArtistId] = recordings;
+            }
+
+            recordings.Add(pair.RecordingId);
+        }
+
+        foreach (var band in bands)
+        {
+            if (!byBand.TryGetValue(new ArtistId(band.TargetId), out var recordings)) continue;
+
+            foreach (var recording in recordings)
+            {
+                pairs.Add(new ArtistTrack(band.Member, recording));
+            }
+        }
+
+        return pairs;
+    }
+
+    /// <summary>The three ways a row can name an artist on a recording.</summary>
+    /// <remarks>
+    /// Split out of <see cref="BrowsableAsync"/> so the membership hop can ask
+    /// the identical question about a band. Two copies of these three queries is
+    /// how a member's shelf would come to hold something the band's own page
+    /// does not.
+    /// </remarks>
+    private static async Task<HashSet<ArtistTrack>> CreditedAsync(
+        FonotecaDbContext db,
+        IReadOnlyList<ArtistId>? artists,
         CancellationToken cancellationToken)
     {
         // The library filter: a recording with no file is one the catalogue
@@ -2865,11 +3021,11 @@ public static partial class CatalogueEndpoints
         // Applied as a separate Where rather than folded in as `artist == null ||
         // …`, which would put a parameter-is-null test in the SQL and cost the
         // planner the index.
-        if (artist is { } only)
+        if (artists is { Count: > 0 } only)
         {
-            credits = credits.Where(c => c.ArtistId == only);
-            links = links.Where(r => r.ArtistId == only);
-            wrote = wrote.Where(r => r.ArtistId == only);
+            credits = credits.Where(c => only.Contains(c.ArtistId));
+            links = links.Where(r => r.ArtistId != null && only.Contains(r.ArtistId.Value));
+            wrote = wrote.Where(r => r.ArtistId != null && only.Contains(r.ArtistId.Value));
         }
 
         var pairs = new HashSet<ArtistTrack>();
@@ -3076,6 +3232,21 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>Why this artist has this track, strongest claim first.</summary>
+    /// <remarks>
+    /// <b>Empty means the membership hop reached it, and that is a reason rather
+    /// than the absence of one.</b> The three direct sources each imply a role —
+    /// a credit is "billed", a relationship carries its own type — so a pair with
+    /// nothing to say for itself can only have arrived through a band the artist
+    /// played in, where MusicBrainz names the group on the recording and not the
+    /// player. 527 of this library's 11,252 artist/track rows are in that
+    /// position.
+    ///
+    /// Naming it matters twice over. The card prints these as the answer to "why
+    /// is this record theirs", and a blank there reads as a bug; and a screen
+    /// asking whether every role is <c>composer</c> gets <c>true</c> from an
+    /// empty list, which quietly filed two of Neville Marriner's albums under
+    /// music of his that somebody else recorded.
+    /// </remarks>
     private static IReadOnlyList<string> Roles(
         bool billed,
         List<string> recordingRoles,
@@ -3088,7 +3259,7 @@ public static partial class CatalogueEndpoints
         roles.AddRange(recordingRoles);
         roles.AddRange(workRoles);
 
-        return [.. roles.Distinct(StringComparer.Ordinal)];
+        return roles.Count == 0 ? ["member"] : [.. roles.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>
@@ -3333,7 +3504,10 @@ public sealed record ArtistDetailResponse(ArtistSummary Artist, IReadOnlyList<Tr
 
 /// <param name="WorkTitle">The composition, when MusicBrainz links one. Usually null outside classical.</param>
 /// <param name="Duration">Pre-formatted for display; null when MusicBrainz does not know it.</param>
-/// <param name="Roles">Why this artist has this track: "billed", "conductor", "ensemble", "composer".</param>
+/// <param name="Roles">
+/// Why this artist has this track: "billed", "conductor", "ensemble", "composer",
+/// or "member" where the only reason is a band they played in.
+/// </param>
 /// <param name="Album">
 /// The release this track was attributed to, when one was. Null where attribution
 /// declined, which is a real answer and not a gap to be papered over — the page
@@ -3365,7 +3539,55 @@ public sealed record TrackRow(
 /// artist page groups these rows into albums and draws a cover for each, and
 /// without it every one of them falls back to a monogram.
 /// </param>
-public sealed record TrackAlbum(Guid ReleaseId, Guid? Mbid, string Title, int? Year);
+/// <param name="Artist">
+/// The release's own billing line — "Joe Bonamassa" for a B.B. King tribute
+/// album, whatever the tracks on it are credited to. A compilation's tracks do
+/// not share it, which is exactly why it is worth sending.
+/// </param>
+/// <param name="Billed">
+/// Whether the artist this page is about is on that billing line.
+///
+/// <b>Not the same question as the track's "billed" role, and conflating them
+/// is what put a B.B. King tribute album into Marc Broussard's discography.</b>
+/// He is billed on one recording of it; the album is Joe Bonamassa's. Measured
+/// on the target library, 649 artist/album pairs are billed on a recording and
+/// absent from the release's own credit — every one of them is an appearance.
+///
+/// Three states, deliberately. Null means the release records no credit at all,
+/// which is the catalogue not knowing rather than the artist not being there,
+/// and a screen must not demote an album on the strength of it.
+/// </param>
+/// <param name="Band">
+/// The act credited on the release, where it is a group this artist was a
+/// member of.
+///
+/// <b>Neither billing nor authorship can answer this.</b> MusicBrainz credits a
+/// Dire Straits recording to the group, so Mark Knopfler is not on the release's
+/// billing line, not on the recording's, and reaches the catalogue only as the
+/// composer of the work — which reads as "somebody else recorded their music"
+/// about the man who played and sang it. The membership relation is the only
+/// thing in MusicBrainz that says otherwise, and it rides on the artist lookup
+/// the enrichment pass already makes.
+///
+/// Null until that pass has run with <c>ArtistRelationships</c> included, and
+/// that is a safe default: it is exactly the behaviour of the version before
+/// this field existed.
+///
+/// The group's <i>own</i> name, never the release's printed credit. A screen
+/// grouping by this heads one shelf per band; keyed on what the sleeve printed,
+/// "The Robert Cray Band" and "Robert Cray Band" are two.
+/// </param>
+public sealed record TrackAlbum(
+    Guid ReleaseId,
+    Guid? Mbid,
+    string Title,
+    int? Year,
+    string? Artist,
+    bool? Billed,
+    TrackBand? Band);
+
+/// <summary>A group the artist belongs to, as much of it as a shelf heading needs.</summary>
+public sealed record TrackBand(Guid Id, string Name);
 
 public sealed record FileRow(string Path, long SizeBytes);
 

@@ -58,6 +58,14 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     private static readonly Mbid WinwoodId =
         new(Guid.Parse("885f90ef-6bd9-409a-b2df-e165e553c68e"));
 
+    /// <summary>A person, whose <c>member of band</c> relations all point outwards.</summary>
+    private static readonly Mbid KnopflerId =
+        new(Guid.Parse("e49f69da-17d5-4c5c-bac0-dadcb0e588f5"));
+
+    /// <summary>The band, whose relations are the identical facts pointing inwards.</summary>
+    private static readonly Mbid DireStraitsId =
+        new(Guid.Parse("614e3804-7d34-41ba-857f-811bad7c2b7a"));
+
     private readonly List<ServiceProvider> _providers = [];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -606,4 +614,72 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
 
         return (provider.GetRequiredService<IMusicBrainzCatalogue>(), stub);
     }
+    /// <summary>
+    /// A person's bands come back; the same relation read on the band does not.
+    /// </summary>
+    /// <remarks>
+    /// <b>The direction is the whole of <c>ToBands</c>, and these two documents
+    /// are what tell a mapper that reads it from one that does not.</b>
+    /// MusicBrainz states <c>member of band</c> once and serves it from both
+    /// artists: Mark Knopfler's document carries six, every one <c>forward</c>
+    /// with the group on the far end, and Dire Straits' carries nine, every one
+    /// <c>backward</c> with a member there instead.
+    ///
+    /// Read without checking, the band's own document reports its nine members
+    /// as nine groups Dire Straits belongs to — which would put every band's
+    /// albums onto its members' shelves and none onto its own, silently, on a
+    /// page that looks populated either way.
+    ///
+    /// Verbatim WS/2 documents, fetched with the includes the application asks
+    /// for. Note what else they pin: the person's list contains the band this
+    /// library actually needs, so a mapper that dropped forward relations by
+    /// mistake fails here rather than at the shelf.
+    /// </remarks>
+    [Fact]
+    public async Task OnlyTheMemberSideOfABandRelationIsRead()
+    {
+        var (person, _) = Build(Recorded("artist-mark-knopfler.json"));
+        var knopfler = await person.GetArtistAsync(KnopflerId, Token);
+
+        Assert.NotNull(knopfler);
+        Assert.Contains(DireStraitsId, knopfler.Bands);
+
+        // Six on the wire, all forward, none of them himself.
+        Assert.Equal(6, knopfler.Bands.Count);
+        Assert.DoesNotContain(KnopflerId, knopfler.Bands);
+
+        var (group, _) = Build(Recorded("artist-dire-straits.json"));
+        var band = await group.GetArtistAsync(DireStraitsId, Token);
+
+        Assert.NotNull(band);
+
+        // Nine `member of band` relations in that document and not one of them
+        // is a band Dire Straits belongs to.
+        Assert.Empty(band.Bands);
+    }
+
+    /// <summary>The membership relations are asked for, and nothing heavier is.</summary>
+    /// <remarks>
+    /// The include is what makes the whole feature possible at no extra request,
+    /// and it is one word in a const two files away from the shelf that needs
+    /// it. Pinned beside the exclusions the artist lookup already keeps, so
+    /// dropping it fails a test rather than quietly emptying every band shelf on
+    /// the next enrichment run.
+    /// </remarks>
+    [Fact]
+    public async Task TheArtistLookupAsksForBandMembershipAndStillNotForADiscography()
+    {
+        var (catalogue, stub) = Build(Recorded("artist-mark-knopfler.json"));
+
+        await catalogue.GetArtistAsync(KnopflerId, Token);
+
+        var request = Assert.Single(stub.Requests);
+
+        Assert.Contains("artist-rels", request.Uri.Query, StringComparison.Ordinal);
+        Assert.Contains("genres", request.Uri.Query, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("releases", request.Uri.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("recordings", request.Uri.Query, StringComparison.Ordinal);
+    }
+
 }

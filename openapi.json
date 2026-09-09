@@ -5937,7 +5937,10 @@
           "releaseId",
           "mbid",
           "title",
-          "year"
+          "year",
+          "artist",
+          "billed",
+          "band"
         ],
         "type": "object",
         "properties": {
@@ -5961,6 +5964,44 @@
               "integer"
             ],
             "format": "int32"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "billed": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "band": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrackBand"
+              }
+            ]
+          }
+        }
+      },
+      "TrackBand": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },

@@ -1178,10 +1178,81 @@ public sealed class EnrichmentService(
                 row.Ended = described.HasEnded;
                 row.Genres = Joined(described.Genres);
 
+                await RecordBandsAsync(db, row, described.Bands, cancellationToken)
+                    .ConfigureAwait(false);
+
                 counts.ArtistsDescribed++;
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The bands this artist played in, as links to artists the library holds.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only groups already in the catalogue.</b> MusicBrainz knows every band
+    /// a session player passed through, and minting a row for each would put
+    /// artists with no tracks into a list whose whole promise is that it browses
+    /// what you own — Mark Knopfler alone brings four groups this library holds
+    /// nothing by. Nothing is lost: the rule this feeds asks whether the artist
+    /// credited on a release is a band the artist was in, and that artist is by
+    /// construction a row already.
+    ///
+    /// <b>Existing links are not rewritten.</b> Re-asking the whole artist
+    /// worklist is a hand-written <c>UPDATE</c> clearing <c>LookupUtc</c> — the
+    /// same documented path <c>AcoustIdCheckedUtc</c> takes — so this method runs
+    /// again over artists it has already described, and there is no unique index
+    /// on <c>Relationships</c> to catch a second copy. A membership recorded
+    /// twice would count a band twice on every screen that ever groups by it.
+    ///
+    /// <b>Nothing is deleted either</b>, and that is a decision rather than an
+    /// omission: a membership MusicBrainz has since removed leaves a stale row,
+    /// which is a wrong shelf on one page, where a delete-and-reinsert would
+    /// throw away a correct row every time the lookup failed halfway.
+    /// </remarks>
+    private static async Task RecordBandsAsync(
+        FonotecaDbContext db,
+        Artist member,
+        IReadOnlyList<Mbid> bands,
+        CancellationToken cancellationToken)
+    {
+        if (bands.Count == 0) return;
+
+        var known = await db.Artists
+            .Where(a => a.Mbid != null && bands.Contains(a.Mbid.Value))
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (known.Count == 0) return;
+
+        var already = await db.Relationships
+            .Where(r => r.ArtistId == member.Id && r.Type == RelationshipTargets.Member)
+            .Select(r => r.TargetId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var seen = already.ToHashSet();
+
+        foreach (var band in known)
+        {
+            // A group that somehow lists itself. Cheap to rule out, and a
+            // self-membership would make every one of its own albums read as
+            // somebody else's band.
+            if (band == member.Id || !seen.Add(band.Value)) continue;
+
+            db.Relationships.Add(new Relationship
+            {
+                Id = Guid.CreateVersion7(),
+                SourceType = RelationshipTargets.Artist,
+                SourceId = member.Id.Value,
+                TargetType = RelationshipTargets.Artist,
+                TargetId = band.Value,
+                Type = RelationshipTargets.Member,
+                ArtistId = member.Id,
+            });
         }
     }
 
@@ -1434,6 +1505,19 @@ public sealed class EnrichmentService(
 /// </remarks>
 public static class RelationshipTargets
 {
+    /// <summary>
+    /// The relationship type recording that one artist played in another.
+    /// </summary>
+    /// <remarks>
+    /// The only artist-to-artist link the catalogue stores, and the only
+    /// <c>Relationship</c> row with neither a recording nor a work on the far
+    /// end. Existing queries cannot pick it up by accident: they all reach
+    /// relationships through <c>recording.Relationships</c> or
+    /// <c>work.Relationships</c>, which are scoped by those foreign keys, and
+    /// both are null here.
+    /// </remarks>
+    public const string Member = "member";
+
     public const string Artist = "artist";
     public const string Recording = "recording";
     public const string Work = "work";

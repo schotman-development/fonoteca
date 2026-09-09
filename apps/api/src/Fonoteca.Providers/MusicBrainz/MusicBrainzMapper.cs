@@ -89,7 +89,65 @@ internal static class MusicBrainzMapper
             // Absent means "not known to have ended", which is how MusicBrainz
             // means it and what a living artist's document looks like.
             HasEnded: source.LifeSpan?.Ended ?? false,
-            Genres: genres);
+            Genres: genres,
+            Bands: ToBands(source.Id, source.Relationships));
+    }
+
+    /// <summary>The groups an artist belongs to, from either end of the relation.</summary>
+    /// <remarks>
+    /// <b>The direction is the whole of this function.</b> MusicBrainz states
+    /// <c>member of band</c> once and serves it from both artists: fetched on the
+    /// person it comes back <c>forward</c> with the <i>group</i> in
+    /// <c>relationship.Artist</c>, and fetched on the group it comes back
+    /// <c>backward</c> with the <i>member</i> there instead. Read without
+    /// checking, a group's document reports every one of its members as a band
+    /// that group belongs to — so Dire Straits would be recorded as a member of
+    /// Mark Knopfler, and the rule that reads this would put a band's own albums
+    /// on its members' shelves and nothing on its own.
+    ///
+    /// <b>A backward relation is dropped, not resolved to the subject.</b> It is
+    /// the same fact seen from the other side, so keeping it would be recording
+    /// that the group belongs to its own member — and the group is the subject,
+    /// which contributes nothing about the subject's own memberships. Measured
+    /// against the real documents: Dire Straits' lookup returns nine
+    /// <c>member of band</c> relations and every one is <c>backward</c>, so this
+    /// method returns an empty list for a band and the full list for a person.
+    /// The subject's id is passed in for the self-check below, not to resolve
+    /// the far end.
+    ///
+    /// Ended memberships are kept. Mark Knopfler left Dire Straits in 1995 and
+    /// <i>Brothers in Arms</i> is no less his for it; a rule that read
+    /// <c>ended</c> would empty the shelf of every band that has broken up.
+    /// </remarks>
+    private static List<Mbid> ToBands(Guid subject, IReadOnlyList<IRelationship>? relationships)
+    {
+        if (relationships is null || relationships.Count == 0) return [];
+
+        var bands = new List<Mbid>();
+
+        foreach (var relationship in relationships)
+        {
+            if (!string.Equals(relationship.Type, "member of band", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (relationship.Artist is not { } other) continue;
+
+            // Forward: the subject is the member and the other end is the band.
+            // Backward: the other end is the member, so the band is the subject —
+            // which contributes nothing about the subject's own memberships.
+            var band = string.Equals(relationship.Direction, "backward", StringComparison.OrdinalIgnoreCase)
+                ? (Guid?)null
+                : other.Id;
+
+            if (band is null || band.Value == subject) continue;
+
+            var id = new Mbid(band.Value);
+            if (!bands.Contains(id)) bands.Add(id);
+        }
+
+        return bands;
     }
 
     public static MusicBrainzRelease ToRelease(IRelease source)
