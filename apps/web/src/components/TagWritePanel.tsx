@@ -276,8 +276,15 @@ function Result({ summary }: { readonly summary: Summary }) {
         {summary.unsupported > 0
           ? ` · ${summary.unsupported.toLocaleString()} in containers that cannot carry tags`
           : ''}
-        {summary.skipped > 0 ? ` · ${summary.skipped.toLocaleString()} not on disk` : ''} · took{' '}
-        {formatDuration(summary.durationMilliseconds)}
+        {summary.skipped > 0 ? ` · ${summary.skipped.toLocaleString()} not on disk` : ''}
+        {/* Counted per folder, not per file, so it is worded as albums rather
+            than joined to the file counts beside it. */}
+        {summary.coversWritten > 0
+          ? ` · ${summary.coversWritten.toLocaleString()} album${
+              summary.coversWritten === 1 ? '' : 's'
+            } got a cover`
+          : ''}{' '}
+        · took {formatDuration(summary.durationMilliseconds)}
         {summary.cancelled ? ' · stopped early' : ''}
       </Text>
 

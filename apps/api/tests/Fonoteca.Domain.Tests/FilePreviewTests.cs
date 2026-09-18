@@ -115,4 +115,41 @@ public sealed class FilePreviewTests
             FilePreview.Extensions,
             extension => FilePreview.Of($"x.{extension}").MediaType
                 is "text/html" or "application/xhtml+xml" or "image/svg+xml");
+
+    /// <summary>
+    /// Every image the upload allows can be given a filename, and the name it is
+    /// given is one this class would read back as the same type.
+    /// </summary>
+    /// <remarks>
+    /// The two lists are written out separately — the second one has to be, since
+    /// media type to extension is one-to-many — so this is what stops them
+    /// drifting. An image type added to the allowlist and not here produces a
+    /// cover the catalogue holds and the tag write pass silently declines to put
+    /// beside the album.
+    /// </remarks>
+    [Fact]
+    public void EveryAllowedImageTypeCanBeNamedAndReadBackAsItself()
+    {
+        var images = FilePreview.Extensions
+            .Select(extension => FilePreview.Of($"x.{extension}"))
+            .Where(type => type.Kind == PreviewKind.Image)
+            .Select(type => type.MediaType)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mediaType in images)
+        {
+            var extension = FilePreview.ImageExtensionFor(mediaType);
+
+            Assert.NotNull(extension);
+            Assert.Equal(mediaType, FilePreview.Of($"cover.{extension}").MediaType);
+        }
+    }
+
+    [Theory]
+    [InlineData("image/svg+xml")]
+    [InlineData("application/octet-stream")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void NothingThatIsNotARasterImageIsGivenAFileName(string? declared) =>
+        Assert.Null(FilePreview.ImageExtensionFor(declared));
 }

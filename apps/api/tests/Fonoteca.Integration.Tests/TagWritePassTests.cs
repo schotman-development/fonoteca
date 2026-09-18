@@ -45,6 +45,9 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     private static readonly Mbid GroupMbid = Mb("33333333-3333-4333-8333-333333333333");
     private static readonly Mbid ArtistMbid = Mb("44444444-4444-4444-8444-444444444444");
 
+    /// <summary>The sleeve a person picked, as bytes nothing here has to decode.</summary>
+    private static readonly byte[] ChosenCover = [0xFF, 0xD8, 0xFF, 0xDB, 9, 8, 7, 6];
+
     private readonly List<ServiceProvider> _providers = [];
 
     private string _connectionString = string.Empty;
@@ -67,6 +70,38 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
         foreach (var provider in _providers) await provider.DisposeAsync();
 
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+
+        // The default trash is a sibling of the library rather than a folder
+        // inside it, so deleting the root above does not take it with it.
+        if (Directory.Exists(_root + "-trash")) Directory.Delete(_root + "-trash", recursive: true);
+    }
+
+    /// <summary>
+    /// A cover for the seeded release, as choosing one in the app leaves it.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="bytes"/> is null for the other row this table holds: a
+    /// stamp saying both sources were asked and neither had a sleeve.
+    /// </remarks>
+    private async Task SeedCoverAsync(byte[]? bytes, string mediaType = "image/jpeg")
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var release = await db.Releases
+            .Where(candidate => candidate.Mbid == ReleaseMbid)
+            .Select(candidate => candidate.Id)
+            .SingleAsync(Token);
+
+        db.ReleaseCovers.Add(new ReleaseCover
+        {
+            ReleaseId = release,
+            Bytes = bytes,
+            MediaType = bytes is null ? null : mediaType,
+            ArchiveImageId = bytes is null ? null : 1234,
+            SavedUtc = DateTimeOffset.UtcNow,
+        });
+
+        await db.SaveChangesAsync(Token);
     }
 
     /// <summary>
@@ -324,6 +359,143 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
             .ReadAsync(new LibraryPath(lonely), cancellationToken: Token);
 
         Assert.False(reading.Fields.ContainsKey("ALBUM"));
+    }
+
+    /// <summary>
+    /// The sleeve a person chose is written beside the album, once for the folder.
+    /// </summary>
+    /// <remarks>
+    /// The reason this pass grew a cover at all: choosing one used to write a row
+    /// in PostgreSQL and nothing else, so every other player on the same disk went
+    /// on showing whatever the rip embedded. Two files, one cover — the unit here
+    /// is the directory, not the file.
+    /// </remarks>
+    [Fact]
+    public async Task TheChosenSleeveIsWrittenBesideTheAlbum()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(
+            ("Miles Davis/Kind of Blue/01 track.flac", 1),
+            ("Miles Davis/Kind of Blue/02 track.flac", 2));
+
+        await SeedCoverAsync(ChosenCover);
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(2, summary.Examined);
+        Assert.Equal(1, summary.CoversWritten);
+
+        var written = await File.ReadAllBytesAsync(
+            Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg"), Token);
+
+        Assert.Equal(ChosenCover, written);
+    }
+
+    /// <summary>
+    /// A second run leaves the cover it wrote alone.
+    /// </summary>
+    /// <remarks>
+    /// The tags have the diff for a worklist and the cover has its own bytes, for
+    /// the same reason: a run over an already-written library must not rewrite
+    /// every album's sleeve to say what it already says.
+    /// </remarks>
+    [Fact]
+    public async Task ASecondRunDoesNotRewriteTheCover()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(ChosenCover);
+
+        var services = Build();
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).CoversWritten);
+
+        var cover = Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg");
+        var stamped = File.GetLastWriteTimeUtc(cover);
+
+        var again = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(0, again.CoversWritten);
+        Assert.Equal(stamped, File.GetLastWriteTimeUtc(cover));
+    }
+
+    /// <summary>
+    /// A cover already in the folder is moved to the trash, never overwritten.
+    /// </summary>
+    /// <remarks>
+    /// The one destructive thing this pass does outside the write path, so it
+    /// does it the way the file manager does: a move to <c>Fonoteca:TrashPath</c>
+    /// under a stamped folder. A hand-made sleeve scan is not recoverable from
+    /// any provider, and unlike a tag write there is no undo journal carrying the
+    /// old bytes.
+    /// </remarks>
+    [Fact]
+    public async Task ACoverAlreadyThereIsDisplacedRatherThanOverwritten()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(ChosenCover);
+
+        var existing = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3 };
+        var cover = Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg");
+        await File.WriteAllBytesAsync(cover, existing, Token);
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library)).CoversWritten);
+
+        Assert.Equal(ChosenCover, await File.ReadAllBytesAsync(cover, Token));
+
+        var displaced = Directory
+            .EnumerateFiles(_root + "-trash", "cover.jpg", SearchOption.AllDirectories)
+            .Single();
+
+        Assert.Equal(existing, await File.ReadAllBytesAsync(displaced, Token));
+    }
+
+    /// <summary>
+    /// With mutation off, the folder is left exactly as it was found.
+    /// </summary>
+    /// <remarks>
+    /// The flag is what somebody turns on to agree that this application may
+    /// change their files, and a cover written under it would be a file appearing
+    /// in a library nobody agreed to touch.
+    /// </remarks>
+    [Fact]
+    public async Task WithMutationOffNoCoverIsWritten()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(ChosenCover);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(allowMutation: false));
+
+        Assert.Equal(0, summary.CoversWritten);
+        Assert.False(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg")));
+    }
+
+    /// <summary>
+    /// A release nobody has chosen a cover for gets no file invented for it.
+    /// </summary>
+    /// <remarks>
+    /// A <c>ReleaseCovers</c> row with null bytes is a stamp recording that both
+    /// sources were asked and neither answered. Treating it as a cover would put
+    /// an empty file in the folder and hide every sleeve found later.
+    /// </remarks>
+    [Fact]
+    public async Task AStampWithNoBytesIsNotACover()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(bytes: null);
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(0, summary.CoversWritten);
+        Assert.False(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg")));
     }
 
     /// <summary>Only one piece of library-wide work at a time.</summary>

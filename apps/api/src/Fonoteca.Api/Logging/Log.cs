@@ -414,6 +414,13 @@ internal static partial class Log
         Message = "No pictures were found for a batch of {Artists} artists: {Reason}")]
     public static partial void PicturesNotFound(ILogger logger, int artists, string reason);
 
+    /// <remarks>Warning, like <see cref="PicturesNotFound"/>: it ends a stage.</remarks>
+    [LoggerMessage(
+        EventId = 1259,
+        Level = LogLevel.Warning,
+        Message = "The {Stage} stage ended on a failed batch: {Reason}")]
+    public static partial void BatchStageEnded(ILogger logger, string stage, string reason);
+
     /// <remarks>
     /// Debug, like <see cref="ArtistNotDescribed"/>, and for a narrower version
     /// of the same reason: the worklist here is the followed set rather than the
@@ -636,6 +643,24 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Tags not written to {Path}: {Reason}")]
     public static partial void TagsNotWritten(ILogger logger, string path, string reason);
+
+    [LoggerMessage(
+        EventId = 1305,
+        Level = LogLevel.Information,
+        Message = "Cover written to {Path}{Displaced}")]
+    public static partial void CoverWritten(ILogger logger, string path, string displaced);
+
+    /// <remarks>
+    /// Warning rather than Debug, and deliberately not the same line as
+    /// <see cref="TagsNotWritten"/>: the file's tags were written, and only the
+    /// sleeve beside them was not. A run reporting every file written with a page
+    /// of these is a folder permissions problem, not a tagging one.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1306,
+        Level = LogLevel.Warning,
+        Message = "Cover not written to {Path}: {Reason}")]
+    public static partial void CoverNotWritten(ILogger logger, string path, string reason);
 
     [LoggerMessage(
         EventId = 1400,

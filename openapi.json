@@ -6842,6 +6842,7 @@
           "unsupported",
           "failed",
           "skipped",
+          "coversWritten",
           "cancelled"
         ],
         "type": "object",
@@ -6889,6 +6890,10 @@
             "format": "int32"
           },
           "skipped": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "coversWritten": {
             "type": "integer",
             "format": "int32"
           },

@@ -1,13 +1,19 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
+using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Logging;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Domain.Events;
+using Fonoteca.Ingest;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Fonoteca.Api.Library;
 
@@ -72,6 +78,13 @@ namespace Fonoteca.Api.Library;
 /// number, or a title with no album, produces a file that reads as a half-tagged
 /// rip in every player. The narrower question is also the honest one: these are
 /// the files the catalogue actually has an answer for.</item>
+///
+/// <item><b>The chosen sleeve goes out as a file beside the album, and its unit
+/// is the folder rather than the file.</b> Everything else here is a tag, and a
+/// cover is not one: it is written once per directory, as <c>cover.jpg</c>, and
+/// the files themselves are not touched by it. See
+/// <see cref="EnsureCoverAsync"/> for why that is the shape and not an embedded
+/// picture.</item>
 /// </list>
 /// </remarks>
 public sealed class TagWriteService(
@@ -80,6 +93,8 @@ public sealed class TagWriteService(
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
     TagWriterOptions writerOptions,
+    FileSystemAudioFileStore store,
+    IOptions<FonotecaOptions> options,
     IClock clock,
     ILogger<TagWriteService> logger) : IHostedService
 {
@@ -306,6 +321,7 @@ public sealed class TagWriteService(
         var startedAt = clock.UtcNow;
         var elapsed = Stopwatch.StartNew();
         var counts = new Tally();
+        var covers = new CoverRun(clock.UtcNow);
         var correlationId = Guid.CreateVersion7().ToString("N")[..12];
 
         var pending = await CountAsync(scope, cancellationToken).ConfigureAwait(false);
@@ -338,7 +354,7 @@ public sealed class TagWriteService(
 
                     try
                     {
-                        await HandleAsync(file, counts, correlationId, cancellationToken)
+                        await HandleAsync(file, counts, covers, correlationId, cancellationToken)
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
@@ -400,6 +416,7 @@ public sealed class TagWriteService(
             Unsupported: counts.Unsupported,
             Failed: counts.Failed,
             Skipped: counts.Missing,
+            CoversWritten: counts.CoversWritten,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.TagWriteCompleted(
@@ -445,6 +462,7 @@ public sealed class TagWriteService(
                 .Select(file => new PendingTagWrite(
                     file.Id,
                     file.Path,
+                    file.ReleaseId,
                     file.AcoustId,
                     file.Track!.Title,
                     file.Recording!.Title,
@@ -481,6 +499,7 @@ public sealed class TagWriteService(
     private async Task HandleAsync(
         PendingTagWrite file,
         Tally counts,
+        CoverRun covers,
         string correlationId,
         CancellationToken cancellationToken)
     {
@@ -562,6 +581,11 @@ public sealed class TagWriteService(
                 }
             }
 
+            // The album's sleeve, once per folder rather than once per file, and
+            // inside this scope so its journal entry rides the save below.
+            await EnsureCoverAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
+                .ConfigureAwait(false);
+
             // Always, and not only when something was committed.
             // `IEventLog.AppendAsync` does not save itself — that is what makes
             // one scope and one save per file the resumability story — so
@@ -572,6 +596,181 @@ public sealed class TagWriteService(
             // failed verification.
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The album's chosen sleeve, written once beside the music as <c>cover.jpg</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why a file beside the album rather than a picture inside each one.</b>
+    /// Every player that reads a library off a disk — Navidrome, Plex, Kodi,
+    /// Jellyfin, foobar — looks for <c>cover.*</c> in the album's directory
+    /// before it looks inside the audio, so one 100 KB file answers for the whole
+    /// folder. Embedding the same image in a dozen FLACs means a dozen container
+    /// rewrites through the verified write path, a dozen undo entries carrying
+    /// the displaced artwork, and <c>TagSnapshot.PictureDigests</c> — which
+    /// exists to prove a tag write did <i>not</i> disturb the pictures — taught
+    /// to expect this one change. That is a pass of its own and this is not it.
+    ///
+    /// <b>Once per directory, not once per file.</b> A cover is a fact about a
+    /// folder, so the first file in each one does the work and the rest of the
+    /// album skips this entirely. Multi-disc rips get one per disc directory,
+    /// which is what a player looking beside the audio needs.
+    ///
+    /// <b>The bytes are the worklist, exactly as the diff is for tags.</b> A
+    /// folder already holding this image is read and left alone, so a second run
+    /// costs one file read per album and writes nothing.
+    ///
+    /// <b>A different <c>cover.*</c> already there is displaced, never
+    /// overwritten.</b> It goes to <c>Fonoteca:TrashPath</c> under a stamped
+    /// folder — the file manager's own convention, and the reason this is
+    /// reversible. It cannot call <c>FileManagerService.TrashAsync</c> to do it:
+    /// that takes <see cref="LibraryWorkGate"/>, which this pass is holding.
+    ///
+    /// <b>It never marks the file as failed.</b> A folder this process cannot
+    /// write to is a cover problem, not a tagging one, and the tags may already
+    /// have been written by the time this runs.
+    /// </remarks>
+    private async Task EnsureCoverAsync(
+        PendingTagWrite file,
+        Tally counts,
+        CoverRun covers,
+        FonotecaDbContext db,
+        IServiceProvider provider,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var separator = file.Path.LastIndexOf('/');
+        var folder = separator < 0 ? string.Empty : file.Path[..separator];
+
+        // The whole album behind the first file is answered by this line.
+        if (!covers.Folders.Add(folder)) return;
+
+        if (file.ReleaseId is not { } releaseId) return;
+
+        if (!covers.Sleeves.TryGetValue(releaseId, out var sleeve))
+        {
+            // `Bytes != null` is the whole filter: a row with no bytes is a stamp
+            // saying both sources were asked and neither answered, not a cover.
+            sleeve = await db.ReleaseCovers
+                .AsNoTracking()
+                .Where(cover => cover.ReleaseId == releaseId && cover.Bytes != null)
+                .Select(cover => new StoredCover(cover.Bytes!, cover.MediaType))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            covers.Sleeves[releaseId] = sleeve;
+        }
+
+        if (sleeve is null) return;
+
+        // An image type with no filename is one this application would refuse to
+        // serve back, so it is not one to write into somebody's library either.
+        if (FilePreview.ImageExtensionFor(sleeve.MediaType) is not { } extension)
+        {
+            Log.CoverNotWritten(logger, folder, $"'{sleeve.MediaType}' is not an image with a name");
+            return;
+        }
+
+        var target = folder.Length == 0 ? $"cover.{extension}" : $"{folder}/cover.{extension}";
+        var absolute = store.AbsolutePathFor(new LibraryPath(target));
+        var displaced = string.Empty;
+
+        try
+        {
+            if (File.Exists(absolute))
+            {
+                var present = await File.ReadAllBytesAsync(absolute, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // Already ours, or already right. Either way nothing to do, and
+                // this is what makes re-running the pass cheap.
+                if (present.AsSpan().SequenceEqual(sleeve.Bytes)) return;
+
+                if (!writerOptions.AllowFileMutation)
+                {
+                    Log.CoverNotWritten(logger, target, "file mutation is off");
+                    return;
+                }
+
+                displaced = Displace(target, absolute, covers.Stamp);
+            }
+            else if (!writerOptions.AllowFileMutation)
+            {
+                Log.CoverNotWritten(logger, target, "file mutation is off");
+                return;
+            }
+
+            var staged = await store
+                .OpenForCreateAsync(new LibraryPath(target), sleeve.Bytes.Length, cancellationToken)
+                .ConfigureAwait(false);
+
+            await using (staged.ConfigureAwait(false))
+            {
+                await staged.Content.WriteAsync(sleeve.Bytes, cancellationToken).ConfigureAwait(false);
+                await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
+        {
+            Log.CoverNotWritten(logger, target, cause.Message);
+            return;
+        }
+
+        counts.CoversWritten++;
+        Log.CoverWritten(logger, target, displaced.Length == 0 ? string.Empty : $", displacing {displaced}");
+
+        // Keyed by MediaFileId like every other entry this pass writes, because
+        // a path is up to 4096 bytes and SubjectId is 200. The file named is the
+        // one whose folder got the cover, which is also the one whose save this
+        // entry rides on.
+        var payload = JsonSerializer.Serialize(new
+        {
+            path = target,
+            mediaType = sleeve.MediaType,
+            bytes = sleeve.Bytes.Length,
+            displaced = displaced.Length == 0 ? null : displaced,
+        });
+
+        await provider.GetRequiredService<IEventLog>()
+            .AppendAsync(
+                DomainEvent.Create(
+                    $"{EventPrefix}.cover",
+                    TagWriter.FileSubject,
+                    file.Id.ToString(),
+                    Actor,
+                    clock.UtcNow,
+                    payload,
+                    correlationId),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Moves a cover that is in the way into the trash, and says where it went.
+    /// </summary>
+    /// <remarks>
+    /// The same layout <c>FileManagerService.TrashAsync</c> writes — a stamped
+    /// folder holding the library-relative path — so one run's displaced sleeves
+    /// land together and can be put back by hand. The stamp is the run's, not
+    /// each file's, for exactly that reason.
+    /// </remarks>
+    private string Displace(string relative, string absolute, string stamp)
+    {
+        var destination = Path.Combine(
+            FileManagerService.TrashRoot(options.Value),
+            stamp,
+            relative.Replace('/', Path.DirectorySeparatorChar));
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+        // The log line first: a crash mid-move leaves something naming what was
+        // being displaced, which is the only thing that would explain a missing
+        // cover afterwards.
+        Log.FilesTrashing(logger, relative, destination);
+        File.Move(absolute, destination);
+
+        return destination;
     }
 
     /// <summary>The sentence the log gets, with the tag library named where one failed.</summary>
@@ -598,7 +797,37 @@ public sealed class TagWriteService(
 
         /// <summary>Not on disk. Left alone — an unmounted volume is not an empty library.</summary>
         public int Missing;
+
+        /// <summary>Album folders that got a sleeve. Counted per folder, unlike everything above.</summary>
+        public int CoversWritten;
     }
+
+    /// <summary>
+    /// What one run has already answered about covers.
+    /// </summary>
+    /// <remarks>
+    /// Two caches with the same purpose: a folder is asked once however many
+    /// files it holds, and a release is read out of the database once however
+    /// many folders it spans. A null value in <see cref="Sleeves"/> is an answer
+    /// — "this release has no stored cover" — and not a missing entry, or a
+    /// library of albums nobody has chosen a sleeve for queries once per file.
+    ///
+    /// Per run rather than per pass: a cover chosen between two runs has to be
+    /// picked up by the second one.
+    /// </remarks>
+    private sealed class CoverRun(DateTimeOffset startedAt)
+    {
+        /// <summary>One stamp for the whole run, so displaced sleeves land together.</summary>
+        public string Stamp { get; } =
+            startedAt.ToString("yyyy-MM-dd HHmmss", CultureInfo.InvariantCulture);
+
+        public HashSet<string> Folders { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<ReleaseId, StoredCover?> Sleeves { get; } = [];
+    }
+
+    /// <summary>A chosen cover as the catalogue holds it.</summary>
+    private sealed record StoredCover(byte[] Bytes, string? MediaType);
 
     private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid);
 
@@ -613,6 +842,7 @@ public sealed class TagWriteService(
     private sealed record PendingTagWrite(
         MediaFileId Id,
         string Path,
+        ReleaseId? ReleaseId,
         AcoustId? AcoustId,
         string? TrackTitle,
         string RecordingTitle,
@@ -709,6 +939,12 @@ public sealed record TagWriteProgress(
 /// </param>
 /// <param name="Unsupported">Containers with nowhere to put a custom field — DSD, mostly.</param>
 /// <param name="Skipped">Files that were not on disk. Left alone; an unmounted volume is not an empty library.</param>
+/// <param name="CoversWritten">
+/// Album folders that got the catalogue's chosen sleeve written beside the music
+/// as <c>cover.jpg</c>. <b>Counted per folder, unlike every other number here</b>
+/// — a twelve-track album is twelve examined files and one cover — so it is
+/// deliberately not part of any total.
+/// </param>
 public sealed record TagWriteSummary(
     string JobId,
     string Scope,
@@ -722,4 +958,5 @@ public sealed record TagWriteSummary(
     int Unsupported,
     int Failed,
     int Skipped,
+    int CoversWritten,
     bool Cancelled);

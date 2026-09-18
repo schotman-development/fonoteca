@@ -2194,6 +2194,8 @@ export interface components {
             failed: number;
             /** Format: int32 */
             skipped: number;
+            /** Format: int32 */
+            coversWritten: number;
             cancelled: boolean;
         };
         TrackAlbum: {

@@ -606,12 +606,31 @@ public sealed class FileManagerService(
     private static string Truncate(string subject) =>
         subject.Length <= 200 ? subject : subject[..200];
 
-    private string TrashRoot()
+    private string TrashRoot() => TrashRoot(options.Value);
+
+    /// <summary>
+    /// Where a displaced file goes, from the settings alone.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal static</c> for the tag write pass, which displaces a folder's
+    /// existing <c>cover.*</c> and must put it in the same place this screen
+    /// does. <b>It cannot call <see cref="TrashAsync"/> to do it</b> — that takes
+    /// <c>LibraryWorkGate</c>, which the pass is already holding, so the call
+    /// would be refused by the lock the pass itself owns.
+    ///
+    /// The default is a sibling of the library rather than a folder inside it.
+    /// <c>FonotecaOptions</c> validates a configured path the same way, at
+    /// startup: a trash folder within the root is re-scanned as new files after
+    /// its rows have been deleted.
+    /// </remarks>
+    internal static string TrashRoot(FonotecaOptions options)
     {
-        var configured = options.Value.TrashPath;
+        ArgumentNullException.ThrowIfNull(options);
+
+        var configured = options.TrashPath;
 
         return string.IsNullOrWhiteSpace(configured)
-            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.Value.LibraryPath)) + "-trash"
+            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.LibraryPath)) + "-trash"
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(configured));
     }
 

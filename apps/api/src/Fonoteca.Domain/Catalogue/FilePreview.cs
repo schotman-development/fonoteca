@@ -141,6 +141,32 @@ public static class FilePreview
         && Known.Values.Any(type =>
             type.Kind == PreviewKind.Image
             && type.MediaType.Equals(mediaType, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// What to call a file holding bytes of this media type, or null for anything
+    /// that is not one of the images above.
+    /// </summary>
+    /// <remarks>
+    /// <b>The allowlist read backwards, for the one caller that has to invent a
+    /// name rather than read one.</b> A cover stored in the catalogue has a media
+    /// type and no filename, and writing it beside the album needs both.
+    ///
+    /// Spelled out rather than derived from <c>Known</c>, because that direction
+    /// is one-to-many — <c>image/jpeg</c> is both <c>jpg</c> and <c>jpeg</c> —
+    /// and a <c>FrozenDictionary</c> promises no enumeration order, so "the first
+    /// match" would be a filename that could change between runs of the same
+    /// build. <c>FilePreviewTests</c> pins the two lists against each other.
+    /// </remarks>
+    public static string? ImageExtensionFor(string? mediaType) => mediaType?.ToLowerInvariant() switch
+    {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        "image/avif" => "avif",
+        _ => null,
+    };
 }
 
 /// <param name="MediaType">
