@@ -910,11 +910,11 @@ public sealed class EnrichmentService(
     {
         var now = clock.UtcNow;
 
-        IReadOnlyList<MusicBrainzReleaseGroup> released;
+        MusicBrainzDiscography browse;
 
         try
         {
-            released = await musicBrainz
+            browse = await musicBrainz
                 .BrowseReleaseGroupsForArtistAsync(artist.Mbid, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -926,6 +926,8 @@ public sealed class EnrichmentService(
             Log.DiscographyNotFetched(logger, artist.Name, cause.Message);
             return;
         }
+
+        var released = browse.Groups;
 
         var scope = scopeFactory.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
@@ -1025,6 +1027,38 @@ public sealed class EnrichmentService(
                     ReleaseGroupId = groupId,
                     Position = 0,
                 });
+            }
+
+            // A group MusicBrainz no longer credits them with — merged into
+            // another, or deleted — loses its credit, or it sits on the missing
+            // shelf forever beside the album it was merged into. Only groups with
+            // an MBID: a shop's record was never in this browse to drop out of it.
+            // And only on a complete, non-empty answer: a mirror mid-replication
+            // returns a prefix, and pruning past the cut would have the next full
+            // browse re-add the back catalogue as arrivals and monitor all of it.
+            // The scan's rule, that absence is not deletion.
+            if (browse.Complete && released.Count > 0)
+            {
+                var browsed = released.Select(group => group.Id).ToHashSet();
+
+                var dropped = (await db.ReleaseGroups
+                        .AsNoTracking()
+                        .Where(group => group.Mbid != null && already.Contains(group.Id))
+                        .Select(group => new { group.Id, group.Mbid })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false))
+                    .Where(group => !browsed.Contains(group.Mbid!.Value))
+                    .Select(group => (ReleaseGroupId?)group.Id)
+                    .ToList();
+
+                if (dropped.Count > 0)
+                {
+                    db.ArtistCredits.RemoveRange(await db.ArtistCredits
+                        .Where(credit => credit.ArtistId == artist.Id
+                            && dropped.Contains(credit.ReleaseGroupId))
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false));
+                }
             }
 
             await DiscoverAsync(db, artist, held, arrived, baseline, counts, cancellationToken)

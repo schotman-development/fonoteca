@@ -1224,6 +1224,68 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>
+    /// A record MusicBrainz stops crediting loses its credit on the next browse.
+    /// </summary>
+    /// <remarks>
+    /// Marc Broussard's <i>Carencro</i> was two release groups, one holding the
+    /// files and the other listed as missing beside it. Merging them on
+    /// MusicBrainz fixed nothing here while the re-browse only ever added. The
+    /// empty third browse is the other half: that is also what an artist 404
+    /// looks like, and it must not take the discography with it. The fourth is a
+    /// mirror mid-replication, whose prefix must not either — pruned, the next
+    /// full browse would re-add the back catalogue as arrivals and monitor it.
+    /// </remarks>
+    [Fact]
+    public async Task ARecordMusicBrainzNoLongerCreditsLeavesTheDiscography()
+    {
+        var artist = await SeedFollowedArtistAsync("Marc Broussard");
+
+        var released = new List<MusicBrainzReleaseGroup>
+        {
+            Released("Carencro", 2004),
+            Released("Carencro (duplicate)", 2004),
+        };
+
+        var catalogue = new StubCatalogue(
+            recording: null,
+            work: null,
+            discography: () => [.. released]);
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await AgeDiscographyAsync(artist, TimeSpan.FromDays(30));
+        released.RemoveAt(1);
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        async Task<List<string>> CreditedAsync()
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+
+            return await db.ArtistCredits
+                .Where(credit => credit.ArtistId == artist && credit.ReleaseGroupId != null)
+                .Join(db.ReleaseGroups, credit => credit.ReleaseGroupId, group => group.Id, (_, group) => group.Title)
+                .ToListAsync(Token);
+        }
+
+        Assert.Equal(["Carencro"], await CreditedAsync());
+
+        await AgeDiscographyAsync(artist, TimeSpan.FromDays(30));
+        released.Clear();
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        Assert.Equal(["Carencro"], await CreditedAsync());
+
+        // A short browse: Carencro is past the cut, and must not be read as gone.
+        await AgeDiscographyAsync(artist, TimeSpan.FromDays(30));
+        released.Add(Released("Must Be the Water", 2024));
+        catalogue.BrowseComplete = false;
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        Assert.Equal(["Carencro", "Must Be the Water"], (await CreditedAsync()).Order());
+        Assert.Equal(4, catalogue.BrowseCalls);
+    }
+
+    /// <summary>
     /// An artist with no files at all, which is the case following exists for.
     /// </summary>
     /// <remarks>
@@ -1855,6 +1917,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
         public int BrowseCalls => Volatile.Read(ref _browseCalls);
 
+        /// <summary>False models a mirror mid-replication, whose browse ends short.</summary>
+        public bool BrowseComplete { get; set; } = true;
+
         public static StubCatalogue Unavailable() => new(null, null, unavailable: true);
 
         /// <summary>Never searched for. Only the by-hand album screen searches.</summary>
@@ -1898,7 +1963,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         /// since. A fixed list cannot express that, and a stub that cannot
         /// change its answer can only test half the rule.
         /// </remarks>
-        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+        public Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
             Mbid artist,
             CancellationToken cancellationToken = default)
         {
@@ -1906,7 +1971,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
             if (unavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
 
-            return Task.FromResult(discography?.Invoke() ?? []);
+            return Task.FromResult(new MusicBrainzDiscography(discography?.Invoke() ?? [], BrowseComplete));
         }
 
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(

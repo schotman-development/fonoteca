@@ -660,10 +660,10 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzRecording?>(null);
 
-        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+        public Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
             Mbid artist,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroup>>([]);
+            Task.FromResult(new MusicBrainzDiscography([], Complete: true));
 
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,

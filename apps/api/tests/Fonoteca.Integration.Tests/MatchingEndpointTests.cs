@@ -801,12 +801,12 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
                 null));
         }
 
-        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+        public Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
             Mbid artist,
             CancellationToken cancellationToken = default) =>
             unavailable
                 ? throw new ProviderUnavailableException("musicbrainz", "Down.")
-                : Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroup>>([]);
+                : Task.FromResult(new MusicBrainzDiscography([], Complete: true));
 
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,
@@ -911,10 +911,10 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
                 new Mbid(Guid.CreateVersion7()),
                 "Symphony no. 3"));
 
-        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+        public Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
             Mbid artist,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroup>>([]);
+            Task.FromResult(new MusicBrainzDiscography([], Complete: true));
 
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,

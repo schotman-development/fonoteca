@@ -299,7 +299,7 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                     .ConfigureAwait(false)),
             cancellationToken);
 
-    public async Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+    public async Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
         Mbid artist,
         CancellationToken cancellationToken = default)
     {
@@ -330,8 +330,11 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                     // An empty page ends the loop whatever the count claims —
                     // BrowseReleasesForRecordingAsync's lesson, for the same
                     // reason: a mirror mid-replication is where a total and its
-                    // contents disagree.
-                    if (results.Count == 0) break;
+                    // contents disagree. The answer is then a prefix, and says so.
+                    if (results.Count == 0)
+                    {
+                        return new MusicBrainzDiscography(collected, offset >= page.TotalResults);
+                    }
 
                     foreach (var group in results)
                     {
@@ -339,17 +342,16 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                     }
 
                     offset += results.Count;
-                    if (offset >= page.TotalResults) break;
+                    if (offset >= page.TotalResults) return new MusicBrainzDiscography(collected, true);
                 }
-
-                return collected;
             },
             cancellationToken).ConfigureAwait(false);
 
         // Null is the 404 arm, which for this browse means the artist is gone —
         // indistinguishable from one credited with nothing, and the caller
-        // treats both the same way.
-        return groups ?? [];
+        // treats both the same way. Not complete: an MBID merged into another
+        // artist is a 404 too, and says nothing about their records.
+        return groups ?? new MusicBrainzDiscography([], false);
     }
 
     public Task<MusicBrainzWork?> GetWorkAsync(

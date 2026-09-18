@@ -528,9 +528,13 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
                 index switch { 0 => page1, 1 => page2, _ => empty });
         });
 
-        var groups = await catalogue.BrowseReleaseGroupsForArtistAsync(artist, Token);
+        var browse = await catalogue.BrowseReleaseGroupsForArtistAsync(artist, Token);
+        var groups = browse.Groups;
 
         Assert.Equal(4, groups.Count);
+
+        // Six announced, four delivered: what arrived is kept and the cut is said.
+        Assert.False(browse.Complete);
         Assert.Equal(3, stub.Requests.Count);
 
         // Offsets advance by what arrived. MetaBrainz omits an offset of zero.
@@ -556,6 +560,32 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
 
         Assert.Equal("EP", groups[2].PrimaryType);
         Assert.Null(groups[3].PrimaryType);
+    }
+
+    /// <summary>
+    /// A browse that delivered what it counted is complete, which is what licenses
+    /// the enrichment pass to read a missing group as one MusicBrainz dropped.
+    /// </summary>
+    [Fact]
+    public async Task ADiscographyBrowseThatDeliversItsCountIsComplete()
+    {
+        var page = """
+            {"release-group-count":1,"release-group-offset":0,"release-groups":[
+              {"id":"11111111-1111-1111-1111-111111111111","title":"Carencro",
+               "primary-type":"Album","secondary-types":[],
+               "first-release-date":"2004-08-03","disambiguation":""}
+            ]}
+            """;
+
+        var (catalogue, stub) = Build(_ => StubHttpHandler.Json(HttpStatusCode.OK, page));
+
+        var browse = await catalogue.BrowseReleaseGroupsForArtistAsync(
+            new Mbid(Guid.Parse("58e325d5-54fd-4e98-b39a-3aa6bc319273")),
+            Token);
+
+        Assert.True(browse.Complete);
+        Assert.Equal(["Carencro"], browse.Groups.Select(group => group.Title));
+        Assert.Single(stub.Requests);
     }
 
     [Fact]

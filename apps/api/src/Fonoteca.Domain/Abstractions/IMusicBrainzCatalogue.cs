@@ -169,10 +169,11 @@ public interface IMusicBrainzCatalogue
     /// <see cref="SearchReleasesAsync"/> to one screen and makes it fail on a
     /// self-hosted server does not reach here. See ADR 0006.
     ///
-    /// Paged internally to exhaustion, like
-    /// <see cref="BrowseReleasesForRecordingAsync"/>, so the answer is the whole
-    /// discography or an exception — never a quiet prefix, which for this
-    /// caller would read as an artist who stopped recording.
+    /// Paged internally until the count is reached or a page comes back empty,
+    /// like <see cref="BrowseReleasesForRecordingAsync"/>. The second is a
+    /// mirror mid-replication, and the answer is then a prefix — kept, since
+    /// what did arrive is true, but marked, because a caller removing whatever
+    /// is not listed would read the cut as deletions.
     ///
     /// <b>Unfiltered on purpose, though WS/2 would filter it.</b> The browse
     /// takes a release-group type and the temptation is to ask only for albums;
@@ -183,15 +184,26 @@ public interface IMusicBrainzCatalogue
     /// rankings.
     /// </remarks>
     /// <returns>
-    /// Empty when MusicBrainz has no such artist, or credits them with nothing —
-    /// indistinguishable from here, and the caller treats both the same way.
+    /// No groups when MusicBrainz has no such artist, or credits them with
+    /// nothing — indistinguishable from here, and the caller treats both the
+    /// same way.
     /// </returns>
     /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
     /// <exception cref="ProviderRejectedException">The request was refused.</exception>
-    Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+    Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
         Mbid artist,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>What a browse of an artist's release groups returned.</summary>
+/// <param name="Complete">
+/// Whether every group MusicBrainz counted arrived. False on a short browse and
+/// on an unknown artist, so absence from <paramref name="Groups"/> is evidence
+/// of nothing unless this is true.
+/// </param>
+public sealed record MusicBrainzDiscography(
+    IReadOnlyList<MusicBrainzReleaseGroup> Groups,
+    bool Complete);
 
 /// <summary>
 /// One release group as a browse states it — an album, without any of its
