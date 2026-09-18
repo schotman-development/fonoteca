@@ -919,7 +919,7 @@ export interface paths {
         };
         /**
          * The album's cover, as stored in the catalogue.
-         * @description The first request for an album with no stored cover fetches the Cover Art Archive's front at 500px and keeps it, so the archive is asked once per album. An album the archive holds no front for is remembered as such and answers 404 without asking again. Served under an ETag with `no-cache`, so a changed cover shows on the next view and an unchanged one costs a 304.
+         * @description The first request for an album with no stored cover fetches the Cover Art Archive's front at 500px and keeps it, so the archive is asked once per album. Where the archive holds no front, Qobuz is asked for the same record — by barcode where there is one, by a matched title and artist otherwise — and refuses rather than guesses. An album neither has a picture of answers 404 and is remembered as such for a week, then asked about again, so a sleeve either gains later is still picked up. Served under an ETag with `no-cache`, so a changed cover shows on the next view and an unchanged one costs a 304.
          */
         get: operations["GetReleaseCover"];
         put?: never;
@@ -1964,6 +1964,7 @@ export interface components {
             /** Format: int64 */
             chosen: null | number;
             uploaded: boolean;
+            qobuzAlbum: null | string;
             images: components["schemas"]["ReleaseCoverOption"][];
         };
         ReleaseDetailResponse: {

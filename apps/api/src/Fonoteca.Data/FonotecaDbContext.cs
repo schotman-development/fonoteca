@@ -420,6 +420,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         {
             e.HasKey(x => x.ReleaseId);
             e.Property(x => x.MediaType).HasMaxLength(100);
+            e.Property(x => x.QobuzAlbumId).HasMaxLength(64);
             e.HasOne<Release>()
                 .WithOne()
                 .HasForeignKey<ReleaseCover>(x => x.ReleaseId)

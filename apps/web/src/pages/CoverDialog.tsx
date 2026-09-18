@@ -132,6 +132,19 @@ export function CoverDialog({
           </Text>
         ) : null}
 
+        {/*
+          Said plainly, because it is the one cover here nothing looked up: it
+          was matched to a record the shop sells. Somebody deciding whether the
+          sleeve is right needs to know which of the two kinds they are looking
+          at — and an archive image below is one click away if it is not.
+        */}
+        {state.status === 'ready' && state.data.qobuzAlbum != null ? (
+          <Text size="sm" tone="secondary" block>
+            The cover now comes from Qobuz, because the Cover Art Archive holds no front for this
+            release.
+          </Text>
+        ) : null}
+
         {state.status === 'ready' && state.data.images.length === 0 ? (
           <Text tone="tertiary" block>
             {state.data.mbid == null

@@ -423,10 +423,29 @@ what it means comes from the catalogue.
   trash.
 
 **Album covers** are fetched once at 500px and served from `ReleaseCovers` under
-an ETag — every tile used to hot-link the archive's front-250. An album with no
-front is remembered as a row with no bytes; **an outage is not stored** and the
-next view retries. Only an image the archive lists against *this* release may be
-chosen, and an upload is held to the same raster allowlist with SVG refused.
+an ETag — every tile used to hot-link the archive's front-250. Only an image the
+archive lists against *this* release may be chosen, and an upload is held to the
+same raster allowlist with SVG refused.
+
+- **Two sources, in order, and the order is the safety argument.** The archive
+  is keyed on the release mbid and cannot be wrong about which record it shows.
+  **Qobuz is the fallback** (`QobuzCovers`), reached only where that answered
+  nothing — 105 of 612 albums here — and keyed on the barcode where there is
+  one, on a matched title and artist otherwise. Measured on the first run: **63
+  of the 105 gained a cover**, 13 by barcode and 50 by title. A loose match is
+  refused: an ampersand written out as "and" does not fold, and that is a
+  `QobuzCoversTests` case rather than an oversight.
+- **A row with no bytes is a stamp, not an answer**, and expires after
+  `CatalogueEndpoints.CoverRetryAfter` (a week). Treated as final it would hide
+  every sleeve that reached either source after the first view, forever, with no
+  endpoint to clear it. **A row with bytes never expires**, from any source.
+- **An outage is not stored** — from either source, which is why `QobuzCovers`
+  throws rather than returning null when it could not ask. A stored outage would
+  be believed for a week.
+- **`QobuzAlbumId` is provenance, and `Uploaded` means a person's upload.** A
+  cover the shop supplied is nobody's upload, and the dialog says which it is.
+  This is the one caller of `QobuzClient` that is not a person choosing an album,
+  so what bounds it is written on both.
 
 **`…/folders/seed`** hands a folder to MusicBrainz's own "add release" form,
 prefilled. Fonoteca writes nothing to MusicBrainz and cannot — their `/ws/2`

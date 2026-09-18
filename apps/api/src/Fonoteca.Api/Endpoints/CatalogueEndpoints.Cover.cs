@@ -1,6 +1,7 @@
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Providers.Qobuz;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
@@ -20,11 +21,38 @@ namespace Fonoteca.Api.Endpoints;
 /// <b>The archive's front is only the default.</b> It is the first image typed
 /// <c>Front</c>, which on <i>Back to Tennessee</i> is a 2:1 fold-out spread
 /// ahead of the square sleeve.
+///
+/// <b>Two sources, in that order, and the order is the whole safety argument.</b>
+/// The archive is keyed on the release's own MusicBrainz id and cannot be wrong
+/// about which record it is showing. Qobuz is asked only where that produced
+/// nothing, and is keyed on a barcode where there is one and on a matched title
+/// otherwise — see <c>QobuzCovers</c>, which refuses rather than guesses.
+///
+/// <b>Nothing found is not a final answer.</b> It is remembered for
+/// <see cref="CoverRetryAfter"/> and then asked again, because a sleeve reaching
+/// either source after the first view is exactly the thing a stored "no" would
+/// hide forever.
 /// </remarks>
 public static partial class CatalogueEndpoints
 {
     /// <summary>The largest picture a person may upload.</summary>
     private const int MaxCoverBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// How long "nobody has a picture of this" is believed.
+    /// </summary>
+    /// <remarks>
+    /// <b>A week, which is the same week the candidate caches are believed
+    /// for</b>, and chosen against the same two costs pulling opposite ways. Too
+    /// short and every browse of a shelf with a hundred coverless albums is a
+    /// hundred searches against a paid subscription; too long and an album
+    /// whose sleeve was added the day after somebody looked at it stays a
+    /// monogram until they think to go and ask.
+    ///
+    /// <b>Only a row with no bytes expires.</b> A cover that exists is never
+    /// re-asked, from any source — see <c>ReleaseCover</c>.
+    /// </remarks>
+    private static readonly TimeSpan CoverRetryAfter = TimeSpan.FromDays(7);
 
     private static void MapCoverEndpoints(IEndpointRouteBuilder group)
     {
@@ -34,9 +62,12 @@ public static partial class CatalogueEndpoints
             .WithDescription(
                 "The first request for an album with no stored cover fetches the Cover Art "
                 + "Archive's front at 500px and keeps it, so the archive is asked once per album. "
-                + "An album the archive holds no front for is remembered as such and answers 404 "
-                + "without asking again. Served under an ETag with `no-cache`, so a changed cover "
-                + "shows on the next view and an unchanged one costs a 304.")
+                + "Where the archive holds no front, Qobuz is asked for the same record — by "
+                + "barcode where there is one, by a matched title and artist otherwise — and "
+                + "refuses rather than guesses. An album neither has a picture of answers 404 and "
+                + "is remembered as such for a week, then asked about again, so a sleeve either "
+                + "gains later is still picked up. Served under an ETag with `no-cache`, so a "
+                + "changed cover shows on the next view and an unchanged one costs a 304.")
             .Produces(StatusCodes.Status200OK, contentType: "image/jpeg")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -68,56 +99,74 @@ public static partial class CatalogueEndpoints
         Guid id,
         FonotecaDbContext db,
         ICoverArtArchive archive,
+        QobuzCovers shop,
         IClock clock,
         HttpContext context,
         CancellationToken cancellationToken)
     {
         var releaseId = new ReleaseId(id);
+        var now = Now(clock);
 
         var cover = await db.ReleaseCovers
             .AsNoTracking()
             .FirstOrDefaultAsync(row => row.ReleaseId == releaseId, cancellationToken)
             .ConfigureAwait(false);
 
-        if (cover is null)
+        // A row with bytes is the answer, whoever found them. A row without is
+        // only how long ago nobody had a picture, and it runs out.
+        if (cover is null || (cover.Bytes is null && now - cover.SavedUtc >= CoverRetryAfter))
         {
-            var mbid = await db.Releases
-                .Where(release => release.Id == releaseId)
-                .Select(release => release.Mbid)
+            var release = await db.Releases
+                .Where(row => row.Id == releaseId)
+                .Select(row => new
+                {
+                    row.Mbid,
+                    row.Title,
+                    row.ReleasedYear,
+                    row.Barcode,
+
+                    // The billed line, as every other screen renders it — the
+                    // name a shop prints on the same record.
+                    Artists = row.Credits
+                        .OrderBy(credit => credit.Position)
+                        .Select(credit => new
+                        {
+                            credit.CreditedAs,
+                            credit.JoinPhrase,
+                            Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
+                        })
+                        .ToList(),
+                })
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            if (mbid is null) return NoCover();
+            if (release is null) return NoCover();
 
             try
             {
-                var images = await archive.ListAsync(mbid.Value, cancellationToken)
-                    .ConfigureAwait(false);
-
-                var front = images.FirstOrDefault(image => image.Front);
-
-                cover = front is null
-                    ? new ReleaseCover { ReleaseId = releaseId, SavedUtc = Now(clock) }
-                    : await DownloadCoverAsync(archive, releaseId, mbid.Value, front.Id, clock, cancellationToken)
-                        .ConfigureAwait(false);
+                cover =
+                    await ArchiveCoverAsync(archive, releaseId, release.Mbid, clock, cancellationToken)
+                        .ConfigureAwait(false)
+                    ?? await ShopCoverAsync(
+                            shop,
+                            releaseId,
+                            release.Title,
+                            CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
+                            release.ReleasedYear,
+                            release.Barcode,
+                            clock,
+                            cancellationToken)
+                        .ConfigureAwait(false)
+                    ?? new ReleaseCover { ReleaseId = releaseId, SavedUtc = now };
             }
-            catch (ProviderUnavailableException cause)
+            catch (ProviderException cause)
             {
-                // Not stored: an outage is not an answer, and the next view retries.
+                // Not stored, from either source: an outage is not an answer, and
+                // a stored one would be believed for a week.
                 return ArchiveUnavailable(cause);
             }
 
-            db.ReleaseCovers.Add(cover);
-
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (DbUpdateException)
-            {
-                // A second tile for the same album got there first. Its row is as
-                // good as this one, and this request still has the bytes in hand.
-            }
+            await StoreFoundCoverAsync(db, cover, cancellationToken).ConfigureAwait(false);
         }
 
         if (cover.Bytes is null || cover.MediaType is null) return NoCover();
@@ -151,7 +200,7 @@ public static partial class CatalogueEndpoints
 
         var chosen = await db.ReleaseCovers
             .Where(row => row.ReleaseId == releaseId)
-            .Select(row => new { row.ArchiveImageId, Stored = row.Bytes != null })
+            .Select(row => new { row.ArchiveImageId, row.QobuzAlbumId, Stored = row.Bytes != null })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -172,7 +221,8 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new ReleaseCoverOptions(
             release.Mbid?.Value,
             chosen?.ArchiveImageId,
-            chosen is { Stored: true, ArchiveImageId: null },
+            chosen is { Stored: true, ArchiveImageId: null, QobuzAlbumId: null },
+            chosen?.QobuzAlbumId,
             images
                 .Select(image => new ReleaseCoverOption(
                     image.Id,
@@ -314,6 +364,96 @@ public static partial class CatalogueEndpoints
         return TypedResults.NoContent();
     }
 
+    /// <summary>The archive's own front, or nothing.</summary>
+    /// <remarks>
+    /// <b>First, and the only source keyed on an identifier.</b> An album with
+    /// no MusicBrainz id skips straight past it: the archive is indexed by
+    /// release mbid and has no other way in.
+    /// </remarks>
+    private static async Task<ReleaseCover?> ArchiveCoverAsync(
+        ICoverArtArchive archive,
+        ReleaseId releaseId,
+        Mbid? mbid,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        if (mbid is not { } release) return null;
+
+        var images = await archive.ListAsync(release, cancellationToken).ConfigureAwait(false);
+
+        return images.FirstOrDefault(image => image.Front) is { } front
+            ? await DownloadCoverAsync(archive, releaseId, release, front.Id, clock, cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+    }
+
+    /// <summary>The shop's picture of the same record, or nothing.</summary>
+    /// <remarks>
+    /// Second, never first, and unreached for five albums in six — see the
+    /// type's own remarks for why a matched title is allowed to choose a cover
+    /// when it is not allowed to choose a portrait.
+    /// </remarks>
+    private static async Task<ReleaseCover?> ShopCoverAsync(
+        QobuzCovers shop,
+        ReleaseId releaseId,
+        string title,
+        string? artist,
+        int? year,
+        string? barcode,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var found = await shop.FindAsync(title, artist, year, barcode, cancellationToken)
+            .ConfigureAwait(false);
+
+        return found is null
+            ? null
+            : new ReleaseCover
+            {
+                ReleaseId = releaseId,
+                Bytes = found.Bytes,
+                MediaType = found.MediaType,
+                QobuzAlbumId = found.AlbumId,
+                SavedUtc = Now(clock),
+            };
+    }
+
+    /// <summary>
+    /// Writes down what the sources answered, without overwriting a picture.
+    /// </summary>
+    /// <remarks>
+    /// <b>An upsert rather than an insert, because the row may already exist</b>
+    /// — that is what a week-old "nobody has one" is — and guarded on
+    /// <c>Bytes IS NULL</c>, because between this request reading that row and
+    /// writing this one somebody may have uploaded or chosen a cover. A rule's
+    /// answer must not land on top of a person's; the guard is where
+    /// <c>ChooseReleaseCover</c>'s unconditional upsert gets to win a race it
+    /// did not know it was in.
+    /// </remarks>
+    private static async Task StoreFoundCoverAsync(
+        FonotecaDbContext db,
+        ReleaseCover cover,
+        CancellationToken cancellationToken)
+    {
+        await db.Database
+            .ExecuteSqlAsync(
+                $"""
+                INSERT INTO "ReleaseCovers"
+                    ("ReleaseId", "Bytes", "MediaType", "ArchiveImageId", "QobuzAlbumId", "SavedUtc")
+                VALUES ({cover.ReleaseId.Value}, {cover.Bytes}, {cover.MediaType},
+                    {cover.ArchiveImageId}, {cover.QobuzAlbumId}, {cover.SavedUtc})
+                ON CONFLICT ("ReleaseId") DO UPDATE SET
+                    "Bytes" = excluded."Bytes",
+                    "MediaType" = excluded."MediaType",
+                    "ArchiveImageId" = excluded."ArchiveImageId",
+                    "QobuzAlbumId" = excluded."QobuzAlbumId",
+                    "SavedUtc" = excluded."SavedUtc"
+                WHERE "ReleaseCovers"."Bytes" IS NULL
+                """,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private static async Task<ReleaseCover> DownloadCoverAsync(
         ICoverArtArchive archive,
         ReleaseId releaseId,
@@ -353,12 +493,15 @@ public static partial class CatalogueEndpoints
         await db.Database
             .ExecuteSqlAsync(
                 $"""
-                INSERT INTO "ReleaseCovers" ("ReleaseId", "Bytes", "MediaType", "ArchiveImageId", "SavedUtc")
-                VALUES ({cover.ReleaseId.Value}, {cover.Bytes}, {cover.MediaType}, {cover.ArchiveImageId}, {cover.SavedUtc})
+                INSERT INTO "ReleaseCovers"
+                    ("ReleaseId", "Bytes", "MediaType", "ArchiveImageId", "QobuzAlbumId", "SavedUtc")
+                VALUES ({cover.ReleaseId.Value}, {cover.Bytes}, {cover.MediaType},
+                    {cover.ArchiveImageId}, {cover.QobuzAlbumId}, {cover.SavedUtc})
                 ON CONFLICT ("ReleaseId") DO UPDATE SET
                     "Bytes" = excluded."Bytes",
                     "MediaType" = excluded."MediaType",
                     "ArchiveImageId" = excluded."ArchiveImageId",
+                    "QobuzAlbumId" = excluded."QobuzAlbumId",
                     "SavedUtc" = excluded."SavedUtc"
                 """,
                 cancellationToken)
@@ -379,20 +522,35 @@ public static partial class CatalogueEndpoints
             detail: $"The catalogue has no release with id {id}.",
             statusCode: StatusCodes.Status404NotFound);
 
-    private static ProblemHttpResult ArchiveUnavailable(ProviderUnavailableException cause) =>
+    /// <summary>
+    /// One of the two sources did not answer.
+    /// </summary>
+    /// <remarks>
+    /// Named for the provider that failed rather than for the archive, since
+    /// either can be the one that did — and the title is what reaches a person
+    /// looking at why a tile is empty.
+    /// </remarks>
+    private static ProblemHttpResult ArchiveUnavailable(ProviderException cause) =>
         TypedResults.Problem(
-            title: "The Cover Art Archive did not answer",
+            title: $"{cause.Provider} did not answer",
             detail: cause.Message,
             statusCode: StatusCodes.Status503ServiceUnavailable);
 }
 
 /// <param name="Mbid">Null for an album with no MusicBrainz id; <c>Images</c> is then empty.</param>
 /// <param name="Chosen">The archive image currently stored, if the stored cover is one.</param>
-/// <param name="Uploaded">Whether the stored cover is a person's upload.</param>
+/// <param name="Uploaded">
+/// Whether the stored cover is a person's upload — which now means neither
+/// source found it, rather than merely "not the archive's". A cover the shop
+/// supplied is nobody's upload, and a screen saying otherwise tells somebody
+/// they did something they did not do.
+/// </param>
+/// <param name="QobuzAlbum">Which Qobuz album supplied it, when one did.</param>
 public sealed record ReleaseCoverOptions(
     Guid? Mbid,
     long? Chosen,
     bool Uploaded,
+    string? QobuzAlbum,
     IReadOnlyList<ReleaseCoverOption> Images);
 
 /// <param name="Front">Whether the archive itself calls this the front.</param>

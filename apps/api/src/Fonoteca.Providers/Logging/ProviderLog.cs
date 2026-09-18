@@ -120,6 +120,48 @@ internal static partial class ProviderLog
         int returned,
         int total);
 
+    /// <remarks>
+    /// Debug and not a warning: an album the shop does not carry, or carries
+    /// under a name that does not fold to ours, is the ordinary answer. What
+    /// makes it worth a line at all is that the alternative — a cover appearing
+    /// from nowhere — leaves no trace of <i>which</i> record it was taken from,
+    /// and that is the one thing a wrong sleeve needs explaining by.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1405,
+        Level = LogLevel.Debug,
+        Message = "Qobuz offered no cover for {Artist} - {Title}: {Searched} albums searched, "
+            + "none matched by barcode or by title")]
+    public static partial void QobuzCoverUnmatched(
+        ILogger logger,
+        string? artist,
+        string title,
+        int searched);
+
+    [LoggerMessage(
+        EventId = 1406,
+        Level = LogLevel.Debug,
+        Message = "Qobuz album {Album} supplies the cover for {Artist} - {Title}, matched by {How}")]
+    public static partial void QobuzCoverMatched(
+        ILogger logger,
+        string album,
+        string? artist,
+        string title,
+        string how);
+
+    /// <remarks>
+    /// A warning, unlike its portrait twin: a picture served from somewhere that
+    /// is not their CDN, or under a type this application will not serve, is the
+    /// shape of a redirect landing somewhere unexpected — and the bytes were
+    /// about to be stored and handed to a browser.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1407,
+        Level = LogLevel.Warning,
+        Message = "Qobuz offered {Url} as a cover, which is not a picture this application "
+            + "will serve")]
+    public static partial void QobuzCoverRejected(ILogger logger, string url);
+
     [LoggerMessage(
         EventId = 1430,
         Level = LogLevel.Warning,

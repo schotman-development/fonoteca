@@ -16,11 +16,18 @@ namespace Fonoteca.Providers.Qobuz;
 /// Search Qobuz, read an album's track list, and open a track's audio.
 /// </summary>
 /// <remarks>
-/// <b>Manual acquisition only.</b> Nothing here is on a pass or a schedule —
-/// every call is a person who has chosen an album. That is a deliberate limit
+/// <b>Nothing here is on a pass or a schedule.</b> That is a deliberate limit
 /// rather than an unfinished one: this is a reverse-engineered API on a paid
 /// personal subscription, and the failure mode of automating it is a suspended
 /// account rather than a retry.
+///
+/// <b>Acquisition is a person choosing an album; <see cref="QobuzCovers"/> is
+/// not, and is the one caller that isn't.</b> A page of tiles can reach it
+/// without anybody choosing anything, so what bounds it is stated there and
+/// counted here: one search per album, only where the Cover Art Archive holds
+/// nothing, and at most once a week per album while it keeps holding nothing.
+/// Measured on this library that is 105 searches to fill the shelf and a
+/// handful a week after. A pass over the whole library would be neither.
 ///
 /// No <c>IQobuz…</c> interface in the domain, unlike AcoustID and MusicBrainz,
 /// and the difference is who consumes it. Those two feed rules that live in
@@ -76,6 +83,13 @@ public sealed class QobuzClient(
     /// visible rather than silent.
     /// </remarks>
     private const int AlbumPageSize = 100;
+
+    /// <summary>How long a cover download may take before it is a failure.</summary>
+    /// <remarks>
+    /// Not on the client, because the client is shared with audio and infinite
+    /// is correct there. See <see cref="DownloadImageAsync"/>.
+    /// </remarks>
+    private static readonly TimeSpan ImageTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>Albums matching a search, best first as Qobuz ranks them.</summary>
     public async Task<IReadOnlyList<QobuzAlbum>> SearchAlbumsAsync(
@@ -373,6 +387,68 @@ public sealed class QobuzClient(
         {
             throw new ProviderUnavailableException(
                 ProviderName, $"Qobuz audio download failed: {cause.Message}.", cause);
+        }
+    }
+
+    /// <summary>A picture from their CDN, whole.</summary>
+    /// <remarks>
+    /// <b>Buffered rather than streamed</b>, unlike <see cref="OpenAudioAsync"/>
+    /// and for the opposite reason: a cover is a few hundred kilobytes that is
+    /// about to be written to a row, so there is nothing to copy it through to.
+    ///
+    /// <b>On the content client, so it is unauthenticated and ungated.</b> The
+    /// CDN is not the API: sending it the app id and the subscriber's token
+    /// spends a credential on a host that does not want one, and queueing an
+    /// image behind the one-second API gate would make a page of tiles a page of
+    /// seconds. Who may be asked for a cover at all is decided a layer up, in
+    /// <see cref="QobuzCovers"/>.
+    ///
+    /// <b>With a timeout of its own, because that client has none.</b> Infinite
+    /// is right for the 400 MB download it was configured for and wrong here:
+    /// this runs inside a request drawing a tile, and a CDN socket that hangs
+    /// would hold that request until the browser gave up. A cover is a few
+    /// hundred kilobytes, so <see cref="ImageTimeout"/> is generous.
+    /// </remarks>
+    public async Task<CoverArtBytes> DownloadImageAsync(
+        Uri url,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+
+        var http = clients.CreateClient(ContentHttpClientName);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ImageTimeout);
+
+        try
+        {
+            using var response = await http.GetAsync(url, timeout.Token).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new ProviderUnavailableException(
+                    ProviderName,
+                    $"Qobuz image download returned {(int)response.StatusCode} {response.StatusCode}.");
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token)
+                .ConfigureAwait(false);
+
+            return new CoverArtBytes(
+                bytes,
+                response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
+        }
+        catch (HttpRequestException cause)
+        {
+            throw new ProviderUnavailableException(
+                ProviderName, $"Qobuz image download failed: {cause.Message}.", cause);
+        }
+        catch (OperationCanceledException cause) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The caller's token is not the one that fired, so this is the
+            // timeout above — worth trying again later, unlike an abandoned page.
+            throw new ProviderUnavailableException(
+                ProviderName, $"Qobuz image download timed out after {ImageTimeout}.", cause);
         }
     }
 

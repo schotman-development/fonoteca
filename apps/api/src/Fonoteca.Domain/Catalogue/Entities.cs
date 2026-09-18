@@ -909,9 +909,18 @@ public sealed class ReleaseCandidateSet
 /// The picture shown for one release, kept rather than fetched on every view.
 /// </summary>
 /// <remarks>
-/// <b>A row with no bytes is an answer:</b> the archive was asked and holds no
-/// front cover. Without it every page showing that album would ask again. A
-/// row is only written when the archive answered, so an outage retries.
+/// <b>A row with no bytes is not an answer, it is a stamp:</b> nobody had a
+/// picture of this album when it was written. Without the row every page
+/// showing that album would ask both sources again; treated as final, an album
+/// whose sleeve reached the archive or the shop <i>after</i> that view would
+/// never show one. So it expires — see <c>CatalogueEndpoints.CoverRetryAfter</c>
+/// — and a row is still only written when a source answered, so an outage
+/// retries at once rather than in a week.
+///
+/// <b>A row with bytes never expires</b>, whichever source found it. That is
+/// rule 4: replacing a picture somebody is looking at, because a second source
+/// later offered a different one, is the catalogue overruling a settled
+/// question nobody asked it to reopen.
 /// </remarks>
 public sealed class ReleaseCover
 {
@@ -921,10 +930,20 @@ public sealed class ReleaseCover
 
     public string? MediaType { get; set; }
 
-    /// <summary>
-    /// Which archive image this is. Null beside bytes means a person uploaded it.
-    /// </summary>
+    /// <summary>Which archive image this is, when the archive is where it came from.</summary>
     public long? ArchiveImageId { get; set; }
+
+    /// <summary>
+    /// Which Qobuz album the picture came from, when Qobuz is where it came from.
+    /// </summary>
+    /// <remarks>
+    /// The provenance, not just the source: a Qobuz cover is the one kind here
+    /// chosen by <i>matching</i> rather than by an identifier, so the album it
+    /// was taken from is the only thing that makes a wrong sleeve explicable
+    /// after the fact. Bytes with neither this nor
+    /// <see cref="ArchiveImageId"/> are a person's upload.
+    /// </remarks>
+    public string? QobuzAlbumId { get; set; }
 
     /// <summary>When the picture last changed; the ETag it is served under.</summary>
     public required DateTimeOffset SavedUtc { get; set; }

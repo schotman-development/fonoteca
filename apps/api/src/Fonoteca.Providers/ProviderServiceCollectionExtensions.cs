@@ -184,6 +184,12 @@ public static class ProviderServiceCollectionExtensions
 
         services.AddSingleton<QobuzClient>();
 
+        // Not keyed, unlike the portraits and the discovery below: there is one
+        // source of a cover that is not the Cover Art Archive, and the caller
+        // reaches it only after that one has answered with nothing. A second
+        // would be a decision to take then.
+        services.AddSingleton<QobuzCovers>();
+
         // Keyed, because there are two sources of artist pictures and the caller
         // has to be able to name which one it wants first — they differ in cost
         // by two orders of magnitude, so "inject them all and try each" would
