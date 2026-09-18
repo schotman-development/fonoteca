@@ -118,29 +118,40 @@ public static class StagedFileName
         return cleaned.Length == 0 ? Unnamed : cleaned;
     }
 
-    /// <summary>Cuts to <see cref="MaximumSegmentBytes"/> without splitting a character.</summary>
+    /// <summary>Cuts to <paramref name="maximumBytes"/> UTF-8 bytes without splitting a character.</summary>
     /// <remarks>
     /// Rune by rune rather than by index. A surrogate pair cut down the middle
     /// is a lone surrogate, which does not round-trip through UTF-8 and comes
     /// back off the filesystem as a replacement character — a filename that no
     /// longer equals the one that was written.
+    ///
+    /// Public because the staging file the tag write opens has the same limit
+    /// and learned it the hard way: a name of 241 bytes is legal, and the same
+    /// name inside <c>.{name}.fonoteca-xxxxxxxx.tmp</c> is 264 and cannot be
+    /// created at all. One copy of the rune loop, two callers — the alternative
+    /// is two, and one of them ends up counting characters.
     /// </remarks>
-    private static string Truncate(string value)
+    public static string ClampToBytes(string value, int maximumBytes)
     {
-        if (Encoding.UTF8.GetByteCount(value) <= MaximumSegmentBytes) return value;
+        ArgumentNullException.ThrowIfNull(value);
 
-        var kept = new StringBuilder(MaximumSegmentBytes);
+        if (Encoding.UTF8.GetByteCount(value) <= maximumBytes) return value;
+
+        var kept = new StringBuilder(maximumBytes);
         var bytes = 0;
 
         foreach (var rune in value.EnumerateRunes())
         {
             var size = rune.Utf8SequenceLength;
-            if (bytes + size > MaximumSegmentBytes) break;
+            if (bytes + size > maximumBytes) break;
 
             kept.Append(rune);
             bytes += size;
         }
 
-        return kept.ToString().TrimEnd('.', ' ');
+        return kept.ToString();
     }
+
+    private static string Truncate(string value) =>
+        ClampToBytes(value, MaximumSegmentBytes).TrimEnd('.', ' ');
 }

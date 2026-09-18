@@ -75,7 +75,7 @@ public static partial class FileEndpoints
         return app;
     }
 
-    private static async Task<Results<Ok<FolderListing>, ProblemHttpResult>> ListFolder(
+    internal static async Task<Results<Ok<FolderListing>, ProblemHttpResult>> ListFolder(
         FileManagerService files,
         CancellationToken cancellationToken,
         string? path = null)

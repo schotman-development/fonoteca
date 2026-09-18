@@ -329,50 +329,74 @@ public sealed class FileManagerService(
             // cross-device, permissions, a name the filesystem refuses — rolls
             // the paths back; the other order can only be undone by a scan, and
             // by then the scan has already discarded everything derived.
-            var transaction = await db.Database.BeginTransactionAsync(cancellationToken)
-                .ConfigureAwait(false);
+            //
+            // Through the execution strategy, because the context is registered
+            // with EnableRetryOnFailure and NpgsqlRetryingExecutionStrategy
+            // refuses a transaction it did not open: without this every rename
+            // answered 500 with "does not support user-initiated transactions",
+            // and the feature this service exists for was unreachable. The
+            // delegate is the retriable unit and may run more than once, so
+            // nothing in it may lean on what a previous attempt did — which is
+            // what the check below is for. A rollback undoes the paths; it does
+            // not undo a rename(2).
+            var rows = await db.Database.CreateExecutionStrategy().ExecuteAsync(
+                async token =>
+                {
+                    var transaction = await db.Database.BeginTransactionAsync(token)
+                        .ConfigureAwait(false);
 
-            await using (transaction.ConfigureAwait(false))
+                    await using (transaction.ConfigureAwait(false))
+                    {
+                        var repointed = await RewritePathsAsync(source, target, token)
+                            .ConfigureAwait(false);
+
+                        // Before the branch, not inside the file half of it.
+                        // Moving a folder to a home that does not exist yet is
+                        // the ordinary case — there is no "create folder" on the
+                        // screen — and without this Directory.Move throws a
+                        // DirectoryNotFoundException naming the *source*, so the
+                        // refusal points at the one path that is fine.
+                        Directory.CreateDirectory(Path.GetDirectoryName(targetAbsolute)!);
+
+                        var alreadyMoved = !File.Exists(sourceAbsolute)
+                            && !Directory.Exists(sourceAbsolute)
+                            && (File.Exists(targetAbsolute) || Directory.Exists(targetAbsolute));
+
+                        if (!alreadyMoved)
+                        {
+                            if (isDirectory) Directory.Move(sourceAbsolute, targetAbsolute);
+                            else File.Move(sourceAbsolute, targetAbsolute);
+                        }
+
+                        await JournalAsync(
+                            "files.moved",
+                            $"{source} -> {target}",
+                            new { from = source, to = target, catalogueRows = repointed },
+                            token).ConfigureAwait(false);
+
+                        await transaction.CommitAsync(token).ConfigureAwait(false);
+
+                        return repointed;
+                    }
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            // After the commit, so a failure here is tidying that did not happen
+            // rather than a move that did not. Reported as a failed move it would
+            // send somebody looking for a folder that has already moved.
+            try
             {
-                var rows = await RewritePathsAsync(source, target, cancellationToken)
-                    .ConfigureAwait(false);
-
-                // Before the branch, not inside the file half of it. Moving a
-                // folder to a home that does not exist yet is the ordinary case
-                // — there is no "create folder" on the screen — and without this
-                // Directory.Move throws a DirectoryNotFoundException naming the
-                // *source*, so the refusal points at the one path that is fine.
-                Directory.CreateDirectory(Path.GetDirectoryName(targetAbsolute)!);
-
-                if (isDirectory) Directory.Move(sourceAbsolute, targetAbsolute);
-                else File.Move(sourceAbsolute, targetAbsolute);
-
-                await JournalAsync(
-                    "files.moved",
-                    $"{source} -> {target}",
-                    new { from = source, to = target, catalogueRows = rows },
-                    cancellationToken).ConfigureAwait(false);
-
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-
-                // After the commit, so a failure here is tidying that did not
-                // happen rather than a move that did not. Reported as a failed
-                // move it would send somebody looking for a folder that has
-                // already moved.
-                try
-                {
-                    var parent = ParentOf(source);
-                    if (parent is not null) store.PruneEmptyDirectories(new LibraryPath(parent));
-                }
-                catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
-                {
-                    Log.FilesTrashRefused(logger, source, cause.Message);
-                }
-
-                Log.FilesMoved(logger, source, target, rows);
-
-                return new FileOperation(true, 1, rows, target, null);
+                var parent = ParentOf(source);
+                if (parent is not null) store.PruneEmptyDirectories(new LibraryPath(parent));
             }
+            catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
+            {
+                Log.FilesTrashRefused(logger, source, cause.Message);
+            }
+
+            Log.FilesMoved(logger, source, target, rows);
+
+            return new FileOperation(true, 1, rows, target, null);
         }
     }
 

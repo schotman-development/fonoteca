@@ -375,6 +375,90 @@ the only caller of `Start()`), so it is always a deliberate press.
 - **`describedAtUtc` is on the wire beside the fields it fills.** Without it a
   screen cannot tell "MusicBrainz holds no country for this orchestra" from
   "nobody has asked yet", and those want opposite things on the page.
+- **`Artists.LatinName` is MusicBrainz's own English alias, and the whole
+  feature rides on `Include.Aliases` costing nothing.** MusicBrainz files an
+  artist under the name they use in the script they use it in —
+  `Пётр Ильич Чайковский`, `内田光子`, `ጌታቸው፡መኩሪያ` — which is right for a catalogue
+  and wrong for a list somebody reads, where those rows sort past Z and are
+  unfindable by anyone who knows the man as Tchaikovsky. Measured on this
+  library: **22 of 3,051 artists**, and 20 of them carry an
+  `locale="en" primary="true"` alias that is exactly the wanted transliteration.
+  The other two (`余隆`, `村治佳織`) carry a Latin alias with no locale at all, which
+  is the third rung of `LatinNames.Of`. Same lookup as the genres and the band
+  relations, one more include, no extra turn at the rate limit.
+- **Letters only, and 59 real names turn on that word.** Asking "is every
+  *character* Latin" flags 81 artists and only 22 are non-Latin: the rest are
+  `Johnny “Guitar” Watson`, `T‐Bone Walker`, `Camille Saint‐Saëns`,
+  `Gordon Jenkins’ Orchestra` — curly quotes, U+2010 hyphens, U+2019
+  apostrophes inside names that were already right. Skipping non-letters drops
+  all of them and also every false hit on titles: `…`, `№`, `♩`, and the Roman
+  numeral `Ⅱ`, which is a `LetterNumber` rather than a letter. `LatinNames`
+  runs on `Rune`, not `char`, so a name outside the BMP is one test rather than
+  two surrogate halves that are letters in neither script.
+- **There is deliberately no sort-name fallback.** `SortName` is Latin for all
+  22, so un-inverting it looks like a free fourth rung — and it is right on a
+  person and garbage on an ensemble: `Jenkins, Gordon, Orchestra and Choir`
+  becomes `Orchestra and Choir Jenkins, Gordon`, and nothing in the sort name
+  says which kind it is. An artist with no Latin alias keeps their own name,
+  which is hard to read and never false.
+- **Beside `Name` rather than over it, and the column is what makes that
+  affordable.** Overwriting at write time costs no read sites at all and was
+  the tempting version; it throws away the catalogue's record of what
+  MusicBrainz says, and it reaches `TagWriteService`, which would then rewrite
+  a Japanese pressing's `ARTIST` frame on a display preference. A column is
+  SQL-translatable, so the EF projections that *cannot* call a helper — the
+  hazard this file already documents — read `LatinName ?? Name` anyway. Every
+  reader resolves it that way, so null means "their own name is fine".
+- **A non-Latin `CreditedAs` is not a billing line.** Six rows here, all
+  Mitsuko Uchida, where a Japanese pressing spells her the way her own row
+  already does. Every credit line resolves `CreditedAs ?? LatinName ?? Name`,
+  so stored they outrank the alias and the release page disagrees with the
+  artist page beside it. `LatinNames.CreditedAs` is now the one copy of a rule
+  three writers held separately; the one that reaches it holding an `ArtistId`
+  out of a dictionary passes `artistName: null` and is judged on script alone,
+  which is exactly what it could do before.
+- **The artist filter searches both names.** The list prints
+  `LatinName ?? Name`, so a filter over the other column is a search box that
+  cannot find what the screen is showing — typing "Tchaikovsky" would match
+  nothing with the row visible behind it. The native name stays searchable,
+  because somebody pasting `Чайковский` out of a filename means that row.
+- **`U+02BB` is a letter, and the first bound was wrong about it.** The
+  `ʻokina` and the modifier apostrophe `U+02BC` are category `Lm`, so
+  `Rune.IsLetter` calls them letters, and they sit just above a cut at
+  `U+024F` — so `Israel Kamakawiwoʻole` read as non-Latin and had an English
+  alias written over a name that was already right. That is this rule failing
+  in the only direction that does damage, and no query over the library would
+  have found it: MusicBrainz spells most Hawaiian artists this way and this
+  library holds none of them. The bound is `U+02FF`, which costs nothing —
+  everything between is IPA and Latin modifiers, and Greek, the first script
+  with letters that merely look Latin, starts at `U+0370`.
+- **A `Search hint` is not a name.** MusicBrainz files misspellings and
+  punctuation variants under that alias type so its own search box matches
+  them — Tchaikovsky has `Chaikovsky`, `Ciaikosvsky` and eleven more. Harmless
+  while a named rung wins, and the whole answer on the last rung, which takes
+  any Latin alias in ordinal order: `Chaikovsky` sorts first. `MusicBrainzAlias`
+  carries the type for this one `Where` clause.
+- **This is narrowed to artists, and the narrowing is not stated anywhere
+  else.** Release, recording and track titles measured clean — the 27 that
+  first looked non-Latin were `…`, `№`, `♩`, `Ⅱ` and one MusicBrainz typo where
+  `A Matter оf Time` carries a Cyrillic `о`. Two surfaces are genuinely not
+  covered and both show today: **7 Cyrillic work titles** (`Щелкунчик, op. 71:
+  Увертюра`), which are the section headings on Tchaikovsky's page, and **752
+  release-group titles** on the discography and "missing records" shelves
+  (`Пиковая дама`, `交響曲第６番 作品74 「悲愴」`). MusicBrainz serves aliases for both,
+  so the mechanism generalises — but each needs its own column and `Include`,
+  and for works and release groups that is a re-ask of a large worklist rather
+  than a free ride on a lookup already being made. The Identify and Matching
+  screens print provider data that never reaches a catalogue row at all, and a
+  folder's name on disk is not ours to transliterate.
+- **The 22 needed the hand-written `UPDATE`, for the fourth time.** The
+  worklist is `Artists.LookupUtc IS NULL`, so every artist described before
+  `Include.Aliases` existed is invisible to it — `member of band`'s lesson,
+  again. Narrowed to the artists whose name is not Latin rather than clearing
+  the column outright: 22 rows and half a minute against 3,051 and seventy
+  minutes. The selector is the SQL twin of `LatinNames.IsLatin` — strip the
+  Latin ranges, see whether a letter survives — and it returns 22 and 6, which
+  is how it was checked against the C# rule.
 - **`Intl.DisplayNames` turns `AT` into Austria.** A table of two hundred
   countries is data the platform already ships. MusicBrainz's own non-ISO codes
   — `XW` worldwide, `XE` Europe, `SU` — come back as themselves through
@@ -490,6 +574,27 @@ genuinely single releases.
   candidate set for one component runs to hundreds; writing them all makes the
   album list a browse of MusicBrainz. Writing the full track list of the ones
   kept is what makes "you are missing track 7" answerable.
+- **A song left out of an album that matched is usually enrichment's guess, not
+  the rule's.** One AcoustID cluster links a dozen recordings and enrichment
+  names the most-submitted — *Blue in Green (Take 1)* where *Kind of Blue* prints
+  the master — so `Assign` finds no slot for it. `ReleaseAttribution.Reseat` then
+  seats a refused file on a gap in a release the folder was already filed under,
+  when the file's *own* cluster links that gap's recording, the answer is single
+  both ways, and the drift clears the configured last rung; the file's
+  `RecordingId` is re-pointed to the slot's. Evidence is `AcoustIdMatchesJson` or
+  one lookup from the stored fingerprint, only for folders that filed something
+  and refused something. Replayed offline: at most 16 of 42 such files (fewer where
+  the siblings were filed by a person, which keeps them out of the component); 24 have
+  clusters that do not link the album's recording at all, and two drift 6–8s.
+  A re-pointed file keeps `EnrichmentOutcome.Linked` with the track list's billed
+  credits and without the old recording's relationships; clearing its
+  `RecordingLookupUtc` by hand puts enrichment's guess back and leaves the file
+  disagreeing with its track. Only albums filed `Attributed` are seated onto, and
+  files with `IdentityDecidedUtc` are never re-pointed. **Not covered:
+  `AcoustIdOutcome.Ambiguous` files** — no `AcoustId`, no `RecordingId`, never in
+  a component. 11 of 12 in partly-filed folders have a cluster linking an empty
+  slot; seating them means a pass deciding an identity, which needs an outcome of
+  its own.
 - **`held` counts distinct tracks, not files.** Five encodings of one song are
   one track of the album; counting files makes a half-ripped album read complete.
 - **Known failure, expected fixed by the folder cut and NOT yet re-measured.**
@@ -948,8 +1053,7 @@ one that already exists.
 | --- | --- |
 | `Domain/Abstractions/IMusicBrainzCatalogue.cs` | `SearchReleasesAsync` — the one text search in the application |
 | `Api/Endpoints/CatalogueEndpoints.AlbumMatching.cs` | search, track list, and the commit |
-| `web/src/pages/MatchingPage.tsx` | the worklist, grouped by album folder |
-| `web/src/pages/ReleaseMatchDialog.tsx` | search → choose → check the pairing → file |
+| `web/src/pages/IdentifyPage.tsx` | one folder at a time — see the Identify section below |
 | `web/src/pages/seating.ts` | the pure half — ids, drift, folder cut. `node --test` |
 
 **Every other chooser on the matching screen recovers a candidate set. This one
@@ -1051,6 +1155,54 @@ MusicBrainz and approving a pairing they can see is the only evidence available.
   section. Pasting an MBID or a release URL into the box is a lookup and works
   either way; `CatalogueEndpoints.AlbumMatching` detects one with a regex before
   it searches, because MusicBrainz indexes titles and not identifiers.
+
+### The Identify screen, one folder at a time
+
+| | |
+| --- | --- |
+| `Api/Endpoints/CatalogueEndpoints.Identify.cs` | `GET …/folders/queue`, `GET …/folders/identify` |
+| `Tagging/AudioFileDescriber.cs` | `ReadTagsAsync` — the tag half of `DescribeAsync`, no `ffprobe` |
+| `web/src/pages/IdentifyPage.tsx` | folder, search, one release at a time, Skip / Not a release / More / File |
+| `web/src/pages/identify.ts` | the pure half — seating, notices, facts. `node --test` |
+
+`/library/matching` replaced the grouped worklist and the album dialog. The unit
+is the album folder (`AlbumFolder.Of`), whatever each open file in it was
+refused for, so a component and its stray file questions are one screen.
+
+- **The tags order the queue and prefill the search, and decide nothing.** The
+  refused files carry Picard tags; folders whose open files all name one
+  `MUSICBRAINZ_ALBUMID` come first, and that release is looked up by id and put
+  first among the search results, because a text search for the tag's album
+  title does not always return it (a live release titled with its venue).
+- **Tag readings are cached in `IMemoryCache`** keyed on path, size and mtime —
+  the scan's own idea of a version — for an hour. The queue reads every open
+  file's tags; the first request after a restart is seconds, later ones are
+  milliseconds.
+- **Skip records nothing.** It is the next index in the queue, and the queue
+  wraps.
+- **Seating is by title, then by the disc and track tags**, with a missing DISC
+  tag inferred from disc subfolders. Titles are normalised keeping letters of
+  every script: `[^a-z0-9]` would reduce Cyrillic titles to empty strings, which
+  are all equal. **A file is filed when its title matches its track at least in
+  part** — one title's whole words, in order, inside the other's, which is how
+  `Mars, the Bringer of War` sits in MusicBrainz's `The Planets, op. 32: Mars, the
+  Bringer of War. Allegro`. A partial title never *finds* a track; only the disc
+  and track tags do, and it confirms that. Anything else is flagged and left open
+  unless somebody picks the track on the row, which overrides every rule and
+  bumps whatever a rule put there.
+- **A file not on the release is placed where it sits in the folder** — disc,
+  track tag, then path order, because a live rip tagged against a release that
+  dropped a song carries the same track number twice.
+- **Commits go through the existing endpoints** — `files/release`,
+  `folders/unreleased`, `folders/reopen` — so what this screen can answer is
+  exactly what they accept. Not-a-release and reopen are prefix writes and are
+  offered only for `Artist/Album` folders.
+- **The same question sits under the Files listing** for an `Artist/Album`
+  folder with catalogued audio (`FolderIdentify`), because a confident mistake
+  is on no queue. A folder with nothing open offers only the reopen. The album
+  page's "Identified wrong" reopens every album folder its files sit in — the
+  whole folder, whatever else is filed there — and skips files loose under an
+  artist, whose folder would be the whole discography.
 
 ### Writing it all back, which is the only step nobody may automate
 
@@ -1489,6 +1641,48 @@ search index, replicating daily. Optional; nothing in the build, the tests or
   container that exits 1 in 40ms having printed nothing. `set-replication-token`
   loops forever on EOF for the same reason. `accept-terms` and `set-token` exist
   so both fail loudly and early instead. Neither answer is ours to guess.
+
+### The MCP endpoint, and whose decision it records
+
+| | |
+| --- | --- |
+| `Api/Mcp/LibraryTools.cs` | the tools, and `Guard` — the token check in front of `/mcp` |
+| `Domain/Abstractions/ICallerContext.cs` | `AgentCallerContext`, which every tool call acts as |
+| `Api/Endpoints/CatalogueEndpoints.cs` | `ByCaller` — each by-a-person outcome's agent twin, in one place |
+
+`/mcp` is streamable HTTP, stateless, so an agent on another machine can read the
+catalogue, run the passes and answer the worklist without a shell on this one:
+`claude mcp add --transport http fonoteca http://<host>:5088/mcp --header "Authorization: Bearer <token>"`.
+
+- **Every tool is an existing endpoint handler, called directly** — `internal`
+  rather than `private` for that reason. Validation, the gate and every refusal
+  stay the endpoint's own; a problem document becomes the tool's error, and the
+  answer is serialised with the HTTP JSON options, so an agent reads what the
+  browser reads. A tool with its own copy of a rule is the drift this file keeps
+  warning about.
+- **An agent's decision is not the owner's.** Approving a tool call is not
+  listening to the file, and the by-a-person outcomes exist to say somebody did.
+  Each has an agent twin — `IdentifiedByAgent`, `RejectedByAgent`,
+  `UnreleasedByAgent`, `ReopenedByAgent`, `LinkedByAgent`, `AttributedByAgent`,
+  `NoReleaseByAgent` — written by the same handler when the caller is
+  `AgentCallerContext`, and the event log's actor is `agent`. **Adding a
+  by-a-person value means adding its twin to `ByCaller`**, or the agent path
+  throws. Two readers had to learn the twins: `UnidentifiedOutcomes` (a reopened
+  folder is a question whoever reopened it) and `EnrichmentService.PersonFiled`.
+  `ReleaseSummary.Certainty` is the *max* over the column, and the twins are
+  numbered above everything, so one agent-filed file makes the album read as the
+  agent's — the weakest claim, which is the rule.
+- **Not offered: the tag write at any scope, trash/move/upload, Qobuz.** The tag
+  write is still three buttons and no fourth route. `decide_recording` writes one
+  AcoustID into one file under `AllowFileMutation`, exactly as its button does.
+- **`Fonoteca:McpToken` empty is a 404, read per request.** `Guard` is middleware
+  rather than a filter so it sits in front of whatever `MapMcp` maps, and an empty
+  bearer does not match an empty setting. It locks `/mcp` and nothing else: every
+  `/api` route is as open as the port.
+- **Lists default to 50**, not the endpoints' browser-sized defaults — a response
+  lands in a model's context.
+- `McpEndpointTests` pins the tool list, both refusals, the agent's name on a
+  decision, and that `file_under_release`'s pairs bind every field.
 
 ### Two things that must stay in a hosted service
 

@@ -49,6 +49,12 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     /// <summary>A second edition with the same track list, for the cross-edition case.</summary>
     private static readonly Mbid Other = new(Guid.Parse("44444444-4444-4444-4444-444444444444"));
 
+    /// <summary>An artist the catalogue already holds, so a track credit can link to it.</summary>
+    private static readonly Mbid Known = new(Guid.Parse("55555555-5555-5555-5555-555555555555"));
+
+    /// <summary>Billed on the same tracks and absent from the catalogue.</summary>
+    private static readonly Mbid Stranger = new(Guid.Parse("66666666-6666-6666-6666-666666666666"));
+
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
     private WebApplicationFactory<Program>? _factory;
@@ -142,6 +148,75 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         // these files: they carried no recording MBID of their own.
         var recording = await db.Recordings.SingleAsync(row => row.Id == first.RecordingId, Token);
         Assert.Equal("Don't Stop 'Til You Get Enough", recording.Title);
+    }
+
+    /// <summary>
+    /// A recording minted from a track list reaches its artist's page.
+    /// </summary>
+    /// <remarks>
+    /// <c>BrowsableAsync</c> reaches an artist through
+    /// <c>ArtistCredits.RecordingId</c>, a recording relationship or the work
+    /// hop — <b>never through the release</b>. So a recording minted with no
+    /// credit is on the album and on nobody's page, and the failure is invisible
+    /// on the screen that just filed it: measured on the target library, filing
+    /// <i>Sixteen Tons</i> by hand took its artist from eleven tracks to six.
+    ///
+    /// The billing line costs nothing — <c>ReleaseIncludes</c> already asks for
+    /// <c>ArtistCredits</c> — which is what separates it from the rest of the
+    /// graph. Conductors, orchestras and the composer hop need a recording
+    /// lookup each, and refusing that per-file cost is exactly what
+    /// <see cref="EnrichmentOutcome.LinkedByPerson"/> means.
+    /// </remarks>
+    [Fact]
+    public async Task ARecordingMintedFromATrackListIsCreditedToTheArtistItIsBilledTo()
+    {
+        await FileAsync((_first, 1, 1));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles.SingleAsync(row => row.Id == _first, Token);
+
+        var credits = await db.ArtistCredits
+            .Where(credit => credit.RecordingId == file.RecordingId)
+            .Join(db.Artists, credit => credit.ArtistId, artist => artist.Id, (credit, artist) => artist)
+            .ToListAsync(Token);
+
+        // Only the artist the catalogue already held. The stranger billed beside
+        // him on the same track is not minted here, which is
+        // `ApplyCreditsAsync`'s rule and holds for the same reason.
+        var artist = Assert.Single(credits);
+        Assert.Equal("Michael Jackson", artist.Name);
+        Assert.Equal(Known, artist.Mbid);
+    }
+
+    /// <summary>
+    /// A recording the enrichment pass already described keeps its own credits.
+    /// </summary>
+    /// <remarks>
+    /// Filled where empty, never replaced. A recording lookup carries the
+    /// conductor, the orchestra and the composer hop; a release track list
+    /// carries the billing line and nothing else, so converging on MusicBrainz
+    /// here would overwrite the richer answer with the poorer one on every pass —
+    /// and the pass runs over the whole library. <c>MediumFormats</c>'s bargain
+    /// and <c>PrimaryType ??=</c>'s, not <c>ApplyTracksAsync</c>'s.
+    /// </remarks>
+    [Fact]
+    public async Task FilingDoesNotReplaceTheCreditsEnrichmentAlreadyWrote()
+    {
+        // Track 3, whose recording is seeded with a credit of its own.
+        await FileAsync((_third, 1, 3));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles.SingleAsync(row => row.Id == _third, Token);
+
+        var credits = await db.ArtistCredits
+            .Where(credit => credit.RecordingId == file.RecordingId)
+            .Join(db.Artists, credit => credit.ArtistId, artist => artist.Id, (credit, artist) => artist)
+            .ToListAsync(Token);
+
+        var artist = Assert.Single(credits);
+        Assert.Equal("The Enrichment Pass Found This One", artist.Name);
     }
 
     /// <summary>
@@ -980,6 +1055,45 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
 
         db.MediaFiles.AddRange(first, second, third);
 
+        // The artist the track list bills. Present before the filing, because the
+        // writer links only artists the catalogue already knows.
+        var known = new Artist
+        {
+            Id = ArtistId.New(),
+            Name = "Michael Jackson",
+            Mbid = Known,
+        };
+
+        db.Artists.Add(known);
+
+        // Track 3's recording, already described by the enrichment pass and
+        // credited to somebody else. The release lookup bills it to Michael
+        // Jackson; filling only where empty means this credit survives.
+        var described = new Recording
+        {
+            Id = RecordingId.New(),
+            Title = "Working Day and Night",
+            Mbid = new Mbid(Guid.Parse("33333333-3333-3333-3333-333333333333")),
+        };
+
+        var enriched = new Artist
+        {
+            Id = ArtistId.New(),
+            Name = "The Enrichment Pass Found This One",
+            Mbid = new Mbid(Guid.Parse("77777777-7777-7777-7777-777777777777")),
+        };
+
+        db.Artists.Add(enriched);
+        db.Recordings.Add(described);
+
+        db.ArtistCredits.Add(new ArtistCredit
+        {
+            Id = Guid.CreateVersion7(),
+            ArtistId = enriched.Id,
+            RecordingId = described.Id,
+            Position = 0,
+        });
+
         // One the attribution pass already placed.
         var recording = new Recording
         {
@@ -1153,6 +1267,11 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzRecording?>(null);
 
+        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+            Mbid artist,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroup>>([]);
+
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,
             CancellationToken cancellationToken = default) =>
@@ -1176,6 +1295,14 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
                 title,
                 TimeSpan.FromMinutes(4),
                 new Mbid(Guid.Parse($"33333333-3333-3333-3333-33333333333{position}")),
-                []);
+
+                // The billing line every release lookup already returns. Two
+                // artists, and the catalogue holds only the first: a writer that
+                // minted the second would put a row with a name and nothing else
+                // into the artist list.
+                [
+                    new MusicBrainzCredit(Known, "Michael Jackson", null, " & ", null, "Person"),
+                    new MusicBrainzCredit(Stranger, "Nobody In The Catalogue", null, null, null, null),
+                ]);
     }
 }

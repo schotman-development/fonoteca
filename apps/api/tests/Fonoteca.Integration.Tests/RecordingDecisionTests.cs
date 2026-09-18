@@ -1062,6 +1062,11 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
                     null));
         }
 
+        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+            Mbid artist,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroup>>([]);
+
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,
             CancellationToken cancellationToken = default) =>

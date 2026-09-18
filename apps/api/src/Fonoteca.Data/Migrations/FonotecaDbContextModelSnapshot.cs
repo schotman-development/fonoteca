@@ -40,17 +40,27 @@ namespace Fonoteca.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<DateTimeOffset?>("DiscographyLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool>("Ended")
                         .HasColumnType("boolean");
 
                     b.Property<int?>("EndedYear")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("Followed")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Gender")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
                     b.Property<string>("Genres")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("LatinName")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
@@ -82,9 +92,10 @@ namespace Fonoteca.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Id")
-                        .HasDatabaseName("IX_Artists_Unasked")
-                        .HasFilter("\"LookupUtc\" IS NULL AND \"Mbid\" IS NOT NULL");
+                    b.HasIndex("LatinName");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("LatinName"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("LatinName"), new[] { "gin_trgm_ops" });
 
                     b.HasIndex("Mbid")
                         .IsUnique()
@@ -96,6 +107,12 @@ namespace Fonoteca.Data.Migrations
                     NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Name"), new[] { "gin_trgm_ops" });
 
                     b.HasIndex("SortName");
+
+                    b.HasIndex(new[] { "Id" }, "IX_Artists_Unasked")
+                        .HasFilter("\"LookupUtc\" IS NULL AND \"Mbid\" IS NOT NULL");
+
+                    b.HasIndex(new[] { "DiscographyLookupUtc" }, "IX_Artists_Unbrowsed")
+                        .HasFilter("\"Mbid\" IS NOT NULL");
 
                     b.ToTable("Artists");
                 });
@@ -532,6 +549,9 @@ namespace Fonoteca.Data.Migrations
 
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("Monitored")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("PrimaryType")
                         .HasMaxLength(100)

@@ -255,6 +255,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(1000).IsRequired();
             e.Property(x => x.SortName).HasMaxLength(1000);
+            e.Property(x => x.LatinName).HasMaxLength(1000);
             e.Property(x => x.Type).HasMaxLength(100);
             e.Property(x => x.Disambiguation).HasMaxLength(1000);
             e.Property(x => x.Country).HasMaxLength(10);
@@ -269,6 +270,13 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.PortraitUrl).HasMaxLength(1000);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops");
+
+            // The artist filter searches this beside Name, so it wants the same
+            // index. Not partial, although it is null for 3,029 of 3,051 rows:
+            // a trigram GIN index stores nothing for a null anyway, and the
+            // filter would have to be repeated in the query verbatim for
+            // PostgreSQL to use it.
+            e.HasIndex(x => x.LatinName).HasMethod("gin").HasOperators("gin_trgm_ops");
             e.HasIndex(x => x.SortName);
 
             // The enrichment pass's third worklist: artists nobody has asked
@@ -276,9 +284,61 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // the nulls and the whole point is that it empties — a full index
             // would grow to every artist in the library to answer a question
             // that ends up returning nothing.
-            e.HasIndex(x => x.Id)
-                .HasDatabaseName("IX_Artists_Unasked")
+            // Both of these are partial indexes on the same column, and the
+            // *named* overload is what makes them two indexes rather than one.
+            // `HasIndex(x => x.Id)` returns the builder for the index on that
+            // property set — call it twice and the second does not add
+            // anything, it reconfigures the first. The migration generated
+            // against the unnamed form opened with
+            // `DropIndex("IX_Artists_Unasked")` and never recreated it: the
+            // artist worklist would have quietly lost its index while the new
+            // one looked like it had been added.
+            e.HasIndex(x => x.Id, "IX_Artists_Unasked")
                 .HasFilter("\"LookupUtc\" IS NULL AND \"Mbid\" IS NOT NULL");
+
+            // The enrichment pass's fifth worklist: artists whose discography
+            // has never been fetched, plus followed ones whose fetch has gone
+            // stale.
+            //
+            // <b>`"Followed"` came out of the filter when the worklist widened
+            // to the whole catalogue, and leaving it in would have been the
+            // dead-index bug below a second time.</b> The predicate is now
+            // satisfied by an unfollowed artist with a null stamp — precisely a
+            // row the old filter excluded — so the index could not have served
+            // the query it is named for. What stays in the filter is the one
+            // clause still conjunct across both arms of the OR.
+            //
+            // <b>It pays nothing until the backlog is browsed, and that is the
+            // state it is for.</b> While most of the catalogue is unstamped the
+            // predicate matches almost every row, so PostgreSQL rightly seq
+            // scans and this index is not chosen — measured on the real table at
+            // 2,977 of 3,004 unstamped. Modelled at the steady state instead —
+            // 27 unstamped, which is what the table looks like once the pass has
+            // run — the planner picks it unforced: a `BitmapOr` of two `Bitmap
+            // Index Scan`s with `Index Cond: ("DiscographyLookupUtc" IS NULL)`,
+            // the indexed column a genuine search key. So the index is dormant
+            // rather than dead, and the run that makes it worth having is the
+            // one that fills the column.
+            //
+            // The filter excludes nothing today, every artist here having an
+            // MBID. It is kept because it stays *true* of the worklist, costs
+            // nothing, and an artist minted from a credit line with no MBID is
+            // ordinary — the day one exists this index already declines it.
+            //
+            // <b>The stamp is the indexed column and only the conjuncts are in
+            // the filter, and that is not cosmetic.</b> This worklist stopped
+            // being "never asked" when monitoring arrived and became "never
+            // asked OR asked too long ago" — and a partial index whose filter
+            // says `"DiscographyLookupUtc" IS NULL` cannot serve that query at
+            // all, because the OR admits exactly the rows the filter excludes.
+            // Measured against the real database with `enable_seqscan = off`,
+            // PostgreSQL refused to consider the old index even when forced and
+            // fell back to a bitmap scan over `IX_Artists_Mbid` — an index whose
+            // own comment claimed to serve a worklist it could not. Filtering on
+            // what stayed conjunct and indexing what moved into the OR is what
+            // makes it usable again.
+            e.HasIndex(x => x.DiscographyLookupUtc, "IX_Artists_Unbrowsed")
+                .HasFilter("\"Mbid\" IS NOT NULL");
         });
 
         modelBuilder.Entity<ArtistCredit>(e =>

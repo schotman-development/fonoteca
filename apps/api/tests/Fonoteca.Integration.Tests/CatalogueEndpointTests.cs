@@ -166,6 +166,81 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
+    /// Following an artist the library holds nothing by has to show them.
+    /// </summary>
+    /// <remarks>
+    /// <b>Three separate cuts in <c>GetArtists</c> would each, on its own, hide
+    /// the artist somebody has just followed</b> — and every one of them is
+    /// right about the case it was written for. The zero-recording drop exists
+    /// because an artist with no tracks is a credit row nothing browses; the
+    /// album shelf exists because the default list is the sleeve; and neither
+    /// has any way to know this row is there on purpose. Following is a person's
+    /// explicit act and outranks both.
+    ///
+    /// "Nobody At All" is seeded with no recordings at all, which is why the
+    /// test above reports seven artists from the nine this seed adds. That makes
+    /// it the exact fixture: if following stops beating any one of the three,
+    /// the artist vanishes and the button appears to do nothing at all — no
+    /// error, no empty state, just a list that did not change.
+    ///
+    /// The default shelf is asserted and not only <c>scope=following</c>,
+    /// because the default shelf is what somebody is looking at when they press
+    /// it.
+    /// </remarks>
+    [Fact]
+    public async Task AFollowedArtistIsListedEvenWithNothingOfTheirsInTheLibrary()
+    {
+        using var client = _factory!.CreateClient();
+
+        var before = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
+
+        Assert.NotNull(before);
+        Assert.DoesNotContain(before.Items, a => a.Id == _seed.Orphan);
+
+        var followed = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/artists/{_seed.Orphan}/follow", UriKind.Relative),
+            new ArtistFollowRequest(true),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, followed.StatusCode);
+
+        var shelf = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(shelf);
+
+        var orphan = Assert.Single(shelf.Items, a => a.Id == _seed.Orphan);
+
+        Assert.True(orphan.Following);
+
+        // Nothing of theirs is held, and the count says so rather than being
+        // suppressed: the row is honest about being empty.
+        Assert.Equal(0, orphan.TrackCount);
+
+        var following = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=following", UriKind.Relative), Token);
+
+        Assert.NotNull(following);
+        Assert.Equal([_seed.Orphan], following.Items.Select(a => a.Id));
+
+        // Unfollowing puts them back out of reach, or the flag is write-once and
+        // the catalogue grows artists nobody can remove.
+        var unfollowed = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/artists/{_seed.Orphan}/follow", UriKind.Relative),
+            new ArtistFollowRequest(false),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, unfollowed.StatusCode);
+
+        var after = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(after);
+        Assert.DoesNotContain(after.Items, a => a.Id == _seed.Orphan);
+    }
+
+    /// <summary>
     /// Being on every track of an album is what makes somebody its artist; being
     /// on one of them is a guest.
     /// </summary>
@@ -635,18 +710,18 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
-    /// The album list's three orders, each one a different answer.
+    /// The album list's four orders, each one a different answer.
     /// </summary>
     /// <remarks>
     /// Sorted in SQL because the endpoint pages in SQL, and every case here asks
-    /// for <b>two of the three</b> deliberately. Asking for the whole list would
+    /// for <b>two of the four</b> deliberately. Asking for the whole list would
     /// pass identically against an implementation that sorted only the page it
     /// had already taken — which is the bug worth pinning, since a library of
-    /// five hundred albums pages for real. The seed is chosen so all three
+    /// five hundred albums pages for real. The seed is chosen so all four
     /// orders name a different first two.
     /// </remarks>
     [Fact]
-    public async Task AlbumsSortByTitleArtistOrYear()
+    public async Task AlbumsSortByTitleArtistYearOrArrival()
     {
         using var client = _factory!.CreateClient();
 
@@ -664,6 +739,13 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(
             ["Blues Summit 100", "Seesaw"],
             await TitlesAsync(client, sort: "year"));
+
+        // The seed adds its files in release order, so the last two seeded lead
+        // — which is a different pair again, and in particular not the pair the
+        // year gives: the Ring is the oldest record here and the newest arrival.
+        Assert.Equal(
+            ["Wagner: Der Ring des Nibelungen", "Blues Summit 100"],
+            await TitlesAsync(client, sort: "added"));
 
         // An order nobody asked for is the default, not an error page.
         Assert.Equal(
@@ -1181,9 +1263,23 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             JoinPhrase = joinPhrase,
         };
 
+    /// <summary>
+    /// Minted from an increasing instant rather than from the clock, because the
+    /// order these files were <i>added</i> in is the order of these calls.
+    /// </summary>
+    /// <remarks>
+    /// A UUIDv7 orders to the millisecond and the rest of it is random, so a seed
+    /// that writes every file inside one millisecond — which is every seed —
+    /// leaves <c>sort=added</c> to shuffle. One minute apart is not a claim about
+    /// anything; it is far enough apart to be an order.
+    /// </remarks>
+    private static int _added;
+
     private static MediaFile File(string path, Recording recording) => new()
     {
-        Id = MediaFileId.New(),
+        Id = new MediaFileId(Guid.CreateVersion7(
+            DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture)
+                .AddMinutes(Interlocked.Increment(ref _added)))),
         Path = path,
         SizeBytes = 42_000_000,
         LastModifiedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture),

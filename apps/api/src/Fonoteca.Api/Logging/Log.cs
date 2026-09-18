@@ -414,6 +414,42 @@ internal static partial class Log
         Message = "No pictures were found for a batch of {Artists} artists: {Reason}")]
     public static partial void PicturesNotFound(ILogger logger, int artists, string reason);
 
+    /// <remarks>
+    /// Debug, like <see cref="ArtistNotDescribed"/>, and for a narrower version
+    /// of the same reason: the worklist here is the followed set rather than the
+    /// catalogue, so this can never be thousands of lines — but a followed
+    /// artist MusicBrainz credits with nothing is an ordinary answer, not a
+    /// fault, and logging it louder would make an empty discography read as a
+    /// broken one.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1257,
+        Level = LogLevel.Debug,
+        Message = "{Artist}'s discography was not fetched: {Reason}")]
+    public static partial void DiscographyNotFetched(ILogger logger, string artist, string reason);
+
+    /// <remarks>
+    /// A sibling of <see cref="DiscographyNotFetched"/> rather than the same
+    /// event with the provider glued into the reason, and the analyzer is right
+    /// to insist: an interpolated argument is built whether or not Debug logging
+    /// is on, and this one sits in a loop over every followed artist and every
+    /// source. The provider is its own parameter, so nothing is composed unless
+    /// the line is actually written.
+    ///
+    /// Debug, like its neighbour, because a shop being briefly unreachable is an
+    /// ordinary event that costs nothing here — the MusicBrainz answer stands,
+    /// the artist is still stamped, and the next run asks again.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1258,
+        Level = LogLevel.Debug,
+        Message = "{Provider} was not asked what {Artist} released: {Reason}")]
+    public static partial void ReleasesNotDiscovered(
+        ILogger logger,
+        string provider,
+        string artist,
+        string reason);
+
     [LoggerMessage(
         EventId = 1260,
         Level = LogLevel.Information,

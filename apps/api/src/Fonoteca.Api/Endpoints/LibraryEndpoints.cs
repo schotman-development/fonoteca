@@ -181,7 +181,7 @@ public static class LibraryEndpoints
         CancellationToken cancellationToken) =>
         CatalogueEndpoints.StartAsync(tags, TagWriteScope.Library, cancellationToken);
 
-    private static async Task<Ok<TagWriteStatusResponse>> GetTagWriteStatus(
+    internal static async Task<Ok<TagWriteStatusResponse>> GetTagWriteStatus(
         TagWriteService tags,
         CancellationToken cancellationToken)
     {
@@ -212,7 +212,7 @@ public static class LibraryEndpoints
                 detail: "No tag write is running.",
                 statusCode: StatusCodes.Status409Conflict);
 
-    private static async Task<Results<Ok<LibraryScanSummary>, ProblemHttpResult>> ScanLibrary(
+    internal static async Task<Results<Ok<LibraryScanSummary>, ProblemHttpResult>> ScanLibrary(
         LibraryScanService scans,
         IdentificationService identification,
         IOptions<FonotecaOptions> options,
@@ -251,7 +251,7 @@ public static class LibraryEndpoints
         };
     }
 
-    private static Ok<LibraryScanStatusResponse> GetLibraryScanStatus(LibraryScanService scans) =>
+    internal static Ok<LibraryScanStatusResponse> GetLibraryScanStatus(LibraryScanService scans) =>
         TypedResults.Ok(new LibraryScanStatusResponse(scans.IsRunning, scans.LastCompleted));
 
     /// <summary>
@@ -267,7 +267,7 @@ public static class LibraryEndpoints
     /// opposite of the posture ADR 0002 takes. Chained instead, by
     /// <c>Fonoteca:IdentifyAfterScan</c>, so scanning still leads to identifying.
     /// </remarks>
-    private static async Task<Results<Accepted<IdentificationStartedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Accepted<IdentificationStartedResponse>, ProblemHttpResult>>
         StartIdentification(IdentificationService identification, CancellationToken cancellationToken)
     {
         var pending = await identification.CountPendingAsync(cancellationToken).ConfigureAwait(false);
@@ -292,7 +292,7 @@ public static class LibraryEndpoints
         };
     }
 
-    private static async Task<Ok<IdentificationStatusResponse>> GetIdentificationStatus(
+    internal static async Task<Ok<IdentificationStatusResponse>> GetIdentificationStatus(
         IdentificationService identification,
         CancellationToken cancellationToken)
     {
@@ -309,7 +309,7 @@ public static class LibraryEndpoints
             LastCompleted: identification.LastCompleted));
     }
 
-    private static Results<Accepted, ProblemHttpResult> CancelIdentification(
+    internal static Results<Accepted, ProblemHttpResult> CancelIdentification(
         IdentificationService identification) =>
         identification.Cancel()
             ? TypedResults.Accepted("/api/library/identify")
@@ -332,7 +332,7 @@ public static class LibraryEndpoints
     /// No 503 arm: unlike the other two, this pass never touches the library
     /// root, so its absence is not a reason to refuse.
     /// </remarks>
-    private static async Task<Results<Accepted<EnrichmentStartedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Accepted<EnrichmentStartedResponse>, ProblemHttpResult>>
         StartEnrichment(EnrichmentService enrichment, CancellationToken cancellationToken)
     {
         var pending = (await enrichment.CountPendingAsync(cancellationToken).ConfigureAwait(false))
@@ -354,7 +354,7 @@ public static class LibraryEndpoints
         };
     }
 
-    private static async Task<Ok<EnrichmentStatusResponse>> GetEnrichmentStatus(
+    internal static async Task<Ok<EnrichmentStatusResponse>> GetEnrichmentStatus(
         EnrichmentService enrichment,
         CancellationToken cancellationToken)
     {
@@ -372,10 +372,11 @@ public static class LibraryEndpoints
             PendingFiles: pending.Files,
             PendingArtists: pending.Artists,
             PendingPortraits: pending.Portraits,
+            PendingDiscographies: pending.Discographies,
             LastCompleted: enrichment.LastCompleted));
     }
 
-    private static Results<Accepted, ProblemHttpResult> CancelEnrichment(EnrichmentService enrichment) =>
+    internal static Results<Accepted, ProblemHttpResult> CancelEnrichment(EnrichmentService enrichment) =>
         enrichment.Cancel()
             ? TypedResults.Accepted("/api/library/enrich")
             : TypedResults.Problem(
@@ -393,7 +394,7 @@ public static class LibraryEndpoints
     /// missing file as unreadable, and refusing on a directory check would be a
     /// second, worse copy of the same test.
     /// </remarks>
-    private static async Task<Results<Accepted<ProbeStartedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Accepted<ProbeStartedResponse>, ProblemHttpResult>>
         StartProbe(ProbeService probes, CancellationToken cancellationToken)
     {
         var pending = await probes.CountPendingAsync(cancellationToken).ConfigureAwait(false);
@@ -413,7 +414,7 @@ public static class LibraryEndpoints
         };
     }
 
-    private static async Task<Ok<ProbeStatusResponse>> GetProbeStatus(
+    internal static async Task<Ok<ProbeStatusResponse>> GetProbeStatus(
         ProbeService probes,
         CancellationToken cancellationToken)
     {
@@ -434,7 +435,7 @@ public static class LibraryEndpoints
             LastCompleted: probes.LastCompleted));
     }
 
-    private static Results<Accepted, ProblemHttpResult> CancelProbe(ProbeService probes) =>
+    internal static Results<Accepted, ProblemHttpResult> CancelProbe(ProbeService probes) =>
         probes.Cancel()
             ? TypedResults.Accepted("/api/library/probe")
             : TypedResults.Problem(
@@ -450,7 +451,7 @@ public static class LibraryEndpoints
     /// links out of the catalogue and never opens a file, so an unmounted library
     /// volume is no reason to refuse.
     /// </remarks>
-    private static async Task<Results<Accepted<AttributionStartedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Accepted<AttributionStartedResponse>, ProblemHttpResult>>
         StartAttribution(ReleaseAttributionService attribution, CancellationToken cancellationToken)
     {
         var pending = await attribution.CountPendingAsync(cancellationToken).ConfigureAwait(false);
@@ -471,7 +472,7 @@ public static class LibraryEndpoints
         };
     }
 
-    private static async Task<Ok<AttributionStatusResponse>> GetAttributionStatus(
+    internal static async Task<Ok<AttributionStatusResponse>> GetAttributionStatus(
         ReleaseAttributionService attribution,
         CancellationToken cancellationToken)
     {
@@ -487,7 +488,7 @@ public static class LibraryEndpoints
             LastCompleted: attribution.LastCompleted));
     }
 
-    private static Results<Accepted, ProblemHttpResult> CancelAttribution(
+    internal static Results<Accepted, ProblemHttpResult> CancelAttribution(
         ReleaseAttributionService attribution) =>
         attribution.Cancel()
             ? TypedResults.Accepted("/api/library/attribute")
@@ -584,6 +585,22 @@ public sealed record EnrichmentStatusResponse(
     /// this catalogue was described before pictures existed.
     /// </remarks>
     int PendingPortraits,
+
+    /// <summary>
+    /// Artists nobody has asked what they released.
+    /// </summary>
+    /// <remarks>
+    /// The fourth noun, and no longer the small one. While this was the followed
+    /// set it was single figures beside three counts in the thousands; it is now
+    /// every artist with an MBID that has never been browsed, because a
+    /// discography nobody fetched is one nobody can find an album in. On a
+    /// catalogue this stage has not run over it is the largest number here and
+    /// the slowest work behind it — a gated browse each, plus the shops.
+    /// Separate from <see cref="PendingArtists"/> for the same reason the
+    /// portraits are: same rows, different work, and one number would quote the
+    /// wrong wait.
+    /// </remarks>
+    int PendingDiscographies,
 
     EnrichmentSummary? LastCompleted);
 

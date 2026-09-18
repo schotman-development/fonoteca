@@ -251,6 +251,33 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public bool WarmCandidates { get; init; } = true;
 
+    /// <summary>
+    /// How stale a followed artist's discography may get before the enrichment
+    /// pass asks MusicBrainz again.
+    /// </summary>
+    /// <remarks>
+    /// <b>Without a re-ask the monitoring feature cannot work at all.</b> The
+    /// discography worklist was <c>DiscographyLookupUtc IS NULL</c>, so a
+    /// followed artist was browsed exactly once and never again — and
+    /// <c>ReleaseGroup.Monitored</c> is defined as "turned up <i>after</i> you
+    /// followed them", which is a comparison against a second browse that never
+    /// happened. The column would have been permanently false for everybody.
+    ///
+    /// <b>It is the one place this application re-asks a provider on a clock,
+    /// and that is affordable only because of what it is asking about.</b> The
+    /// worklist is the followed set rather than the catalogue — a few dozen
+    /// artists, one gated browse each — where the same idea applied to
+    /// <c>AcoustIdCheckedUtc</c> or <c>RecordingLookupUtc</c> would re-ask about
+    /// a hundred thousand files. It also spends nothing at Qobuz and buys
+    /// nothing automatically: acquisition is still a person pressing a button.
+    ///
+    /// Nothing auto-starts enrichment, so this is a ceiling on what a pass
+    /// <i>may</i> re-ask rather than a timer. Seven days against a service whose
+    /// data moves in weeks; raise it if the followed set grows large enough for
+    /// the browses to be felt at the rate limit.
+    /// </remarks>
+    public int DiscographyRecheckDays { get; init; } = 7;
+
     /// <summary>Settings for the acquisition providers, which are nested rather than flat.</summary>
     /// <remarks>
     /// The odd one out in this file, and deliberately so. Every other setting
@@ -272,6 +299,19 @@ public sealed class FonotecaOptions : IValidatableObject
 
     /// <summary>Origins allowed to call the API. The web app's dev server in development.</summary>
     public IReadOnlyList<string> CorsOrigins { get; init; } = [];
+
+    /// <summary>
+    /// The bearer token <c>/mcp</c> requires. Empty turns the endpoint off.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, because <c>/mcp</c> lets an agent start passes and answer
+    /// the worklist, and a fresh install should not offer that to its network.
+    /// The token locks this one endpoint and nothing else: every <c>/api</c>
+    /// route is as open as it was, so who can reach the port is still the real
+    /// boundary. Read per request rather than at startup, so it is one rule in
+    /// one place — see <c>LibraryTools.Guard</c>.
+    /// </remarks>
+    public string McpToken { get; init; } = string.Empty;
 
     /// <summary>
     /// The rules that involve more than one setting.

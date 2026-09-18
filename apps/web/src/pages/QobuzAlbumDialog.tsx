@@ -33,7 +33,7 @@ type DownloadState =
 /**
  * One album, its track list, and the button that spends the subscription.
  *
- * A dialog rather than a route, for `MatchingPage`'s reason: the thing being
+ * A dialog rather than a route, for the old matching page's reason: the thing being
  * worked is the search result behind it, and dismissing an album should return
  * a person to the row they came from. There is also nothing to link to — a
  * Qobuz album id is somebody else's identifier for something this catalogue

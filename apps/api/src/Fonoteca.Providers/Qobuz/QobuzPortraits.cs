@@ -94,7 +94,16 @@ public sealed class QobuzPortraits(
     /// </remarks>
     private Uri? Picture(string wanted, IReadOnlyList<QobuzArtist> matches)
     {
+        // Pictureless rows go before the rule sees them, not inside it. They
+        // cannot be the answer to *this* question, and counting them as rivals
+        // would refuse the commonest shape there is — a well-known artist beside
+        // a homonym the service holds a row for and no photograph of. The filter
+        // lives here rather than in `ArtistNameMatch` because a photograph is
+        // not evidence of identity: it is what this caller needs, and a release
+        // source asking the same matcher would otherwise lose every artist Qobuz
+        // sells records by but holds no press photo of.
         var candidates = matches
+            .Where(match => !string.IsNullOrWhiteSpace(match.ImageUrl))
             .Select(match => new ArtistCandidate(match.Name, match.AlbumCount, match.ImageUrl))
             .ToList();
 

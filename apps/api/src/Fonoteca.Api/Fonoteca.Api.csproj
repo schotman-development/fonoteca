@@ -22,6 +22,7 @@
     </PackageReference>
     <!-- HealthChecks itself comes from the shared framework; only the EF Core integration is a package. -->
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
   </ItemGroup>
 
   <!--

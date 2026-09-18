@@ -90,7 +90,33 @@ internal static class MusicBrainzMapper
             // means it and what a living artist's document looks like.
             HasEnded: source.LifeSpan?.Ended ?? false,
             Genres: genres,
-            Bands: ToBands(source.Id, source.Relationships));
+            Bands: ToBands(source.Id, source.Relationships),
+            Aliases: ToAliases(source.Aliases));
+    }
+
+    /// <summary>The artist's other names, flattened to what picks a Latin one.</summary>
+    /// <remarks>
+    /// Blank names are dropped rather than carried: WS/2 answers absent text
+    /// with <c>""</c> rather than null, and an empty alias is Latin by every
+    /// test — it contains no letter that is not — so an unfiltered list hands
+    /// the picker a winner that prints as nothing at all.
+    /// </remarks>
+    private static List<MusicBrainzAlias> ToAliases(IReadOnlyList<IAlias>? aliases)
+    {
+        var mapped = new List<MusicBrainzAlias>();
+
+        foreach (var alias in aliases ?? [])
+        {
+            if (NullIfBlank(alias.Name) is not { } name) continue;
+
+            mapped.Add(new MusicBrainzAlias(
+                name,
+                NullIfBlank(alias.Locale),
+                alias.Primary,
+                NullIfBlank(alias.Type)));
+        }
+
+        return mapped;
     }
 
     /// <summary>The groups an artist belongs to, from either end of the relation.</summary>
@@ -226,6 +252,30 @@ internal static class MusicBrainzMapper
             PrimaryType: NullIfBlank(group?.PrimaryType),
             SecondaryTypes: group?.SecondaryTypes ?? [],
             Media: media);
+    }
+
+    /// <summary>A browse result: an album, with none of its pressings.</summary>
+    /// <remarks>
+    /// The types are kept exactly as MusicBrainz spells them — <c>Album</c>,
+    /// <c>Compilation</c>, <c>DJ-mix</c> — because the rule that reads them
+    /// (<c>Discography.IsGap</c>) is written against those spellings and a
+    /// tidied-up copy here would break it silently.
+    ///
+    /// Only the year of the first release survives, which is the opposite of
+    /// <see cref="ToReleaseCandidate"/>'s decision and deliberate: editions are
+    /// sorted by date and a reissue outranking an original is a real failure,
+    /// while a discography is a list of records with a year beside each.
+    /// </remarks>
+    public static MusicBrainzReleaseGroup ToReleaseGroup(IReleaseGroup source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return new MusicBrainzReleaseGroup(
+            Id: new Mbid(source.Id),
+            Title: source.Title ?? string.Empty,
+            PrimaryType: NullIfBlank(source.PrimaryType),
+            SecondaryTypes: source.SecondaryTypes ?? [],
+            FirstReleaseYear: ToYear(source.FirstReleaseDate));
     }
 
     /// <summary>A search hit: the browse shape, plus the billing line and the score.</summary>

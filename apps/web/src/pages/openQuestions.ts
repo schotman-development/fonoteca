@@ -116,6 +116,16 @@ const IDENTITY: Readonly<Record<string, OpenReason>> = {
       'same providers the same question returns the same answer. Match the folder to the right ' +
       'album — adding it to MusicBrainz first if it is not there yet.',
   },
+  ReopenedByAgent: {
+    label: 'An agent said this was wrong',
+    tone: 'warning',
+    note:
+      'A pass matched these files confidently and an agent disagreed, on your approval, so they ' +
+      'gave up the recording and album it chose. Nobody listened to the files to check.',
+    next:
+      'Yours to settle: no pass will look at these again. Check the agent was right before ' +
+      'matching the folder to an album.',
+  },
   RecordingNotFound: {
     label: 'The recording is gone',
     tone: 'warning',

@@ -6,7 +6,8 @@ import { ArtistPage } from './pages/ArtistPage.tsx'
 import { ArtistsPage } from './pages/ArtistsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
-import { MatchingPage } from './pages/MatchingPage.tsx'
+import { IdentifyPage } from './pages/IdentifyPage.tsx'
+import { artistListSearch, releaseListSearch } from './pages/listSearch.ts'
 import { ReleasePage } from './pages/ReleasePage.tsx'
 import { ReleasesPage } from './pages/ReleasesPage.tsx'
 
@@ -29,28 +30,65 @@ const dashboardRoute = createRoute({
   component: DashboardPage,
 })
 
+/**
+ * The order and the filter live here, not in the page.
+ *
+ * A `useState` on a list is destroyed the moment somebody opens a row, because
+ * opening a row unmounts the list — so sorting the artists by holdings, opening
+ * one and pressing Back came back alphabetical, with nothing anywhere that
+ * could have restored it. In the URL it is restored by the history entry, it
+ * survives a reload, and it can be sent to somebody. `filesRoute` below already
+ * made this call for the browsed folder, for the same reason.
+ *
+ * `listSearch.ts` owns the values each key may hold, so a URL arriving with an
+ * album order on the artists page is narrowed to "no order chosen" rather than
+ * reaching a `<select>` that cannot show it.
+ */
 const artistsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library',
   component: ArtistsPage,
+  validateSearch: artistListSearch,
 })
 
+/**
+ * The detail pages declare the list's parameters too, and carry them.
+ *
+ * Nothing on either page reads them — the schema exists so the shelf's state
+ * can ride along on the way in, which is what leaves the back link something to
+ * hand back.
+ *
+ * **The card that was clicked is what puts them there, not a
+ * `retainSearchParams` middleware on these routes.** Retention by key cannot
+ * tell where a navigation came from, and both lists spell their filter `query`:
+ * with the middleware on, filtering the artists for "b", opening one and
+ * clicking one of their albums carried that "b" onto the albums list, which is
+ * this very bug one hop further along. Handed over by the card, the state only
+ * ever travels from a list to a row of that same list.
+ *
+ * These two routes are siblings of the lists rather than children — search
+ * parameters are inherited down the tree, and `/library/artists/$artistId` does
+ * not sit under `/library` — so the schema is named rather than inherited.
+ */
 const artistRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/artists/$artistId',
   component: ArtistPage,
+  validateSearch: artistListSearch,
 })
 
 const releasesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/releases',
   component: ReleasesPage,
+  validateSearch: releaseListSearch,
 })
 
 const releaseRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/releases/$releaseId',
   component: ReleasePage,
+  validateSearch: releaseListSearch,
 })
 
 /**
@@ -72,7 +110,7 @@ const releaseRoute = createRoute({
 const matchingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/matching',
-  component: MatchingPage,
+  component: IdentifyPage,
 
   /**
    * Where MusicBrainz sends somebody back to.

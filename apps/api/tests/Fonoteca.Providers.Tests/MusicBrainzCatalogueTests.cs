@@ -54,6 +54,12 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     private static readonly Mbid PettyId =
         new(Guid.Parse("5ca3f318-d028-4151-ac73-78e2b2d6cdcc"));
 
+    /// <summary>
+    /// A Russian composer, whose 94 aliases are the whole of the Latin-name rule.
+    /// </summary>
+    private static readonly Mbid TchaikovskyId =
+        new(Guid.Parse("9ddd7abc-9e1b-471d-8031-583bc6bc8be9"));
+
     /// <summary>A person MusicBrainz does not know the end of, because there is not one.</summary>
     private static readonly Mbid WinwoodId =
         new(Guid.Parse("885f90ef-6bd9-409a-b2df-e165e553c68e"));
@@ -454,6 +460,104 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     /// the first would look entirely successful and quietly hide 37 of the
     /// candidate albums a file might have come from.
     /// </remarks>
+    /// <summary>
+    /// A followed artist's discography is paged to the end, and mapped whole.
+    /// </summary>
+    /// <remarks>
+    /// The same trap as the release browse below, one entity along: a prolific
+    /// artist has more release groups than a page holds, and stopping at the
+    /// first would report a discography that quietly ends in the 1980s — which
+    /// reads as "you own everything since" rather than as a bug.
+    ///
+    /// <b>The documents here are synthetic, and that is a deviation worth
+    /// naming.</b> Every other MusicBrainz fixture in this project is a verbatim
+    /// recording under <c>Responses/</c>, for the reason that file's remarks
+    /// give. These are inline because musicbrainz.org answered
+    /// <c>"The MusicBrainz web server is currently busy"</c> to every attempt to
+    /// record one and there is no mirror to fall back on — and a hand-written
+    /// file placed among the recorded ones would be a lie about its provenance.
+    /// The shape is WS/2's own; replacing it with a real capture is worth doing
+    /// the next time the server answers.
+    ///
+    /// What it pins beyond the paging: the year is narrowed from a full date,
+    /// a year-only date survives, an absent date is null rather than a guess,
+    /// secondary types are carried through in MusicBrainz's own spelling
+    /// because <c>Discography.IsGap</c> is written against those exact strings,
+    /// and an untyped group stays untyped.
+    /// </remarks>
+    [Fact]
+    public async Task ADiscographyBrowseIsPagedToTheEndAndMappedWhole()
+    {
+        var artist = new Mbid(Guid.Parse("58e325d5-54fd-4e98-b39a-3aa6bc319273"));
+
+        var page1 = """
+            {"release-group-count":6,"release-group-offset":0,"release-groups":[
+              {"id":"11111111-1111-1111-1111-111111111111","title":"Dire Straits",
+               "primary-type":"Album","secondary-types":[],
+               "first-release-date":"1978-10-07","disambiguation":""},
+              {"id":"22222222-2222-2222-2222-222222222222","title":"Money for Nothing",
+               "primary-type":"Album","secondary-types":["Compilation"],
+               "first-release-date":"1988","disambiguation":""}
+            ]}
+            """;
+
+        var page2 = """
+            {"release-group-count":6,"release-group-offset":2,"release-groups":[
+              {"id":"33333333-3333-3333-3333-333333333333","title":"ExtendedancEPlay",
+               "primary-type":"EP","secondary-types":[],
+               "first-release-date":"1983-01","disambiguation":""},
+              {"id":"44444444-4444-4444-4444-444444444444","title":"Something Unreleased",
+               "primary-type":null,"secondary-types":[],
+               "first-release-date":"","disambiguation":""}
+            ]}
+            """;
+
+        // Both pages announce six and carry two, so the offset never reaches the
+        // claimed total and it is the empty page that ends the loop — which is
+        // the guard worth testing. Counts that agreed with their contents would
+        // terminate on arithmetic alone and never exercise it.
+        var empty = """{"release-group-count":6,"release-group-offset":4,"release-groups":[]}""";
+        var served = 0;
+
+        var (catalogue, stub) = Build(_ =>
+        {
+            var index = served++;
+
+            return StubHttpHandler.Json(
+                HttpStatusCode.OK,
+                index switch { 0 => page1, 1 => page2, _ => empty });
+        });
+
+        var groups = await catalogue.BrowseReleaseGroupsForArtistAsync(artist, Token);
+
+        Assert.Equal(4, groups.Count);
+        Assert.Equal(3, stub.Requests.Count);
+
+        // Offsets advance by what arrived. MetaBrainz omits an offset of zero.
+        Assert.DoesNotContain("offset=", stub.Requests[0].Uri.Query, StringComparison.Ordinal);
+        Assert.Contains("offset=2", stub.Requests[1].Uri.Query, StringComparison.Ordinal);
+        Assert.Contains("offset=4", stub.Requests[2].Uri.Query, StringComparison.Ordinal);
+
+        // Include.None, so nothing is asked for beyond the browse itself — the
+        // whole reason this call is cheap enough to make per followed artist.
+        Assert.DoesNotContain("inc=", stub.Requests[0].Uri.Query, StringComparison.Ordinal);
+
+        Assert.Equal(
+            ["Dire Straits", "Money for Nothing", "ExtendedancEPlay", "Something Unreleased"],
+            groups.Select(group => group.Title));
+
+        // A full date narrows to its year; a year-only date survives; a partial
+        // month keeps the year; an absent date is null and not a guess.
+        Assert.Equal([1978, 1988, 1983, null], groups.Select(group => group.FirstReleaseYear));
+
+        // MusicBrainz's own spellings, because the gap rule matches on them.
+        Assert.Equal(["Compilation"], groups[1].SecondaryTypes);
+        Assert.Empty(groups[0].SecondaryTypes);
+
+        Assert.Equal("EP", groups[2].PrimaryType);
+        Assert.Null(groups[3].PrimaryType);
+    }
+
     [Fact]
     public async Task ABrowseIsPagedToTheEndRatherThanTrustedAtItsFirstPage()
     {
@@ -666,6 +770,50 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     /// dropping it fails a test rather than quietly emptying every band shelf on
     /// the next enrichment run.
     /// </remarks>
+    /// <summary>
+    /// The aliases a Latin display name is chosen from, off a real document.
+    /// </summary>
+    /// <remarks>
+    /// <b>The stub bypasses the mapper, which is why this exists</b> — the same
+    /// reason <c>artist-tom-petty.json</c> does. Every other test of the Latin
+    /// name rule hands <c>LatinNames.Of</c> a hand-built list, so nothing
+    /// exercised <c>ToAliases</c> or proved the three fields it reads survive
+    /// the wire at all.
+    ///
+    /// This document earns its place three times over. It carries <b>94</b>
+    /// aliases where the fixtures beside it carry none; its Russian alias is
+    /// <c>primary="true"</c>, so a rule ranking on the flag before the script
+    /// answers <c>Пётр Чайковский</c>; and it files <c>Chaikovsky</c> as a
+    /// <c>Search hint</c>, which sorts before the right answer ordinally and is
+    /// what the last rung would otherwise reach for.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistsAliasesSurviveTheWireAndNameTheLatinOne()
+    {
+        var (catalogue, _) = Build(Recorded("artist-tchaikovsky.json"));
+
+        var artist = await catalogue.GetArtistAsync(TchaikovskyId, Token);
+
+        Assert.NotNull(artist);
+        Assert.Equal("Пётр Ильич Чайковский", artist.Name);
+        Assert.NotEmpty(artist.Aliases);
+
+        // All three fields, because the rule ranks on all three.
+        var chosen = Assert.Single(
+            artist.Aliases.Where(a => a.Name == "Pyotr Ilyich Tchaikovsky"));
+
+        Assert.True(chosen.IsEnglish);
+        Assert.True(chosen.Primary);
+        Assert.True(chosen.IsName);
+
+        Assert.Contains(artist.Aliases, a => a.Name == "Пётр Чайковский" && a.Primary);
+        Assert.Contains(artist.Aliases, a => a.Name == "Chaikovsky" && !a.IsName);
+
+        Assert.Equal(
+            "Pyotr Ilyich Tchaikovsky",
+            LatinNames.Of(artist.Name, artist.Aliases));
+    }
+
     [Fact]
     public async Task TheArtistLookupAsksForBandMembershipAndStillNotForADiscography()
     {
@@ -677,6 +825,11 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
 
         Assert.Contains("artist-rels", request.Uri.Query, StringComparison.Ordinal);
         Assert.Contains("genres", request.Uri.Query, StringComparison.Ordinal);
+
+        // The third rider, and the one a browse list's Latin names depend on.
+        // Dropped, every non-Latin artist keeps their own name and nothing
+        // fails — the column simply stays null and no screen says why.
+        Assert.Contains("aliases", request.Uri.Query, StringComparison.Ordinal);
 
         Assert.DoesNotContain("releases", request.Uri.Query, StringComparison.Ordinal);
         Assert.DoesNotContain("recordings", request.Uri.Query, StringComparison.Ordinal);

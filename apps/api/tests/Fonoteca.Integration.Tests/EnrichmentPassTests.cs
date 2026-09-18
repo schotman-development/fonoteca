@@ -856,11 +856,17 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     /// person to the wrong screen. <c>Total</c> stays the sum because the
     /// button's enable rule reads it.
     ///
-    /// Three nouns now, and the same artist is in two of them: an artist nobody
-    /// has described is also an artist nobody has looked for a picture of, and
-    /// they are separate work against separate services. Summing them would say
-    /// "2" about one row, and folding them would put a stage costing seconds
-    /// behind a number that used to mean forty-five minutes.
+    /// Four nouns now, and <b>one seeded artist is in three of them</b>: nobody
+    /// has described them, nobody has looked for a picture of them, and nobody
+    /// has asked what they released. Three separate services, three separate
+    /// waits. Summing them would say "3" about one row, and folding them would
+    /// put a stage costing seconds behind a number that used to mean forty-five
+    /// minutes.
+    ///
+    /// The discography clause is the one that moved. It counted the followed set
+    /// and this artist is not followed, so it read zero; the worklist is every
+    /// artist with an MBID now, which is what makes an album findable without
+    /// following its artist first.
     /// </remarks>
     [Fact]
     public async Task ThePendingCountSeparatesFilesFromArtists()
@@ -874,7 +880,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal(0, pending.Files);
         Assert.Equal(1, pending.Artists);
         Assert.Equal(1, pending.Portraits);
-        Assert.Equal(2, pending.Total);
+        Assert.Equal(1, pending.Discographies);
+        Assert.Equal(3, pending.Total);
     }
 
     /// <summary>
@@ -1082,7 +1089,427 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             EndedYear: 1989,
             HasEnded: true,
             Genres: ["classical", "opera"],
-            Bands: []);
+            Bands: [],
+            Aliases: []);
+
+    /// <summary>
+    /// The baseline. A followed artist's back catalogue is not a wanted list.
+    /// </summary>
+    /// <remarks>
+    /// This is the decision the whole feature rests on. Monitoring everything
+    /// the first browse finds would leave the acquire shelf exactly as long as
+    /// it is without the column — the work merely inverted, from choosing what
+    /// you want into dismissing what you do not.
+    /// </remarks>
+    [Fact]
+    public async Task AFirstDiscographyBrowseMonitorsNothing()
+    {
+        var artist = await SeedFollowedArtistAsync("Beth Hart");
+
+        var catalogue = new StubCatalogue(
+            recording: null,
+            work: null,
+            discography: () =>
+                [Released("Leave the Light On", 2003), Released("Bang Bang Boom Boom", 2012)]);
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var groups = await db.ReleaseGroups.AsNoTracking().OrderBy(g => g.Title).ToListAsync(Token);
+
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, group => Assert.False(group.Monitored));
+
+        // Stamped, which is what makes the artist eligible for a later browse
+        // rather than a permanent member of the worklist.
+        var row = await db.Artists.AsNoTracking().SingleAsync(a => a.Id == artist, Token);
+        Assert.NotNull(row.DiscographyLookupUtc);
+    }
+
+    /// <summary>
+    /// A record released after somebody followed the artist is wanted by default.
+    /// </summary>
+    /// <remarks>
+    /// The other half, and the half that could not exist until the discography
+    /// worklist stopped being <c>DiscographyLookupUtc IS NULL</c>: with a single
+    /// browse per artist forever there is no second look to compare against, so
+    /// "turned up since you followed them" describes an empty set and the column
+    /// would be false for everybody, always.
+    ///
+    /// The stamp is aged rather than the interval shortened, so what is under
+    /// test is the shipped seven-day default and not a number invented here.
+    /// </remarks>
+    [Fact]
+    public async Task ARecordThatArrivesAfterTheFirstBrowseIsMonitored()
+    {
+        var artist = await SeedFollowedArtistAsync("Joe Bonamassa");
+
+        var released = new List<MusicBrainzReleaseGroup> { Released("Blues Deluxe", 2003) };
+
+        var catalogue = new StubCatalogue(
+            recording: null,
+            work: null,
+            discography: () => [.. released]);
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await AgeDiscographyAsync(artist, TimeSpan.FromDays(30));
+
+        released.Add(Released("Royal Tea", 2020));
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var groups = await db.ReleaseGroups.AsNoTracking().ToDictionaryAsync(g => g.Title, Token);
+
+        Assert.Equal(2, groups.Count);
+
+        // The one that was already there when they were followed stays a
+        // baseline record; only the arrival is wanted.
+        Assert.False(groups["Blues Deluxe"].Monitored);
+        Assert.True(groups["Royal Tea"].Monitored);
+
+        // And the artist really was asked twice — a test that passed because the
+        // second pass skipped them entirely would prove nothing.
+        Assert.Equal(2, catalogue.BrowseCalls);
+    }
+
+    /// <summary>
+    /// An artist nobody follows is browsed too, and credited with what they released.
+    /// </summary>
+    /// <remarks>
+    /// <b>The worklist was the followed set, and that was the whole of the
+    /// complaint.</b> <c>ArtistCredit.ReleaseGroupId</c> is written by this
+    /// browse and by nothing else, so an unfollowed artist's discography was not
+    /// a cut list, it was an unfetched one — and no album by them could be found
+    /// at all without following them first.
+    ///
+    /// Two things the follow flag still decides are asserted here to stay
+    /// decided: a first browse monitors nothing whoever it is for, and the stamp
+    /// goes on so the row leaves the worklist instead of being re-asked forever.
+    /// The credit is the load-bearing assertion — <c>GetArtist</c> reads the
+    /// discography through exactly that column, so a browse that wrote the group
+    /// and not the credit would leave the page as empty as before.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistNobodyFollowsIsStillBrowsed()
+    {
+        var artist = await SeedFollowedArtistAsync("Rory Gallagher", followed: false);
+
+        var catalogue = new StubCatalogue(
+            recording: null, work: null, discography: () => [Released("Irish Tour '74", 1974)]);
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var group = await db.ReleaseGroups
+            .AsNoTracking()
+            .SingleAsync(row => row.Title == "Irish Tour '74", Token);
+
+        // A first browse is the baseline for anybody, followed or not.
+        Assert.False(group.Monitored);
+
+        Assert.True(await db.ArtistCredits.AnyAsync(
+            credit => credit.ArtistId == artist && credit.ReleaseGroupId == group.Id,
+            Token));
+
+        Assert.NotNull(await db.Artists
+            .AsNoTracking()
+            .Where(row => row.Id == artist)
+            .Select(row => row.DiscographyLookupUtc)
+            .SingleAsync(Token));
+    }
+
+    /// <summary>
+    /// An artist with no files at all, which is the case following exists for.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="followed"/> defaults to true because that is what most of
+    /// these tests are about. False is the other half of the fifth worklist:
+    /// since it widened past the followed set, that artist is on it too — see
+    /// <see cref="AnArtistNobodyFollowsIsStillBrowsed"/>.
+    /// </remarks>
+    private async Task<ArtistId> SeedFollowedArtistAsync(string name, bool followed = true)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var artist = new Artist
+        {
+            Id = ArtistId.New(),
+            Name = name,
+            SortName = name,
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Followed = followed,
+        };
+
+        db.Artists.Add(artist);
+        await db.SaveChangesAsync(Token);
+
+        return artist.Id;
+    }
+
+    /// <summary>Puts a discography far enough in the past that the pass will ask again.</summary>
+    private async Task AgeDiscographyAsync(ArtistId artist, TimeSpan by)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await db.Artists.SingleAsync(a => a.Id == artist, Token);
+        row.DiscographyLookupUtc = row.DiscographyLookupUtc!.Value - by;
+
+        await db.SaveChangesAsync(Token);
+    }
+
+    /// <summary>
+    /// One release group, as the browse returns it.
+    /// </summary>
+    /// <remarks>
+    /// <b>The id is derived from the title, because MusicBrainz's ids are
+    /// stable.</b> A fresh <c>Guid</c> per call models a catalogue that changes a
+    /// record's identity between two browses, which is not a thing that happens —
+    /// and it breaks any test that browses twice in a way that looks like a
+    /// production bug: the second browse fails to recognise the group the first
+    /// one wrote, <c>UpsertGroupAsync</c> finds nothing by the new id, and a
+    /// duplicate is minted before the stage under test has run at all.
+    ///
+    /// Derived rather than hoisted into each fixture, so the next two-run test
+    /// does not have to know this. The digest is a convenience for generating
+    /// sixteen stable bytes from a string; nothing here is a security boundary.
+    /// </remarks>
+    private static MusicBrainzReleaseGroup Released(string title, int year) =>
+        new(
+            new Mbid(new Guid(System.Security.Cryptography.SHA256
+                .HashData(System.Text.Encoding.UTF8.GetBytes(title))
+                .AsSpan(0, 16))),
+            title,
+            "Album",
+            [],
+            year);
+
+    /// <summary>
+    /// A record only the shop knows about reaches the discography.
+    /// </summary>
+    /// <remarks>
+    /// The point of the whole discovery stage: MusicBrainz learns about a record
+    /// when an editor adds it, and a shop lists it on release day. It is minted
+    /// with no MBID and no type, because the shop stated neither — and on a first
+    /// browse it is still unmonitored, since the baseline rule does not care
+    /// which source a record came from.
+    /// </remarks>
+    [Fact]
+    public async Task ARecordOnlyTheShopKnowsAboutReachesTheDiscography()
+    {
+        await SeedFollowedArtistAsync("Beth Hart");
+
+        var catalogue = new StubCatalogue(
+            recording: null, work: null, discography: () => [Released("Leave the Light On", 2003)]);
+
+        var shop = new StubDiscovery(
+            new DiscoveredRelease("War In My Mind", 2019, "0810020502138", "abc", null, 12));
+
+        await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var minted = await db.ReleaseGroups
+            .AsNoTracking()
+            .SingleAsync(group => group.Title == "War In My Mind", Token);
+
+        Assert.Null(minted.Mbid);
+        Assert.Null(minted.PrimaryType);
+        Assert.Equal(2019, minted.FirstReleaseYear);
+
+        // A first browse is the baseline whatever named the record.
+        Assert.False(minted.Monitored);
+
+        // And the MusicBrainz half is untouched beside it.
+        Assert.True(await db.ReleaseGroups.AnyAsync(g => g.Title == "Leave the Light On", Token));
+    }
+
+    /// <summary>
+    /// A shop's copy of a record the catalogue already holds is not a second record.
+    /// </summary>
+    /// <remarks>
+    /// <b>Two runs on purpose.</b> Within one run the titles collected in the
+    /// MusicBrainz loop are in memory, so a single-run test would pass without
+    /// ever asking the question that matters: on a *later* run the record exists
+    /// only in the database, and the stage has to read it back to recognise it.
+    /// That read projects into a private nested record, which compiles whether or
+    /// not EF can translate it — this is what proves it can.
+    ///
+    /// The shop spells it differently and dates it a year out, which is the
+    /// ordinary shape of the disagreement rather than an invented one.
+    ///
+    /// <b>It also guards the browse itself.</b> When this was first written the
+    /// helper minted a fresh MBID per call, so the second browse did not
+    /// recognise its own record and duplicated it — before discovery ran at all.
+    /// The assertion cannot tell the two causes apart by counting, which is why
+    /// the surviving row's title is checked as well: two MusicBrainz rows and one
+    /// MusicBrainz row beside a shop's are different failures.
+    /// </remarks>
+    [Fact]
+    public async Task AShopsCopyOfARecordAlreadyHeldIsNotAddedTwice()
+    {
+        var artist = await SeedFollowedArtistAsync("Joe Bonamassa");
+
+        var catalogue = new StubCatalogue(
+            recording: null, work: null, discography: () => [Released("Blues Deluxe", 2003)]);
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await AgeDiscographyAsync(artist, TimeSpan.FromDays(30));
+
+        var shop = new StubDiscovery(
+            new DiscoveredRelease("Blues DeLuxe", 2004, null, "x", null, 11));
+
+        await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var group = Assert.Single(await db.ReleaseGroups.AsNoTracking().ToListAsync(Token));
+
+        // MusicBrainz's spelling stands; the shop's row was recognised, not merged.
+        Assert.Equal("Blues Deluxe", group.Title);
+    }
+
+    /// <summary>
+    /// A record the shop lists after you followed somebody is wanted by default.
+    /// </summary>
+    [Fact]
+    public async Task ARecordTheShopListsAfterTheBaselineIsMonitored()
+    {
+        var artist = await SeedFollowedArtistAsync("Beth Hart");
+
+        var catalogue = new StubCatalogue(recording: null, work: null, discography: () => []);
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await AgeDiscographyAsync(artist, TimeSpan.FromDays(30));
+
+        var shop = new StubDiscovery(
+            new DiscoveredRelease("War In My Mind", 2019, null, "x", null, 12));
+
+        await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var minted = await db.ReleaseGroups.AsNoTracking().SingleAsync(Token);
+
+        Assert.Equal("War In My Mind", minted.Title);
+        Assert.True(minted.Monitored);
+    }
+
+    /// <summary>
+    /// A shop's artist page is not a discography, and singles are not gaps.
+    /// </summary>
+    /// <remarks>
+    /// Measured, one artist's page is 166 rows of singles, promos and
+    /// compilations beside the albums. Minted untyped they all satisfy
+    /// <c>Discography.IsGap</c>, so without a cut the first re-browse would
+    /// monitor every one and lengthen the shelf this work exists to shorten.
+    ///
+    /// An uncounted record is <b>kept</b>: a silence is not a small number, which
+    /// is the same reading <c>ArtistNameMatch.Dwarfs</c> gives an absent album
+    /// count, and it errs towards a visible extra row over a hidden gap.
+    /// </remarks>
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(3, false)]
+    [InlineData(4, true)]
+    [InlineData(null, true)]
+    public async Task ASingleIsNotOfferedAndAnUncountedRecordIs(int? tracks, bool offered)
+    {
+        await SeedFollowedArtistAsync("Beth Hart");
+
+        var catalogue = new StubCatalogue(recording: null, work: null, discography: () => []);
+
+        var shop = new StubDiscovery(
+            new DiscoveredRelease("Something", 2019, null, "x", null, tracks));
+
+        await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Equal(offered, await db.ReleaseGroups.AsNoTracking().AnyAsync(Token));
+    }
+
+    /// <summary>
+    /// A shop being down must not cost the answer MusicBrainz already gave.
+    /// </summary>
+    /// <remarks>
+    /// The browse has succeeded by the time discovery runs, and the artist is
+    /// about to be stamped. Letting the shop's failure escape would discard a
+    /// perfectly good discography, leave the stamp unwritten and re-ask for both
+    /// on every run — which is the failure <c>BetterPictureAsync</c> already
+    /// records in its own words, where a Qobuz outage meant no artist got a
+    /// picture at all.
+    /// </remarks>
+    [Fact]
+    public async Task AShopBeingDownDoesNotCostTheMusicBrainzAnswer()
+    {
+        var artist = await SeedFollowedArtistAsync("Beth Hart");
+
+        var catalogue = new StubCatalogue(
+            recording: null, work: null, discography: () => [Released("Leave the Light On", 2003)]);
+
+        var shop = new StubDiscovery { Unavailable = true };
+
+        await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var kept = await db.ReleaseGroups.AsNoTracking().SingleAsync(Token);
+        Assert.Equal("Leave the Light On", kept.Title);
+
+        // Stamped, so the pass converges rather than re-asking MusicBrainz forever
+        // because a shop was briefly unreachable.
+        var row = await db.Artists.AsNoTracking().SingleAsync(a => a.Id == artist, Token);
+        Assert.NotNull(row.DiscographyLookupUtc);
+
+        Assert.Equal(1, shop.Calls);
+    }
+
+    /// <summary>
+    /// An expired shop credential costs a log line, not the pass.
+    /// </summary>
+    /// <remarks>
+    /// <b>The case an outage test cannot reach.</b> <c>QobuzClient</c> treats
+    /// only 429, 408 and 5xx as transient; every other non-2xx — 401 among them —
+    /// is a rejection, and a user auth token taken from a signed-in web player
+    /// session expires as a matter of course. Caught too narrowly, that exception
+    /// escapes to <c>DrainAsync</c>, which rethrows rejections on purpose, and
+    /// the whole run aborts — after the unsaved scope has already thrown away
+    /// this artist's groups, credits and stamp.
+    ///
+    /// So this asserts the same three things the outage test does, for the other
+    /// exception type: the MusicBrainz answer survives, the artist is stamped,
+    /// and the pass reaches its end.
+    /// </remarks>
+    [Fact]
+    public async Task AnExpiredShopCredentialDoesNotAbortThePass()
+    {
+        var artist = await SeedFollowedArtistAsync("Beth Hart");
+
+        var catalogue = new StubCatalogue(
+            recording: null, work: null, discography: () => [Released("Leave the Light On", 2003)]);
+
+        var shop = new StubDiscovery { Rejected = true };
+
+        // EnrichAsync asserts the pass finished rather than aborting.
+        await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var kept = await db.ReleaseGroups.AsNoTracking().SingleAsync(Token);
+        Assert.Equal("Leave the Light On", kept.Title);
+
+        var row = await db.Artists.AsNoTracking().SingleAsync(a => a.Id == artist, Token);
+        Assert.NotNull(row.DiscographyLookupUtc);
+
+        Assert.Equal(1, shop.Calls);
+    }
 
     private static async Task EnrichAsync(ServiceProvider services)
     {
@@ -1209,7 +1636,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         IMusicBrainzCatalogue catalogue,
         IArtistPortraits? portraits = null,
         IArtistPortraits? pressPhotos = null,
-        IArtistPortraits? thumbnails = null)
+        IArtistPortraits? thumbnails = null,
+        IReleaseDiscovery? releases = null)
     {
         var services = new ServiceCollection();
 
@@ -1240,6 +1668,16 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         services.AddKeyedSingleton<IArtistPortraits>(
             ArtistPortraitSources.AudioDb,
             thumbnails ?? new StubPortraits());
+
+        // Finds nothing unless a test says otherwise, which is the commonest real
+        // answer: a shop carries records by the artists it sells, and most of a
+        // followed list is not on any one of them. Registered whatever the test
+        // is about, because `EnrichmentService` now resolves it at construction —
+        // without this every test in this file fails on the container rather
+        // than on its own subject.
+        services.AddKeyedSingleton<IReleaseDiscovery>(
+            ReleaseDiscoverySources.Qobuz,
+            releases ?? new StubDiscovery());
 
         services.Configure<WikidataOptions>(options => options.BatchSize = 2);
         services.AddSingleton<LibraryWorkGate>();
@@ -1300,6 +1738,63 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>
+    /// A shop that carries whatever a test says it carries.
+    /// </summary>
+    /// <remarks>
+    /// Finds nothing by default, which is both the commonest real answer and
+    /// what keeps every existing test in this file unchanged by the discovery
+    /// stage's arrival — the same bargain the third picture source took.
+    ///
+    /// The call count matters for the same reason it does on
+    /// <see cref="StubPortraits"/>: a source asked twice about one artist in a
+    /// single run is a worklist that does not converge.
+    /// </remarks>
+    private sealed class StubDiscovery(params DiscoveredRelease[] releases) : IReleaseDiscovery
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        /// <summary>When set, every request fails the way an outage does.</summary>
+        public bool Unavailable { get; init; }
+
+        /// <summary>
+        /// When set, every request fails the way an expired credential does.
+        /// </summary>
+        /// <remarks>
+        /// A separate flag because the two are different exception types and the
+        /// pass treated them differently: an outage was caught and a refusal was
+        /// not, so a stale Qobuz token aborted the run and took the artist's
+        /// MusicBrainz answer with it. Nothing modelled that until this existed.
+        /// </remarks>
+        public bool Rejected { get; init; }
+
+        /// <summary>Every artist this stub was asked about, in order.</summary>
+        public List<ArtistToPicture> Asked { get; } = [];
+
+        public Task<DiscoveredReleases> FindAsync(
+            ArtistToPicture artist,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+
+            lock (Asked) Asked.Add(artist);
+
+            if (Unavailable)
+            {
+                throw new ProviderUnavailableException("stub", "the shop is down.");
+            }
+
+            if (Rejected)
+            {
+                throw new ProviderRejectedException("stub", "the token has expired.");
+            }
+
+            return Task.FromResult(new DiscoveredReleases(releases, releases.Length));
+        }
+    }
+
+    /// <summary>
     /// Answers one recording MBID per cluster, and counts the asking.
     /// </summary>
     /// <remarks>
@@ -1344,17 +1839,21 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         MusicBrainzRecording? recording,
         MusicBrainzWork? work,
         bool unavailable = false,
-        MusicBrainzArtist? artist = null) : IMusicBrainzCatalogue
+        MusicBrainzArtist? artist = null,
+        Func<IReadOnlyList<MusicBrainzReleaseGroup>>? discography = null) : IMusicBrainzCatalogue
     {
         private int _recordingCalls;
         private int _workCalls;
         private int _artistCalls;
+        private int _browseCalls;
 
         public int RecordingCalls => Volatile.Read(ref _recordingCalls);
 
         public int WorkCalls => Volatile.Read(ref _workCalls);
 
         public int ArtistCalls => Volatile.Read(ref _artistCalls);
+
+        public int BrowseCalls => Volatile.Read(ref _browseCalls);
 
         public static StubCatalogue Unavailable() => new(null, null, unavailable: true);
 
@@ -1381,6 +1880,34 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(
                 "Enrichment does not attribute releases; nothing here should call this.");
+
+        /// <summary>
+        /// What MusicBrainz says a followed artist released.
+        /// </summary>
+        /// <remarks>
+        /// Empty rather than throwing like its neighbours, because enrichment
+        /// genuinely calls this one: the discography stage browses a followed
+        /// artist's release groups. Most fixtures here follow nobody, so the
+        /// stage's worklist is empty and this is never reached — but throwing
+        /// would turn the day somebody adds a followed artist into a failure in
+        /// an unrelated test rather than into the thing they were testing.
+        ///
+        /// A <see cref="Func{TResult}"/> rather than a list, because the whole
+        /// point of monitoring is the difference between two browses of the same
+        /// artist: the first is a baseline and the second is what turned up
+        /// since. A fixed list cannot express that, and a stub that cannot
+        /// change its answer can only test half the rule.
+        /// </remarks>
+        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+            Mbid artist,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _browseCalls);
+
+            if (unavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
+
+            return Task.FromResult(discography?.Invoke() ?? []);
+        }
 
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,

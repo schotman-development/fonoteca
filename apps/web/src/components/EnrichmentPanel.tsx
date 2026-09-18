@@ -35,6 +35,7 @@ function pendingSentence(status: {
   readonly pendingFiles: number
   readonly pendingArtists: number
   readonly pendingPortraits: number
+  readonly pendingDiscographies: number
 }): string {
   const parts: string[] = []
 
@@ -64,6 +65,20 @@ function pendingSentence(status: {
       `${status.pendingPortraits.toLocaleString()} picture${
         status.pendingPortraits === 1 ? '' : 's'
       } to look for`,
+    )
+  }
+
+  // Fourth clause, and no longer the small one. It was the followed set — single
+  // figures beside three counts in the thousands — and it is now every artist
+  // with an MBID nobody has browsed, because a discography nobody fetched is a
+  // discography nobody can find an album in. Named as discographies rather than
+  // as artists so it cannot be read as a second helping of the artist count —
+  // the rows overlap, the work does not.
+  if (status.pendingDiscographies > 0) {
+    parts.push(
+      `${status.pendingDiscographies.toLocaleString()} discograph${
+        status.pendingDiscographies === 1 ? 'y' : 'ies'
+      } to fetch`,
     )
   }
 

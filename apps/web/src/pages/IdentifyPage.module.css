@@ -1,0 +1,276 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-inline-size: 0;
+}
+
+.title,
+.heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.grow {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.mono {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.panel {
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+.search {
+  display: flex;
+  align-items: end;
+  gap: var(--space-8);
+}
+
+.search > :first-child {
+  flex: 1;
+}
+
+.carousel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-inline-size: 0;
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-accent-border);
+  border-inline-start: var(--border-width-thick) solid var(--color-accent-solid);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  overflow-x: auto;
+}
+
+/* Tables */
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.table th,
+.table td {
+  padding: var(--space-4) var(--space-8);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table thead th {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.table tr[data-differs] > * {
+  background-color: var(--color-warning-subtle);
+}
+
+.table tr[data-kind="empty"] td,
+.table tr[data-kind="held"] td {
+  color: var(--color-text-secondary);
+}
+
+.table tr[data-kind="unseated"] > * {
+  border-block-start: var(--border-width-thick) solid var(--color-danger-border);
+  border-block-end: var(--border-width-thick) solid var(--color-danger-border);
+  background-color: var(--color-danger-subtle);
+}
+
+/* Snackbars */
+
+.snackbars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.snackbars:empty {
+  display: none;
+}
+
+.snackbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-6) var(--space-6) var(--space-6) var(--space-16);
+  border: var(--border-width-thin) solid var(--color-warning-border);
+  border-inline-start: var(--border-width-thick) solid var(--color-warning-solid);
+  border-radius: var(--radius-md);
+  background-color: var(--color-warning-subtle);
+}
+
+.snackbar[data-tone="danger"] {
+  border-color: var(--color-danger-border);
+  border-inline-start-color: var(--color-danger-solid);
+  background-color: var(--color-danger-subtle);
+}
+
+.snackbar[data-tone="success"] {
+  border-color: var(--color-success-border);
+  border-inline-start-color: var(--color-success-solid);
+  background-color: var(--color-success-subtle);
+}
+
+/* The bar */
+
+/*
+ * Pinned to the bottom edge of the shell's scroll container, which has padding:
+ * a sticky box stops at the padding, so it is pulled down over it.
+ */
+.stickyBar {
+  position: sticky;
+  inset-block-end: calc(-1 * var(--space-24));
+  z-index: var(--z-index-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-12) 0 calc(var(--space-12) + var(--space-24));
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+  background-color: var(--color-surface-base);
+}
+
+.result {
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-success-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+/* More menu */
+
+.moreAnchor {
+  display: inline-flex;
+  anchor-name: --identify-more;
+}
+
+.menu {
+  position-anchor: --identify-more;
+  inset: auto;
+  inset-block-start: anchor(bottom);
+  inset-inline-end: anchor(right);
+  position-try-fallbacks: flip-block;
+  margin: var(--space-4) 0 0;
+  inline-size: 320px;
+  padding: var(--space-8);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-lg);
+}
+
+.menuGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-block: var(--space-4);
+  padding-inline: 0;
+  border: 0;
+}
+
+.menuGroup + .menuGroup {
+  border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
+}
+
+.menuGroup > legend {
+  float: inline-start;
+  inline-size: 100%;
+  padding: var(--space-4) var(--space-8) 0;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.menuItem {
+  display: block;
+  inline-size: 100%;
+  padding: var(--space-6) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.menuItem:hover:not([aria-disabled="true"]) {
+  background-color: var(--color-interactive-hover);
+}
+
+.menuItem:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: -2px;
+}
+
+/* Tertiary text rather than opacity: the tokens' contrast was measured, a faded colour was not. */
+.menuItem[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.menuItem[aria-disabled="true"] > span {
+  color: var(--color-text-tertiary);
+}
+
+/* Every tag */
+
+.tagList {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+}
+
+.tagRow {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: baseline;
+}
+
+.tagRow > dt,
+.tagRow > dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Native, as SortSelect's is: the platform's control carries the keyboard and a phone's picker. */
+.picker {
+  display: block;
+  /* A percentage width keeps the longest option from setting the column's width. */
+  inline-size: 100%;
+  margin-block-start: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-xs);
+}
+
+.picker:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 1px;
+}

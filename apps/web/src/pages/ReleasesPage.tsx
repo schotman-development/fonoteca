@@ -1,34 +1,17 @@
 import type { components } from '@fonoteca/api-client'
 import { Badge, CatalogueCard, CatalogueGrid, Input, Stack, Text } from '@fonoteca/ui'
-import { Link } from '@tanstack/react-router'
-import { useDeferredValue, useId, useState } from 'react'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { useDeferredValue, useId } from 'react'
 
 import { api } from '../api.ts'
 import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { CERTAINTY } from './certainty.ts'
 import { releaseCover } from './coverArt.ts'
+import { RELEASE_DEFAULT_SORT, RELEASE_SORTS, type ReleaseListSearch } from './listSearch.ts'
 import styles from './ReleasesPage.module.css'
 
 type ReleaseSummary = components['schemas']['ReleaseSummary']
-
-/**
- * The three orders worth having.
- *
- * Title is how you find an album you already have in mind. Artist is what turns
- * an alphabetical soup of titles back into a shelf, since a person's records
- * sit together nowhere else on this screen. Year is the one that answers a
- * question nothing else here does — what this library is made of, decade by
- * decade — and it is worth remembering the year came from MusicBrainz's dating
- * of *this pressing*, so a remaster sorts as the remaster it is.
- */
-const SORTS = [
-  ['title', 'Title'],
-  ['artist', 'Artist'],
-  ['year', 'Newest first'],
-] as const
-
-type Sort = (typeof SORTS)[number][0]
 
 /**
  * The library, by album.
@@ -39,8 +22,18 @@ type Sort = (typeof SORTS)[number][0]
  * makes the validation card below a second opinion rather than an echo.
  */
 export function ReleasesPage() {
-  const [filter, setFilter] = useState('')
-  const [sort, setSort] = useState<Sort>('title')
+  // In the address bar rather than in the component, so opening an album and
+  // coming back keeps the order. See `routes.tsx` and the artist list.
+  const { query: filter = '', sort = RELEASE_DEFAULT_SORT } = useSearch({
+    from: '/library/releases',
+  })
+
+  const navigate = useNavigate({ from: '/library/releases' })
+
+  const update = (next: ReleaseListSearch) => {
+    void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true })
+  }
+
   const searchId = useId()
 
   const query = useDeferredValue(filter.trim())
@@ -83,11 +76,16 @@ export function ReleasesPage() {
             type="search"
             value={filter}
             placeholder="Sloe Gin, Off the Wall…"
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={(event) => update({ query: event.target.value })}
           />
         </div>
 
-        <SortSelect label="Sort by" value={sort} options={SORTS} onChange={setSort} />
+        <SortSelect
+          label="Sort by"
+          value={sort}
+          options={RELEASE_SORTS}
+          onChange={(value) => update({ sort: value === RELEASE_DEFAULT_SORT ? undefined : value })}
+        />
       </Stack>
 
       <div role="status" aria-live="polite" aria-busy={state.status === 'loading'}>
@@ -255,8 +253,15 @@ function ReleaseCard({ release }: { readonly release: ReleaseSummary }) {
           ) : null}
         </>
       }
+      /* The list's order and filter ride along on the click. See the artist card. */
       render={(props) => (
-        <Link {...props} to="/library/releases/$releaseId" params={{ releaseId: release.id }} />
+        <Link
+          {...props}
+          to="/library/releases/$releaseId"
+          from="/library/releases"
+          params={{ releaseId: release.id }}
+          search={(prev) => prev}
+        />
       )}
     />
   )

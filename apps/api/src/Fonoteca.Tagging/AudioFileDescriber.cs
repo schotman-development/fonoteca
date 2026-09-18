@@ -152,6 +152,53 @@ public sealed class AudioFileDescriber(IAudioFileStore files, IAudioProbe probe)
             notes.Add($"The audio could not be measured: {Reason(cause)}");
         }
 
+        if (await ReadTagsIntoAsync(path, tags, seen, cancellationToken).ConfigureAwait(false)
+            is { } tagNote)
+        {
+            notes.Add(tagNote);
+        }
+
+        return new AudioFileReading
+        {
+            Quality = measurement?.Quality,
+            Duration = measurement?.Quality.Duration,
+            DecodedCleanly = measurement?.DecodedCleanly ?? false,
+            Tags = tags,
+            Note = notes.Count == 0 ? null : string.Join(" ", notes),
+        };
+    }
+
+    /// <summary>
+    /// What the file says about itself, without measuring the audio.
+    /// </summary>
+    /// <remarks>
+    /// The tag half of <see cref="DescribeAsync"/> and nothing else: no
+    /// <c>ffprobe</c>, so a folder of files costs a tag parse each rather than a
+    /// subprocess each. Never throws on the file; null when the file could not be
+    /// read at all, which a caller must not remember as "no tags".
+    /// </remarks>
+    public async Task<IReadOnlyList<TagValue>?> ReadTagsAsync(
+        LibraryPath path,
+        CancellationToken cancellationToken = default)
+    {
+        var tags = new List<TagValue>();
+
+        var note = await ReadTagsIntoAsync(
+                path, tags, new HashSet<string>(StringComparer.OrdinalIgnoreCase), cancellationToken)
+            .ConfigureAwait(false);
+
+        return note is null ? tags : null;
+    }
+
+    /// <summary>TagLib#'s named fields, then ATL's extras. Returns a note when the first read failed.</summary>
+    private async Task<string?> ReadTagsIntoAsync(
+        LibraryPath path,
+        List<TagValue> tags,
+        HashSet<string> seen,
+        CancellationToken cancellationToken)
+    {
+        string? note = null;
+
         try
         {
             var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
@@ -176,7 +223,7 @@ public sealed class AudioFileDescriber(IAudioFileStore files, IAudioProbe probe)
         catch (Exception cause)
 #pragma warning restore CA1031
         {
-            notes.Add($"The tags could not be read: {Reason(cause)}");
+            note = $"The tags could not be read: {Reason(cause)}";
         }
 
         try
@@ -207,14 +254,7 @@ public sealed class AudioFileDescriber(IAudioFileStore files, IAudioProbe probe)
             // standard tags came back fine it would report a gap nobody can see.
         }
 
-        return new AudioFileReading
-        {
-            Quality = measurement?.Quality,
-            Duration = measurement?.Quality.Duration,
-            DecodedCleanly = measurement?.DecodedCleanly ?? false,
-            Tags = tags,
-            Note = notes.Count == 0 ? null : string.Join(" ", notes),
-        };
+        return note;
     }
 
     /// <summary>

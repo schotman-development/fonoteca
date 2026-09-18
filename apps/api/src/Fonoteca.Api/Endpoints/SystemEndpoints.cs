@@ -41,7 +41,7 @@ public static class SystemEndpoints
     /// Safe to poll — the probe caches, so the response can be served without
     /// spending a turn at the rate gate that identification work queues behind.
     /// </remarks>
-    private static async Task<MusicBrainzHealthResponse> GetMusicBrainzHealth(
+    internal static async Task<MusicBrainzHealthResponse> GetMusicBrainzHealth(
         MusicBrainzHealthProbe probe,
         CancellationToken cancellationToken)
     {

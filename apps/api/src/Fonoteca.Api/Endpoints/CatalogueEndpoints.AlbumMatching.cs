@@ -109,6 +109,14 @@ public static partial class CatalogueEndpoints
     private const int MaximumFolderFiles = 300;
 
     /// <summary>An MBID anywhere in what somebody typed or pasted.</summary>
+    /// <remarks>
+    /// Unanchored, so it pulls the id out of a full
+    /// <c>musicbrainz.org/release/&lt;id&gt;</c> URL as readily as out of a bare
+    /// one — it is already URL-parsing by construction, which is why the follow
+    /// endpoint reuses it rather than declaring a second copy. Two regexes for
+    /// one format is how one of them ends up accepting something the other
+    /// refuses.
+    /// </remarks>
     [GeneratedRegex(
         "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -244,7 +252,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
     }
 
-    private static async Task<Results<Ok<ReleaseSearchResponse>, ProblemHttpResult>> SearchReleases(
+    internal static async Task<Results<Ok<ReleaseSearchResponse>, ProblemHttpResult>> SearchReleases(
         IMusicBrainzCatalogue musicBrainz,
         CancellationToken cancellationToken,
         string? q = null,
@@ -297,7 +305,7 @@ public static partial class CatalogueEndpoints
         }
     }
 
-    private static async Task<Results<Ok<ReleaseSlotsResponse>, ProblemHttpResult>> GetReleaseSlots(
+    internal static async Task<Results<Ok<ReleaseSlotsResponse>, ProblemHttpResult>> GetReleaseSlots(
         Guid id,
         string? folder,
         FonotecaDbContext db,
@@ -354,6 +362,10 @@ public static partial class CatalogueEndpoints
             release.PrimaryType,
             release.SecondaryTypes,
             slots.Select(slot => slot.DiscNumber).Distinct().Count(),
+            release.Labels.FirstOrDefault(label => label.Name is not null)?.Name,
+            (release.Labels.FirstOrDefault(label => label.Name is not null)
+                ?? (release.Labels.Count > 0 ? release.Labels[0] : null))?.CatalogNumber,
+            string.IsNullOrWhiteSpace(release.Barcode) ? null : release.Barcode,
             slots));
     }
 
@@ -382,7 +394,7 @@ public static partial class CatalogueEndpoints
     /// it is a bulk write and pretending otherwise on a per-row basis would
     /// promise something no write here delivers.
     /// </remarks>
-    private static async Task<Results<Ok<FolderContentsResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Ok<FolderContentsResponse>, ProblemHttpResult>>
         GetFolderContents(
             string? folder,
             FonotecaDbContext db,
@@ -516,7 +528,7 @@ public static partial class CatalogueEndpoints
     /// failure leaves the decision untaken rather than half-taken, and the same
     /// click works once MusicBrainz does.
     /// </remarks>
-    private static async Task<Results<Ok<AlbumFilingResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Ok<AlbumFilingResponse>, ProblemHttpResult>>
         FileFilesUnderRelease(
             AlbumFilingRequest request,
             FonotecaDbContext db,
@@ -684,13 +696,13 @@ public static partial class CatalogueEndpoints
             // A file that keeps any one of these refusals keeps its place on the
             // worklist, and the screen that just filed it would go on offering
             // it — see the type's remarks and `EnrichmentOutcome.LinkedByPerson`.
-            row.AcoustIdOutcome = AcoustIdOutcome.IdentifiedByPerson;
+            row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.IdentifiedByPerson);
             row.IdentityDecidedUtc = now;
 
-            row.EnrichmentOutcome = EnrichmentOutcome.LinkedByPerson;
+            row.EnrichmentOutcome = ByCaller(caller, EnrichmentOutcome.LinkedByPerson);
             row.RecordingLookupUtc = now;
 
-            row.AttributionOutcome = ReleaseAttributionOutcome.AttributedByPerson;
+            row.AttributionOutcome = ByCaller(caller, ReleaseAttributionOutcome.AttributedByPerson);
             row.ReleaseLookupUtc = now;
             row.ReleaseDecidedUtc = now;
 
@@ -762,7 +774,7 @@ public static partial class CatalogueEndpoints
     /// everything else derived, which is the right answer: the claim was about
     /// audio that is no longer there.
     /// </remarks>
-    private static async Task<Results<Ok<FolderUnreleasedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Ok<FolderUnreleasedResponse>, ProblemHttpResult>>
         MarkFolderUnreleased(
             FolderUnreleasedRequest request,
             FonotecaDbContext db,
@@ -850,7 +862,7 @@ public static partial class CatalogueEndpoints
             if (row.IdentityDecidedUtc == null
                 && UnidentifiedOutcomes.Contains(row.AcoustIdOutcome))
             {
-                row.AcoustIdOutcome = AcoustIdOutcome.Unreleased;
+                row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.Unreleased);
 
                 // Only if nothing ever asked, for the reason the rejection path
                 // states: the stamp means "AcoustID has been put this question",
@@ -862,7 +874,7 @@ public static partial class CatalogueEndpoints
 
             if (UnlinkedOutcomes.Contains(row.EnrichmentOutcome))
             {
-                row.EnrichmentOutcome = EnrichmentOutcome.Unreleased;
+                row.EnrichmentOutcome = ByCaller(caller, EnrichmentOutcome.Unreleased);
                 row.RecordingLookupUtc ??= now;
 
                 // The identification leg may have been `Identified` and left
@@ -875,7 +887,7 @@ public static partial class CatalogueEndpoints
             if (row.ReleaseDecidedUtc == null
                 && UnattributedOutcomes.Contains(row.AttributionOutcome))
             {
-                row.AttributionOutcome = ReleaseAttributionOutcome.Unreleased;
+                row.AttributionOutcome = ByCaller(caller, ReleaseAttributionOutcome.Unreleased);
                 row.ReleaseLookupUtc ??= now;
                 row.ReleaseDecidedUtc = now;
             }
@@ -946,7 +958,7 @@ public static partial class CatalogueEndpoints
     /// already on the same screen under the same folder heading. Overwriting
     /// them would lose the distinction and change nothing a person can see.
     /// </remarks>
-    private static async Task<Results<Ok<FolderReopenResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Ok<FolderReopenResponse>, ProblemHttpResult>>
         ReopenFolder(
             FolderReopenRequest request,
             FonotecaDbContext db,
@@ -1025,7 +1037,7 @@ public static partial class CatalogueEndpoints
             row.IdentityDecidedUtc = null;
             row.ReleaseDecidedUtc = null;
 
-            row.AcoustIdOutcome = AcoustIdOutcome.ReopenedByPerson;
+            row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.ReopenedByPerson);
 
             // Both of the later legs go back to "no answer", which is what they
             // now are: the recording they were about is gone. They are not moved
@@ -1243,6 +1255,9 @@ public sealed record ReleaseSearchRow(
     int? Score);
 
 /// <summary>One album's every position, for seating files onto.</summary>
+/// <param name="Label">The first label MusicBrainz lists, which is the one printed on the sleeve.</param>
+/// <param name="CatalogNumber">The first catalogue number MusicBrainz lists.</param>
+/// <param name="Barcode">Null for none — MusicBrainz also sends "" for "this release has no barcode".</param>
 public sealed record ReleaseSlotsResponse(
     Guid Mbid,
     string Title,
@@ -1254,6 +1269,9 @@ public sealed record ReleaseSlotsResponse(
     string? PrimaryType,
     IReadOnlyList<string> SecondaryTypes,
     int DiscCount,
+    string? Label,
+    string? CatalogNumber,
+    string? Barcode,
     IReadOnlyList<ReleaseSlotRow> Slots);
 
 /// <summary>

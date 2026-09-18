@@ -57,6 +57,24 @@ export function releaseArt(mbid: string): string {
 }
 
 /**
+ * The sleeve of a record the library does not hold.
+ *
+ * Keyed on the *release group* rather than a release, which is the only key
+ * available here: a discography is groups, and the whole point of a row on it
+ * is that no pressing of it has been chosen — or owned.
+ * The Cover Art Archive redirects a group to whichever of its releases has
+ * artwork, which is exactly the "any sleeve for this album" question being
+ * asked.
+ *
+ * Same rendition as {@link releaseArt} so the two sit at one size on a page
+ * that shows both, and a 404 is the ordinary answer — the caller falls back to
+ * a monogram the way every other artwork here does.
+ */
+export function releaseGroupArt(mbid: string): string {
+  return `https://coverartarchive.org/release-group/${mbid}/front-250`
+}
+
+/**
  * A photograph of the artist, at a size worth downloading.
  *
  * **Fetched by the browser, not proxied**, for `releaseArt`'s reason and against

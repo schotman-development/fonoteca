@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Logging;
 using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
@@ -65,7 +66,9 @@ public sealed class EnrichmentService(
     [FromKeyedServices(ArtistPortraitSources.Wikidata)] IArtistPortraits portraits,
     [FromKeyedServices(ArtistPortraitSources.Qobuz)] IArtistPortraits pressPhotos,
     [FromKeyedServices(ArtistPortraitSources.AudioDb)] IArtistPortraits audioDbPhotos,
+    [FromKeyedServices(ReleaseDiscoverySources.Qobuz)] IReleaseDiscovery qobuzReleases,
     IOptions<WikidataOptions> portraitOptions,
+    IOptions<FonotecaOptions> options,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
     IClock clock,
@@ -168,7 +171,12 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return new EnrichmentPending(unasked + personFiled, artists, portraits);
+            var discographies = await db.Artists
+                .Where(UnbrowsedArtist(DiscographyCutoff))
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return new EnrichmentPending(unasked + personFiled, artists, portraits, discographies);
         }
     }
 
@@ -339,6 +347,29 @@ public sealed class EnrichmentService(
             // two orders of magnitude: the whole library is a dozen requests, so
             // a run cancelled before it has lost seconds rather than hours.
             await PicturesAsync(counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            // Fifth, and last — and the reason changed out from under this line
+            // when the worklist widened past the followed set. It used to be
+            // last because it was the cheapest thing here: a handful of followed
+            // rows against stages counting thousands, so a cancelled run lost
+            // seconds of it. It is now the catalogue, one gated browse plus the
+            // shops per artist, which makes it the *most* expensive stage on the
+            // list rather than the least.
+            //
+            // It stays last anyway, for a reason that survives the change: every
+            // stage above writes facts other screens already depend on, and this
+            // one only adds records nobody owns. A run cancelled part way should
+            // lose the shopping list rather than the catalogue. What a cancelled
+            // run now loses is real, though, so `ClaimDiscographiesAsync` drains
+            // followed artists first — see the ordering there.
+            //
+            // The artists it browses for were all in the catalogue before the
+            // run started: following somebody mints their row at the moment of
+            // the click, not here.
+            await DrainAsync(
+                ClaimDiscographiesAsync(cancellationToken),
+                artist => FetchDiscographyAsync(artist, counts, cancellationToken),
+                artist => artist.Name).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -436,7 +467,8 @@ public sealed class EnrichmentService(
     /// at all, because the recording MBID is already in the catalogue.
     /// </remarks>
     private static readonly System.Linq.Expressions.Expression<Func<MediaFile, bool>> PersonFiled =
-        file => file.EnrichmentOutcome == EnrichmentOutcome.LinkedByPerson
+        file => (file.EnrichmentOutcome == EnrichmentOutcome.LinkedByPerson
+                || file.EnrichmentOutcome == EnrichmentOutcome.LinkedByAgent)
             && file.Recording != null
             && file.Recording.Mbid != null;
 
@@ -719,6 +751,452 @@ public sealed class EnrichmentService(
             if (fresh.Count == 0) yield break;
 
             foreach (var artist in fresh) yield return artist;
+        }
+    }
+
+    /// <summary>
+    /// Artists nobody has asked for a discography — the fifth worklist.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every artist with an MBID, not only the followed ones.</b> This was the
+    /// followed set, and that made a record reachable only for somebody already
+    /// followed: <c>ArtistCredit.ReleaseGroupId</c> is written by this browse and
+    /// by nothing else, so every other artist's page showed an empty discography
+    /// — not a filtered one, an unfetched one — and the only way to find an album
+    /// was to follow its artist first. Measured on this library when it changed,
+    /// 27 artists of 3,004 had ever been browsed.
+    ///
+    /// <b>The clock-driven re-ask stays followed-only, and that asymmetry is the
+    /// design rather than an oversight.</b> An artist nobody has browsed is asked
+    /// about once; a followed one is asked again when
+    /// <see cref="DiscographyCutoff"/> says their answer has gone stale. Widening
+    /// the re-ask as well would multiply a weekly sweep by a hundred — see that
+    /// property's own remarks on why it is affordable at all — and would buy no
+    /// monitoring, because <c>ReleaseGroup.Monitored</c> means "released after
+    /// you followed them" and is undefined for an artist nobody follows.
+    ///
+    /// <b>It does cost something, and monitoring is not the whole of it.</b> An
+    /// unfollowed artist's discography is fetched once and then frozen: nothing
+    /// in the application clears <c>DiscographyLookupUtc</c>, so a record they
+    /// release afterwards is invisible on their page for good, and the complaint
+    /// this widening answers — an album nobody can find — comes back for
+    /// everything released after the one browse. Re-asking is the hand-written
+    /// <c>UPDATE</c> this codebase already documents for <c>AcoustIdCheckedUtc</c>.
+    /// Following the artist is the supported way to keep their page current, and
+    /// that is a real limitation rather than a tidy division of labour.
+    ///
+    /// The stamp rather than "has any credited release group" for the reason
+    /// every other stamp in this file exists: an artist MusicBrainz credits with
+    /// nothing would otherwise be browsed for again on every run forever.
+    /// </remarks>
+    private static System.Linq.Expressions.Expression<Func<Artist, bool>> UnbrowsedArtist(
+        DateTimeOffset cutoff) =>
+        artist => artist.Mbid != null
+            && (artist.DiscographyLookupUtc == null
+                || (artist.Followed && artist.DiscographyLookupUtc < cutoff));
+
+    /// <summary>
+    /// How stale a discography may be before this pass asks again.
+    /// </summary>
+    /// <remarks>
+    /// <b>The clause that makes monitoring possible, and the only clock-driven
+    /// re-ask in the application.</b> Keyed on the stamp being null alone — which
+    /// is what every other worklist here does and what this one did — a followed
+    /// artist is browsed once and never again, so "released after you followed
+    /// them" has nothing to compare against and <c>ReleaseGroup.Monitored</c>
+    /// could never become true for anybody.
+    ///
+    /// It is affordable only because of what it re-asks about: the followed set,
+    /// a few dozen artists at one gated browse each. The same idea applied to any
+    /// file-keyed worklist would re-ask about a hundred thousand rows, which is
+    /// exactly why <c>AcoustIdCheckedUtc</c> and friends stay keyed on null
+    /// forever and are re-asked by a hand-written <c>UPDATE</c>.
+    ///
+    /// Clamped at both ends rather than floored at one. Zero means "re-ask on
+    /// every run", which is a legitimate thing to configure and costs one browse
+    /// per followed artist per press; negative would put the cutoff in the
+    /// future and re-ask identically, so it is floored rather than rejected.
+    ///
+    /// <b>The ceiling is the one that matters, because without it a setting
+    /// takes the application down.</b> <see cref="TimeSpan.FromDays"/> throws
+    /// <see cref="OverflowException"/> past about ten million days, and this
+    /// property is read by <c>CountPendingAsync</c> — which the dashboard polls.
+    /// So a fat-fingered <c>Fonoteca:DiscographyRecheckDays</c> would not
+    /// misconfigure the re-ask, it would 500 the status endpoint on a timer,
+    /// nowhere near the setting that caused it. Ten years is past any useful
+    /// value and cannot overflow.
+    ///
+    /// The ceiling is a real narrowing and not only a crash guard: anything from
+    /// ten years up to about ten million days used to work and now silently
+    /// clamps. Both mean "never re-ask in practice", so nothing is lost, but it
+    /// is a behaviour change rather than a pure fix.
+    /// </remarks>
+    private DateTimeOffset DiscographyCutoff =>
+        clock.UtcNow
+        - TimeSpan.FromDays(Math.Clamp(options.Value.DiscographyRecheckDays, 0, MaxRecheckDays));
+
+    /// <summary>The widest re-ask interval that cannot overflow a <see cref="TimeSpan"/>.</summary>
+    private const int MaxRecheckDays = 3_650;
+
+    /// <summary>The fifth worklist, a page at a time.</summary>
+    private async IAsyncEnumerable<PendingArtist> ClaimDiscographiesAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<ArtistId>();
+
+        // Read once, not per page: the cutoff must not slide forward while the
+        // pass drains, or an artist browsed early in a long run falls back onto
+        // the worklist before that run has finished.
+        var cutoff = DiscographyCutoff;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PendingArtist> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                // Followed first, and that ordering earns its keep now the
+                // worklist is the catalogue rather than a handful of rows. This
+                // drain is thousands of gated browses and a person can cancel it
+                // — so the artists somebody said they cared about are the ones
+                // that must not be left to a run that does not finish. Within
+                // each half the id order is the stable one the paging needs.
+                page = await db.Artists
+                    .AsNoTracking()
+                    .Where(UnbrowsedArtist(cutoff))
+                    .OrderByDescending(a => a.Followed)
+                    .ThenBy(a => a.Id)
+                    .Select(a => new PendingArtist(a.Id, a.Name, a.Mbid!.Value))
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var fresh = page.Where(artist => seen.Add(artist.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var artist in fresh) yield return artist;
+        }
+    }
+
+    /// <summary>
+    /// Writes down what MusicBrainz says one artist released.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every release group is stored, and the rule that hides most of them
+    /// runs when somebody opens the page.</b> A discography is mostly
+    /// compilations and live bootlegs, and cutting here would make the stored
+    /// answer a function of a rule — so changing the rule would mean re-browsing
+    /// for every artist in the catalogue at a turn each, which since this
+    /// worklist widened past the followed set is thousands rather than dozens.
+    /// <c>Discography.IsGap</c> is applied in <c>CatalogueEndpoints.GetArtist</c>
+    /// instead.
+    ///
+    /// <b>The groups are minted through the attribution pass's own writer.</b>
+    /// Two pressings of an album share a release group by definition and two
+    /// artists share one whenever they collaborated, so a second upsert here
+    /// would duplicate rows and die on <c>IX_ReleaseGroups_Mbid</c> — the
+    /// failure that writer's memo already exists to prevent, and which took out
+    /// 51 components in one live run before it did.
+    /// </remarks>
+    private async Task FetchDiscographyAsync(
+        PendingArtist artist,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.UtcNow;
+
+        IReadOnlyList<MusicBrainzReleaseGroup> released;
+
+        try
+        {
+            released = await musicBrainz
+                .BrowseReleaseGroupsForArtistAsync(artist.Mbid, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            // Transient. The stamp stays null, so the row stays on the worklist
+            // and the next run retries it — the same bargain DescribeAsync takes.
+            counts.Failed++;
+            Log.DiscographyNotFetched(logger, artist.Name, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.Artists
+                .FirstOrDefaultAsync(a => a.Id == artist.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Unfollowed, or removed, since the page was claimed. Nothing to
+            // record and nothing wrong.
+            if (row is null) return;
+
+            // Whether anybody has ever browsed this artist, read *before* the
+            // stamp below overwrites it. This is what separates the two cases
+            // that decide monitoring: a first browse is the baseline — the back
+            // catalogue as it stood when somebody followed them, monitored by
+            // nothing — and a later one can only be turning up records that did
+            // not exist last time we looked, which is what "future releases"
+            // means here. Read after the assignment it is always false and every
+            // record ever written would be monitored.
+            var baseline = row.DiscographyLookupUtc is null;
+
+            // Stamped whether or not MusicBrainz credited them with anything.
+            // "We asked and they have released nothing else" is an answer, and a
+            // row left unstamped on it is re-asked about on every run forever.
+            row.DiscographyLookupUtc = now;
+
+            if (released.Count == 0)
+            {
+                Log.DiscographyNotFetched(logger, artist.Name, "no release groups");
+            }
+
+            var writer = new ReleaseAttributionService.ReleaseWriter(db);
+
+            // The credits this artist already has on release groups, so a second
+            // run over the same artist adds none. EF queries the database rather
+            // than the change tracker, so this is read once up front and added to
+            // as we go — the same trap the writer's own memos exist for.
+            var already = (await db.ArtistCredits
+                    .Where(credit => credit.ArtistId == artist.Id && credit.ReleaseGroupId != null)
+                    .Select(credit => credit.ReleaseGroupId!.Value)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .ToHashSet();
+
+            // Records this artist was not credited with last time, on a run that
+            // is not the first. Collected rather than flagged in place because
+            // the writer hands back an id and the entity it minted is not
+            // necessarily loaded — see the monitoring loop below.
+            var arrived = new List<ReleaseGroupId>();
+
+            // What the catalogue already holds by them, as titles rather than
+            // ids. `already` answers "have we written this credit"; this answers
+            // "is this record already here", which is a different question and
+            // the only one a shop's album can be put to — it arrives with no
+            // MBID, so a title and a year are all there is to compare.
+            //
+            // <b>Seeded before the loop, on purpose.</b> The groups that loop
+            // mints are Added and unsaved, and EF queries the database rather
+            // than the change tracker — so the same query run afterwards would
+            // miss exactly the rows just written and re-mint every one of them
+            // through the provider path. It is appended to as the loop goes.
+            var held = await db.ReleaseGroups
+                .Where(group => already.Contains(group.Id))
+                .Select(group => new HeldRecord(group.Title, group.FirstReleaseYear))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var group in released)
+            {
+                var groupId = await writer
+                    .UpsertGroupAsync(
+                        group.Id,
+                        group.Title,
+                        cancellationToken,
+                        group.PrimaryType,
+                        group.SecondaryTypes,
+                        group.FirstReleaseYear)
+                    .ConfigureAwait(false);
+
+                held.Add(new HeldRecord(group.Title, group.FirstReleaseYear));
+
+                if (!already.Add(groupId)) continue;
+
+                if (!baseline) arrived.Add(groupId);
+
+                // Position 0 and no join phrase: this is not a printed billing
+                // line, it is "MusicBrainz credits this artist with this record".
+                // Inventing a position would corrupt the ordering for anything
+                // that ever reads a real credit line off a release group.
+                db.ArtistCredits.Add(new ArtistCredit
+                {
+                    Id = Guid.CreateVersion7(),
+                    ArtistId = artist.Id,
+                    ReleaseGroupId = groupId,
+                    Position = 0,
+                });
+            }
+
+            await DiscoverAsync(db, artist, held, arrived, baseline, counts, cancellationToken)
+                .ConfigureAwait(false);
+
+            // A record that turned up after somebody followed this artist is
+            // monitored; everything the first browse wrote is not. `FindAsync`
+            // rather than a query, because the writer has either just Added
+            // these or loaded them a moment ago — both are in the change
+            // tracker, which `FindAsync` checks before it touches the database,
+            // and an Added row no query would find yet is exactly the common
+            // case here.
+            foreach (var id in arrived)
+            {
+                var record = await db.ReleaseGroups
+                    .FindAsync([id], cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (record is not null) record.Monitored = true;
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>One record the catalogue already holds by an artist, as a shop could recognise it.</summary>
+    /// <remarks>
+    /// A title and a year, because a provider's album arrives with no MBID and
+    /// those are the only comparable facts — see <see cref="ReleaseTitleMatch"/>
+    /// for what that costs and why it errs towards showing a duplicate rather
+    /// than hiding a gap.
+    /// </remarks>
+    private sealed record HeldRecord(string Title, int? Year);
+
+    /// <summary>
+    /// The fewest tracks a discovered record may have before it is worth offering.
+    /// </summary>
+    /// <remarks>
+    /// <b>A shop's artist page is not a discography, and without this the
+    /// feature makes the problem it exists to solve worse.</b> Measured against
+    /// this installation, one artist's <c>artist/get?extra=albums</c> reports
+    /// <b>166</b> records — singles, EPs, one-track promos and compilations
+    /// alongside the albums. Minted with no <c>PrimaryType</c> (the shop never
+    /// said "album" and inventing the word would be a claim it did not make),
+    /// every one of them satisfies <c>Discography.IsGap</c>, which deliberately
+    /// keeps untyped records. The next re-browse would then mark all 166
+    /// monitored, and the shelf a person asked to be made shorter would grow by
+    /// two orders of magnitude.
+    ///
+    /// Four is a knob and not a principle, in <c>ArtistNameMatch.CatalogueMargin</c>'s
+    /// sense: it keeps EPs, which are records somebody made on purpose, and drops
+    /// the one-to-three-track rows that are overwhelmingly singles and promos.
+    /// An unknown count is <b>kept</b> rather than dropped — a silence is not a
+    /// small number, the same reading <c>Dwarfs</c> gives an absent album count —
+    /// which errs towards a visible extra row over a hidden gap, the direction
+    /// <see cref="ReleaseTitleMatch"/> states.
+    /// </remarks>
+    private const int MinimumTracksToOffer = 4;
+
+    /// <summary>
+    /// What the shops say this artist released, for records the catalogue has no row for.
+    /// </summary>
+    /// <remarks>
+    /// <b>A failure here must never cost the MusicBrainz answer.</b> The browse
+    /// above has already succeeded and the artist is about to be stamped;
+    /// letting a shop's failure escape would leave the stamp unwritten, discard a
+    /// perfectly good discography and re-ask for it on every run. So every source
+    /// is caught individually and the pass carries on — which is the lesson
+    /// <c>BetterPictureAsync</c> already paid for in its own words, where a Qobuz
+    /// outage meant no artist got a picture at all.
+    ///
+    /// <b><see cref="ProviderException"/>, not just the unavailable half, and the
+    /// difference is not pedantry.</b> <c>QobuzClient.Diagnose</c> treats only
+    /// 429, 408 and 5xx as transient; every other non-2xx — <b>401 included</b> —
+    /// is a <c>ProviderRejectedException</c>. The user auth token comes from a
+    /// signed-in web player session, so it expiring is routine rather than
+    /// exotic. Caught narrowly, that exception escapes to <c>DrainAsync</c>,
+    /// which rethrows rejections deliberately, and the whole pass aborts — having
+    /// first discarded this artist's groups, credits and stamp with the unsaved
+    /// scope.
+    ///
+    /// <b>That rethrow is right for MusicBrainz and wrong here</b>, which is why
+    /// the catch belongs at this level rather than that one: a missing AcoustID
+    /// key should stop a pass on the first file instead of the
+    /// hundred-thousandth, because nothing downstream can work without it. A shop
+    /// is supplementary by construction — the catalogue half has already
+    /// succeeded — so its refusal is worth a line and nothing more.
+    ///
+    /// <b>Minted with a null <c>Mbid</c>, and that is a one-way door.</b>
+    /// <c>ReleaseGroup</c> has no barcode column — a group spans every pressing
+    /// and each pressing has its own UPC — so nothing can later recognise one of
+    /// these as a MusicBrainz record. The alternative was inventing an
+    /// identifier, which is worse. <c>DiscoveredRelease.Barcode</c> is carried
+    /// against the day a <c>Release</c> is written from one of these, where ADR
+    /// 0011's key does work.
+    ///
+    /// <b>Monitoring is decided by the caller's baseline rule, not here.</b> A
+    /// discovered record joins <paramref name="arrived"/> on exactly the same
+    /// terms as a MusicBrainz one, so "released after you followed them" means
+    /// one thing across both sources rather than two.
+    /// </remarks>
+    private async Task DiscoverAsync(
+        FonotecaDbContext db,
+        PendingArtist artist,
+        List<HeldRecord> held,
+        List<ReleaseGroupId> arrived,
+        bool baseline,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        foreach (var (name, source) in ReleaseSources)
+        {
+            DiscoveredReleases found;
+
+            try
+            {
+                found = await source
+                    .FindAsync(new ArtistToPicture(artist.Mbid, artist.Name), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (ProviderException cause)
+            {
+                Log.ReleasesNotDiscovered(logger, name, artist.Name, cause.Message);
+                continue;
+            }
+
+            foreach (var record in found.Releases)
+            {
+                if (string.IsNullOrWhiteSpace(record.Title)) continue;
+
+                if (record.TrackCount is { } tracks && tracks < MinimumTracksToOffer) continue;
+
+                // Against everything already known by this artist, including the
+                // records minted moments ago in this same scope — which is why
+                // the list is passed in and appended to rather than re-queried.
+                if (held.Any(entry => ReleaseTitleMatch.IsSameRecord(
+                        record.Title, record.Year, entry.Title, entry.Year)))
+                {
+                    continue;
+                }
+
+                var minted = new ReleaseGroup
+                {
+                    Id = ReleaseGroupId.New(),
+                    Title = record.Title,
+                    FirstReleaseYear = record.Year,
+
+                    // Deliberately untyped. The shop said it sells this record;
+                    // it did not say what kind of record it is, and "Album" here
+                    // would be this application's word rather than anybody's
+                    // fact. `Discography.IsGap` keeps untyped records for exactly
+                    // this reason, and the tile prints "Untyped" so the screen
+                    // says which it is.
+                    PrimaryType = null,
+                };
+
+                db.ReleaseGroups.Add(minted);
+
+                db.ArtistCredits.Add(new ArtistCredit
+                {
+                    Id = Guid.CreateVersion7(),
+                    ArtistId = artist.Id,
+                    ReleaseGroupId = minted.Id,
+                    Position = 0,
+                });
+
+                held.Add(new HeldRecord(record.Title, record.Year));
+
+                if (!baseline) arrived.Add(minted.Id);
+
+                counts.RecordsDiscovered++;
+            }
         }
     }
 
@@ -1021,6 +1499,26 @@ public sealed class EnrichmentService(
     ];
 
     /// <summary>
+    /// The shops that can say what an artist released, in the order they are asked.
+    /// </summary>
+    /// <remarks>
+    /// <b>MusicBrainz is a volunteer catalogue and it is late.</b> A record
+    /// reaches it when an editor adds it; a shop lists it the day it goes on
+    /// sale. Since monitoring is defined as "turned up after you followed them",
+    /// the window these sources cover is exactly the one that matters.
+    ///
+    /// Ordered, and the order is a decision rather than a registration accident —
+    /// the same reasoning as <see cref="PictureSources"/>. Qobuz first because it
+    /// is the one that can also <i>sell</i> the record: a gap it names is
+    /// actionable in one click, where a gap only a free source knows about is a
+    /// lead. A second entry costs one line here.
+    /// </remarks>
+    private IEnumerable<(string Name, IReleaseDiscovery Source)> ReleaseSources =>
+    [
+        (QobuzReleaseDiscovery.ProviderName, qobuzReleases),
+    ];
+
+    /// <summary>
     /// The better picture, from the first preferred source that has one.
     /// </summary>
     /// <remarks>
@@ -1169,6 +1667,14 @@ public sealed class EnrichmentService(
                 if (!string.IsNullOrWhiteSpace(described.Name)) row.Name = described.Name;
 
                 row.SortName = described.SortName ?? row.SortName;
+
+                // Assigned rather than coalesced, and that is the opposite of
+                // the line above on purpose. This is derived from the name that
+                // was just written, so a correction that turns a non-Latin name
+                // into a Latin one has to be able to clear it — coalescing would
+                // leave the old transliteration printed over a name that no
+                // longer needs one.
+                row.LatinName = LatinNames.Of(row.Name, described.Aliases);
                 row.Type = described.Type ?? row.Type;
                 row.Disambiguation = described.Disambiguation ?? row.Disambiguation;
                 row.Country = described.Country;
@@ -1427,6 +1933,9 @@ public sealed class EnrichmentService(
         public int ArtistsDescribed;
 
         public int ArtistsPictured;
+
+        /// <summary>Records a shop named that the catalogue had no row for.</summary>
+        public int RecordsDiscovered;
     }
 
     /// <summary>
@@ -1543,7 +2052,19 @@ public enum EnrichmentStatus
 /// not the same work: a described artist cost a gated MusicBrainz turn, and a
 /// picture costs a two-hundred-and-fiftieth of one batched query.
 /// </param>
-public sealed record EnrichmentPending(int Files, int Artists, int Portraits)
+/// <param name="Discographies">
+/// Artists nobody has asked MusicBrainz what they released. Counted apart from
+/// <paramref name="Artists"/> for the reason the portraits are: same rows,
+/// different work, and a person reading one number would be told to expect the
+/// wrong wait.
+///
+/// <b>No longer the small one.</b> While this was the followed set it was single
+/// figures beside three counts in the thousands; it is now every artist with an
+/// MBID that has never been browsed, so on a fresh library it is the largest
+/// number on the panel and the slowest stage behind it — one gated browse each,
+/// plus the shops.
+/// </param>
+public sealed record EnrichmentPending(int Files, int Artists, int Portraits, int Discographies)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -1553,7 +2074,7 @@ public sealed record EnrichmentPending(int Files, int Artists, int Portraits)
     /// zero and the button is disabled — a stage left out of this total is a
     /// stage that can never be reached.
     /// </remarks>
-    public int Total => Files + Artists + Portraits;
+    public int Total => Files + Artists + Portraits + Discographies;
 }
 
 /// <summary>Where a running pass has got to.</summary>

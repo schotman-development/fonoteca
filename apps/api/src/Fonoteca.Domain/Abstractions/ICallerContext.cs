@@ -47,3 +47,20 @@ public sealed class SystemCallerContext : ICallerContext
     public string ActorName => "system";
     public string? DeviceId => null;
 }
+
+/// <summary>
+/// An agent acting through <c>/mcp</c>, on the owner's approval of each call.
+/// </summary>
+/// <remarks>
+/// Not the owner. Approving a tool call is a different act from reading the
+/// candidates and listening to the file, and the decision endpoints record the
+/// difference in the outcome they write as well as in the event log's actor.
+/// </remarks>
+public sealed class AgentCallerContext : ICallerContext
+{
+    public const string AgentId = "agent";
+
+    public string ActorId => AgentId;
+    public string ActorName => "agent";
+    public string? DeviceId => null;
+}

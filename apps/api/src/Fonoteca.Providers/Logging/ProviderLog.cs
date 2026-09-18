@@ -92,6 +92,34 @@ internal static partial class ProviderLog
             + "be this one")]
     public static partial void QobuzArtistAmbiguous(ILogger logger, string artist, int matches);
 
+    /// <remarks>
+    /// Debug, because it is the ordinary outcome rather than a problem: a shop
+    /// carries records by the artists it sells, and a followed artist it has
+    /// never heard of is an answer. Counted at the caller, where a run's worth of
+    /// them becomes one summary line instead of one line per artist.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1403,
+        Level = LogLevel.Debug,
+        Message = "Qobuz carries no artist called {Artist}, so nothing was asked about releases")]
+    public static partial void QobuzArtistNotFound(ILogger logger, string artist);
+
+    /// <remarks>
+    /// <b>The cut is worth a line because it is invisible otherwise.</b> Qobuz
+    /// report their own total, and one real artist measured at 166 albums against
+    /// a 100-row page — a caller that read only the rows would treat part of a
+    /// discography as all of it and report nothing missing.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1404,
+        Level = LogLevel.Debug,
+        Message = "Qobuz returned {Returned} of {Total} albums for {Artist}")]
+    public static partial void QobuzArtistAlbums(
+        ILogger logger,
+        string artist,
+        int returned,
+        int total);
+
     [LoggerMessage(
         EventId = 1430,
         Level = LogLevel.Warning,

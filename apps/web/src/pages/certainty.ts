@@ -86,6 +86,36 @@ export const CERTAINTY: Readonly<
   },
 
   /*
+    The same three, taken by an agent through `/mcp`. Not "by you": you approved
+    a tool call, and nobody listened to the files. Warning rather than neutral,
+    because that is the suspicion the distinction exists to carry.
+  */
+  AttributedByAgent: {
+    label: 'Matched by an agent',
+    short: 'By agent',
+    tone: 'warning',
+    note:
+      'No rule placed these files. An agent chose the album and the pairing and you approved the ' +
+      'call, but nobody listened to check it — worth a look before trusting it.',
+  },
+  NoReleaseByAgent: {
+    label: 'No album, said by an agent',
+    short: 'No album',
+    tone: 'warning',
+    note:
+      'An agent read the candidates and said none of them is the album these files came from. You ' +
+      'approved the call; nobody listened to the files.',
+  },
+  UnreleasedByAgent: {
+    label: 'Not from a release, said by an agent',
+    short: 'Unreleased',
+    tone: 'warning',
+    note:
+      "An agent said this folder is nobody's album and you approved the call, so nothing goes on " +
+      'asking. Nobody listened to the files.',
+  },
+
+  /*
     The four that file nothing. None of them is an error and none is styled as
     one: refusing is a first-class answer here, and a screen that shouted about
     it would be arguing with the rule that produced it. `NotAttempted` is not

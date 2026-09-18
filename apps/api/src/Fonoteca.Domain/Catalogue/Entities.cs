@@ -94,6 +94,36 @@ public sealed class ReleaseGroup
 
     public int? FirstReleaseYear { get; set; }
 
+    /// <summary>
+    /// Somebody wants this record, whether or not the library holds it.
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="Artist.Followed"/>'s counterpart one level down, and the
+    /// second fact in this catalogue that is not derived from anything.</b> A
+    /// person sets it, nothing can recompute it, and a rescan must never touch
+    /// it.
+    ///
+    /// <b>It is a filter, not an instruction.</b> Nothing searches for a
+    /// monitored record, nothing buys one, and no pass reads this column —
+    /// acquisition here is still a person who searched, read a track list and
+    /// pressed a button, which is the standing rule in <c>CLAUDE.md</c> and on
+    /// the acquire screen itself. What it changes is which records that screen
+    /// is willing to show: the shelf of gaps grows with every artist followed,
+    /// and past a few dozen a list of everything they never released is not a
+    /// list anybody reads.
+    ///
+    /// <b>Default false, and that decides the whole feature.</b> The discography
+    /// browse writes a followed artist's entire back catalogue at once, so
+    /// defaulting this true would make the shelf exactly as long as it is
+    /// without the column — the work merely inverted from choosing what to want
+    /// into dismissing what you do not. So the first browse is a baseline that
+    /// monitors nothing, and <c>EnrichmentService.FetchDiscographyAsync</c>
+    /// monitors what turns up on a <i>later</i> browse: records that appeared
+    /// after somebody said they cared. Marking anything older is a deliberate
+    /// press on the artist page.
+    /// </remarks>
+    public bool Monitored { get; set; }
+
     public ICollection<Release> Releases { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
 }
@@ -629,6 +659,31 @@ public enum AcoustIdOutcome
     /// for an album read as one that has been dealt with.
     /// </remarks>
     ReopenedByPerson = 9,
+
+    /// <summary>
+    /// An agent chose which recording this is, through <c>/mcp</c>, on the owner's approval.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="IdentifiedByPerson"/>. The owner approved a tool call; nobody
+    /// listened to the file, and "you decided this" and "an agent decided this"
+    /// want different amounts of suspicion. Every by-a-person value has an agent
+    /// twin for that reason, written by the same endpoint when the caller is
+    /// <c>AgentCallerContext</c> — it is a claim about who decided, where the
+    /// by-a-person values were a claim about whether a rule did.
+    /// </remarks>
+    IdentifiedByAgent = 10,
+
+    /// <summary>An agent rejected every candidate. See <see cref="IdentifiedByAgent"/>.</summary>
+    RejectedByAgent = 11,
+
+    /// <summary>An agent said this folder was never released. See <see cref="IdentifiedByAgent"/>.</summary>
+    UnreleasedByAgent = 12,
+
+    /// <summary>
+    /// An agent reopened a folder a pass decided. See <see cref="IdentifiedByAgent"/>.
+    /// </summary>
+    /// <remarks>An open question, like <see cref="ReopenedByPerson"/>, and in the worklist's set for the same reason.</remarks>
+    ReopenedByAgent = 13,
 }
 
 /// <summary>
@@ -698,6 +753,15 @@ public enum EnrichmentOutcome
     /// however firmly the folder it sits in was dismissed.
     /// </remarks>
     Unreleased = 6,
+
+    /// <summary>
+    /// An agent filed this file under an album. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.
+    /// </summary>
+    /// <remarks>On the second enrichment worklist beside <see cref="LinkedByPerson"/>, which it has the same gap as.</remarks>
+    LinkedByAgent = 7,
+
+    /// <summary>An agent said this audio was never released. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.</summary>
+    UnreleasedByAgent = 8,
 }
 
 /// <summary>What was decided about a file, and how firmly.</summary>
@@ -767,6 +831,15 @@ public enum ReleaseAttributionOutcome
     /// having been offered at all.
     /// </remarks>
     Unreleased = 9,
+
+    /// <summary>An agent named the release. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.</summary>
+    AttributedByAgent = 10,
+
+    /// <summary>An agent said none of the candidate releases fits. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.</summary>
+    NoReleaseByAgent = 11,
+
+    /// <summary>An agent said these files came from no release. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.</summary>
+    UnreleasedByAgent = 12,
 }
 
 /// <summary>
@@ -884,6 +957,26 @@ public sealed class Artist
     /// <summary>"Beatles, The" — for sorting, distinct from display name.</summary>
     public string? SortName { get; set; }
 
+    /// <summary>
+    /// What to print when <see cref="Name"/> is not in Latin script.
+    /// </summary>
+    /// <remarks>
+    /// MusicBrainz's own English alias, chosen by <see cref="LatinNames.Of"/>,
+    /// and null for every artist whose name is already Latin — which is 3,029
+    /// of this library's 3,051. Every reader resolves
+    /// <c>LatinName ?? Name</c>, so a null is "their own name is fine" rather
+    /// than a gap somebody has to fill.
+    ///
+    /// <b>Beside <see cref="Name"/> rather than over it.</b> Overwriting would
+    /// have cost no read sites at all and was the tempting version; what it
+    /// throws away is the one thing the catalogue is supposed to be — a record
+    /// of what MusicBrainz says. It would also reach the tag writer, which
+    /// would then rewrite a Japanese pressing's <c>ARTIST</c> frame on a
+    /// display preference. A column is SQL-translatable, so the projections
+    /// that could not call a helper can read <c>LatinName ?? Name</c> anyway.
+    /// </remarks>
+    public string? LatinName { get; set; }
+
     public Mbid? Mbid { get; set; }
 
     /// <summary>Person, Group, Orchestra, Choir.</summary>
@@ -981,6 +1074,49 @@ public sealed class Artist
     /// look like.
     /// </remarks>
     public DateTimeOffset? PortraitLookupUtc { get; set; }
+
+    /// <summary>
+    /// Somebody said they care about this artist, whatever the library holds.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one fact here that is not derived from anything.</b> Every other
+    /// column on this row is an answer — from a credit line, from MusicBrainz,
+    /// from Wikidata — and every artist in the catalogue is a byproduct of a
+    /// file. This is the opposite: it comes from a person, nothing can
+    /// recompute it, and a rescan of the whole library must never touch it.
+    ///
+    /// It is deliberately unrelated to what is held. An artist with two hundred
+    /// tracks may be unfollowed — a session player a credit line dragged in —
+    /// and a followed artist may have no files at all, which is the case the
+    /// feature exists for and the one that breaks things: an artist with no
+    /// recordings is dropped from the browse list, so following somebody new
+    /// looks like it did nothing. <c>CatalogueEndpoints.GetArtists</c> keeps a
+    /// followed artist whatever their track count.
+    /// </remarks>
+    public bool Followed { get; set; }
+
+    /// <summary>
+    /// When MusicBrainz was last asked what this artist has released.
+    /// </summary>
+    /// <remarks>
+    /// <b>Keyed on the asking, and this is the sixth time.</b>
+    /// <c>AcoustIdCheckedUtc</c>, <c>RecordingLookupUtc</c>,
+    /// <c>ReleaseLookupUtc</c>, <see cref="LookupUtc"/> and
+    /// <see cref="PortraitLookupUtc"/> each paid for this separately. Keyed on
+    /// "has this artist any credited release groups" instead, every artist
+    /// MusicBrainz lists nothing for — and every one whose discography is
+    /// genuinely empty — is browsed for again on every run forever.
+    ///
+    /// Separate from <see cref="Followed"/> rather than cleared by it, so that
+    /// unfollowing and re-following does not spend the browse again, and so
+    /// that the discography already fetched survives. Re-asking is the
+    /// hand-written <c>UPDATE</c> this codebase already documents for
+    /// <c>AcoustIdCheckedUtc</c>.
+    ///
+    /// Set when the answer is "nothing" too. Left null only when the lookup did
+    /// not happen, so a transient outage retries and a real answer does not.
+    /// </remarks>
+    public DateTimeOffset? DiscographyLookupUtc { get; set; }
 
     /// <summary>Billed credits — the printed credit line, with its order.</summary>
     public ICollection<ArtistCredit> Credits { get; init; } = [];

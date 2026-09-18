@@ -7,7 +7,7 @@ import styles from './SortSelect.module.css'
  * How a catalogue list is ordered.
  *
  * A native `<select>` rather than a design system component, for the reason the
- * seating dialog gives: three short options do not need a combobox, and the
+ * seating dialog gives: a handful of short options do not need a combobox, and the
  * platform's control brings the role, the typeahead, the keyboard handling and
  * a phone's picker that a hand-built listbox would have to reimplement.
  *

@@ -1,6 +1,7 @@
 import type { components } from '@fonoteca/api-client'
+import { describeError } from '@fonoteca/api-client'
 import { Badge, Button, CatalogueCard, CatalogueGrid, Input, Stack, Text } from '@fonoteca/ui'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
 import { api } from '../api.ts'
@@ -8,40 +9,15 @@ import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './ArtistsPage.module.css'
 import { artistImageUrl } from './coverArt.ts'
+import {
+  ARTIST_DEFAULTS,
+  ARTIST_SCOPES,
+  ARTIST_SORTS,
+  type ArtistListSearch,
+  type ArtistScope,
+} from './listSearch.ts'
 
 type ArtistSummary = components['schemas']['ArtistSummary']
-
-/**
- * The two orders worth having, and the reason there is not a third.
- *
- * Alphabetical is how you find somebody you already have in mind; by holdings
- * is how you find out who this library is actually *about*, which on a
- * collection assembled over years is rarely who you would guess. Everything
- * else — by type, by year of first release — is a filter wearing a sort's
- * clothes, and neither is a column here.
- */
-const SORTS = [
-  ['name', 'Name'],
-  ['tracks', 'Most tracks'],
-] as const
-
-type Sort = (typeof SORTS)[number][0]
-
-/**
- * Which names count as artists here.
- *
- * The union the catalogue can reach a track through — credit lines, conductors,
- * ensembles and the composer of the work — is 2,860 names on the author's
- * library, of which 2,157 are songwriters and lyricists with one track each.
- * That is the right answer to "whose page can I reach this recording from" and a
- * useless front page. The default is the sleeve: who the album is *by*.
- */
-const SCOPES = [
-  ['album', 'Album artists'],
-  ['all', 'Everyone credited'],
-] as const
-
-type Scope = (typeof SCOPES)[number][0]
 
 /**
  * The library, by artist.
@@ -53,10 +29,47 @@ type Scope = (typeof SCOPES)[number][0]
  * album's own artist.
  */
 export function ArtistsPage() {
-  const [filter, setFilter] = useState('')
-  const [sort, setSort] = useState<Sort>('name')
-  const [scope, setScope] = useState<Scope>('album')
+  // The shelf's state, read from the address bar rather than from a `useState`
+  // that opening an artist would destroy. See `routes.tsx`.
+  const {
+    query: filter = '',
+    sort = ARTIST_DEFAULTS.sort,
+    scope = ARTIST_DEFAULTS.scope,
+  } = useSearch({ from: '/library' })
+
+  const navigate = useNavigate({ from: '/library' })
+
+  /**
+   * Change one part of the view.
+   *
+   * `replace`, because a sort is a way of looking at the shelf rather than a
+   * place on it: pushed, Back would undo the last keystroke of a filter instead
+   * of leaving the screen, and getting out of a list somebody had typed into
+   * would take twenty presses.
+   *
+   * A key set to `undefined` is dropped by `artistListSearch` rather than
+   * written as empty, which is how choosing the default clears it from the URL.
+   */
+  const update = (next: ArtistListSearch) => {
+    void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true })
+  }
+
   const searchId = useId()
+  const followId = useId()
+
+  const [candidate, setCandidate] = useState('')
+  // `saving`, not `following`: on this page "following" is already a fact about
+  // an artist, and a flag of that name meaning "a request is in flight" is the
+  // one somebody misreads later.
+  const [saving, setSaving] = useState(false)
+  const [followError, setFollowError] = useState<string | null>(null)
+
+  // `useApiQuery` has no cache and no invalidation — the decision `CLAUDE.md`
+  // records as still open — so a list that has to be re-read after a write is
+  // re-read by changing a dependency. A counter is the whole of it; adopting a
+  // query library to refresh one list would be deciding that question by
+  // accident.
+  const [reload, setReload] = useState(0)
 
   // The typed value drives the input and a deferred copy drives the request, so
   // typing stays responsive without a hand-rolled debounce timer — React
@@ -81,8 +94,33 @@ export function ArtistsPage() {
           },
         },
       }),
-    [query, sort, scope],
+    [query, sort, scope, reload],
   )
+
+  const follow = async () => {
+    setSaving(true)
+
+    try {
+      await api.post('/api/catalogue/artists/follow', {
+        json: { artist: candidate.trim() },
+      })
+
+      setCandidate('')
+      setFollowError(null)
+
+      // Shown on the shelf they were just added to, rather than left to be
+      // looked for. An artist followed from here is routinely one the library
+      // holds nothing by, and on the default shelf that is a tile with no
+      // records under it — true, and not obviously the thing that just
+      // happened.
+      update({ scope: 'following' })
+      setReload((seen) => seen + 1)
+    } catch (cause) {
+      setFollowError(describeError(cause))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Stack direction="column" gap={20}>
@@ -96,7 +134,9 @@ export function ArtistsPage() {
         <Text tone="secondary" block>
           {scope === 'album'
             ? 'Who your albums are by, collaborations included — the name on the sleeve rather than everyone on the record.'
-            : 'Everyone credited on something you own — billed, conducting, playing as an ensemble, or named as the composer of the work.'}
+            : scope === 'all'
+              ? 'Everyone credited on something you own — billed, conducting, playing as an ensemble, or named as the composer of the work.'
+              : 'Artists you follow, whether or not you own anything by them — the one list here that is a choice rather than a reading of the library.'}
         </Text>
       </Stack>
 
@@ -112,11 +152,16 @@ export function ArtistsPage() {
             type="search"
             value={filter}
             placeholder="Karajan, Bonamassa, Mozart…"
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={(event) => update({ query: event.target.value })}
           />
         </div>
 
-        <SortSelect label="Sort by" value={sort} options={SORTS} onChange={setSort} />
+        <SortSelect
+          label="Sort by"
+          value={sort}
+          options={ARTIST_SORTS}
+          onChange={(value) => update({ sort: value === ARTIST_DEFAULTS.sort ? undefined : value })}
+        />
 
         {/*
           The same native select, because this is the same control with different
@@ -124,8 +169,54 @@ export function ArtistsPage() {
           sort does: the list is paged there, so narrowing the page in the browser
           would narrow one slice of a library and look like it had worked.
         */}
-        <SortSelect label="Show" value={scope} options={SCOPES} onChange={setScope} />
+        <SortSelect
+          label="Show"
+          value={scope}
+          options={ARTIST_SCOPES}
+          onChange={(value) =>
+            update({ scope: value === ARTIST_DEFAULTS.scope ? undefined : value })
+          }
+        />
+
+        {/*
+          The only way into this page for an artist the library holds nothing
+          by — every other name here arrived as a byproduct of a file, so there
+          is no row to toggle and nothing to search for.
+
+          An id or a URL rather than a name, and that is a constraint rather
+          than a preference: the one free-text call this application makes is
+          for releases, it needs a Solr index, and it fails against a
+          self-hosted mirror. An MBID is a lookup and works everywhere.
+        */}
+        <div className={styles.search}>
+          <label htmlFor={followId}>
+            <Text size="xs" tone="tertiary">
+              Follow by MusicBrainz id
+            </Text>
+          </label>
+          <Stack gap={8} align="center">
+            <Input
+              id={followId}
+              value={candidate}
+              placeholder="musicbrainz.org/artist/… or the id itself"
+              onChange={(event) => setCandidate(event.target.value)}
+            />
+            <Button
+              variant="secondary"
+              disabled={saving || candidate.trim() === ''}
+              onClick={() => void follow()}
+            >
+              Follow
+            </Button>
+          </Stack>
+        </div>
       </Stack>
+
+      {followError != null ? (
+        <Text size="sm" tone="warning">
+          {followError}
+        </Text>
+      ) : null}
 
       <div role="status" aria-live="polite" aria-busy={state.status === 'loading'}>
         {state.status === 'loading' ? <Text tone="tertiary">Reading the catalogue…</Text> : null}
@@ -148,8 +239,8 @@ export function ArtistsPage() {
         state.data.items.length === 0 ? (
           <Empty
             filtered={query.length > 0}
-            narrowed={scope === 'album'}
-            onWiden={() => setScope('all')}
+            scope={scope}
+            onWiden={() => update({ scope: 'all' })}
           />
         ) : (
           /*
@@ -208,15 +299,34 @@ function Results({ total, shown }: { readonly total: number; readonly shown: num
  */
 function Empty({
   filtered,
-  narrowed,
+  scope,
   onWiden,
 }: {
   readonly filtered: boolean
-  readonly narrowed: boolean
+  readonly scope: ArtistScope
   readonly onWiden: () => void
 }) {
+  // The fourth meaning, and it is not a narrowing at all. An empty Following
+  // list is not a library that has not been enriched and not a shelf hiding
+  // somebody — it is a list nobody has put anything on, so neither the pass
+  // nor the widen button is the answer. Offering "search everyone credited"
+  // here would answer "you follow nobody" with a button that cannot help.
+  if (scope === 'following') {
+    return (
+      <Stack direction="column" gap={4} align="start">
+        <Text tone="tertiary" block>
+          {filtered ? 'No artist you follow matches that.' : 'You are not following anyone yet.'}
+        </Text>
+        <Text size="sm" tone="tertiary" block>
+          Following is a choice rather than a reading of the library. Follow someone from their
+          page, or add an artist you own nothing by with their MusicBrainz id or URL.
+        </Text>
+      </Stack>
+    )
+  }
+
   if (filtered) {
-    return narrowed ? (
+    return scope === 'album' ? (
       <Stack direction="column" gap={8} align="start">
         <Text tone="tertiary" block>
           No album artist matches that.
@@ -287,6 +397,23 @@ function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
             tells an orchestra from the person conducting it at a glance, and
             those sit next to each other in an alphabetical list.
           */}
+          {/*
+            First, because it is the one thing on this tile that is a decision
+            rather than a reading of the library — and because on the default
+            shelf a followed artist with nothing held is otherwise indis-
+            tinguishable from one whose files have not been enriched yet.
+
+            A badge and not a button: `CatalogueCard`'s `render` wraps the whole
+            tile in a `Link`, so a control here would be an interactive element
+            inside an interactive element. Following is toggled on the artist's
+            own page, which is also where the discography it fetches is shown.
+          */}
+          {artist.following ? (
+            <Badge tone="info" size="sm">
+              following
+            </Badge>
+          ) : null}
+
           {artist.type != null && artist.type !== 'Person' ? (
             <Badge tone="neutral" size="sm">
               {artist.type}
@@ -306,8 +433,21 @@ function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
           ) : null}
         </>
       }
+      /*
+        The shelf's order and filter travel with the click, so the artist page
+        has something for its back link to hand back. Carried by the card rather
+        than by a middleware on the destination route: a middleware retains by
+        key and cannot tell where a navigation came from, and both lists spell
+        their filter `query`.
+      */
       render={(props) => (
-        <Link {...props} to="/library/artists/$artistId" params={{ artistId: artist.id }} />
+        <Link
+          {...props}
+          to="/library/artists/$artistId"
+          from="/library"
+          params={{ artistId: artist.id }}
+          search={(prev) => prev}
+        />
       )}
     />
   )

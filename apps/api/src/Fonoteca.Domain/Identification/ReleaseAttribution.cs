@@ -134,6 +134,110 @@ public static class ReleaseAttribution
     }
 
     /// <summary>
+    /// Seats a refused file on a gap in an album its folder was filed under, when
+    /// the file's own AcoustID cluster names the recording that gap prints.
+    /// </summary>
+    /// <remarks>
+    /// <b>The commonest way one song goes missing from an album that matched.</b>
+    /// An AcoustID cluster is routinely linked to a dozen recordings — the master,
+    /// the alternate take, the remaster, each compilation's duplicate entry — and
+    /// enrichment has to name one, so it names the most-submitted. <i>Kind of
+    /// Blue</i>'s "Blue in Green" came out as "Blue in Green (Take 1)": 324
+    /// submissions against the album's own recording's 4, one cluster, the same
+    /// audio. <see cref="Assign"/> matches on the recording MBID, so eight files
+    /// fill eight tracks and the ninth is refused beside the one empty slot it
+    /// belongs on.
+    ///
+    /// Nothing here reopens the choice of album. It runs after <see cref="Assign"/>
+    /// and reaches only releases that rule already chose on the strength of the
+    /// other files, and only slots none of them took. The cluster is the evidence
+    /// that this audio is that recording, and the album is what says which of the
+    /// cluster's recordings is meant — neither alone would do.
+    ///
+    /// Refused unless the answer is single in both directions: one gap for the
+    /// file, one file for the gap. An album printing a studio take and a live one,
+    /// both linked to one cluster, is a real disagreement; two files wanting one
+    /// gap is a duplicate encoding, which the gap cannot tell apart.
+    ///
+    /// The drift gate is the caller's, the loosest the album itself could have been
+    /// admitted under, and not the strictest rung. Measured on the target library,
+    /// <i>L-O-V-E</i>'s filed tracks sit 1.39 to 1.44s off their printed lengths
+    /// and its left-out ones 1.4 to 2.8s: a strict gate refuses a track for
+    /// drifting exactly as its siblings do. What it still refuses is a different
+    /// performance — <i>Guess Who</i>'s leftover is 6.2s out against siblings at
+    /// 0.05s.
+    /// </remarks>
+    /// <param name="linked">
+    /// For each file with evidence, every recording its own cluster is linked to.
+    /// A file absent from the map is left as it was.
+    /// </param>
+    public static IReadOnlyList<ReleaseAssignment> Reseat(
+        IReadOnlyList<ReleaseAssignment> assignments,
+        IReadOnlyCollection<AttributionFile> files,
+        IReadOnlyCollection<MusicBrainzRelease> candidates,
+        IReadOnlyDictionary<MediaFileId, IReadOnlySet<Mbid>> linked,
+        AttributionThresholds? thresholds = null)
+    {
+        ArgumentNullException.ThrowIfNull(assignments);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(linked);
+
+        var loosest = (thresholds ?? AttributionThresholds.Default).MaximumDrift;
+        var durations = files.ToDictionary(file => file.Id, file => file.Duration);
+
+        // Only an album filed without a tie. An edition chosen from several was
+        // checked to agree about the other files' positions, not this one's.
+        var filed = assignments
+            .Where(a => a.Release is not null && a.Outcome == ReleaseAttributionOutcome.Attributed)
+            .ToList();
+
+        var gaps = candidates
+            .Where(release => filed.Exists(a => a.Release == release.Id))
+            .SelectMany(release => release.Tracks
+                .Where(track => track.RecordingId is not null
+                    && !filed.Exists(a => a.Release == release.Id
+                        && a.DiscNumber == track.DiscNumber
+                        && a.Position == track.Position))
+                .Select(track => (Release: release, Track: track)))
+            .ToList();
+
+        var wanted = assignments
+            .Where(a => a.Release is null
+                && a.Outcome is ReleaseAttributionOutcome.NoConfidentFit or ReleaseAttributionOutcome.NoCandidate
+                && linked.ContainsKey(a.File))
+            .Select(a => (a.File, Gaps: gaps
+                .Where(gap => linked[a.File].Contains(gap.Track.RecordingId!.Value)
+                    && (DriftOf(durations.GetValueOrDefault(a.File), gap.Track.Length) is not { } drift
+                        || drift <= loosest))
+                .ToList()))
+            .Where(want => want.Gaps.Count == 1)
+            .Select(want => (want.File, Gap: want.Gaps[0]))
+            .ToList();
+
+        var seated = wanted
+            .GroupBy(want => (want.Gap.Release.Id, want.Gap.Track.DiscNumber, want.Gap.Track.Position))
+            .Where(claim => claim.Count() == 1)
+            .Select(claim => claim.Single())
+            .ToDictionary(
+                want => want.File,
+                want =>
+                    new ReleaseAssignment(
+                        want.File,
+                        want.Gap.Release.Id,
+                        want.Gap.Release.ReleaseGroupId,
+                        want.Gap.Track.DiscNumber,
+                        want.Gap.Track.Position,
+                        ReleaseAttributionOutcome.Attributed,
+                        0));
+
+        return [.. assignments.Select(a => seated.GetValueOrDefault(a.File, a))];
+    }
+
+    private static TimeSpan? DriftOf(TimeSpan? measured, TimeSpan? printed) =>
+        measured is { } left && printed is { } right ? (left - right).Duration() : null;
+
+    /// <summary>
     /// Turns a winning fit — and the editions that matched it just as well —
     /// into one answer per file.
     /// </summary>

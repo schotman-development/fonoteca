@@ -68,6 +68,7 @@ public sealed class ReleaseAttributionService(
     LibraryWorkGate gate,
     IServiceScopeFactory scopeFactory,
     IMusicBrainzCatalogue musicBrainz,
+    IAcoustIdLookup acoustId,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
     IOptions<FonotecaOptions> options,
@@ -340,12 +341,31 @@ public sealed class ReleaseAttributionService(
     {
         var component = await GatherAsync(seed, memo, cancellationToken).ConfigureAwait(false);
 
-        var assignments = ReleaseAttribution.Assign(
-            component.Files.Select(file => file.ToAttributionFile()).ToList(),
-            component.Candidates,
-            new AttributionThresholds(
-                options.Value.ReleaseMinimumCoverage,
-                TimeSpan.FromMilliseconds(options.Value.ReleaseMaximumDriftMs)));
+        var files = component.Files.Select(file => file.ToAttributionFile()).ToList();
+
+        var thresholds = new AttributionThresholds(
+            options.Value.ReleaseMinimumCoverage,
+            TimeSpan.FromMilliseconds(options.Value.ReleaseMaximumDriftMs));
+
+        var assignments = ReleaseAttribution.Assign(files, component.Candidates, thresholds);
+
+        // Only a folder that filed something and refused something has a gap a
+        // refused file could belong on, so only those spend an AcoustID turn.
+        var refusedHere = assignments
+            .Where(a => a.Release is null && Unanswered.Contains(a.Outcome))
+            .Select(a => a.File)
+            .ToList();
+
+        var asked = new Dictionary<MediaFileId, IReadOnlyList<AcoustIdMatch>>();
+
+        if (refusedHere.Count > 0 && assignments.Any(a => a.Release is not null))
+        {
+            var linked = await LinkedRecordingsAsync(refusedHere, asked, memo, cancellationToken)
+                .ConfigureAwait(false);
+
+            assignments = ReleaseAttribution.Reseat(
+                assignments, files, component.Candidates, linked, thresholds);
+        }
 
         var chosen = component.Candidates
             .Where(release => assignments.Any(a => a.Release == release.Id))
@@ -420,6 +440,14 @@ public sealed class ReleaseAttributionService(
                         written.Release,
                         assignment.DiscNumber ?? 1,
                         assignment.Position ?? 0);
+
+                    // The same recording for a file the rule matched by MBID; for
+                    // one `Reseat` placed, the one of its cluster's recordings the
+                    // album actually prints, rather than the one enrichment guessed.
+                    row.RecordingId = writer.RecordingIdAt(
+                        written.Release,
+                        assignment.DiscNumber ?? 1,
+                        assignment.Position ?? 0) ?? row.RecordingId;
                 }
                 else if (assignment.ReleaseGroup is { } groupMbid)
                 {
@@ -428,6 +456,12 @@ public sealed class ReleaseAttributionService(
                     row.ReleaseGroupId = await writer
                         .UpsertGroupAsync(groupMbid, component.GroupTitle(groupMbid), cancellationToken)
                         .ConfigureAwait(false);
+                }
+
+                if (asked.TryGetValue(row.Id, out var matches))
+                {
+                    row.AcoustIdMatchesJson = AcoustIdEvidence.Serialise(matches);
+                    row.AcoustIdMatchesUtc = now;
                 }
 
                 counts.Record(row.AttributionOutcome);
@@ -442,6 +476,80 @@ public sealed class ReleaseAttributionService(
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Every recording each file's own AcoustID cluster is linked to.
+    /// </summary>
+    /// <remarks>
+    /// The stored evidence where there is some, and a lookup from the stored
+    /// fingerprint where there is not — no file is opened. Most identified files
+    /// predate <c>AcoustIdMatchesJson</c>, so the lookup is the ordinary path on
+    /// an existing library; what it answers is kept on the row with the
+    /// component, as every other pass that asks AcoustID does.
+    ///
+    /// A file with no fingerprint is left out and its refusal stands. A provider
+    /// failure is not swallowed: stamping the component anyway would record a gap
+    /// nobody asked about as one that could not be filled, and no run would ask
+    /// again. It fails the component exactly as a MusicBrainz outage does, and a
+    /// rejected key ends the pass the same way.
+    ///
+    /// A file whose identity a person or agent decided is never offered: re-pointing
+    /// its recording would overrule them.
+    /// </remarks>
+    private async Task<Dictionary<MediaFileId, IReadOnlySet<Mbid>>> LinkedRecordingsAsync(
+        List<MediaFileId> ids,
+        Dictionary<MediaFileId, IReadOnlyList<AcoustIdMatch>> asked,
+        Memo memo,
+        CancellationToken cancellationToken)
+    {
+        List<(MediaFileId Id, AcoustId? AcoustId, string? Fingerprint, TimeSpan? Duration, string? Json)> rows;
+
+        var scope = scopeFactory.CreateAsyncScope();
+
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            rows = (await db.MediaFiles
+                    .AsNoTracking()
+                    .Where(f => ids.Contains(f.Id) && f.AcoustId != null && f.IdentityDecidedUtc == null)
+                    .Select(f => new { f.Id, f.AcoustId, f.Fingerprint, f.FingerprintDuration, f.AcoustIdMatchesJson })
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .Select(f => (f.Id, f.AcoustId, f.Fingerprint, f.FingerprintDuration, f.AcoustIdMatchesJson))
+                .ToList();
+        }
+
+        var linked = new Dictionary<MediaFileId, IReadOnlySet<Mbid>>();
+
+        foreach (var row in rows)
+        {
+            var cluster = row.AcoustId!.Value;
+            var matches = AcoustIdEvidence.Deserialise(row.Json);
+            var stored = matches is not null;
+
+            if (matches is null && !memo.Clusters.TryGetValue(cluster, out matches))
+            {
+                if (row.Fingerprint is not { Length: > 0 } || row.Duration is not { } duration) continue;
+
+                matches = await acoustId
+                    .LookupAsync(new AudioFingerprint(row.Fingerprint, duration), cancellationToken)
+                    .ConfigureAwait(false);
+
+                memo.Clusters[cluster] = matches;
+            }
+
+            if (!stored) asked[row.Id] = matches;
+
+            linked[row.Id] = matches
+                .Where(match => match.AcoustId == cluster.Value)
+                .SelectMany(match => match.Recordings)
+                .Select(recording => recording.Id)
+                .ToHashSet();
+        }
+
+        return linked;
     }
 
     /// <summary>
@@ -840,6 +948,9 @@ public sealed class ReleaseAttributionService(
         public Dictionary<Mbid, IReadOnlyList<MusicBrainzReleaseCandidate>> Browses { get; } = [];
 
         public Dictionary<Mbid, MusicBrainzRelease?> Releases { get; } = [];
+
+        /// <summary>AcoustID's answer, by the cluster the file was identified as.</summary>
+        public Dictionary<AcoustId, IReadOnlyList<AcoustIdMatch>> Clusters { get; } = [];
     }
 
     /// <summary>A set of files decided together, with the releases they were decided against.</summary>
@@ -988,6 +1099,18 @@ public sealed class ReleaseAttributionService(
         /// </remarks>
         private readonly Dictionary<Mbid, ReleaseGroup> _groups = [];
 
+        /// <summary>
+        /// Recordings this writer has already credited in this unit of work.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="_minted"/>'s trap, one table along. The check below asks the
+        /// database which recordings already carry a credit, and a credit added
+        /// for one release is invisible to that query until <c>SaveChanges</c> —
+        /// so a component naming one recording on two releases would credit it
+        /// twice and put the artist on the page twice.
+        /// </remarks>
+        private readonly HashSet<RecordingId> _credited = [];
+
         public async Task<(ReleaseId Release, ReleaseGroupId? Group)> UpsertAsync(
             MusicBrainzRelease source,
             string? mediumFormats,
@@ -1038,6 +1161,7 @@ public sealed class ReleaseAttributionService(
             release.MediumFormats = mediumFormats ?? release.MediumFormats;
 
             await ApplyTracksAsync(release, source, cancellationToken).ConfigureAwait(false);
+            await ApplyRecordingCreditsAsync(source, cancellationToken).ConfigureAwait(false);
             await ApplyCreditsAsync(release, source, cancellationToken).ConfigureAwait(false);
 
             return (release.Id, groupId);
@@ -1048,7 +1172,8 @@ public sealed class ReleaseAttributionService(
             string title,
             CancellationToken cancellationToken,
             string? primaryType = null,
-            IReadOnlyList<string>? secondaryTypes = null)
+            IReadOnlyList<string>? secondaryTypes = null,
+            int? firstReleaseYear = null)
         {
             if (!_groups.TryGetValue(mbid, out var group))
             {
@@ -1071,6 +1196,12 @@ public sealed class ReleaseAttributionService(
             // GroupOnly file knows only its title, and the release that later
             // names it properly must be able to fill the rest in.
             group.PrimaryType ??= primaryType;
+
+            // Coalesced for the same reason, and it is the discography browse
+            // that finally fills it: the column has been in the schema since the
+            // first migration with nothing writing it, because a release tells
+            // you when that pressing came out and not when the record did.
+            group.FirstReleaseYear ??= firstReleaseYear;
 
             if (secondaryTypes is { Count: > 0 })
             {
@@ -1142,8 +1273,115 @@ public sealed class ReleaseAttributionService(
                     ReleaseId = release.Id,
                     Position = position++,
                     JoinPhrase = credit.JoinPhrase,
-                    CreditedAs = credit.Name,
+                    CreditedAs = LatinNames.CreditedAs(credit.Name, artist.Name),
                 });
+            }
+        }
+
+        /// <summary>
+        /// The billed artist on each recording the track list named.
+        /// </summary>
+        /// <remarks>
+        /// <b>The response already carries this and the writer used to drop it.</b>
+        /// <c>ReleaseIncludes</c> asks for <c>ArtistCredits</c> alongside
+        /// <c>Recordings</c>, so every release lookup returns the billing line for
+        /// every track, and <see cref="ApplyCreditsAsync"/> was writing only the
+        /// release's own. A recording minted from a track list therefore reached
+        /// the catalogue with no credit at all — and <c>BrowsableAsync</c> reaches
+        /// an artist through <c>ArtistCredits.RecordingId</c>, a recording
+        /// relationship or the work hop, never through the release. So a file
+        /// filed by hand under an album vanished from its artist's page: on
+        /// <i>Sixteen Tons</i>, six of twelve.
+        ///
+        /// This costs no request. What it deliberately does <b>not</b> do is the
+        /// rest of the graph — conductors, orchestras, composers live on
+        /// relationships that only a recording lookup carries, which is the
+        /// per-file cost <see cref="EnrichmentOutcome.LinkedByPerson"/> exists to
+        /// refuse. The billed credit is the half that was already paid for.
+        ///
+        /// Only artists the catalogue already knows are linked, which is
+        /// <see cref="ApplyCreditsAsync"/>'s rule and it holds here for the same
+        /// reason: minting one from a credit line would put a row with a name and
+        /// nothing else into the artist list.
+        /// </remarks>
+        private async Task ApplyRecordingCreditsAsync(
+            MusicBrainzRelease source,
+            CancellationToken cancellationToken)
+        {
+            var wanted = new Dictionary<RecordingId, IReadOnlyList<MusicBrainzCredit>>();
+
+            foreach (var track in source.Tracks)
+            {
+                if (track.Credits.Count == 0) continue;
+                if (track.RecordingId is not { } mbid) continue;
+                if (!_minted.TryGetValue(mbid, out var recording)) continue;
+                if (!_credited.Add(recording.Id)) continue;
+
+                wanted[recording.Id] = track.Credits;
+            }
+
+            if (wanted.Count == 0) return;
+
+            var ids = wanted.Keys.ToList();
+
+            // Which of them a credit already reaches. One query for the whole
+            // track list rather than one per recording: a compilation of licensed
+            // catalogue runs to a thousand tracks and this pass meets them.
+            var described = (await db.ArtistCredits
+                    .AsNoTracking()
+                    .Where(c => c.RecordingId != null && ids.Contains(c.RecordingId!.Value))
+                    .Select(c => c.RecordingId!.Value)
+                    .Distinct()
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .ToHashSet();
+
+            // Every artist the track list bills, resolved in one query for the
+            // same reason. `Contains` over value-converted ids is the pattern
+            // `BrowsableAsync` already relies on EF translating.
+            var billed = wanted.Values
+                .SelectMany(credits => credits)
+                .Select(credit => credit.ArtistId)
+                .OfType<Mbid>()
+                .Distinct()
+                .ToList();
+
+            var artists = (await db.Artists
+                    .Where(a => a.Mbid != null && billed.Contains(a.Mbid!.Value))
+                    .Select(a => new { a.Id, a.Mbid })
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .ToDictionary(a => a.Mbid!.Value, a => a.Id);
+
+            foreach (var (recording, credits) in wanted)
+            {
+                // Filled where empty, never replaced — `MediumFormats`'s bargain
+                // and `PrimaryType ??=`'s, not `ApplyTracksAsync`'s. A recording
+                // a credit already reaches was described by the enrichment pass
+                // from a *recording* lookup, which carries the conductor, the
+                // orchestra and the composer hop; this track list carries the
+                // billing line and nothing else. Converging on MusicBrainz here
+                // would mean overwriting the richer answer with the poorer one on
+                // every pass, and the fact lost is not one a rerun restores.
+                if (described.Contains(recording)) continue;
+
+                var position = 0;
+
+                foreach (var credit in credits)
+                {
+                    if (credit.ArtistId is not { } mbid) continue;
+                    if (!artists.TryGetValue(mbid, out var artist)) continue;
+
+                    db.ArtistCredits.Add(new ArtistCredit
+                    {
+                        Id = Guid.CreateVersion7(),
+                        ArtistId = artist,
+                        RecordingId = recording,
+                        Position = position++,
+                        JoinPhrase = credit.JoinPhrase,
+                        CreditedAs = LatinNames.CreditedAs(credit.Name, artistName: null),
+                    });
+                }
             }
         }
 

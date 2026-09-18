@@ -55,6 +55,23 @@ internal sealed record QobuzAlbumBody
 
     [JsonPropertyName("tracks")]
     public QobuzTrackListBody? Tracks { get; init; }
+
+    /// <summary>
+    /// The barcode, which is the only key a provider-sourced release has.
+    /// </summary>
+    /// <remarks>
+    /// ADR 0011's key: <c>Releases.Barcode</c> exists, is indexed and is
+    /// deliberately not unique, so an album Qobuz names can be written without an
+    /// MBID and later matched to a MusicBrainz release that shares the barcode —
+    /// at which point the row gains its MBID without a file moving.
+    ///
+    /// Measured on <c>artist/get?extra=albums</c>: present on every row returned.
+    /// Absent on some back-catalogue and digital-only titles, which is the
+    /// honest failure — an unkeyed release a re-fetch duplicates — rather than
+    /// inventing one.
+    /// </remarks>
+    [JsonPropertyName("upc")]
+    public string? Upc { get; init; }
 }
 
 internal sealed record QobuzArtistBody
@@ -87,6 +104,18 @@ internal sealed record QobuzArtistBody
     /// </remarks>
     [JsonPropertyName("albums_count")]
     public int? AlbumsCount { get; init; }
+
+    /// <summary>
+    /// What this artist has released, on an <c>artist/get?extra=albums</c>.
+    /// </summary>
+    /// <remarks>
+    /// Absent on a search row and on a plain <c>artist/get</c>, hence nullable.
+    /// The rows inside carry no <c>tracks</c> — measured — which the album mapper
+    /// already tolerates, so one album shape serves both calls rather than two
+    /// that could disagree about a field.
+    /// </remarks>
+    [JsonPropertyName("albums")]
+    public QobuzAlbumListBody? Albums { get; init; }
 }
 
 internal sealed record QobuzArtistSearchBody
@@ -169,6 +198,19 @@ internal sealed record QobuzAlbumListBody
 {
     [JsonPropertyName("items")]
     public IReadOnlyList<QobuzAlbumBody>? Items { get; init; }
+
+    /// <summary>
+    /// How many the service holds, against how many came back.
+    /// </summary>
+    /// <remarks>
+    /// Worth reading rather than counting <see cref="Items"/>: one artist
+    /// measured at <b>166</b> albums against a five-row page, so a caller that
+    /// trusted the list length would report a discography as complete after
+    /// seeing three percent of it. The same distinction
+    /// <c>QobuzAlbum.TrackCount</c> already draws for a cut track list.
+    /// </remarks>
+    [JsonPropertyName("total")]
+    public int? Total { get; init; }
 }
 
 /// <summary>The answer to <c>track/getFileUrl</c>: a signed, time-limited CDN URL.</summary>
@@ -234,6 +276,7 @@ internal sealed record QobuzErrorBody
 [JsonSerializable(typeof(QobuzAlbumBody))]
 [JsonSerializable(typeof(QobuzSearchBody))]
 [JsonSerializable(typeof(QobuzArtistSearchBody))]
+[JsonSerializable(typeof(QobuzArtistBody))]
 [JsonSerializable(typeof(QobuzFileUrlBody))]
 [JsonSerializable(typeof(QobuzErrorBody))]
 internal sealed partial class QobuzJsonContext : JsonSerializerContext;

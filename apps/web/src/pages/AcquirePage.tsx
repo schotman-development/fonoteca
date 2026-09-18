@@ -15,7 +15,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './AcquirePage.module.css'
-import { releaseArt, releaseCover } from './coverArt.ts'
+import { releaseArt, releaseCover, releaseGroupArt } from './coverArt.ts'
 import { QobuzAlbumDialog, type Replacing } from './QobuzAlbumDialog.tsx'
 import { readiness } from './qobuz.ts'
 
@@ -24,6 +24,7 @@ type UpgradeListResponse = components['schemas']['UpgradeListResponse']
 type UpgradeCandidate = components['schemas']['UpgradeCandidate']
 type IncompleteAlbum = components['schemas']['IncompleteAlbum']
 type MissingTrack = components['schemas']['MissingTrack']
+type MissingRecord = components['schemas']['MissingRecord']
 
 /**
  * Buying music, by hand.
@@ -247,6 +248,9 @@ export function AcquirePage() {
         onSearch={(album) => ask(album.query)}
       />
 
+      {/* A plain search for the same reason: there is no file to replace. */}
+      <Missing state={upgrades} onSearch={(record) => ask(record.query)} />
+
       {open !== null ? (
         <QobuzAlbumDialog
           album={open}
@@ -309,7 +313,17 @@ function Shelf({
   useEffect(() => {
     const all = tiles()
 
-    if (all.some((tile) => tile.tabIndex === 0)) return
+    /*
+      The attribute, never the property — and reading the property is why this
+      never ran. A `<button>` is natively focusable, so `tile.tabIndex` reports
+      `0` on a tile that carries no `tabindex` at all: the bail was therefore
+      true on the first render of every shelf, nothing was ever assigned, and
+      all of them stayed tab stops until somebody pressed an arrow key. Measured
+      on the running page, all 527 upgrade tiles and all 27 incomplete ones had
+      no attribute — precisely the "520 tab stops in front of everything below
+      it" this effect exists to prevent.
+    */
+    if (all.some((tile) => tile.getAttribute('tabindex') === '0')) return
 
     for (const [index, tile] of all.entries()) tile.tabIndex = index === 0 ? 0 : -1
   })
@@ -731,6 +745,186 @@ function IncompleteTile({
             ) : null}{' '}
             Search Qobuz for the whole album.
           </VisuallyHidden>
+        </button>
+      )}
+    />
+  )
+}
+
+/**
+ * Records by followed artists that the library has none of.
+ *
+ * **The third shelf, and the only one that starts from a person.** The two above
+ * it start from the library — this file is lossy, this album is short of its
+ * track list — and can only ever offer what is already here in a worse form.
+ * Following somebody is the one fact in the catalogue nothing can recompute, so
+ * this is the only list on the screen that can name a record the library has
+ * never held.
+ *
+ * **Three states, and telling them apart is most of the job**, which is the
+ * lesson `MissingRecords` on the artist page already paid for one artist at a
+ * time: nobody follows anybody, they are followed but nothing has browsed them
+ * yet, or they were browsed and there are gaps. Collapsing the first two into
+ * "nothing missing" reports a complete collection to somebody who has simply not
+ * run the pass — and the remedies are opposite, one being a button on another
+ * screen and the other being nothing at all.
+ *
+ * The empty cases are one line of tertiary text rather than a shelf with a
+ * heading, so a screen nobody has used the feature on does not grow a section
+ * about it.
+ */
+function Missing({
+  state,
+  onSearch,
+}: {
+  readonly state: ReturnType<typeof useApiQuery<UpgradeListResponse>>
+  readonly onSearch: (record: MissingRecord) => void
+}) {
+  // The upgrade panel's, one request behind all three lists — see `Incomplete`.
+  if (state.status !== 'ready') return null
+
+  const { missing, followedArtists, unbrowsedArtists, unmonitoredGaps } = state.data
+
+  if (followedArtists === 0) {
+    return (
+      <Text size="sm" tone="tertiary">
+        Follow an artist from the Artists screen to see the records of theirs the library has not
+        got. It is the only list here that can name something you have never held.
+      </Text>
+    )
+  }
+
+  if (missing.length === 0) {
+    /*
+      Three silences, and they want three different sentences. Nothing marked is
+      the commonest and the only one a person can act on — it is what a freshly
+      followed artist looks like, because the first browse is a baseline that
+      monitors nothing. Nothing browsed is a pass somebody has to run. Nothing
+      missing is good news. Collapsing any pair of them tells somebody the
+      library is complete when it is merely unasked, or sends them to a screen
+      with nothing on it.
+    */
+    if (unmonitoredGaps > 0) {
+      return (
+        <Text size="sm" tone="tertiary">
+          {unmonitoredGaps.toLocaleString()} record{unmonitoredGaps === 1 ? '' : 's'} by artists you
+          follow {unmonitoredGaps === 1 ? 'is' : 'are'} not here, and none is marked as wanted. Mark
+          the ones you want on the artist's page and they appear on this shelf — records released
+          after you followed someone are marked for you.
+          {/*
+            Said here as well, because the two states overlap and this branch
+            wins. A library with some unmarked gaps *and* some unbrowsed artists
+            would otherwise only ever hear about the marking, and never learn
+            that a pass has not looked at part of the list at all.
+          */}
+          {unbrowsedArtists > 0
+            ? ` ${unbrowsedArtists.toLocaleString()} ${
+                unbrowsedArtists === 1 ? 'artist has' : 'artists have'
+              } not been browsed yet, so this count is incomplete — run the enrichment pass from Foundation.`
+            : ''}
+        </Text>
+      )
+    }
+
+    return (
+      <Text size="sm" tone="tertiary">
+        {unbrowsedArtists > 0
+          ? `Nothing listed yet — run the enrichment pass from Foundation to fetch what ${
+              unbrowsedArtists === followedArtists
+                ? 'they'
+                : `${unbrowsedArtists.toLocaleString()} of them`
+            } released.`
+          : `Nothing missing from the ${followedArtists.toLocaleString()} artist${
+              followedArtists === 1 ? '' : 's'
+            } you follow.`}
+      </Text>
+    )
+  }
+
+  return (
+    <Shelf
+      title="Not in your library"
+      count={missing.length}
+      label="Records by artists you follow that the library has none of, by artist"
+      detail={
+        <>
+          Records by the {followedArtists.toLocaleString()} artist
+          {followedArtists === 1 ? '' : 's'} you follow that no file here sits under, and that you
+          have marked as wanted. <strong>Qobuz has not been asked about any of them</strong> —
+          pressing one is what finds out whether it sells a copy.
+          {unmonitoredGaps > 0
+            ? ` ${unmonitoredGaps.toLocaleString()} more ${
+                unmonitoredGaps === 1 ? 'record is' : 'records are'
+              } missing but unmarked; mark them on the artist's page.`
+            : ''}
+          {unbrowsedArtists > 0
+            ? ` ${unbrowsedArtists.toLocaleString()} ${
+                unbrowsedArtists === 1 ? 'artist has' : 'artists have'
+              } not been browsed yet — run the enrichment pass from Foundation.`
+            : ''}
+        </>
+      }
+    >
+      {missing.map((record) => (
+        <MissingTile key={record.releaseGroupId} record={record} onSearch={onSearch} />
+      ))}
+    </Shelf>
+  )
+}
+
+/**
+ * One record they made that the library has not got.
+ *
+ * The same card as the artist page's `MissingCard` with one difference that
+ * matters: it renders a real `<button>`. There it goes nowhere, because there is
+ * no page for a record no file is under and inventing one would be inventing the
+ * album — here the press is a Qobuz search, which is the whole point of the
+ * screen. `Shelf` finds its tiles with `querySelectorAll('button')`, so a card
+ * without one would also be invisible to the roving tab stop.
+ *
+ * The sleeve comes from the Cover Art Archive keyed on the *release group*,
+ * which is the only key there is: no pressing has been chosen, because none has
+ * been owned.
+ */
+function MissingTile({
+  record,
+  onSearch,
+}: {
+  readonly record: MissingRecord
+  readonly onSearch: (record: MissingRecord) => void
+}) {
+  const image = record.mbid != null ? releaseGroupArt(record.mbid) : null
+
+  return (
+    <CatalogueCard
+      variant="album"
+      title={record.title}
+      {...(image != null ? { image } : {})}
+      subtitle={[record.artist, record.year].filter(Boolean).join(' · ')}
+      meta={
+        <span className={styles.metaRow}>
+          <Stack gap={4} wrap>
+            {/*
+              An untyped group is one `Discography.IsGap` lets through rather
+              than one it recognised, and on an obscure artist that is most of
+              them — so the tile says which it is instead of printing nothing.
+            */}
+            <Badge tone="neutral" size="sm">
+              {record.primaryType ?? 'Untyped'}
+            </Badge>
+
+            {record.secondaryTypes.map((type) => (
+              <Badge key={type} tone="neutral" size="sm">
+                {type}
+              </Badge>
+            ))}
+          </Stack>
+        </span>
+      }
+      render={(props) => (
+        <button {...props} type="button" onClick={() => onSearch(record)}>
+          {props.children}
+          <VisuallyHidden> Search Qobuz for this record.</VisuallyHidden>
         </button>
       )}
     />

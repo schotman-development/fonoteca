@@ -9,7 +9,7 @@ import {
   TableHeaderCell,
   Text,
 } from '@fonoteca/ui'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useCallback, useState } from 'react'
 import { api } from '../api.ts'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
@@ -17,7 +17,9 @@ import { useApiQuery } from '../useApiQuery.ts'
 import { CoverDialog } from './CoverDialog.tsx'
 import { CERTAINTY } from './certainty.ts'
 import { releaseCover } from './coverArt.ts'
+import { parentOf } from './files.ts'
 import styles from './ReleasePage.module.css'
+import { ALBUM_FOLDER_DEPTH, albumFolderOf } from './seating.ts'
 import { workGroups } from './workGroups.ts'
 
 type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
@@ -32,6 +34,8 @@ type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
 export function ReleasePage() {
   const { releaseId } = useParams({ from: '/library/releases/$releaseId' })
   const [contributions, setContributions] = useState(0)
+  // Here rather than in AskAgain: the refetch after a reopen unmounts it.
+  const [reopened, setReopened] = useState<(Reopened & { readonly release: string }) | null>(null)
 
   // Stable, because the panels below hold it in an effect's dependency array: a
   // fresh arrow every render re-runs the effect that called it, which is a
@@ -47,7 +51,13 @@ export function ReleasePage() {
 
   return (
     <Stack direction="column" gap={20}>
-      <Link to="/library/releases" className={styles.back}>
+      {/* The list's order and filter, carried back. See the artist page. */}
+      <Link
+        to="/library/releases"
+        from="/library/releases/$releaseId"
+        search={(prev) => prev}
+        className={styles.back}
+      >
         <Text size="sm">← All albums</Text>
       </Link>
 
@@ -64,9 +74,31 @@ export function ReleasePage() {
         ) : null}
       </div>
 
+      {reopened !== null && reopened.release === releaseId ? (
+        <div role="status">
+          <Text size="sm" tone={reopened.failed ? 'danger' : 'secondary'} block>
+            {reopened.message}
+          </Text>
+          <Stack gap={8} wrap>
+            {reopened.folders.map((folder) => (
+              <Link key={folder} to="/files" search={{ path: folder }}>
+                <Text size="sm">{folder}</Text>
+              </Link>
+            ))}
+          </Stack>
+        </div>
+      ) : null}
+
       {state.status === 'ready' ? (
         <Stack direction="column" gap={20}>
           <Header release={state.data.release} />
+          <AskAgain
+            tracks={state.data.tracks}
+            onReopened={(result) => {
+              setReopened({ ...result, release: releaseId })
+              changed()
+            }}
+          />
           <Contribute
             releaseId={releaseId}
             count={state.data.contributable}
@@ -198,6 +230,115 @@ function Header({ release }: { readonly release: components['schemas']['ReleaseS
           </Stack>
         ) : null}
       </Stack>
+    </Stack>
+  )
+}
+
+/**
+ * Saying the album is wrong, so its folders become questions again.
+ *
+ * The reopen is the folder's, which is the unit the Identify screen answers in:
+ * every matched file under each album folder these files sit in gives up its
+ * answer. A file loose under an artist has no album folder, and reopening its
+ * parent would take back the whole artist, so those are left and named.
+ */
+type Reopened = {
+  readonly failed: boolean
+  readonly message: string
+  /** The folders that were reopened, to open in Files. */
+  readonly folders: readonly string[]
+}
+
+function AskAgain({
+  tracks,
+  onReopened,
+}: {
+  readonly tracks: readonly ReleaseTrackRow[]
+  readonly onReopened: (result: Reopened) => void
+}) {
+  const navigate = useNavigate()
+  const [sending, setSending] = useState(false)
+
+  const parents = [
+    ...new Set(tracks.flatMap((track) => track.files.map((file) => parentOf(file.path)))),
+  ]
+  const folders = [
+    ...new Set(
+      parents.filter((parent) => parent.split('/').length >= ALBUM_FOLDER_DEPTH).map(albumFolderOf),
+    ),
+  ]
+  const loose = parents
+    .filter((parent) => parent.split('/').length < ALBUM_FOLDER_DEPTH)
+    .map((parent) => (parent === '' ? 'the library root' : parent))
+
+  if (folders.length === 0) return null
+
+  async function reopen() {
+    if (
+      !window.confirm(
+        'Say this album was identified wrong?\n\n' +
+          `Every matched file in ${folders.map((folder) => `“${folder}”`).join(', ')} gives up ` +
+          'its recording, album and track, and each folder becomes one question on the Identify ' +
+          'screen. No pass will match them again. Nothing on disk is touched.',
+      )
+    ) {
+      return
+    }
+
+    setSending(true)
+
+    const done: string[] = []
+    const details: string[] = []
+
+    try {
+      for (const folder of folders) {
+        const result = await api.post('/api/catalogue/matching/folders/reopen', {
+          json: { folder },
+        })
+        done.push(folder)
+        details.push(result.detail)
+      }
+    } catch (cause: unknown) {
+      const left = folders.filter((folder) => !done.includes(folder))
+      onReopened({
+        failed: true,
+        message: [...details, `Not reopened: ${left.join(', ')}. ${describeError(cause)}`].join(
+          ' ',
+        ),
+        folders: done,
+      })
+      return
+    }
+
+    const [only] = folders
+    if (folders.length === 1 && only !== undefined) {
+      void navigate({ to: '/files', search: { path: only } })
+      return
+    }
+
+    onReopened({ failed: false, message: details.join(' '), folders: done })
+  }
+
+  return (
+    <Stack direction="column" gap={8} align="start">
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={sending}
+        onClick={() => {
+          void reopen().finally(() => {
+            setSending(false)
+          })
+        }}
+      >
+        {sending ? 'Reopening…' : 'Identified wrong — ask again'}
+      </Button>
+
+      {loose.length > 0 ? (
+        <Text size="xs" tone="tertiary" block>
+          Not reopened, because they sit in no album folder: {loose.join(', ')}
+        </Text>
+      ) : null}
     </Stack>
   )
 }

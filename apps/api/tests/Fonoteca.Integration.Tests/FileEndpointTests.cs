@@ -4,8 +4,10 @@ using System.Text;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Fixtures;
 using Fonoteca.Api.Library;
+using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fonoteca.Integration.Tests;
 
@@ -34,18 +36,19 @@ public sealed class FileEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private string _root = string.Empty;
     private string _trash = string.Empty;
+    private string _connectionString = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
     public async ValueTask InitializeAsync()
     {
-        var connectionString = await postgres.CreateDatabaseAsync(TestContext.Current.CancellationToken);
+        _connectionString = await postgres.CreateDatabaseAsync(TestContext.Current.CancellationToken);
 
         _root = Directory.CreateTempSubdirectory("fonoteca-files-api-").FullName;
         _trash = Directory.CreateTempSubdirectory("fonoteca-files-bin-").FullName;
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("ConnectionStrings:Fonoteca", connectionString);
+            builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:TrashPath", _trash);
             builder.UseSetting("Fonoteca:WarmCandidates", "false");
@@ -206,6 +209,62 @@ public sealed class FileEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         var detail = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("already exists", detail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>The rename opens a transaction, and the real context retries.</b>
+    /// </summary>
+    /// <remarks>
+    /// <c>NpgsqlRetryingExecutionStrategy</c> refuses a transaction it did not
+    /// open, so every rename answered <b>500</b> — "does not support
+    /// user-initiated transactions" — while <see cref="FileManagerTests"/> stayed
+    /// green throughout, because it builds its own context and never turns
+    /// <c>EnableRetryOnFailure</c> on. Only the host's own registration has the
+    /// configuration that breaks, which is exactly what this class is for.
+    ///
+    /// The row is what is being asserted, not the rename: carrying it is the
+    /// whole reason this is an endpoint rather than a <c>mv</c> and a rescan.
+    /// </remarks>
+    [Fact]
+    public async Task RenamingThroughTheEndpointCarriesTheCatalogueRowWithTheFile()
+    {
+        WriteFile("Brahms/Symphony 1/01 Allegro.flac");
+
+        // The client first: the host migrates on start, so there is nothing to
+        // seed into until it has.
+        using var client = _factory!.CreateClient();
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Brahms/Symphony 1/01 Allegro.flac",
+                SizeBytes = 16,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+            });
+
+            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var response = await client.PostAsJsonAsync(
+            new Uri("/api/files/move", UriKind.Relative),
+            new { from = "Brahms/Symphony 1", to = "Brahms/Symphony No. 1" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.True(File.Exists(
+            Path.Combine(_root, "Brahms", "Symphony No. 1", "01 Allegro.flac")));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Equal(
+            ["Brahms/Symphony No. 1/01 Allegro.flac"],
+            await db.MediaFiles
+                .AsNoTracking()
+                .Select(file => file.Path)
+                .ToListAsync(TestContext.Current.CancellationToken));
     }
 
     /// <summary>

@@ -1,7 +1,9 @@
 import type { components } from '@fonoteca/api-client'
+import { describeError } from '@fonoteca/api-client'
 import {
   Artwork,
   Badge,
+  Button,
   CatalogueCard,
   CatalogueGrid,
   Disclosure,
@@ -12,6 +14,7 @@ import {
   Text,
 } from '@fonoteca/ui'
 import { Link, useParams } from '@tanstack/react-router'
+import { useState } from 'react'
 import { api } from '../api.ts'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
@@ -19,7 +22,7 @@ import styles from './ArtistPage.module.css'
 import type { AlbumSectionKey, ArtistAlbum } from './artistAlbums.ts'
 import { albumsOf, leaf, sameArtist, sectionsOf } from './artistAlbums.ts'
 import { countryName, lifeSpan } from './artistFacts.ts'
-import { artistImageUrl, releaseArt, releaseCover } from './coverArt.ts'
+import { artistImageUrl, releaseArt, releaseCover, releaseGroupArt } from './coverArt.ts'
 import { workGroups } from './workGroups.ts'
 
 type TrackRow = components['schemas']['TrackRow']
@@ -122,7 +125,24 @@ export function ArtistPage() {
 
   return (
     <Stack direction="column" gap={20}>
-      <Link to="/library" className={styles.back}>
+      {/*
+        The list's own order and filter, carried back rather than reset. The
+        card that was clicked put them on this page's URL, so `prev` is the
+        state the shelf was in when it was opened — and a person who sorted by
+        holdings, opened somebody and pressed this arrow gets the shelf they
+        left.
+
+        `prev` is the *validated* search, so a bookmark landing here with an
+        album's order on it hands back nothing rather than a value the artists
+        list cannot show. Arriving with none of them set carries none of them
+        back, which is the same default the list starts on.
+      */}
+      <Link
+        to="/library"
+        from="/library/artists/$artistId"
+        search={(prev) => prev}
+        className={styles.back}
+      >
         <Text size="sm">← All artists</Text>
       </Link>
 
@@ -216,11 +236,24 @@ export function ArtistPage() {
                   ))}
                 </Stack>
               ) : null}
+
+              <FollowButton artistId={artistId} following={state.data.artist.following} />
             </Stack>
           </Stack>
 
+          {/*
+            Held and missing are two different questions and only the first one
+            is gated on the library. A followed artist nothing here is by has no
+            tracks at all — so everything below this line would be hidden by the
+            branch that exists to explain an empty shelf, including the
+            discography that is the entire reason for following them.
+          */}
           {state.data.tracks.length === 0 ? (
-            <Text tone="tertiary">Nothing in the library credits this artist.</Text>
+            <Text tone="tertiary">
+              {state.data.artist.following
+                ? 'Nothing in the library is by this artist yet.'
+                : 'Nothing in the library credits this artist.'}
+            </Text>
           ) : (
             <>
               {/*
@@ -302,9 +335,266 @@ export function ArtistPage() {
               </Disclosure>
             </>
           )}
+
+          {/*
+            Outside the ternary above, deliberately: this is the half of the
+            page that is about records the library does *not* hold, so gating it
+            on holding something would hide it in exactly the case it was built
+            for.
+          */}
+          <MissingRecords discography={state.data.discography} artist={state.data.artist.name} />
         </Stack>
       ) : null}
     </Stack>
+  )
+}
+
+/**
+ * Follow, which is the one control on this page that changes a fact rather than
+ * a view.
+ *
+ * Optimistic in the narrow sense only — the flag flips after the request
+ * returns, not before it — because `useApiQuery` has no invalidation and a
+ * refetch of the whole artist would cost a second read of every track to redraw
+ * one word. The state it owns is one boolean the server just confirmed.
+ *
+ * It no longer gates the discography below. Following used to be what put an
+ * artist on the enrichment pass's fifth worklist, which is why that list was
+ * empty for everybody else; the worklist is the whole catalogue now. What this
+ * button still buys is monitoring — a record that turns up after the click is
+ * wanted by default, and one already in the back catalogue is not.
+ */
+function FollowButton({
+  artistId,
+  following: initial,
+}: {
+  readonly artistId: string
+  readonly following: boolean
+}) {
+  const [following, setFollowing] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const toggle = async () => {
+    const next = !following
+
+    setBusy(true)
+
+    try {
+      await api.post('/api/catalogue/artists/{id}/follow', {
+        params: { path: { id: artistId } },
+        json: { follow: next },
+      })
+
+      setFollowing(next)
+      setError(null)
+    } catch (cause) {
+      setError(describeError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Stack direction="column" gap={4} align="start">
+      <Button variant="secondary" disabled={busy} onClick={() => void toggle()}>
+        {following ? 'Following' : 'Follow'}
+      </Button>
+
+      {error != null ? (
+        <Text size="sm" tone="warning">
+          {error}
+        </Text>
+      ) : null}
+    </Stack>
+  )
+}
+
+/**
+ * The records they made that no file here is under.
+ *
+ * **Three states, and telling them apart is the whole job.** Nobody has asked
+ * MusicBrainz yet; it was asked and the library holds everything; it was asked
+ * and there are gaps. Collapsing the first into the second would report a
+ * complete collection to somebody who has simply not run the pass — which is
+ * why `fetchedAtUtc` is on the wire at all, and the same reason
+ * `describedAtUtc` is.
+ *
+ * `known` and `held` travel beside the list because the list is *cut*:
+ * `Discography.IsGap` hides compilations and the rest, so its length is not the
+ * number of records missing and saying "7 missing of 41" from it would be
+ * wrong in both figures.
+ */
+function MissingRecords({
+  discography,
+  artist,
+}: {
+  readonly discography: components['schemas']['ArtistDiscography']
+  readonly artist: string
+}) {
+  if (discography.fetchedAtUtc == null) {
+    // One silence now, where there were two. This forked on following because
+    // following was what put an artist on the browse worklist, so the honest
+    // sentence for everybody else was "follow them first". That worklist is the
+    // whole catalogue now, and the old instruction would be wrong in the way
+    // that wastes somebody's afternoon: it asks for a click that has no bearing
+    // on whether this list ever fills.
+    //
+    // Nothing auto-starts enrichment — `StartEnrichment` is the only caller of
+    // `Start()` — so an unbrowsed artist means a pass nobody has run yet, and
+    // saying which of those two states this is remains the whole content here.
+    return (
+      <Text size="sm" tone="tertiary">
+        Nothing listed yet — run the enrichment pass from Foundation to fetch what they released.
+      </Text>
+    )
+  }
+
+  if (discography.missing.length === 0) {
+    return (
+      <Text size="sm" tone="tertiary">
+        Nothing missing — the library holds {discography.held.toLocaleString()} of the{' '}
+        {discography.known.toLocaleString()} records MusicBrainz credits to them.
+      </Text>
+    )
+  }
+
+  return (
+    <Stack direction="column" gap={4}>
+      <Stack gap={8} align="center">
+        <h2 className={styles.heading}>
+          <Text weight="semibold">Not in your library</Text>
+        </h2>
+        <Badge tone="warning" size="sm">
+          {discography.missing.length}
+        </Badge>
+      </Stack>
+
+      <Text size="sm" tone="secondary" block>
+        Records MusicBrainz credits to them that no file here sits under — holding{' '}
+        {discography.held.toLocaleString()} of {discography.known.toLocaleString()}.
+      </Text>
+
+      <CatalogueGrid aria-label={`Not in your library: ${artist}`}>
+        {discography.missing.map((record) => (
+          <MissingCard key={record.id} record={record} />
+        ))}
+      </CatalogueGrid>
+    </Stack>
+  )
+}
+
+/**
+ * Wanting a record, which is what keeps the acquire shelf readable.
+ *
+ * `FollowButton`'s counterpart one level down, and the same narrow optimism: the
+ * flag flips after the request returns rather than before, because `useApiQuery`
+ * has no invalidation and refetching the artist to redraw one button would cost
+ * a second read of every track.
+ *
+ * **It lives inside the card rather than making the card a button.**
+ * `MissingCard` deliberately has no `render` — there is no page for a record no
+ * file is under, and inventing one would be inventing the album — so the tile is
+ * not interactive and a control inside it is not a nested one. This is the
+ * opposite of the acquire shelf's tiles, where the whole tile is the button
+ * because there the press is a search.
+ *
+ * The title is in the accessible name because a page of these is otherwise a
+ * column of buttons all called "Monitor".
+ */
+function MonitorButton({
+  releaseGroupId,
+  monitored: initial,
+  title,
+}: {
+  readonly releaseGroupId: string
+  readonly monitored: boolean
+  readonly title: string
+}) {
+  const [monitored, setMonitored] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const toggle = async () => {
+    const next = !monitored
+
+    setBusy(true)
+
+    try {
+      await api.post('/api/catalogue/release-groups/{id}/monitor', {
+        params: { path: { id: releaseGroupId } },
+        json: { monitor: next },
+      })
+
+      setMonitored(next)
+      setError(null)
+    } catch (cause) {
+      setError(describeError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={monitored ? 'secondary' : 'ghost'}
+        disabled={busy}
+        aria-label={`${monitored ? 'Stop wanting' : 'Want'} ${title}`}
+        onClick={() => void toggle()}
+      >
+        {monitored ? 'Wanted' : 'Want this'}
+      </Button>
+
+      {error != null ? (
+        <Text size="xs" tone="warning">
+          {error}
+        </Text>
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * One record they made and the library has not got.
+ *
+ * No `render`, so it goes nowhere — there is no page for a record no file is
+ * under, and inventing one would be inventing the album. The sleeve comes from
+ * the Cover Art Archive keyed on the *release group*, which is the only key
+ * there is here: no pressing has been chosen, because none has been owned.
+ */
+function MissingCard({ record }: { readonly record: components['schemas']['DiscographyRow'] }) {
+  const image = record.mbid != null ? releaseGroupArt(record.mbid) : null
+
+  return (
+    <CatalogueCard
+      variant="album"
+      title={record.title}
+      {...(image != null ? { image } : {})}
+      subtitle={record.firstReleaseYear != null ? String(record.firstReleaseYear) : 'undated'}
+      meta={
+        <>
+          {record.primaryType != null ? (
+            <Badge tone="neutral" size="sm">
+              {record.primaryType}
+            </Badge>
+          ) : null}
+
+          {record.secondaryTypes.map((type) => (
+            <Badge key={type} tone="neutral" size="sm">
+              {type}
+            </Badge>
+          ))}
+
+          <MonitorButton
+            releaseGroupId={record.id}
+            monitored={record.monitored}
+            title={record.title}
+          />
+        </>
+      }
+    />
   )
 }
 

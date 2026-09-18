@@ -912,13 +912,191 @@
         }
       }
     },
+    "/api/catalogue/artists/{id}/follow": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Follow or unfollow an artist the catalogue already holds.",
+        "description": "Following is the one fact on an artist that is not derived from the library or from a provider, and it is deliberately unrelated to what is held: an artist with two hundred tracks may be unfollowed, and a followed artist may have no files at all.\n\nA followed artist appears on `artists` whatever their track count and whether or not they are an album artist — `scope=following` narrows the list to them. Unfollowing keeps the discography already fetched, so re-following spends no provider requests.",
+        "operationId": "SetArtistFollowed",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtistFollowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistFollowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/artists/follow": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Follow an artist by MusicBrainz id, whether or not the library holds them.",
+        "description": "The only way to reach an artist nothing in the library is by. Every artist in this catalogue is otherwise a byproduct of a file, so there is no row to toggle.\n\n`artist` is a MusicBrainz artist id or any URL containing one, which is detected before anything else happens. There is no artist search and this is why: the only free-text call this application makes is for releases, it needs a Solr index, and it fails against a self-hosted mirror — see ADR 0006.\n\nAn artist already in the catalogue is followed without a lookup. A new one is minted from the MusicBrainz lookup with their name, sort name and type, and is left on the enrichment pass's worklist so that pass can fill in the genres and band relations this lookup does not carry.",
+        "operationId": "FollowArtistByMbid",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtistFollowByMbidRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistFollowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/release-groups/{id}/monitor": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Mark a record as one you want, or stop wanting it.",
+        "description": "The second fact in this catalogue that is not derived from anything — `Artist.Followed` is the other — and, like it, a rescan must never touch it.\n\nIt is a filter and not an instruction. Nothing searches for a monitored record and nothing buys one: acquisition is still a person who searched, read a track list and pressed a button. What it decides is which records the acquire screen's shelf will show, because a followed artist's whole discography is not a list anybody reads once a few dozen artists are followed.\n\nEverything a first discography browse writes is unmonitored: that browse is the baseline, so marking is opt-in. Records that appear on a *later* browse are monitored automatically, which is what \"released after you followed them\" means here.",
+        "operationId": "SetReleaseGroupMonitored",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseGroupMonitorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseGroupMonitorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/releases": {
       "get": {
         "tags": [
           "Catalogue"
         ],
         "summary": "Albums the library holds at least one track of.",
-        "description": "Ordered by title, or by `sort=year` (newest first, undated last) or `sort=artist` (the first billed name, uncredited last). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.",
+        "description": "Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.",
         "operationId": "GetReleases",
         "parameters": [
           {
@@ -2047,6 +2225,79 @@
         }
       }
     },
+    "/api/catalogue/matching/folders/queue": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every album folder with an open question, in the order to answer them.",
+        "description": "One row per album folder (`Artist/Album`, discs collapsed) holding at least one file a filing would accept. Folders whose open files all carry the same `MUSICBRAINZ_ALBUMID` tag come first, then the rest by how many files are open, then by path.\n\nReads every open file's tags to order the list, cached per path, size and modification time. No provider call, nothing written. Files sitting at the library root belong to no album folder and are not listed.",
+        "operationId": "GetIdentifyQueue",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentifyQueueResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/matching/folders/identify": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "One album folder's open files, and what their tags say.",
+        "description": "Every open file in the folder whatever it was refused for, in path order, with its tags and the title, track and disc read from them — the filename stands in for a missing title. `tags` summarises the folder: the album, artist, year and label most files agree on, and the release id most files name with how many name it.\n\n`files` counts everything in the folder, answered files included, so `files - open` is how much a pass or a person already placed. Reads tags only; no provider call, nothing written.",
+        "operationId": "GetIdentifyFolder",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentifyFolderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/releases/{id}/cover": {
       "get": {
         "tags": [
@@ -2269,8 +2520,8 @@
         "tags": [
           "Qobuz"
         ],
-        "summary": "Albums worth buying: held in a lossy encoding, or held in part.",
-        "description": "Two lists, both read out of the catalogue with no request to Qobuz. `items` is quality — an album held in something worse than Qobuz sells. `incomplete` is completeness — an album whose release prints more tracks than the library holds, minus the ones whose folder still has unmatched files in it that could account for the gap.",
+        "summary": "Albums worth buying: held in a lossy encoding, held in part, or not held at all.",
+        "description": "Three lists, all read out of the catalogue with no request to Qobuz. `items` is quality — an album held in something worse than Qobuz sells. `incomplete` is completeness — an album whose release prints more tracks than the library holds, minus the ones whose folder still has unmatched files in it that could account for the gap. `missing` is the one that starts from a person rather than a file — records MusicBrainz credits to a followed artist that nothing here sits under, cut by `Discography.IsGap`. It needs the enrichment pass to have browsed those artists; `unbrowsedArtists` says how many it has not.",
         "operationId": "ListQobuzUpgrades",
         "responses": {
           "200": {
@@ -2646,7 +2897,8 @@
       "ArtistDetailResponse": {
         "required": [
           "artist",
-          "tracks"
+          "tracks",
+          "discography"
         ],
         "type": "object",
         "properties": {
@@ -2658,6 +2910,79 @@
             "items": {
               "$ref": "#/components/schemas/TrackRow"
             }
+          },
+          "discography": {
+            "$ref": "#/components/schemas/ArtistDiscography"
+          }
+        }
+      },
+      "ArtistDiscography": {
+        "required": [
+          "known",
+          "held",
+          "fetchedAtUtc",
+          "missing"
+        ],
+        "type": "object",
+        "properties": {
+          "known": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "held": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fetchedAtUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscographyRow"
+            }
+          }
+        }
+      },
+      "ArtistFollowByMbidRequest": {
+        "required": [
+          "artist"
+        ],
+        "type": "object",
+        "properties": {
+          "artist": {
+            "type": "string"
+          }
+        }
+      },
+      "ArtistFollowRequest": {
+        "required": [
+          "follow"
+        ],
+        "type": "object",
+        "properties": {
+          "follow": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ArtistFollowResponse": {
+        "required": [
+          "id",
+          "following"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "following": {
+            "type": "boolean"
           }
         }
       },
@@ -2695,7 +3020,8 @@
           "endedYear",
           "ended",
           "genres",
-          "describedAtUtc"
+          "describedAtUtc",
+          "following"
         ],
         "type": "object",
         "properties": {
@@ -2775,6 +3101,9 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "following": {
+            "type": "boolean"
           }
         }
       },
@@ -3478,6 +3807,56 @@
           }
         }
       },
+      "DiscographyRow": {
+        "required": [
+          "id",
+          "mbid",
+          "title",
+          "primaryType",
+          "secondaryTypes",
+          "firstReleaseYear",
+          "monitored"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "primaryType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "firstReleaseYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "monitored": {
+            "type": "boolean"
+          }
+        }
+      },
       "EnrichmentStartedResponse": {
         "required": [
           "jobId",
@@ -3505,6 +3884,7 @@
           "pendingFiles",
           "pendingArtists",
           "pendingPortraits",
+          "pendingDiscographies",
           "lastCompleted"
         ],
         "type": "object",
@@ -3545,6 +3925,10 @@
             "format": "int32"
           },
           "pendingPortraits": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingDiscographies": {
             "type": "integer",
             "format": "int32"
           },
@@ -4254,6 +4638,218 @@
           }
         }
       },
+      "IdentifyFileRow": {
+        "required": [
+          "mediaFileId",
+          "path",
+          "name",
+          "subFolder",
+          "title",
+          "track",
+          "disc",
+          "length",
+          "lengthMs",
+          "reason",
+          "size",
+          "format",
+          "tags"
+        ],
+        "type": "object",
+        "properties": {
+          "mediaFileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subFolder": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "disc": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "length": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lengthMs": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileTagRow"
+            }
+          }
+        }
+      },
+      "IdentifyFolderResponse": {
+        "required": [
+          "folder",
+          "files",
+          "open",
+          "audio",
+          "tags",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "open": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "audio": {
+            "type": "string"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/IdentifyFolderTags"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentifyFileRow"
+            }
+          }
+        }
+      },
+      "IdentifyFolderTags": {
+        "required": [
+          "album",
+          "artist",
+          "year",
+          "label",
+          "discs",
+          "release",
+          "agreeing"
+        ],
+        "type": "object",
+        "properties": {
+          "album": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "discs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "release": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "agreeing": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "IdentifyQueueResponse": {
+        "required": [
+          "total",
+          "files",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentifyQueueRow"
+            }
+          }
+        }
+      },
+      "IdentifyQueueRow": {
+        "required": [
+          "folder",
+          "open",
+          "tagsNameRelease"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "open": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tagsNameRelease": {
+            "type": "boolean"
+          }
+        }
+      },
       "IncompleteAlbum": {
         "required": [
           "releaseId",
@@ -4466,6 +5062,60 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OpenQuestion"
+            }
+          }
+        }
+      },
+      "MissingRecord": {
+        "required": [
+          "releaseGroupId",
+          "mbid",
+          "title",
+          "artist",
+          "year",
+          "query",
+          "primaryType",
+          "secondaryTypes"
+        ],
+        "type": "object",
+        "properties": {
+          "releaseGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "query": {
+            "type": "string"
+          },
+          "primaryType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }
@@ -5368,6 +6018,33 @@
           }
         }
       },
+      "ReleaseGroupMonitorRequest": {
+        "required": [
+          "monitor"
+        ],
+        "type": "object",
+        "properties": {
+          "monitor": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ReleaseGroupMonitorResponse": {
+        "required": [
+          "id",
+          "monitored"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "monitored": {
+            "type": "boolean"
+          }
+        }
+      },
       "ReleaseListResponse": {
         "required": [
           "total",
@@ -5624,6 +6301,9 @@
           "primaryType",
           "secondaryTypes",
           "discCount",
+          "label",
+          "catalogNumber",
+          "barcode",
           "slots"
         ],
         "type": "object",
@@ -5682,6 +6362,24 @@
           "discCount": {
             "type": "integer",
             "format": "int32"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "catalogNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "barcode": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "slots": {
             "type": "array",
@@ -6497,7 +7195,11 @@
           "files",
           "items",
           "incomplete",
-          "unmatchedAlbums"
+          "unmatchedAlbums",
+          "missing",
+          "followedArtists",
+          "unbrowsedArtists",
+          "unmonitoredGaps"
         ],
         "type": "object",
         "properties": {
@@ -6518,6 +7220,24 @@
             }
           },
           "unmatchedAlbums": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissingRecord"
+            }
+          },
+          "followedArtists": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unbrowsedArtists": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unmonitoredGaps": {
             "type": "integer",
             "format": "int32"
           }

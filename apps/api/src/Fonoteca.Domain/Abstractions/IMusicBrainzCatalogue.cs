@@ -152,7 +152,70 @@ public interface IMusicBrainzCatalogue
     Task<MusicBrainzWork?> GetWorkAsync(
         Mbid id,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every release group MusicBrainz credits to this artist.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one call here about records the library does not hold.</b> Every
+    /// other method answers a question raised by a file — what is this audio,
+    /// what is on this album, who is this credit. This one is asked because
+    /// somebody followed an artist, and the answer is mostly records they do not
+    /// own; that is the point of it.
+    ///
+    /// <b>A browse, not a search, which is what makes it work against a
+    /// mirror.</b> It is keyed on the artist's MBID and answered from the
+    /// database, so it needs no Solr index — the constraint that confines
+    /// <see cref="SearchReleasesAsync"/> to one screen and makes it fail on a
+    /// self-hosted server does not reach here. See ADR 0006.
+    ///
+    /// Paged internally to exhaustion, like
+    /// <see cref="BrowseReleasesForRecordingAsync"/>, so the answer is the whole
+    /// discography or an exception — never a quiet prefix, which for this
+    /// caller would read as an artist who stopped recording.
+    ///
+    /// <b>Unfiltered on purpose, though WS/2 would filter it.</b> The browse
+    /// takes a release-group type and the temptation is to ask only for albums;
+    /// what comes back is then a fact shaped by a rule, and changing the rule
+    /// means re-asking MusicBrainz about every followed artist at a turn each.
+    /// The whole list is stored and <c>Discography.IsGap</c> cuts it at read
+    /// time, which is this codebase's standing bargain: cache answers, never
+    /// rankings.
+    /// </remarks>
+    /// <returns>
+    /// Empty when MusicBrainz has no such artist, or credits them with nothing —
+    /// indistinguishable from here, and the caller treats both the same way.
+    /// </returns>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">The request was refused.</exception>
+    Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+        Mbid artist,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// One release group as a browse states it — an album, without any of its
+/// pressings.
+/// </summary>
+/// <remarks>
+/// Flatter than the three loose <c>ReleaseGroupId</c> / <c>ReleaseGroupTitle</c>
+/// / <c>PrimaryType</c> fields the release records carry, because here the group
+/// <i>is</i> the subject rather than something hanging off a release. The
+/// browse returns no releases with it and none are asked for: a discography is
+/// a list of records, and which pressing somebody would want is a question for
+/// the day they decide to buy one.
+/// </remarks>
+/// <param name="FirstReleaseYear">
+/// The year of the earliest release in the group. Null when MusicBrainz holds no
+/// date — an unreleased or newly announced record, which is a real state and not
+/// an error.
+/// </param>
+public sealed record MusicBrainzReleaseGroup(
+    Mbid Id,
+    string Title,
+    string? PrimaryType,
+    IReadOnlyList<string> SecondaryTypes,
+    int? FirstReleaseYear);
 
 /// <summary>
 /// A date MusicBrainz may only partly know: <c>1969</c>, <c>1969-08</c>,
@@ -245,13 +308,56 @@ public sealed record MusicBrainzWork(
 
     IReadOnlyList<MusicBrainzRelation> Relations);
 
+/// <summary>One name an artist is also known by.</summary>
+/// <remarks>
+/// Flattened to the three fields <see cref="Catalogue.LatinNames"/> reads.
+/// Deliberately not the whole WS/2 alias: its type, sort name and date range
+/// have no reader, and an alias's own sort name in particular is a trap —
+/// picking a display name out of it would print "Tchaikovsky, Pyotr Ilyich".
+/// </remarks>
+/// <param name="Locale">IETF tag, or null for an alias nobody has assigned one to.</param>
+/// <param name="Primary">Whether MusicBrainz calls this the main name for that locale.</param>
+/// <param name="Type">"Artist name", "Legal name", "Search hint", or null.</param>
+public sealed record MusicBrainzAlias(string Name, string? Locale, bool Primary, string? Type = null)
+{
+    /// <summary>
+    /// Whether the locale is English, of any flavour.
+    /// </summary>
+    /// <remarks>
+    /// <c>en_GB</c> and <c>en_US</c> are both in use beside plain <c>en</c>, and
+    /// an equality check against the bare tag silently demotes them to the
+    /// last-resort rung — where an unrelated Latin alias can outrank a perfectly
+    /// good English one.
+    /// </remarks>
+    public bool IsEnglish =>
+        Locale is not null
+        && (Locale.Equals("en", StringComparison.OrdinalIgnoreCase)
+            || Locale.StartsWith("en_", StringComparison.OrdinalIgnoreCase)
+            || Locale.StartsWith("en-", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Whether this alias is a name somebody uses, rather than a way to find them.
+    /// </summary>
+    /// <remarks>
+    /// A <c>Search hint</c> is explicitly not a name: MusicBrainz files common
+    /// misspellings, punctuation variants and abbreviations under it so its
+    /// search box matches them. Harmless while a *named* rung wins, and the
+    /// whole answer on the last rung — which takes any Latin alias in ordinal
+    /// order, so for the next artist with no English alias a deliberate
+    /// misspelling filed as a hint could become the name on the page.
+    /// </remarks>
+    public bool IsName =>
+        !string.Equals(Type, "Search hint", StringComparison.OrdinalIgnoreCase);
+}
+
 /// <summary>An artist as MusicBrainz describes them, rather than as a credit line does.</summary>
 /// <remarks>
-/// Narrower than the WS/2 response on purpose. Aliases, IPIs, ISNIs, areas and
-/// URL relations all arrive in the same document and none of them has a reader:
-/// there is no catalogue search for aliases to feed, and no screen with a
+/// Narrower than the WS/2 response on purpose. IPIs, ISNIs, areas and URL
+/// relations all arrive in the same document and none of them has a reader:
+/// there is no catalogue search for them to feed, and no screen with an
 /// external link on it. Widening this is one <c>Include</c> and one field the day
-/// something wants them.
+/// something wants them — which is what <see cref="MusicBrainzArtist.Aliases"/>
+/// was, the day a browse list had to print a Latin name.
 /// </remarks>
 public sealed record MusicBrainzArtist(
     Mbid Id,
@@ -329,7 +435,26 @@ public sealed record MusicBrainzArtist(
     /// members, which puts a band's albums on its members' shelves and none on
     /// its own.
     /// </remarks>
-    IReadOnlyList<Mbid> Bands);
+    IReadOnlyList<Mbid> Bands,
+
+    /// <summary>
+    /// The other names this artist is known by, for picking a Latin one.
+    /// </summary>
+    /// <remarks>
+    /// Free on the lookup that was already being made — <c>Include.Aliases</c>
+    /// beside the genres and relationships, no second request and no second
+    /// turn at the rate limit. Its one reader is
+    /// <see cref="Catalogue.LatinNames.Of"/>.
+    ///
+    /// <b>Artists described before this include was added are invisible to
+    /// it.</b> The worklist is <c>Artists.LookupUtc IS NULL</c>, so a stamped
+    /// row is never re-asked and its aliases stay unknown — the same trap
+    /// <c>member of band</c> fell into. Re-asking is the hand-written
+    /// <c>UPDATE</c> this codebase already documents, and it is worth narrowing
+    /// to the artists whose name is not Latin: on this library that is 22 rows
+    /// rather than 3,051.
+    /// </remarks>
+    IReadOnlyList<MusicBrainzAlias> Aliases);
 
 /// <summary>One typed link from an entity to an artist.</summary>
 /// <remarks>

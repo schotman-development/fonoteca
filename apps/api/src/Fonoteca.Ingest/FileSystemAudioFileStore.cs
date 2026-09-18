@@ -39,6 +39,18 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
     /// <summary>Matches <see cref="StagingInfix"/>; the leading dot is part of the name.</summary>
     private const string StagingSearchPattern = "*" + StagingInfix + "*.tmp";
 
+    /// <summary>
+    /// NAME_MAX: what one path segment may weigh, in bytes.
+    /// </summary>
+    /// <remarks>
+    /// 255 on ext4, and 255 over the NFS mount this library actually sits on —
+    /// <c>getconf NAME_MAX</c>, measured rather than assumed.
+    /// </remarks>
+    private const int MaximumNameBytes = 255;
+
+    /// <summary>What <see cref="StagingNameFor"/> adds: the dot, the infix, eight hex digits, ".tmp".</summary>
+    private static readonly int StagingWrapperBytes = 1 + StagingInfix.Length + 8 + ".tmp".Length;
+
     private readonly string _root;
 
     public FileSystemAudioFileStore(string libraryRoot)
@@ -408,9 +420,23 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
     }
 
     /// <summary>
-    /// A staging name, random rather than time-ordered.
+    /// A staging name, random rather than time-ordered, and clamped to NAME_MAX.
     /// </summary>
     /// <remarks>
+    /// <b>The wrapper is 23 bytes and the filesystem's limit is 255, so the name
+    /// it copies cannot be believed.</b> Two files in the target library are 241
+    /// and 237 bytes — a Disney medley, and a Shostakovich movement whose Cyrillic
+    /// artist costs two bytes a character — both perfectly legal, both staging to
+    /// 264 and 260. The open throws <c>PathTooLongException</c>, the tag write
+    /// rolls back, and because identification rolls its stamp back with it the
+    /// same two files are fingerprinted, looked up and lost again on every
+    /// subsequent run. <see cref="Domain.Acquisition.StagedFileName"/> already
+    /// paid for this on the download path; this is the same clamp, in bytes
+    /// rather than characters and never mid-rune, applied to the only part of the
+    /// name that may be shortened. The infix and the <c>.tmp</c> survive, so the
+    /// sweep still recognises its own leftovers, and the guid still separates two
+    /// long names that truncate to the same prefix.
+    ///
     /// The one place in this codebase that must <b>not</b> use
     /// <c>Guid.CreateVersion7()</c>. Version 7 is time-ordered — the leading hex
     /// digits are a millisecond timestamp — so truncating one to eight
@@ -419,8 +445,13 @@ public sealed class FileSystemAudioFileStore : IAudioFileStore
     /// gives up, and two writes in one millisecond fail. Version 4 is random,
     /// which is the only property a temporary filename wants.
     /// </remarks>
-    private static string StagingNameFor(string fileName) =>
-        $".{fileName}{StagingInfix}{Guid.NewGuid().ToString("N")[..8]}.tmp";
+    private static string StagingNameFor(string fileName)
+    {
+        var kept = Domain.Acquisition.StagedFileName.ClampToBytes(
+            fileName, MaximumNameBytes - StagingWrapperBytes);
+
+        return $".{kept}{StagingInfix}{Guid.NewGuid().ToString("N")[..8]}.tmp";
+    }
 
     /// <summary>
     /// Refuses a write the volume cannot hold, rather than filling it.

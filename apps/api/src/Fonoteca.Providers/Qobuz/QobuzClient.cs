@@ -61,6 +61,22 @@ public sealed class QobuzClient(
     /// </remarks>
     private const int TrackPageSize = 500;
 
+    /// <summary>How many albums one <c>artist/get</c> asks for.</summary>
+    /// <remarks>
+    /// <b>A cap, and it has to be one.</b> Measured against a real artist on this
+    /// installation, <c>artist/get?extra=albums</c> reports <b>166</b> albums —
+    /// and that is one artist on a followed list that is meant to grow. Asking
+    /// for all of everything, for everybody, at one gated request each, is how a
+    /// discovery pass turns into an afternoon.
+    ///
+    /// 100 is generous against the question actually being asked, which is "has
+    /// anything appeared recently" rather than "recite the discography". Where it
+    /// cuts, <see cref="QobuzArtistAlbums.Total"/> says so, which is the same
+    /// bargain <see cref="TrackPageSize"/> takes with a truncated track list:
+    /// visible rather than silent.
+    /// </remarks>
+    private const int AlbumPageSize = 100;
+
     /// <summary>Albums matching a search, best first as Qobuz ranks them.</summary>
     public async Task<IReadOnlyList<QobuzAlbum>> SearchAlbumsAsync(
         string query,
@@ -147,10 +163,71 @@ public sealed class QobuzClient(
             // that URL 403s at their CDN.
             var picture = item.Image?.Large ?? item.Image?.Medium;
 
-            artists.Add(new QobuzArtist(item.Name, picture, item.AlbumsCount ?? 0));
+            // The id travels now. It was dropped here while the only consumer
+            // wanted a photograph, and a picture needs no second request — but
+            // asking what an artist released does, and this number is the only
+            // way to make it.
+            artists.Add(new QobuzArtist(item.Name, picture, item.AlbumsCount ?? 0, item.Id));
         }
 
         return artists;
+    }
+
+    /// <summary>
+    /// What Qobuz say this artist has released.
+    /// </summary>
+    /// <remarks>
+    /// <b>The call that exists because MusicBrainz is late.</b> A volunteer
+    /// catalogue adds a record when somebody gets round to it; a shop lists it
+    /// the day it goes on sale, because that is the business. For "has this
+    /// artist put something out recently" the shop is the better source, and it
+    /// is the same shop this application already buys from — so "is it new" and
+    /// "can I have it" are one question with one answer.
+    ///
+    /// <b>The rows carry no track list</b>, measured, and that is fine: the
+    /// mapper already treats a missing <c>tracks</c> as an empty one, and nothing
+    /// here needs the tracks. A person who wants them opens the album, which is
+    /// <see cref="GetAlbumAsync"/> and a separate request.
+    ///
+    /// <b>Every row carries a <c>upc</c></b>, which is what makes this worth
+    /// storing rather than merely showing: it is ADR 0011's release key, so an
+    /// album named here can later be recognised as a MusicBrainz release without
+    /// anybody deciding anything.
+    ///
+    /// The artist id comes from <see cref="SearchArtistsAsync"/> and therefore
+    /// from a *name*, so the caller must decide whether the row it found is the
+    /// artist it meant — <c>ArtistNameMatch</c> is that decision and it is not
+    /// this method's.
+    /// </remarks>
+    public async Task<QobuzArtistAlbums> GetArtistAlbumsAsync(
+        long artistId,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = await GetAsync(
+            "artist/get",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["artist_id"] = artistId.ToString(CultureInfo.InvariantCulture),
+                ["extra"] = "albums",
+                ["limit"] = AlbumPageSize.ToString(CultureInfo.InvariantCulture),
+                ["offset"] = "0",
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        var body = Deserialize(payload, QobuzJsonContext.Default.QobuzArtistBody, "artist/get");
+        var items = body?.Albums?.Items ?? [];
+
+        var albums = new List<QobuzAlbum>(items.Count);
+
+        foreach (var item in items)
+        {
+            if (Album(item) is { } album) albums.Add(album);
+        }
+
+        // Their count rather than the list's, for the reason a cut track list
+        // reports its own: a caller comparing against `albums.Count` would read
+        // a hundred rows of a hundred and sixty-six as a whole discography.
+        return new QobuzArtistAlbums(albums, body?.Albums?.Total ?? albums.Count);
     }
 
     /// <summary>One album with its track list.</summary>
@@ -491,8 +568,22 @@ public sealed class QobuzClient(
             body.MaximumSamplingRate,
             body.Streamable ?? false,
             body.Image?.Large,
-            tracks);
+            tracks,
+            // Null where Qobuz hold none, which is a real answer and not a gap in
+            // the wiring — see QobuzAlbumBody.Upc. It is the only key an album
+            // with no MBID has, so leaving it unread would make every
+            // provider-sourced release unmatchable against MusicBrainz forever.
+            NullIfBlank(body.Upc));
     }
+
+    /// <summary>A trimmed value, or null where the service sent nothing usable.</summary>
+    /// <remarks>
+    /// Qobuz send <c>""</c> for absent text rather than omitting the field, and an
+    /// empty barcode is not a barcode. Stored as-is it would key one release and
+    /// then collide with every other album that also has none.
+    /// </remarks>
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
     /// The title with its edition suffix folded in.
@@ -531,11 +622,31 @@ public sealed class QobuzClient(
 /// that they have none</b> — so it is an unknown rather than a small number, and
 /// <c>QobuzPortraits.Dwarfs</c> refuses to compare against one.
 /// </param>
-public sealed record QobuzArtist(string Name, string? ImageUrl, int AlbumCount);
+/// <param name="Id">
+/// Qobuz's own id for them, or null where the row carried none.
+/// </param>
+/// <remarks>
+/// <b>The id is here because a name is not an identifier.</b> Every Qobuz call
+/// about an artist is keyed on this number, and the only way to reach one is a
+/// name search — so a search result that dropped its id could be recognised as
+/// the right artist and then not asked anything. That is precisely the join
+/// <c>GetArtistAlbumsAsync</c> needs: decide who they are from the name, then ask
+/// about them by id.
+///
+/// Nullable because <c>QobuzArtistBody.Id</c> is. A row with no id is a row
+/// nothing further can be asked about, which a caller has to be able to see
+/// rather than discover as a zero.
+/// </remarks>
+public sealed record QobuzArtist(string Name, string? ImageUrl, int AlbumCount, long? Id = null);
 
 /// <summary>One album as an acquisition sees it.</summary>
 /// <param name="TrackCount">Qobuz's own count. Higher than <c>Tracks.Count</c> means the list was cut.</param>
 /// <param name="Streamable">Whether the account may play it at all — region and tier.</param>
+/// <param name="Upc">
+/// The barcode, or null. The one key a provider-sourced release has — see
+/// <c>QobuzAlbumBody.Upc</c> and ADR 0011 — and the only field here that can
+/// later tie this album to a MusicBrainz release without a person deciding.
+/// </param>
 public sealed record QobuzAlbum(
     string Id,
     string Title,
@@ -548,7 +659,18 @@ public sealed record QobuzAlbum(
     double? MaximumSamplingRate,
     bool Streamable,
     string? CoverUrl,
-    IReadOnlyList<QobuzTrack> Tracks);
+    IReadOnlyList<QobuzTrack> Tracks,
+    string? Upc = null);
+
+/// <summary>An artist's records, and how many of them there were.</summary>
+/// <param name="Albums">The page that came back, oldest-to-newest as Qobuz order them.</param>
+/// <param name="Total">
+/// How many Qobuz hold. Greater than <paramref name="Albums"/>'s length means the
+/// list was cut — measured at 166 against a 100-row page for one artist — and a
+/// caller that read the length instead would report a discography as complete
+/// after seeing part of it.
+/// </param>
+public sealed record QobuzArtistAlbums(IReadOnlyList<QobuzAlbum> Albums, int Total);
 
 /// <param name="Performer">The track's own credit, which on a compilation is not the album's.</param>
 public sealed record QobuzTrack(

@@ -196,6 +196,69 @@ public sealed class StagedWriteTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Names at the far end of what a filesystem takes, staged anyway.
+    /// </summary>
+    /// <remarks>
+    /// The library's names, not a test's: two files in it are 241 and 237 bytes
+    /// — a Disney medley of five titles, and a Shostakovich movement whose
+    /// Cyrillic artist costs two bytes a character. Both are legal; both wrapped
+    /// in the staging name's 23 bytes are over NAME_MAX, so the open threw
+    /// <c>PathTooLongException</c> and identification rolled the whole file back
+    /// — fingerprint, AcoustID and check stamp — leaving it to fail identically
+    /// on every run after.
+    ///
+    /// The cases are shaped so a cut made by index rather than by rune lands
+    /// mid-character: an odd offset in front of two-byte runes, and a four-byte
+    /// rune straddling the boundary. A half-copied sequence does not round-trip
+    /// through UTF-8, and the filesystem will not take the name either.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(OversizedStagedNames))]
+    public async Task AFileWhoseNameNearlyFillsNameMaxCanStillBeStagedAndCommitted(string name)
+    {
+        var (store, path) = Given(name, "original bytes");
+
+        var staged = await store.OpenForReplaceAsync(path, Token);
+        await using (staged.ConfigureAwait(false))
+        {
+            var staging = Path.GetFileName(staged.StagingPath.Value);
+
+            Assert.True(
+                Encoding.UTF8.GetByteCount(staging) <= 255,
+                $"the staged name is {Encoding.UTF8.GetByteCount(staging)} bytes");
+
+            // Hidden to the walk, not an audio extension, and still ours as far
+            // as the sweep for abandoned staging files is concerned.
+            Assert.StartsWith(".", staging, StringComparison.Ordinal);
+            Assert.EndsWith(".tmp", staging, StringComparison.Ordinal);
+            Assert.Contains(
+                staging,
+                Directory.GetFiles(_root, "*.fonoteca-*.tmp").Select(Path.GetFileName));
+
+            // Nothing was cut in half: a lone surrogate does not survive the
+            // round trip, and the file exists under that exact name on disk.
+            Assert.Equal(staging, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(staging)));
+            Assert.True(File.Exists(Path.Combine(_root, staging)));
+
+            await Write(staged, "replacement bytes");
+            await staged.CommitAsync(Token);
+        }
+
+        // And the file keeps its own full name — only the copy in the staging
+        // name was shortened.
+        Assert.Equal("replacement bytes", await File.ReadAllTextAsync(Absolute(name), Token));
+    }
+
+    public static TheoryData<string> OversizedStagedNames => new(
+        // 241 bytes, as the Disney medley is.
+        new string('a', 236) + ".flac",
+        // 236 bytes of two-byte runes behind one ASCII character, so the byte
+        // budget runs out in the middle of a character rather than between two.
+        "A" + new string('я', 115) + ".flac",
+        // 246 bytes, with a four-byte rune straddling the cut.
+        new string('a', 229) + "🎵🎵🎵.flac");
+
     [Fact]
     public void AStaleStagingFileIsSweptAndAFreshOneIsLeftAlone()
     {

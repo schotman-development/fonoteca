@@ -782,9 +782,62 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         }
     }
 
-    private async Task RunAsync(StubCatalogue catalogue)
+    /// <summary>
+    /// The song left out of an album that matched: its cluster names the album's
+    /// recording as well as the one enrichment chose, and the pass seats it.
+    /// </summary>
+    [Fact]
+    public async Task AFileIdentifiedAsAnotherTakeOfTheSameAudioFillsTheAlbumsGap()
     {
-        var attribution = Build(catalogue);
+        var take = Song(90);
+
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", take, 220));
+
+        var cluster = Guid.CreateVersion7();
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await seed.MediaFiles.SingleAsync(f => f.Path == "Artist/Album/03.flac", Token);
+            row.AcoustId = new AcoustId(cluster);
+            row.Fingerprint = "AQAAfingerprint";
+            await seed.SaveChangesAsync(Token);
+        }
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId);
+
+        var clusters = new StubClusters(
+            [new AcoustIdMatch(cluster, 0.97, [new(take, 324), new(Song(3), 4)])]);
+
+        await RunAsync(catalogue, clusters);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles
+            .Include(f => f.Recording)
+            .SingleAsync(f => f.Path == "Artist/Album/03.flac", Token);
+
+        Assert.Equal(ReleaseAttributionOutcome.Attributed, file.AttributionOutcome);
+        Assert.NotNull(file.ReleaseId);
+        Assert.Equal(Song(3), file.Recording!.Mbid);
+
+        var track = await db.Tracks.SingleAsync(t => t.Id == file.TrackId, Token);
+        Assert.Equal(3, track.Position);
+        Assert.Equal(file.RecordingId, track.RecordingId);
+
+        // The answer is kept, so the next run asks nobody.
+        Assert.NotNull(file.AcoustIdMatchesJson);
+        Assert.Equal(1, clusters.Calls);
+    }
+
+    private async Task RunAsync(StubCatalogue catalogue, IAcoustIdLookup? clusters = null)
+    {
+        var attribution = Build(catalogue, clusters);
 
         Assert.Equal(AttributionStatus.Started, attribution.Start().Status);
 
@@ -798,15 +851,15 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         Assert.False(attribution.IsRunning, "The attribution pass did not finish.");
     }
 
-    private ReleaseAttributionService Build(StubCatalogue catalogue)
+    private ReleaseAttributionService Build(StubCatalogue catalogue, IAcoustIdLookup? clusters = null)
     {
-        var provider = Services(catalogue).BuildServiceProvider();
+        var provider = Services(catalogue, clusters).BuildServiceProvider();
         _providers.Add(provider);
 
         return provider.GetRequiredService<ReleaseAttributionService>();
     }
 
-    private ServiceCollection Services(StubCatalogue catalogue)
+    private ServiceCollection Services(StubCatalogue catalogue, IAcoustIdLookup? clusters = null)
     {
         var services = new ServiceCollection();
 
@@ -815,6 +868,7 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         services.AddDbContext<FonotecaDbContext>(options => options.UseNpgsql(_connectionString));
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IMusicBrainzCatalogue>(catalogue);
+        services.AddSingleton<IAcoustIdLookup>(clusters ?? new StubClusters([]));
         services.AddSingleton<LibraryWorkGate>();
         services.AddSingleton<ReleaseAttributionService>();
         services.AddSingleton<IHostApplicationLifetime, NeverStops>();
@@ -988,6 +1042,11 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             return this;
         }
 
+        public Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+            Mbid artist,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroup>>([]);
+
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
             Mbid recording,
             CancellationToken cancellationToken = default)
@@ -1045,6 +1104,22 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
                 PrimaryType: release.PrimaryType,
                 SecondaryTypes: release.SecondaryTypes,
                 Media: [new MusicBrainzMediumSummary(1, "CD", release.Tracks.Count)]);
+    }
+
+    /// <summary>An AcoustID that gives one answer, and counts how often it was asked.</summary>
+    private sealed class StubClusters(IReadOnlyList<AcoustIdMatch> matches) : IAcoustIdLookup
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task<IReadOnlyList<AcoustIdMatch>> LookupAsync(
+            AudioFingerprint fingerprint,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            return Task.FromResult(matches);
+        }
     }
 
     /// <summary>Never stops, because these tests own the lifetime themselves.</summary>

@@ -57,11 +57,23 @@ public static class ArtistNameMatch
     /// is scanned: Qobuz return "Tom Petty" behind "Tom Petty &amp; The
     /// Heartbreakers".
     ///
-    /// <b>Candidates carrying no picture are dropped before anything is
-    /// counted</b>, not treated as rivals — they cannot be the answer either
-    /// way, and counting them would refuse the commonest shape there is: a
-    /// well-known artist beside a homonym the service holds a row for and no
-    /// photograph of.
+    /// <b>Candidates the caller cannot use must be dropped before they get
+    /// here</b>, not treated as rivals — they cannot be the answer either way,
+    /// and counting them would refuse the commonest shape there is: a well-known
+    /// artist beside a homonym the service holds a row for and nothing else.
+    /// For a picture source that means rows with no photograph, and
+    /// <c>QobuzPortraits</c> filters them out before calling.
+    ///
+    /// <b>That filter used to live here and had to move.</b> This rule is about
+    /// which row <i>is</i> the artist, and a photograph is not evidence of
+    /// identity — it is a thing one particular caller happens to need. Left
+    /// inside, every caller inherited the portrait feature's requirement: a
+    /// release source asking the same question would silently lose every artist
+    /// the service sells records by but holds no press photo of, which is a
+    /// large share of exactly the artists worth asking about. The alternative —
+    /// a second copy of the matching rule — is what this class's own existence
+    /// argues against, since that is how one of them ends up without the
+    /// tie-break.
     ///
     /// <b>Where several survive, catalogue size decides and only when it
     /// plainly does.</b> Taking the first would be picking by a ranking of
@@ -89,7 +101,6 @@ public static class ArtistNameMatch
         var target = Normalise(wanted);
 
         var rivals = found
-            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.PictureUrl))
             .Where(candidate => string.Equals(
                 Normalise(candidate.Name), target, StringComparison.Ordinal))
             .OrderByDescending(candidate => candidate.Catalogue)

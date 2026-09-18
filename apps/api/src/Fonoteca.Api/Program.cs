@@ -3,6 +3,7 @@ using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
+using Fonoteca.Api.Mcp;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Api.Startup;
 using Fonoteca.Data;
@@ -14,6 +15,7 @@ using Fonoteca.Tagging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -109,6 +111,7 @@ builder.Services.AddSingleton<TagReader>();
 // opposite one: it never throws, it truncates, and nothing is decided from it —
 // it is what the manual matching screen puts in front of a person.
 builder.Services.AddSingleton<AudioFileDescriber>();
+builder.Services.AddMemoryCache();
 
 // The one switch that decides whether this process may modify a file at all.
 // It is read here, once, so Fonoteca.Tagging never learns what FonotecaOptions
@@ -238,6 +241,15 @@ builder.Services.AddSingleton<QobuzDownloadService>();
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
 
+// The agent endpoint. Registered whether or not Fonoteca:McpToken is set and
+// refused per request without one — see LibraryTools.Guard. Stateless: every
+// tool is one call into a handler the web client already reaches, and nothing
+// here asks the client anything back.
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<LibraryTools>();
+
 // Numbers are numbers.
 //
 // ASP.NET's web JSON defaults set NumberHandling to AllowReadingFromString, and
@@ -290,6 +302,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors(CorsPolicy);
+app.Use(LibraryTools.Guard);
 
 app.MapHealthChecks("/health");
 app.MapSystemEndpoints();
@@ -298,6 +311,9 @@ app.MapFileEndpoints();
 app.MapCatalogueEndpoints();
 app.MapQobuzEndpoints();
 app.MapHub<JobsHub>(JobsHub.Route);
+
+// Not part of the contract packages/api-client is generated from.
+app.MapMcp(LibraryTools.Route).ExcludeFromDescription();
 
 await app.RunAsync().ConfigureAwait(false);
 

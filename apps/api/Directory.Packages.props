@@ -79,6 +79,12 @@
       does need referencing.
     -->
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.10" />
+    <!--
+      The official MCP SDK, for the /mcp endpoint in Fonoteca.Api. The AspNetCore
+      package brings the core SDK with it, which is also what the integration
+      tests use as a client.
+    -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
   </ItemGroup>
 
   <ItemGroup Label="Transitive security pins">

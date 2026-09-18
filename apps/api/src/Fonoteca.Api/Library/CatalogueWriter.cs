@@ -163,7 +163,7 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
                     RecordingId = recording.Id,
                     Position = credit.Position,
                     JoinPhrase = credit.JoinPhrase,
-                    CreditedAs = credit.Name == artist.Name ? null : credit.Name,
+                    CreditedAs = LatinNames.CreditedAs(credit.Name, artist.Name),
                 });
 
                 continue;

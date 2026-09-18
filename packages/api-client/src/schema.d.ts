@@ -352,6 +352,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/artists/{id}/follow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow or unfollow an artist the catalogue already holds.
+         * @description Following is the one fact on an artist that is not derived from the library or from a provider, and it is deliberately unrelated to what is held: an artist with two hundred tracks may be unfollowed, and a followed artist may have no files at all.
+         *
+         *     A followed artist appears on `artists` whatever their track count and whether or not they are an album artist — `scope=following` narrows the list to them. Unfollowing keeps the discography already fetched, so re-following spends no provider requests.
+         */
+        post: operations["SetArtistFollowed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/artists/follow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow an artist by MusicBrainz id, whether or not the library holds them.
+         * @description The only way to reach an artist nothing in the library is by. Every artist in this catalogue is otherwise a byproduct of a file, so there is no row to toggle.
+         *
+         *     `artist` is a MusicBrainz artist id or any URL containing one, which is detected before anything else happens. There is no artist search and this is why: the only free-text call this application makes is for releases, it needs a Solr index, and it fails against a self-hosted mirror — see ADR 0006.
+         *
+         *     An artist already in the catalogue is followed without a lookup. A new one is minted from the MusicBrainz lookup with their name, sort name and type, and is left on the enrichment pass's worklist so that pass can fill in the genres and band relations this lookup does not carry.
+         */
+        post: operations["FollowArtistByMbid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/release-groups/{id}/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a record as one you want, or stop wanting it.
+         * @description The second fact in this catalogue that is not derived from anything — `Artist.Followed` is the other — and, like it, a rescan must never touch it.
+         *
+         *     It is a filter and not an instruction. Nothing searches for a monitored record and nothing buys one: acquisition is still a person who searched, read a track list and pressed a button. What it decides is which records the acquire screen's shelf will show, because a followed artist's whole discography is not a list anybody reads once a few dozen artists are followed.
+         *
+         *     Everything a first discography browse writes is unmonitored: that browse is the baseline, so marking is opt-in. Records that appear on a *later* browse are monitored automatically, which is what "released after you followed them" means here.
+         */
+        post: operations["SetReleaseGroupMonitored"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/releases": {
         parameters: {
             query?: never;
@@ -361,7 +431,7 @@ export interface paths {
         };
         /**
          * Albums the library holds at least one track of.
-         * @description Ordered by title, or by `sort=year` (newest first, undated last) or `sort=artist` (the first billed name, uncredited last). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
+         * @description Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
          */
         get: operations["GetReleases"];
         put?: never;
@@ -796,6 +866,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/matching/folders/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every album folder with an open question, in the order to answer them.
+         * @description One row per album folder (`Artist/Album`, discs collapsed) holding at least one file a filing would accept. Folders whose open files all carry the same `MUSICBRAINZ_ALBUMID` tag come first, then the rest by how many files are open, then by path.
+         *
+         *     Reads every open file's tags to order the list, cached per path, size and modification time. No provider call, nothing written. Files sitting at the library root belong to no album folder and are not listed.
+         */
+        get: operations["GetIdentifyQueue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/folders/identify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One album folder's open files, and what their tags say.
+         * @description Every open file in the folder whatever it was refused for, in path order, with its tags and the title, track and disc read from them — the filename stands in for a missing title. `tags` summarises the folder: the album, artist, year and label most files agree on, and the release id most files name with how many name it.
+         *
+         *     `files` counts everything in the folder, answered files included, so `files - open` is how much a pass or a person already placed. Reads tags only; no provider call, nothing written.
+         */
+        get: operations["GetIdentifyFolder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/releases/{id}/cover": {
         parameters: {
             query?: never;
@@ -879,8 +993,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Albums worth buying: held in a lossy encoding, or held in part.
-         * @description Two lists, both read out of the catalogue with no request to Qobuz. `items` is quality — an album held in something worse than Qobuz sells. `incomplete` is completeness — an album whose release prints more tracks than the library holds, minus the ones whose folder still has unmatched files in it that could account for the gap.
+         * Albums worth buying: held in a lossy encoding, held in part, or not held at all.
+         * @description Three lists, all read out of the catalogue with no request to Qobuz. `items` is quality — an album held in something worse than Qobuz sells. `incomplete` is completeness — an album whose release prints more tracks than the library holds, minus the ones whose folder still has unmatched files in it that could account for the gap. `missing` is the one that starts from a person rather than a file — records MusicBrainz credits to a followed artist that nothing here sits under, cut by `Discography.IsGap`. It needs the enrichment pass to have browsed those artists; `unbrowsedArtists` says how many it has not.
          */
         get: operations["ListQobuzUpgrades"];
         put?: never;
@@ -1026,6 +1140,27 @@ export interface components {
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];
             tracks: components["schemas"]["TrackRow"][];
+            discography: components["schemas"]["ArtistDiscography"];
+        };
+        ArtistDiscography: {
+            /** Format: int32 */
+            known: number;
+            /** Format: int32 */
+            held: number;
+            /** Format: date-time */
+            fetchedAtUtc: null | string;
+            missing: components["schemas"]["DiscographyRow"][];
+        };
+        ArtistFollowByMbidRequest: {
+            artist: string;
+        };
+        ArtistFollowRequest: {
+            follow: boolean;
+        };
+        ArtistFollowResponse: {
+            /** Format: uuid */
+            id: string;
+            following: boolean;
         };
         ArtistListResponse: {
             /** Format: int32 */
@@ -1052,6 +1187,7 @@ export interface components {
             genres: string[];
             /** Format: date-time */
             describedAtUtc: null | string;
+            following: boolean;
         };
         AttributionReportResponse: {
             outcomes: components["schemas"]["OutcomeCount"][];
@@ -1242,6 +1378,18 @@ export interface components {
             /** Format: int64 */
             sizeBytes: null | number;
         };
+        DiscographyRow: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            mbid: null | string;
+            title: string;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            /** Format: int32 */
+            firstReleaseYear: null | number;
+            monitored: boolean;
+        };
         EnrichmentStartedResponse: {
             jobId: string;
             /** Format: int32 */
@@ -1263,6 +1411,8 @@ export interface components {
             pendingArtists: number;
             /** Format: int32 */
             pendingPortraits: number;
+            /** Format: int32 */
+            pendingDiscographies: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {
@@ -1465,6 +1615,61 @@ export interface components {
             failed: number;
             cancelled: boolean;
         };
+        IdentifyFileRow: {
+            /** Format: uuid */
+            mediaFileId: string;
+            path: string;
+            name: string;
+            subFolder: string;
+            title: string;
+            /** Format: int32 */
+            track: null | number;
+            /** Format: int32 */
+            disc: null | number;
+            length: null | string;
+            /** Format: int32 */
+            lengthMs: null | number;
+            reason: string;
+            size: string;
+            format: string;
+            tags: components["schemas"]["FileTagRow"][];
+        };
+        IdentifyFolderResponse: {
+            folder: string;
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            open: number;
+            audio: string;
+            tags: components["schemas"]["IdentifyFolderTags"];
+            items: components["schemas"]["IdentifyFileRow"][];
+        };
+        IdentifyFolderTags: {
+            album: null | string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            label: null | string;
+            /** Format: int32 */
+            discs: number;
+            /** Format: uuid */
+            release: null | string;
+            /** Format: int32 */
+            agreeing: number;
+        };
+        IdentifyQueueResponse: {
+            /** Format: int32 */
+            total: number;
+            /** Format: int32 */
+            files: number;
+            items: components["schemas"]["IdentifyQueueRow"][];
+        };
+        IdentifyQueueRow: {
+            folder: string;
+            /** Format: int32 */
+            open: number;
+            tagsNameRelease: boolean;
+        };
         IncompleteAlbum: {
             /** Format: uuid */
             releaseId: string;
@@ -1525,6 +1730,19 @@ export interface components {
             kinds: components["schemas"]["OpenQuestionCount"][];
             reasons: components["schemas"]["OpenQuestionCount"][];
             items: components["schemas"]["OpenQuestion"][];
+        };
+        MissingRecord: {
+            /** Format: uuid */
+            releaseGroupId: string;
+            /** Format: uuid */
+            mbid: null | string;
+            title: string;
+            artist: string;
+            /** Format: int32 */
+            year: null | number;
+            query: string;
+            primaryType: null | string;
+            secondaryTypes: string[];
         };
         MissingTrack: {
             /** Format: int32 */
@@ -1760,6 +1978,14 @@ export interface components {
             title: string;
             folders: components["schemas"]["AttributionShare"][];
         };
+        ReleaseGroupMonitorRequest: {
+            monitor: boolean;
+        };
+        ReleaseGroupMonitorResponse: {
+            /** Format: uuid */
+            id: string;
+            monitored: boolean;
+        };
         ReleaseListResponse: {
             /** Format: int32 */
             total: number;
@@ -1835,6 +2061,9 @@ export interface components {
             secondaryTypes: string[];
             /** Format: int32 */
             discCount: number;
+            label: null | string;
+            catalogNumber: null | string;
+            barcode: null | string;
             slots: components["schemas"]["ReleaseSlotRow"][];
         };
         ReleaseSummary: {
@@ -2044,6 +2273,13 @@ export interface components {
             incomplete: components["schemas"]["IncompleteAlbum"][];
             /** Format: int32 */
             unmatchedAlbums: number;
+            missing: components["schemas"]["MissingRecord"][];
+            /** Format: int32 */
+            followedArtists: number;
+            /** Format: int32 */
+            unbrowsedArtists: number;
+            /** Format: int32 */
+            unmonitoredGaps: number;
         };
         UpgradeRequest: {
             folder: string;
@@ -2832,6 +3068,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtistDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SetArtistFollowed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistFollowRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistFollowResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    FollowArtistByMbid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistFollowByMbidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistFollowResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SetReleaseGroupMonitored: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseGroupMonitorRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseGroupMonitorResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Not Found */
@@ -3662,6 +4028,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReleaseSeedResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetIdentifyQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentifyQueueResponse"];
+                };
+            };
+        };
+    };
+    GetIdentifyFolder: {
+        parameters: {
+            query?: {
+                folder?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentifyFolderResponse"];
                 };
             };
             /** @description Bad Request */

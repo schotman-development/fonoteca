@@ -442,6 +442,70 @@ public sealed class ReleaseAttributionTests
         Assert.All(result, a => Assert.Equal(ReleaseAttributionOutcome.Attributed, a.Outcome));
     }
 
+    /// <summary>
+    /// <i>Kind of Blue</i>: eight tracks filed, and "Blue in Green" refused beside
+    /// its own empty slot because enrichment named the alternate take.
+    /// </summary>
+    [Fact]
+    public void ARefusedFileWhoseClusterNamesTheOneGapIsSeatedOnIt()
+    {
+        var files = Library(("a", 180), ("b", 200), ("c", 220), ("take-1", 240));
+        var album = Release(AlbumId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220), ("d", 240)]);
+
+        var assigned = ReleaseAttribution.Assign(files, [album]);
+        Assert.Equal(ReleaseAttributionOutcome.NoCandidate, assigned[3].Outcome);
+
+        var result = ReleaseAttribution.Reseat(
+            assigned,
+            files,
+            [album],
+            new Dictionary<MediaFileId, IReadOnlySet<Mbid>>
+            {
+                [File("take-1")] = new HashSet<Mbid> { Recording("take-1"), Recording("d") },
+            });
+
+        Assert.Equal(AlbumId, result[3].Release);
+        Assert.Equal(4, result[3].Position);
+        Assert.Equal(ReleaseAttributionOutcome.Attributed, result[3].Outcome);
+        Assert.Equal(assigned.Take(3), result.Take(3));
+    }
+
+    /// <summary>
+    /// A cluster naming two gaps, or a gap two files want, is a question rather
+    /// than an answer — and so is a gap whose length the file does not match.
+    /// </summary>
+    [Fact]
+    public void AGapIsNotFilledUnlessTheAnswerIsSingleAndTheLengthsAgree()
+    {
+        var files = Library(("a", 180), ("b", 200), ("x", 220), ("y", 260), ("w", 260), ("z", 300));
+        var album = Release(
+            AlbumId,
+            "Album",
+            tracks: [("a", 180), ("b", 200), ("one", 220), ("two", 220), ("solo", 260), ("far", 240)]);
+
+        var assigned = ReleaseAttribution.Assign(files, [album]);
+
+        var result = ReleaseAttribution.Reseat(
+            assigned,
+            files,
+            [album],
+            new Dictionary<MediaFileId, IReadOnlySet<Mbid>>
+            {
+                // Two gaps for one file.
+                [File("x")] = new HashSet<Mbid> { Recording("one"), Recording("two") },
+
+                // Two files for one gap.
+                [File("y")] = new HashSet<Mbid> { Recording("solo") },
+                [File("w")] = new HashSet<Mbid> { Recording("solo") },
+
+                // One gap, one file, sixty seconds out.
+                [File("z")] = new HashSet<Mbid> { Recording("far") },
+            });
+
+        Assert.Equal(AlbumId, result[0].Release);
+        Assert.All(result.Skip(2), a => Assert.Null(a.Release));
+    }
+
     private static List<AttributionFile> Library(params (string Name, int Seconds)[] files) =>
         [.. files.Select(file => new AttributionFile(
             File(file.Name),

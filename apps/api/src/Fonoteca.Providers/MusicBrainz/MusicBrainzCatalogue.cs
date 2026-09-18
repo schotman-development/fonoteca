@@ -80,7 +80,17 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// one request, not a request of its own, so the backlog costs turns only
     /// because the rows are already stamped and have to be re-asked.
     /// </remarks>
-    private const Include ArtistIncludes = Include.Genres | Include.ArtistRelationships;
+    /// <remarks>
+    /// <c>Aliases</c> is the third rider on the same request, and it is what
+    /// lets a browse list print <c>Pyotr Ilyich Tchaikovsky</c> for an artist
+    /// MusicBrainz files under <c>Пётр Ильич Чайковский</c>. Measured on this
+    /// library, 20 of the 22 non-Latin artists carry an English primary alias
+    /// and the other two carry a Latin one with no locale — so the whole
+    /// feature costs no request that was not already being made. See
+    /// <c>LatinNames</c> for which of them wins.
+    /// </remarks>
+    private const Include ArtistIncludes =
+        Include.Genres | Include.ArtistRelationships | Include.Aliases;
 
     private const Include ReleaseIncludes =
         Include.Artists
@@ -288,6 +298,59 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                 await _query.LookupArtistAsync(id.Value, ArtistIncludes, cancellationToken: token)
                     .ConfigureAwait(false)),
             cancellationToken);
+
+    public async Task<IReadOnlyList<MusicBrainzReleaseGroup>> BrowseReleaseGroupsForArtistAsync(
+        Mbid artist,
+        CancellationToken cancellationToken = default)
+    {
+        var groups = await LookupAsync(
+            "artist release groups",
+            artist,
+            async token =>
+            {
+                var collected = new List<MusicBrainzReleaseGroup>();
+                var offset = 0;
+
+                while (true)
+                {
+                    // No includes at all. Title, both type fields and the first
+                    // release date ride on the browse itself, which is the whole
+                    // of what a discography row prints — and every include past
+                    // that is the mistake BrowseIncludes documents one method up.
+                    var page = await _query.BrowseArtistReleaseGroupsAsync(
+                            artist.Value,
+                            BrowsePageSize,
+                            offset,
+                            Include.None,
+                            cancellationToken: token)
+                        .ConfigureAwait(false);
+
+                    var results = page.Results;
+
+                    // An empty page ends the loop whatever the count claims —
+                    // BrowseReleasesForRecordingAsync's lesson, for the same
+                    // reason: a mirror mid-replication is where a total and its
+                    // contents disagree.
+                    if (results.Count == 0) break;
+
+                    foreach (var group in results)
+                    {
+                        collected.Add(MusicBrainzMapper.ToReleaseGroup(group));
+                    }
+
+                    offset += results.Count;
+                    if (offset >= page.TotalResults) break;
+                }
+
+                return collected;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        // Null is the 404 arm, which for this browse means the artist is gone —
+        // indistinguishable from one credited with nothing, and the caller
+        // treats both the same way.
+        return groups ?? [];
+    }
 
     public Task<MusicBrainzWork?> GetWorkAsync(
         Mbid id,

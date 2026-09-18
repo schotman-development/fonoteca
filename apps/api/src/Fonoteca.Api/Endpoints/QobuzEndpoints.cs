@@ -41,13 +41,17 @@ public static class QobuzEndpoints
 
         group.MapGet("/upgrades", ListUpgrades)
             .WithName("ListQobuzUpgrades")
-            .WithSummary("Albums worth buying: held in a lossy encoding, or held in part.")
+            .WithSummary(
+                "Albums worth buying: held in a lossy encoding, held in part, or not held at all.")
             .WithDescription(
-                "Two lists, both read out of the catalogue with no request to Qobuz. `items` is "
+                "Three lists, all read out of the catalogue with no request to Qobuz. `items` is "
                 + "quality — an album held in something worse than Qobuz sells. `incomplete` is "
                 + "completeness — an album whose release prints more tracks than the library "
                 + "holds, minus the ones whose folder still has unmatched files in it that could "
-                + "account for the gap.");
+                + "account for the gap. `missing` is the one that starts from a person rather "
+                + "than a file — records MusicBrainz credits to a followed artist that nothing "
+                + "here sits under, cut by `Discography.IsGap`. It needs the enrichment pass to "
+                + "have browsed those artists; `unbrowsedArtists` says how many it has not.");
 
         group.MapGet("/albums", SearchAlbums)
             .WithName("SearchQobuzAlbums")
@@ -280,7 +284,12 @@ public static class QobuzEndpoints
                     .Count(),
                 Artists = release.Credits
                     .OrderBy(credit => credit.Position)
-                    .Select(credit => new { credit.CreditedAs, credit.Artist!.Name, credit.JoinPhrase })
+                    .Select(credit => new
+                    {
+                        credit.CreditedAs,
+                        Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
+                        credit.JoinPhrase,
+                    })
                     .ToList(),
             })
             .ToListAsync(cancellationToken)
@@ -477,6 +486,9 @@ public static class QobuzEndpoints
                         track.Title))]));
         }
 
+        var (followed, unbrowsed, unmonitored, records) =
+            await MissingRecordsAsync(db, cancellationToken).ConfigureAwait(false);
+
         return TypedResults.Ok(new UpgradeListResponse(
             files.Count,
             items,
@@ -487,7 +499,198 @@ public static class QobuzEndpoints
             [.. incomplete
                 .OrderBy(album => album.TrackCount - album.Held)
                 .ThenBy(album => album.Title, StringComparer.OrdinalIgnoreCase)],
-            unmatched));
+            unmatched,
+            records,
+            followed,
+            unbrowsed,
+            unmonitored));
+    }
+
+    /// <summary>
+    /// Records by followed artists that no file here sits under.
+    /// </summary>
+    /// <remarks>
+    /// <b>The third question on this screen, and the only one that is not about
+    /// a file.</b> The two above it start from the library and ask what is wrong
+    /// with what it holds — an encoding, a gap in a track list. This one starts
+    /// from a person: <c>Artist.Followed</c> is the one column in the catalogue
+    /// nothing can recompute, and a record by somebody they said they cared
+    /// about is worth buying precisely because there is no file to reason from.
+    ///
+    /// <b>It is <c>CatalogueEndpoints.GetArtist</c>'s discography read over every
+    /// followed artist at once</b>, deliberately down to the two-armed
+    /// <c>Held</c> test — a file filed under one of the group's releases, or one
+    /// pointing straight at the group, which is what attribution writes when it
+    /// knows the album and not the pressing. Reading only the first reports a
+    /// record as missing while it sits on the artist's own page, and a screen
+    /// that offers to sell somebody a record they own is worse than no screen.
+    ///
+    /// <b>Asks nothing of anybody.</b> Not Qobuz, which is this endpoint's whole
+    /// bargain, and not MusicBrainz either: the browse behind these rows is the
+    /// enrichment pass's fifth worklist and has already run. So an artist
+    /// nobody has followed contributes nothing, the queries are empty and cheap
+    /// on a library that has never used the feature, and the cut
+    /// (<c>Discography.IsGap</c>) is made here rather than at fetch time —
+    /// CLAUDE.md's standing bargain, so changing the rule costs a page load and
+    /// not a turn at the rate limit for every followed artist.
+    /// </remarks>
+    private static async Task<(int Followed, int Unbrowsed, int Unmonitored, List<MissingRecord> Records)>
+        MissingRecordsAsync(FonotecaDbContext db, CancellationToken cancellationToken)
+    {
+        var followed = await db.Artists
+            .AsNoTracking()
+            .Where(artist => artist.Followed)
+            .Select(artist => new
+            {
+                artist.Id,
+                Name = artist.LatinName ?? artist.Name,
+                artist.Mbid,
+                artist.DiscographyLookupUtc,
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Followed and never browsed. On the wire for the reason
+        // `ArtistDiscography.FetchedAtUtc` is: without it an empty shelf cannot
+        // tell "they have released nothing you have not got" from "nobody has
+        // asked yet", and those want opposite sentences on the page — one is
+        // good news and the other is a pass somebody has to run.
+        //
+        // **The MBID is part of the question, not a detail.** The browse is keyed
+        // on an MBID, so an artist without one is not on
+        // `EnrichmentService.UnbrowsedArtist`'s worklist and never will be.
+        //
+        // This is deliberately the *never asked* half of that worklist and not
+        // the whole of it: the pass also re-asks artists whose discography has
+        // gone stale (`DiscographyLookupUtc < cutoff`), and those have been
+        // browsed — the screen is saying "nobody has looked yet", which a
+        // re-browse candidate contradicts. Counted in memory over the followed
+        // set that is already loaded above, so `IX_Artists_Unbrowsed` is not
+        // involved here either way. Every artist in this
+        // catalogue is a byproduct of a credit line, so a followed one with no
+        // MBID is ordinary rather than exotic — and the browse is keyed on an
+        // MBID, so the pass will never reach them. Counted here without that
+        // clause they are permanently "not browsed yet": the shelf tells
+        // somebody to run a pass that cannot touch them, it changes nothing, and
+        // the line never clears.
+        var unbrowsed = followed.Count(artist =>
+            artist.DiscographyLookupUtc is null && artist.Mbid is not null);
+
+        var names = followed.ToDictionary(artist => artist.Id, artist => artist.Name);
+
+        if (names.Count == 0) return (0, 0, 0, []);
+
+        var ids = names.Keys.ToList();
+
+        // `ArtistCredit.ReleaseGroupId` is written by the discography browse and
+        // by nothing else, so this is the followed set's credited records and
+        // not the whole catalogue's.
+        var credited = await db.ArtistCredits
+            .AsNoTracking()
+            .Where(credit => credit.ReleaseGroupId != null && ids.Contains(credit.ArtistId))
+            .Select(credit => new { credit.ArtistId, Group = credit.ReleaseGroupId!.Value })
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (credited.Count == 0) return (followed.Count, unbrowsed, 0, []);
+
+        // Who a record is filed under on the shelf. A release group credited to
+        // two followed artists is one record and must not be two tiles, so the
+        // billing is collapsed to one name — alphabetically, so that a rerun
+        // cannot change its mind, which is the tie-break the folder-naming rule
+        // above already takes for the same reason.
+        var billed = credited
+            .GroupBy(credit => credit.Group)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(credit => names[credit.ArtistId])
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .First());
+
+        // ponytail: two EXISTS per group, evaluated over every release group the
+        // followed set is credited with. A person-clicked endpoint, and the set
+        // is the followed one rather than the catalogue — push it into a single
+        // anti-join if somebody follows enough artists for this to show.
+        var groups = await db.ReleaseGroups
+            .AsNoTracking()
+            .Where(group => billed.Keys.Contains(group.Id))
+            .Select(group => new
+            {
+                group.Id,
+                group.Mbid,
+                group.Title,
+                group.PrimaryType,
+                group.SecondaryTypes,
+                group.FirstReleaseYear,
+                group.Monitored,
+                Held = group.Releases.Any(release => release.Files.Count != 0)
+                    || db.MediaFiles.Any(file => file.ReleaseGroupId == group.Id),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Every gap the rule admits, before monitoring is considered. Both
+        // numbers reach the screen, because an empty shelf has two opposite
+        // causes: nothing is marked, or nothing is missing. Only the first is
+        // something a person can act on, and a shelf that cannot tell them apart
+        // reads as broken in exactly the case where it is working.
+        var gaps = groups
+            .Where(group => !group.Held)
+            .Select(group => new
+            {
+                group.Id,
+                group.Mbid,
+                group.Title,
+                group.PrimaryType,
+                group.FirstReleaseYear,
+                group.Monitored,
+                Artist = billed[group.Id],
+                Secondary = group.SecondaryTypes is { Length: > 0 } types
+                    ? types.Split(", ", StringSplitOptions.RemoveEmptyEntries)
+                    : [],
+            })
+            .Where(group => Discography.IsGap(new ReleaseGroupFacts(
+                group.Title,
+                group.PrimaryType,
+                group.Secondary,
+                group.FirstReleaseYear)))
+            .ToList();
+
+        var records = gaps
+            // The shelf is the wanted list, not the discography. Everything the
+            // first browse wrote is unmonitored by definition — see
+            // `ReleaseGroup.Monitored` — so this shelf starts empty on a newly
+            // followed artist and fills with what a person marked on the artist
+            // page, plus whatever turned up after they followed them.
+            .Where(group => group.Monitored)
+
+            // By artist, then the artist page's own order within one. The two
+            // shelves above rank by how big a win each row is; there is no such
+            // measure here — one record somebody does not own is not a better
+            // buy than another — so the ordering that earns its place is the one
+            // that keeps an artist's records adjacent, since the tile names the
+            // record and the artist is the thing a person scans for.
+            .OrderBy(group => group.Artist, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(group => group.FirstReleaseYear ?? int.MaxValue)
+            .ThenBy(group => group.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new MissingRecord(
+                group.Id.Value,
+                group.Mbid?.Value,
+                group.Title,
+                group.Artist,
+                group.FirstReleaseYear,
+
+                // The artist and the title, which is the shape both shelves
+                // above search with — and here it is the billing line as well,
+                // since a record nobody owns has no printed credit to prefer.
+                Join(group.Artist, group.Title),
+                group.PrimaryType,
+                group.Secondary))
+            .ToList();
+
+        return (followed.Count, unbrowsed, gaps.Count - records.Count, records);
     }
 
     /// <summary>
@@ -820,11 +1023,75 @@ public sealed record QobuzTrackResponse(
 /// question, and saying how many keeps the short list from reading as a claim
 /// that the library is nearly whole.
 /// </param>
+/// <param name="Missing">
+/// Records by followed artists that no file here sits under. The third question,
+/// and the only one whose unit is not a file — see <c>MissingRecordsAsync</c>.
+/// </param>
+/// <param name="FollowedArtists">
+/// How many artists somebody has followed. The denominator for
+/// <paramref name="Missing"/>, and what tells an empty list from an unused
+/// feature: nobody following anybody is not the same as following people who
+/// have released nothing new.
+/// </param>
+/// <param name="UnbrowsedArtists">
+/// Of those, how many MusicBrainz has never been asked about. The three-state
+/// lesson <c>ArtistDiscography.FetchedAtUtc</c> already paid for, counted rather
+/// than stamped because this list spans artists: an empty shelf with a non-zero
+/// count here means a pass has not run, not that there is nothing to buy.
+/// </param>
+/// <param name="UnmonitoredGaps">
+/// Records by followed artists that the library has not got and nobody has
+/// marked. Not on the shelf, and counted so the screen can tell its two empty
+/// states apart: nothing marked is a sentence about the artist page, nothing
+/// missing is good news, and they look identical from the length of
+/// <paramref name="Missing"/> alone.
+/// </param>
 public sealed record UpgradeListResponse(
     int Files,
     IReadOnlyList<UpgradeCandidate> Items,
     IReadOnlyList<IncompleteAlbum> Incomplete,
-    int UnmatchedAlbums);
+    int UnmatchedAlbums,
+    IReadOnlyList<MissingRecord> Missing,
+    int FollowedArtists,
+    int UnbrowsedArtists,
+    int UnmonitoredGaps);
+
+/// <summary>A record by a followed artist that the library holds no file of.</summary>
+/// <param name="ReleaseGroupId">
+/// The catalogue's own id for the release group. There is no page for a record
+/// nothing is filed under, so this identifies the row rather than linking
+/// anywhere — it is the key the shelf renders on.
+/// </param>
+/// <param name="Mbid">
+/// MusicBrainz's id for the group, and here for the sleeve: the Cover Art
+/// Archive redirects a group to whichever of its releases has artwork, which is
+/// the only key available when no pressing has been chosen because none has been
+/// owned. Null is not expected — the browse that wrote the row is keyed on one.
+/// </param>
+/// <param name="Artist">
+/// Which followed artist this is filed under. One name, not a billing line: a
+/// group credited to two followed artists is one record and one tile.
+/// </param>
+/// <param name="Year">
+/// The earliest release in the group, or null where MusicBrainz holds no date —
+/// an unreleased or newly announced record, which is worth showing rather than
+/// hiding.
+/// </param>
+/// <param name="Query">What to search Qobuz for — the artist and the title.</param>
+/// <param name="PrimaryType">
+/// <c>Album</c>, <c>EP</c> — or null, which means nobody has typed it rather
+/// than that it is none of them. Printed because <c>Discography.IsGap</c> lets
+/// untyped groups through, so a tile has to be able to say so.
+/// </param>
+public sealed record MissingRecord(
+    Guid ReleaseGroupId,
+    Guid? Mbid,
+    string Title,
+    string Artist,
+    int? Year,
+    string Query,
+    string? PrimaryType,
+    IReadOnlyList<string> SecondaryTypes);
 
 /// <summary>An album held in part, with what is missing from it named.</summary>
 /// <param name="Mbid">MusicBrainz's identifier, for the cover. See <see cref="UpgradeCandidate"/>.</param>

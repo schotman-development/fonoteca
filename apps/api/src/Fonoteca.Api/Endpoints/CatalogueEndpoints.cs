@@ -5,6 +5,7 @@ using Fonoteca.Api.Library;
 using Fonoteca.Api.Matching;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Acquisition;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Events;
 using Fonoteca.Domain.Identification;
@@ -175,6 +176,7 @@ public static partial class CatalogueEndpoints
         AcoustIdOutcome.Ambiguous,
         AcoustIdOutcome.BelowThreshold,
         AcoustIdOutcome.ReopenedByPerson,
+        AcoustIdOutcome.ReopenedByAgent,
     ];
 
     /// <summary>Enrichment refusals: the audio is known, the recording is not.</summary>
@@ -195,6 +197,44 @@ public static partial class CatalogueEndpoints
     /// not have to work out that a request held the gate.
     /// </remarks>
     private const string DecisionWorkKind = "matching.decide";
+
+    /// <summary>
+    /// The outcome a decision records: the by-a-person value given, or its agent
+    /// twin when the caller is an agent working through <c>/mcp</c>.
+    /// </summary>
+    /// <remarks>
+    /// One mapping per enum and in one place, so every decision endpoint gets the
+    /// distinction by naming the person's value and nothing more. A value with no
+    /// twin throws rather than being recorded as the person's.
+    /// </remarks>
+    private static AcoustIdOutcome ByCaller(ICallerContext caller, AcoustIdOutcome decided) =>
+        caller is not AgentCallerContext ? decided : decided switch
+        {
+            AcoustIdOutcome.IdentifiedByPerson => AcoustIdOutcome.IdentifiedByAgent,
+            AcoustIdOutcome.RejectedByPerson => AcoustIdOutcome.RejectedByAgent,
+            AcoustIdOutcome.Unreleased => AcoustIdOutcome.UnreleasedByAgent,
+            AcoustIdOutcome.ReopenedByPerson => AcoustIdOutcome.ReopenedByAgent,
+            _ => throw new ArgumentOutOfRangeException(nameof(decided), decided, "No agent twin."),
+        };
+
+    private static EnrichmentOutcome ByCaller(ICallerContext caller, EnrichmentOutcome decided) =>
+        caller is not AgentCallerContext ? decided : decided switch
+        {
+            EnrichmentOutcome.LinkedByPerson => EnrichmentOutcome.LinkedByAgent,
+            EnrichmentOutcome.Unreleased => EnrichmentOutcome.UnreleasedByAgent,
+            _ => throw new ArgumentOutOfRangeException(nameof(decided), decided, "No agent twin."),
+        };
+
+    private static ReleaseAttributionOutcome ByCaller(
+        ICallerContext caller,
+        ReleaseAttributionOutcome decided) =>
+        caller is not AgentCallerContext ? decided : decided switch
+        {
+            ReleaseAttributionOutcome.AttributedByPerson => ReleaseAttributionOutcome.AttributedByAgent,
+            ReleaseAttributionOutcome.NoReleaseByPerson => ReleaseAttributionOutcome.NoReleaseByAgent,
+            ReleaseAttributionOutcome.Unreleased => ReleaseAttributionOutcome.UnreleasedByAgent,
+            _ => throw new ArgumentOutOfRangeException(nameof(decided), decided, "No agent twin."),
+        };
 
     /// <summary>Event type for a person naming which recording a file holds.</summary>
     private const string RecordingDecidedEventType = "matching.recording.decided";
@@ -264,12 +304,65 @@ public static partial class CatalogueEndpoints
             .WithSummary("One artist and every track of theirs in the library.")
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        group.MapPost("/artists/{id:guid}/follow", SetArtistFollowed)
+            .WithName("SetArtistFollowed")
+            .WithSummary("Follow or unfollow an artist the catalogue already holds.")
+            .WithDescription(
+                "Following is the one fact on an artist that is not derived from the library or "
+                + "from a provider, and it is deliberately unrelated to what is held: an artist "
+                + "with two hundred tracks may be unfollowed, and a followed artist may have no "
+                + "files at all.\n\n"
+                + "A followed artist appears on `artists` whatever their track count and whether "
+                + "or not they are an album artist — `scope=following` narrows the list to them. "
+                + "Unfollowing keeps the discography already fetched, so re-following spends no "
+                + "provider requests.")
+                .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/artists/follow", FollowArtistByMbid)
+            .WithName("FollowArtistByMbid")
+            .WithSummary("Follow an artist by MusicBrainz id, whether or not the library holds them.")
+            .WithDescription(
+                "The only way to reach an artist nothing in the library is by. Every artist in "
+                + "this catalogue is otherwise a byproduct of a file, so there is no row to "
+                + "toggle.\n\n"
+                + "`artist` is a MusicBrainz artist id or any URL containing one, which is "
+                + "detected before anything else happens. There is no artist search and this is "
+                + "why: the only free-text call this application makes is for releases, it needs "
+                + "a Solr index, and it fails against a self-hosted mirror — see ADR 0006.\n\n"
+                + "An artist already in the catalogue is followed without a lookup. A new one is "
+                + "minted from the MusicBrainz lookup with their name, sort name and type, and is "
+                + "left on the enrichment pass's worklist so that pass can fill in the genres and "
+                + "band relations this lookup does not carry.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/release-groups/{id:guid}/monitor", SetReleaseGroupMonitored)
+            .WithName("SetReleaseGroupMonitored")
+            .WithSummary("Mark a record as one you want, or stop wanting it.")
+            .WithDescription(
+                "The second fact in this catalogue that is not derived from anything — "
+                + "`Artist.Followed` is the other — and, like it, a rescan must never touch it.\n\n"
+                + "It is a filter and not an instruction. Nothing searches for a monitored "
+                + "record and nothing buys one: acquisition is still a person who searched, read "
+                + "a track list and pressed a button. What it decides is which records the "
+                + "acquire screen's shelf will show, because a followed artist's whole "
+                + "discography is not a list anybody reads once a few dozen artists are "
+                + "followed.\n\n"
+                + "Everything a first discography browse writes is unmonitored: that browse is "
+                + "the baseline, so marking is opt-in. Records that appear on a *later* browse "
+                + "are monitored automatically, which is what \"released after you followed "
+                + "them\" means here.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         group.MapGet("/releases", GetReleases)
             .WithName("GetReleases")
             .WithSummary("Albums the library holds at least one track of.")
             .WithDescription(
-                "Ordered by title, or by `sort=year` (newest first, undated last) or "
-                + "`sort=artist` (the first billed name, uncredited last). "
+                "Ordered by title, or by `sort=year` (newest first, undated last), "
+                + "`sort=artist` (the first billed name, uncredited last) or "
+                + "`sort=added` (whichever album gained a file most recently). "
                 + "`query` filters on the release title, case-insensitively, "
                 + "anywhere in the string. `held` against `trackCount` is what an incomplete rip "
                 + "looks like — though a CD+DVD-Video release is legitimately half missing on an "
@@ -446,6 +539,10 @@ public static partial class CatalogueEndpoints
         // MusicBrainz at all. See CatalogueEndpoints.ReleaseSeed.cs.
         MapReleaseSeedEndpoints(group);
 
+        // One album folder at a time, for the Identify screen. See
+        // CatalogueEndpoints.Identify.cs.
+        MapIdentifyEndpoints(group);
+
         // Album covers, stored rather than hot-linked. See
         // CatalogueEndpoints.Cover.cs.
         MapCoverEndpoints(group);
@@ -453,7 +550,7 @@ public static partial class CatalogueEndpoints
         return app;
     }
 
-    private static async Task<Ok<ArtistListResponse>> GetArtists(
+    internal static async Task<Ok<ArtistListResponse>> GetArtists(
         FonotecaDbContext db,
         CancellationToken cancellationToken,
         string? query = null,
@@ -466,6 +563,11 @@ public static partial class CatalogueEndpoints
         var from = Math.Max(skip, 0);
         var everyone = scope == "all";
 
+        // The third shelf, and the only one that is not a rule about the
+        // catalogue: the other two ask what the library holds, this one asks
+        // what somebody said they cared about.
+        var following = scope == "following";
+
         var matching = db.Artists.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -475,7 +577,16 @@ public static partial class CatalogueEndpoints
             // some providers, and being explicit is the difference between an
             // index scan and a sequential one at a hundred thousand rows.
             var pattern = $"%{Escape(query.Trim())}%";
-            matching = matching.Where(a => EF.Functions.ILike(a.Name, pattern, "\\"));
+
+            // Both names, because the list prints `LatinName ?? Name` and a
+            // filter over the other one is a search box that cannot find what
+            // the screen is showing: typing "Tchaikovsky" would match nothing
+            // while the row reading "Pyotr Ilyich Tchaikovsky" sits in the
+            // results behind it. The native name stays searchable too — somebody
+            // pasting "Чайковский" out of a filename means that row.
+            matching = matching.Where(a =>
+                EF.Functions.ILike(a.Name, pattern, "\\")
+                || (a.LatinName != null && EF.Functions.ILike(a.LatinName, pattern, "\\")));
         }
 
         var theirs = await RecordingsByArtistAsync(db, artist: null, cancellationToken)
@@ -502,12 +613,24 @@ public static partial class CatalogueEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var shelf = everyone ? null : await AlbumArtistsAsync(db, cancellationToken).ConfigureAwait(false);
+        var shelf = everyone || following
+            ? null
+            : await AlbumArtistsAsync(db, cancellationToken).ConfigureAwait(false);
 
         var withTracks = named
             .Select(a => (Artist: a, Recordings: theirs.GetValueOrDefault(a.Id) ?? []))
-            .Where(row => row.Recordings.Count > 0)
-            .Where(row => shelf is null || shelf.Contains(row.Artist.Id))
+            // A followed artist survives both cuts below, and has to survive
+            // both. An artist with no recordings is exactly what following
+            // somebody the library holds nothing by produces, and the album
+            // shelf is a rule about held releases that such an artist can never
+            // satisfy — so either filter alone makes the follow button look
+            // broken: press it, and the artist you just followed is not there.
+            //
+            // Following is a person's explicit act and outranks both heuristics,
+            // which is the whole difference between this and the other shelves.
+            .Where(row => row.Recordings.Count > 0 || row.Artist.Followed)
+            .Where(row => shelf is null || shelf.Contains(row.Artist.Id) || row.Artist.Followed)
+            .Where(row => !following || row.Artist.Followed)
             .ToList();
 
         // Sorted here rather than in SQL because the list is already in memory:
@@ -531,7 +654,7 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new ArtistListResponse(withTracks.Count, page));
     }
 
-    private static async Task<Results<Ok<ArtistDetailResponse>, ProblemHttpResult>> GetArtist(
+    internal static async Task<Results<Ok<ArtistDetailResponse>, ProblemHttpResult>> GetArtist(
         Guid id,
         FonotecaDbContext db,
         CancellationToken cancellationToken)
@@ -584,7 +707,7 @@ public static partial class CatalogueEndpoints
         var bands = (await db.Artists
             .AsNoTracking()
             .Where(a => typed.Contains(a.Id))
-            .Select(a => new { a.Id, a.Name })
+            .Select(a => new { a.Id, Name = a.LatinName ?? a.Name })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false))
             .ToDictionary(a => a.Id.Value, a => a.Name);
@@ -634,7 +757,7 @@ public static partial class CatalogueEndpoints
                                     credit.ArtistId,
                                     credit.CreditedAs,
                                     credit.JoinPhrase,
-                                    ArtistName = credit.Artist!.Name,
+                                    ArtistName = credit.Artist!.LatinName ?? credit.Artist!.Name,
                                 })
                                 .ToList(),
                     })
@@ -698,12 +821,268 @@ public static partial class CatalogueEndpoints
                 Files: [.. row.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
             .ToList();
 
+        // Release groups credited to this artist. `ArtistCredit.ReleaseGroupId`
+        // has been a wired column with no writer since the first migration; the
+        // discography browse is the only thing that fills it, so this query is
+        // empty on every artist that browse has not reached — which was once
+        // everybody nobody had followed, and is now everybody the pass has not
+        // yet got to. The distinction matters when reading an empty page: it is
+        // an unfetched answer, never a filtered one.
+        var credited = await db.ArtistCredits
+            .AsNoTracking()
+            .Where(credit => credit.ArtistId == artistId && credit.ReleaseGroupId != null)
+            .Select(credit => credit.ReleaseGroupId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var groups = credited.Count == 0
+            ? []
+            : await db.ReleaseGroups
+                .AsNoTracking()
+                .Where(group => credited.Contains(group.Id))
+                .Select(group => new
+                {
+                    group.Id,
+                    group.Mbid,
+                    group.Title,
+                    group.PrimaryType,
+                    group.SecondaryTypes,
+                    group.FirstReleaseYear,
+                    group.Monitored,
+
+                    // Two ways to hold a record, and both count. A file filed
+                    // under one of the group's releases is the ordinary one; a
+                    // file pointing straight at the group is what attribution
+                    // writes when it knows the album and not the pressing.
+                    // Reading only the first would report a GroupOnly album as
+                    // missing while it sits on the artist's own page.
+                    Held = group.Releases.Any(release => release.Files.Count != 0)
+                        || db.MediaFiles.Any(file => file.ReleaseGroupId == group.Id),
+                })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        var missing = groups
+            .Where(group => !group.Held)
+            .Select(group => new
+            {
+                group.Id,
+                group.Mbid,
+                group.Title,
+                group.PrimaryType,
+                group.FirstReleaseYear,
+                group.Monitored,
+                Secondary = group.SecondaryTypes is { Length: > 0 } types
+                    ? types.Split(", ", StringSplitOptions.RemoveEmptyEntries)
+                    : [],
+            })
+            // The cut is made here rather than in the browse, so changing the
+            // rule costs a page load instead of a turn at the rate limit for
+            // every followed artist. CLAUDE.md's standing bargain: what is
+            // cached is answers, never rankings.
+            .Where(group => Discography.IsGap(new ReleaseGroupFacts(
+                group.Title,
+                group.PrimaryType,
+                group.Secondary,
+                group.FirstReleaseYear)))
+            .OrderByDescending(group => group.FirstReleaseYear ?? int.MaxValue)
+            .ThenBy(group => group.Title)
+            .Select(group => new DiscographyRow(
+                group.Id.Value,
+                group.Mbid?.Value,
+                group.Title,
+                group.PrimaryType,
+                group.Secondary,
+                group.FirstReleaseYear,
+                group.Monitored))
+            .ToList();
+
         return TypedResults.Ok(new ArtistDetailResponse(
             Describe(artist, rows.Count),
-            rows));
+            rows,
+            new ArtistDiscography(
+                groups.Count,
+                groups.Count(group => group.Held),
+                artist.DiscographyLookupUtc,
+                missing)));
     }
 
-    private static async Task<Ok<ReleaseListResponse>> GetReleases(
+    /// <summary>Follow or unfollow an artist the catalogue already holds.</summary>
+    internal static async Task<Results<Ok<ArtistFollowResponse>, ProblemHttpResult>> SetArtistFollowed(
+        Guid id,
+        ArtistFollowRequest request,
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return TypedResults.Problem(
+                title: "Nothing to set",
+                detail: "The request body must say whether to `follow`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var artistId = new ArtistId(id);
+
+        var artist = await db.Artists
+            .FirstOrDefaultAsync(a => a.Id == artistId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (artist is null)
+        {
+            return TypedResults.Problem(
+                title: "No such artist",
+                detail: $"The catalogue has no artist with id {id}.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        artist.Followed = request.Follow;
+
+        // DiscographyLookupUtc is deliberately left alone in both directions.
+        // Unfollowing keeps what was already fetched, so re-following costs no
+        // provider turns; and clearing it on a follow would re-browse an artist
+        // somebody had merely toggled twice.
+        //
+        // **It has a consequence for monitoring, and it is the accepted one.**
+        // Because the stamp survives, a re-follow's next browse is a *later*
+        // browse rather than a fresh baseline — so everything the artist
+        // released while they were unfollowed arrives as new and is marked
+        // wanted automatically. Unfollow for a year, re-follow, and a year of
+        // records lands on the acquire shelf. That is the intended reading:
+        // they are records nobody here has seen. Resetting instead means
+        // clearing this stamp, which spends the browse again on anybody who
+        // merely toggled the button twice — the thing this line exists to
+        // avoid.
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new ArtistFollowResponse(artist.Id.Value, artist.Followed));
+    }
+
+    /// <summary>Mark a record as wanted, or stop wanting it.</summary>
+    /// <remarks>
+    /// <see cref="SetArtistFollowed"/>'s counterpart one level down, and
+    /// deliberately the same shape: a named field rather than a toggle, so two
+    /// open tabs cannot each believe they know the answer.
+    /// </remarks>
+    internal static async Task<Results<Ok<ReleaseGroupMonitorResponse>, ProblemHttpResult>>
+        SetReleaseGroupMonitored(
+            Guid id,
+            ReleaseGroupMonitorRequest request,
+            FonotecaDbContext db,
+            CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return TypedResults.Problem(
+                title: "Nothing to set",
+                detail: "The request body must say whether to `monitor`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var groupId = new ReleaseGroupId(id);
+
+        var group = await db.ReleaseGroups
+            .FirstOrDefaultAsync(g => g.Id == groupId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (group is null)
+        {
+            return TypedResults.Problem(
+                title: "No such record",
+                detail: $"The catalogue has no release group with id {id}.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        group.Monitored = request.Monitor;
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new ReleaseGroupMonitorResponse(group.Id.Value, group.Monitored));
+    }
+
+    /// <summary>Follow an artist by MusicBrainz id, minting them if need be.</summary>
+    /// <remarks>
+    /// <b>The only way to reach an artist the library holds nothing by.</b>
+    /// Every artist in this catalogue is otherwise a byproduct of a file, so
+    /// there is no row to toggle and nothing to search — <c>SearchReleasesAsync</c>
+    /// is the one free-text call here and it is about releases, needs a Solr
+    /// index, and fails against a mirror. A pasted MBID or MusicBrainz URL is a
+    /// lookup, works everywhere, and is the strongest answer somebody can give.
+    /// </remarks>
+    internal static async Task<Results<Ok<ArtistFollowResponse>, ProblemHttpResult>> FollowArtistByMbid(
+        ArtistFollowByMbidRequest request,
+        FonotecaDbContext db,
+        IMusicBrainzCatalogue musicBrainz,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || string.IsNullOrWhiteSpace(request.Artist)
+            || MbidPattern.Match(request.Artist) is not { Success: true } found)
+        {
+            return TypedResults.Problem(
+                title: "Not a MusicBrainz artist",
+                detail:
+                    "`artist` must be a MusicBrainz artist id, or a URL containing one — "
+                    + "https://musicbrainz.org/artist/<id>. There is no artist search: the only "
+                    + "free-text call this application makes is for releases, and it needs a "
+                    + "search index a mirror does not have.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var mbid = new Mbid(Guid.Parse(found.Value));
+
+        var existing = await db.Artists
+            .FirstOrDefaultAsync(a => a.Mbid == mbid, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is not null)
+        {
+            // Already in the catalogue as a byproduct of some file. Following is
+            // then a flag on a row that already exists, and no lookup is spent.
+            existing.Followed = true;
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            return TypedResults.Ok(new ArtistFollowResponse(existing.Id.Value, true));
+        }
+
+        var described = await musicBrainz.GetArtistAsync(mbid, cancellationToken).ConfigureAwait(false);
+
+        if (described is null)
+        {
+            return TypedResults.Problem(
+                title: "No such artist",
+                detail:
+                    $"MusicBrainz has no artist {mbid.Value}. The id was read out of what you "
+                    + "pasted without checking what kind of thing it names, so the commonest "
+                    + "cause is a release or recording URL rather than an artist one — check the "
+                    + "address says /artist/. Otherwise the artist has been merged away.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        // Minted with the little this lookup is asked for, and LookupUtc left
+        // null on purpose: the enrichment pass's artist stage asks for genres and
+        // band relations that this call does not include, so stamping it here
+        // would save one turn and lose those permanently. The row is on that
+        // stage's worklist from the moment it is saved.
+        var artist = new Artist
+        {
+            Id = ArtistId.New(),
+            Name = described.Name,
+            SortName = described.SortName,
+            Type = described.Type,
+            Disambiguation = described.Disambiguation,
+            Mbid = mbid,
+            Followed = true,
+        };
+
+        db.Artists.Add(artist);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new ArtistFollowResponse(artist.Id.Value, true));
+    }
+
+    internal static async Task<Ok<ReleaseListResponse>> GetReleases(
         FonotecaDbContext db,
         CancellationToken cancellationToken,
         string? query = null,
@@ -747,9 +1126,41 @@ public static partial class CatalogueEndpoints
             "artist" => releases
                 .OrderBy(release => release.Credits
                     .OrderBy(credit => credit.Position)
-                    .Select(credit => credit.CreditedAs ?? credit.Artist!.Name)
+                    .Select(credit => credit.CreditedAs ?? credit.Artist!.LatinName ?? credit.Artist!.Name)
                     .FirstOrDefault())
                 .ThenBy(release => release.Title),
+            // "Added" is not a column and does not need to be: MediaFileId is a
+            // UUIDv7, so the id a row was minted with is when the scan first saw
+            // the file, and PostgreSQL orders uuids bytewise over the big-endian
+            // millisecond those lead with. The newest file decides, so a bonus
+            // disc ripped later brings its album back to the top.
+            //
+            // A folder renamed through the file manager keeps its rows and so
+            // keeps its date, which is exactly why that endpoint exists; a file
+            // genuinely removed and re-added gets a new one, which is right.
+            // LastScannedUtc would tie more honestly and is deliberately not
+            // used: a tagger editing a file's bytes moves it, and that is not
+            // the album being added.
+            //
+            // What the id cannot do is order WITHIN a millisecond — everything
+            // after those 48 bits is fresh randomness, not a counter — so there
+            // is no tie to break and no point pretending there is one: albums
+            // inserted by the same scan come back shuffled, stably, since the
+            // ids never change. Measured on the target library that is 618
+            // albums over 263 milliseconds, 180 of those holding more than one.
+            // The first import is therefore walk order with each millisecond
+            // shuffled, and this order only says something about what arrived
+            // after it. A first-seen column is what would fix that, and it
+            // would have nothing truthful to backfill the existing rows with.
+            //
+            // The newest one is taken by ordering rather than by Max, because
+            // PostgreSQL has comparison operators for uuid but no aggregate over
+            // it: max(uuid) does not exist and the query fails with 42883.
+            "added" => releases
+                .OrderByDescending(release => release.Files
+                    .OrderByDescending(file => file.Id)
+                    .Select(file => file.Id)
+                    .FirstOrDefault()),
             _ => releases.OrderBy(release => release.Title),
         };
 
@@ -772,7 +1183,12 @@ public static partial class CatalogueEndpoints
                 Files = release.Files.Count,
                 Artists = release.Credits
                     .OrderBy(credit => credit.Position)
-                    .Select(credit => new { credit.CreditedAs, credit.JoinPhrase, credit.Artist!.Name })
+                    .Select(credit => new
+                    {
+                        credit.CreditedAs,
+                        credit.JoinPhrase,
+                        Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
+                    })
                     .ToList(),
 
                 // The weakest claim any of its files carries, so a release with
@@ -804,7 +1220,7 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new ReleaseListResponse(total, items));
     }
 
-    private static async Task<Results<Ok<ReleaseDetailResponse>, ProblemHttpResult>> GetRelease(
+    internal static async Task<Results<Ok<ReleaseDetailResponse>, ProblemHttpResult>> GetRelease(
         Guid id,
         FonotecaDbContext db,
         CancellationToken cancellationToken)
@@ -829,7 +1245,12 @@ public static partial class CatalogueEndpoints
                 Files = r.Files.Count,
                 Artists = r.Credits
                     .OrderBy(credit => credit.Position)
-                    .Select(credit => new { credit.CreditedAs, credit.JoinPhrase, credit.Artist!.Name })
+                    .Select(credit => new
+                    {
+                        credit.CreditedAs,
+                        credit.JoinPhrase,
+                        Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
+                    })
                     .ToList(),
                 Certainty = r.Files.Max(file => (int)file.AttributionOutcome),
                 Alternatives = r.Files.Max(file => file.EditionAlternatives),
@@ -1067,7 +1488,7 @@ public static partial class CatalogueEndpoints
     /// stored fingerprint for a file, and from a fresh MusicBrainz gather for a
     /// component.
     /// </remarks>
-    private static async Task<Ok<MatchingQueueResponse>> GetOpenQuestions(
+    internal static async Task<Ok<MatchingQueueResponse>> GetOpenQuestions(
         FonotecaDbContext db,
         CancellationToken cancellationToken,
         int skip = 0,
@@ -1327,7 +1748,7 @@ public static partial class CatalogueEndpoints
     /// removes. Taking the gate would instead refuse the screen for the whole
     /// length of any running pass, which is the wrong trade for a read.
     /// </remarks>
-    private static async Task<Results<Ok<SubjectFileResponse>, ProblemHttpResult>> GetSubjectFile(
+    internal static async Task<Results<Ok<SubjectFileResponse>, ProblemHttpResult>> GetSubjectFile(
         Guid id,
         FonotecaDbContext db,
         AudioFileDescriber describer,
@@ -1841,7 +2262,7 @@ public static partial class CatalogueEndpoints
     /// reverse leaves a row claiming a tag the file does not carry, which nothing
     /// can detect.
     /// </remarks>
-    private static async Task<Results<Ok<RecordingDecisionResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Ok<RecordingDecisionResponse>, ProblemHttpResult>>
         DecideRecording(
             Guid id,
             RecordingDecisionRequest request,
@@ -1940,7 +2361,7 @@ public static partial class CatalogueEndpoints
 
         if (rejected)
         {
-            row.AcoustIdOutcome = AcoustIdOutcome.RejectedByPerson;
+            row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.RejectedByPerson);
 
             // Only if nothing ever asked. The stamp means "AcoustID has been put
             // this question", and overwriting a real one with the time somebody
@@ -2069,7 +2490,7 @@ public static partial class CatalogueEndpoints
         row.RecordingLookupUtc = now;
         row.EnrichmentOutcome = EnrichmentOutcome.Linked;
         row.AcoustIdCheckedUtc ??= now;
-        row.AcoustIdOutcome = AcoustIdOutcome.IdentifiedByPerson;
+        row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.IdentifiedByPerson);
         row.IdentityDecidedUtc = now;
 
         var tag = NotTagged;
@@ -2484,7 +2905,7 @@ public static partial class CatalogueEndpoints
     /// decision gives at length: the lookup and the write both come after the
     /// check.
     /// </remarks>
-    private static async Task<Results<Ok<ComponentDecisionResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Ok<ComponentDecisionResponse>, ProblemHttpResult>>
         DecideComponent(
             string stamp,
             ComponentDecisionRequest request,
@@ -2600,7 +3021,7 @@ public static partial class CatalogueEndpoints
         {
             foreach (var row in rows)
             {
-                row.AttributionOutcome = ReleaseAttributionOutcome.NoReleaseByPerson;
+                row.AttributionOutcome = ByCaller(caller, ReleaseAttributionOutcome.NoReleaseByPerson);
                 row.ReleaseDecidedUtc = now;
             }
 
@@ -2615,7 +3036,7 @@ public static partial class CatalogueEndpoints
 
             return TypedResults.Ok(new ComponentDecisionResponse(
                 stamp,
-                ReleaseAttributionOutcome.NoReleaseByPerson.ToString(),
+                ByCaller(caller, ReleaseAttributionOutcome.NoReleaseByPerson).ToString(),
                 null,
                 null,
                 rows.Count,
@@ -2694,7 +3115,7 @@ public static partial class CatalogueEndpoints
             row.ReleaseId = written.Release;
             row.ReleaseGroupId = written.Group;
             row.TrackId = writer.TrackIdAt(written.Release, match.Slot.DiscNumber, match.Slot.Position);
-            row.AttributionOutcome = ReleaseAttributionOutcome.AttributedByPerson;
+            row.AttributionOutcome = ByCaller(caller, ReleaseAttributionOutcome.AttributedByPerson);
 
             // Zero, and stated rather than left as it was. The count means "this
             // many other editions fitted exactly as well and one was taken by a
@@ -2718,7 +3139,7 @@ public static partial class CatalogueEndpoints
 
         return TypedResults.Ok(new ComponentDecisionResponse(
             stamp,
-            ReleaseAttributionOutcome.AttributedByPerson.ToString(),
+            ByCaller(caller, ReleaseAttributionOutcome.AttributedByPerson).ToString(),
             mbid.Value,
             release.Title,
             decided,
@@ -2760,9 +3181,12 @@ public static partial class CatalogueEndpoints
                         Release = release?.Value,
                         Decided = decided,
                         Files = files,
-                        Outcome = release is null
-                            ? ReleaseAttributionOutcome.NoReleaseByPerson.ToString()
-                            : ReleaseAttributionOutcome.AttributedByPerson.ToString(),
+                        Outcome = ByCaller(
+                                caller,
+                                release is null
+                                    ? ReleaseAttributionOutcome.NoReleaseByPerson
+                                    : ReleaseAttributionOutcome.AttributedByPerson)
+                            .ToString(),
                     },
                     MatchingJson.Default.ComponentDecisionPayload),
                 correlationId),
@@ -3413,7 +3837,7 @@ public static partial class CatalogueEndpoints
     private static ArtistSummary Describe(Artist artist, int trackCount) =>
         new(
             artist.Id.Value,
-            artist.Name,
+            artist.LatinName ?? artist.Name,
             artist.SortName,
             artist.Disambiguation,
             artist.Type,
@@ -3427,7 +3851,8 @@ public static partial class CatalogueEndpoints
             artist.Genres is { Length: > 0 } genres
                 ? genres.Split(", ", StringSplitOptions.RemoveEmptyEntries)
                 : [],
-            artist.LookupUtc);
+            artist.LookupUtc,
+            artist.Followed);
 
     /// <summary>One artist's claim on one recording. Never leaves this file.</summary>
     private readonly record struct ArtistTrack(ArtistId ArtistId, RecordingId RecordingId);
@@ -3501,10 +3926,102 @@ public sealed record ArtistSummary(
     int? EndedYear,
     bool Ended,
     IReadOnlyList<string> Genres,
-    DateTimeOffset? DescribedAtUtc);
+    DateTimeOffset? DescribedAtUtc,
 
-/// <summary>One artist and every track of theirs the library holds.</summary>
-public sealed record ArtistDetailResponse(ArtistSummary Artist, IReadOnlyList<TrackRow> Tracks);
+    /// <summary>
+    /// Whether somebody has said they care about this artist.
+    /// </summary>
+    /// <remarks>
+    /// The only field on this record that is not derived from the library or
+    /// from a provider — so it is also the only one that means the same thing
+    /// on an artist with two hundred tracks and on one with none.
+    /// </remarks>
+    bool Following);
+
+/// <summary>One artist, every track of theirs the library holds, and what it does not.</summary>
+public sealed record ArtistDetailResponse(
+    ArtistSummary Artist,
+    IReadOnlyList<TrackRow> Tracks,
+    ArtistDiscography Discography);
+
+/// <summary>What MusicBrainz says this artist released, against what is held.</summary>
+/// <param name="Known">
+/// Release groups MusicBrainz credits them with, before any rule is applied.
+/// Zero on an artist nobody has followed, which is not the same as an artist
+/// who released nothing — <paramref name="FetchedAtUtc"/> is what tells them
+/// apart.
+/// </param>
+/// <param name="Held">How many of those the library holds at least one file of.</param>
+/// <param name="FetchedAtUtc">
+/// When MusicBrainz was last asked, or null when nobody has. On the wire for the
+/// same reason <c>ArtistSummary.DescribedAtUtc</c> is: without it a screen
+/// cannot tell "this artist released nothing else" from "we never looked", and
+/// those want opposite things on the page.
+/// </param>
+/// <param name="Missing">
+/// The records worth telling somebody they do not own — <c>Discography.IsGap</c>
+/// applied to the unheld remainder. A cut list, so <paramref name="Known"/> and
+/// <paramref name="Held"/> travel beside it rather than being inferable from its
+/// length.
+/// </param>
+public sealed record ArtistDiscography(
+    int Known,
+    int Held,
+    DateTimeOffset? FetchedAtUtc,
+    IReadOnlyList<DiscographyRow> Missing);
+
+/// <summary>One record the artist made that the library has no file of.</summary>
+/// <param name="Mbid">
+/// MusicBrainz's id for the release group. Null is not expected — the browse
+/// that wrote the row is keyed on one — but the column is nullable because a
+/// group can also be minted by the attribution pass from a file.
+/// </param>
+/// <param name="Monitored">
+/// Whether somebody has said they want this record. The acquire screen's shelf
+/// is the monitored subset; this page is where the whole discography is, and
+/// where the flag is set. False on everything the first browse wrote — see
+/// <c>ReleaseGroup.Monitored</c> for why the default decides the feature.
+/// </param>
+public sealed record DiscographyRow(
+    Guid Id,
+    Guid? Mbid,
+    string Title,
+    string? PrimaryType,
+    IReadOnlyList<string> SecondaryTypes,
+    int? FirstReleaseYear,
+    bool Monitored);
+
+/// <param name="Follow">True to follow, false to unfollow.</param>
+/// <remarks>
+/// A named field rather than an inference from the route, so that following and
+/// unfollowing are the same request shape and a client cannot express "toggle" —
+/// which, from two open tabs, means neither of them knows the answer.
+/// </remarks>
+public sealed record ArtistFollowRequest(bool Follow);
+
+/// <param name="Monitor">True to want this record, false to stop wanting it.</param>
+/// <remarks>
+/// Named rather than inferred, for <see cref="ArtistFollowRequest"/>'s reason: a
+/// client cannot express "toggle", which from two open tabs means neither of
+/// them knows what the answer will be.
+/// </remarks>
+public sealed record ReleaseGroupMonitorRequest(bool Monitor);
+
+/// <summary>Where a record stands after the request.</summary>
+public sealed record ReleaseGroupMonitorResponse(Guid Id, bool Monitored);
+
+/// <param name="Artist">
+/// A MusicBrainz artist id, or any URL containing one. Matched anywhere in the
+/// string, so pasting the address bar works.
+/// </param>
+public sealed record ArtistFollowByMbidRequest(string Artist);
+
+/// <summary>Where an artist stands after the request.</summary>
+/// <param name="Id">
+/// The catalogue's own id, which for a newly minted artist is the only way the
+/// caller learns it.
+/// </param>
+public sealed record ArtistFollowResponse(Guid Id, bool Following);
 
 /// <param name="WorkTitle">The composition, when MusicBrainz links one. Usually null outside classical.</param>
 /// <param name="Duration">Pre-formatted for display; null when MusicBrainz does not know it.</param>

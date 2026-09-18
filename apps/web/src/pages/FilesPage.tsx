@@ -20,7 +20,9 @@ import { useApiQuery } from '../useApiQuery.ts'
 import { FilePreviewPane } from './FilePreviewPane.tsx'
 import styles from './FilesPage.module.css'
 import { breadcrumbs, destinationFor, matchSummary, parentOf, uploadName } from './files.ts'
+import { FolderIdentify } from './IdentifyPage.tsx'
 import { fileSize } from './qobuz.ts'
+import { ALBUM_FOLDER_DEPTH } from './seating.ts'
 
 type FolderEntry = components['schemas']['FolderEntry']
 
@@ -73,6 +75,23 @@ export function FilesPage() {
   )
 
   const refresh = () => setAttempt((value) => value + 1)
+
+  /**
+   * The album folder whose catalogued files get the Identify question below the
+   * listing. Remembered across the listing's reloads, because a filing refreshes
+   * the listing and the question must not unmount with its result on screen.
+   */
+  const [album, setAlbum] = useState<string | null>(null)
+  const [answers, setAnswers] = useState(0)
+
+  if (state.status === 'ready' && state.data.path === folder) {
+    const catalogued =
+      folder.split('/').length === ALBUM_FOLDER_DEPTH &&
+      state.data.exists &&
+      state.data.entries.some((entry) => entry.cataloguedFiles > 0)
+
+    if ((catalogued ? folder : null) !== album) setAlbum(catalogued ? folder : null)
+  }
 
   const open = (path: string) => navigate({ to: '/files', search: path === '' ? {} : { path } })
 
@@ -276,6 +295,25 @@ export function FilesPage() {
             onOpen={open}
           />
         </div>
+      ) : null}
+
+      {album === folder ? (
+        <section aria-label="Identify this album">
+          <FolderIdentify
+            key={`${folder}:${answers}`}
+            folder={folder}
+            heading={
+              <h2 className={styles.title}>
+                <Text size="lg" weight="semibold" block>
+                  Identify
+                </Text>
+              </h2>
+            }
+            next="Done"
+            onDone={() => setAnswers((value) => value + 1)}
+            onChanged={refresh}
+          />
+        </section>
       ) : null}
 
       <MoveDialog entry={renaming} busy={busy} onClose={() => setRenaming(null)} onMove={move} />

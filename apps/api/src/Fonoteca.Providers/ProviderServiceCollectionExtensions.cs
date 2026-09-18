@@ -190,6 +190,14 @@ public static class ProviderServiceCollectionExtensions
         // hide the only decision that matters.
         services.AddKeyedSingleton<IArtistPortraits, QobuzPortraits>(ArtistPortraitSources.Qobuz);
 
+        // Keyed for the same reason the portraits are, and it matters more here:
+        // the sources that can say what an artist released differ in what they
+        // cost and in what they can do about the answer. Qobuz is the one that
+        // can also sell it, so a caller has to be able to name it rather than
+        // take whichever registration the container saw last.
+        services.AddKeyedSingleton<IReleaseDiscovery, QobuzReleaseDiscovery>(
+            ReleaseDiscoverySources.Qobuz);
+
         return services;
     }
 

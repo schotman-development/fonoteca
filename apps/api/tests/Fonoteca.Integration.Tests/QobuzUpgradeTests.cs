@@ -110,7 +110,10 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // Every file in the library, attributed or not. The completeness
         // fixtures below are lossless and unprobed, so they add to this and to
         // nothing else on the upgrade list.
-        Assert.Equal(37, body.Files);
+        // 38 since the group-linked FLAC joined the seed: lossless, loose and on
+        // no list, but it is still a file in the library and this is the count
+        // of every one of them.
+        Assert.Equal(38, body.Files);
     }
 
     [Fact]
@@ -289,6 +292,74 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
             body.Incomplete.Select(item => item.Title));
     }
 
+    [Fact]
+    public async Task OnlyAFollowedArtistsRecordsTheLibraryHasNoneOfAreMissing()
+    {
+        var body = await ListAsync();
+
+        var titles = body.Missing.Select(record => record.Title).ToList();
+
+        Assert.Contains("Record Nobody Owns", titles);
+
+        // A screen that offers to sell somebody a record they already own is
+        // worse than no screen, and the link runs file → release → group.
+        Assert.DoesNotContain("Record Already Held", titles);
+
+        // The second arm of "held", which the attribution pass writes when it
+        // knows the album but not the pressing: the file points straight at the
+        // group, with no release in between. Untested until now.
+        Assert.DoesNotContain("Record Held Only By A Group Link", titles);
+
+        Assert.DoesNotContain("Greatest Hits", titles);
+        Assert.DoesNotContain("Record By Somebody Unfollowed", titles);
+
+        // Missing, and nobody said they wanted it. The shelf is the wanted list
+        // rather than the discography — that is the whole reason the column
+        // exists, since a few dozen followed artists otherwise make this shelf
+        // longer than anybody reads.
+        Assert.DoesNotContain("Record Nobody Marked", titles);
+    }
+
+    [Fact]
+    public async Task AGapNobodyMarkedIsCountedRatherThanShown()
+    {
+        var body = await ListAsync();
+
+        // One unmarked gap in the seed. Counted, because an empty shelf has two
+        // opposite causes and only this one is something a person can act on:
+        // "nothing marked" points at the artist page, "nothing missing" is good
+        // news, and the length of `missing` alone cannot tell them apart.
+        Assert.Equal(1, body.UnmonitoredGaps);
+    }
+
+    [Fact]
+    public async Task AMissingRecordIsSearchedForByItsArtistAndTitle()
+    {
+        var body = await ListAsync();
+
+        var record = Assert.Single(body.Missing, item => item.Title == "Record Nobody Owns");
+
+        Assert.Equal("Followed Artist", record.Artist);
+        Assert.Equal("Followed Artist Record Nobody Owns", record.Query);
+        Assert.Equal("Album", record.PrimaryType);
+    }
+
+    [Fact]
+    public async Task AnArtistNobodyHasBrowsedIsCountedRatherThanMistakenForHavingNoGaps()
+    {
+        var body = await ListAsync();
+
+        // Three followed. Without the second number an empty shelf reads as
+        // "nothing to buy" on a library where the pass has simply not run.
+        Assert.Equal(3, body.FollowedArtists);
+
+        // One, not two. "Pending Artist" has an MBID and is genuinely waiting
+        // for the pass; "Artist With No Mbid" is followed and unbrowsed and the
+        // pass's worklist excludes them, so counting them would leave the
+        // "run the enrichment pass" line on the screen forever.
+        Assert.Equal(1, body.UnbrowsedArtists);
+    }
+
     private async Task<UpgradeListResponse> ListAsync()
     {
         using var client = _factory!.CreateClient();
@@ -419,6 +490,70 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
             File("Y/Waiting on Identify/03.flac", waiting),
             File("Y/Waiting on Identify/04.flac", waiting));
 
+        // The third list, which is about people rather than files. Two followed
+        // artists and one nobody followed; one of the two has never been
+        // browsed, so `UnbrowsedArtists` is exercised as well as the shelf.
+        var kept = Artist("Followed Artist");
+        kept.Followed = true;
+        kept.DiscographyLookupUtc =
+            DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture);
+
+        // Followed, never browsed, and reachable — the browse is keyed on an
+        // MBID, so without one this artist would not be on the pass's worklist
+        // and must not be counted as waiting for it.
+        var pending = Artist("Pending Artist");
+        pending.Followed = true;
+        pending.Mbid = new Mbid(Guid.CreateVersion7());
+
+        // Followed with no MBID at all, which is the ordinary shape here: every
+        // artist in this catalogue is a byproduct of a credit line. The
+        // enrichment pass can never reach them, so counting them as "not browsed
+        // yet" tells somebody to run a pass that will change nothing, forever.
+        var unreachable = Artist("Artist With No Mbid");
+        unreachable.Followed = true;
+
+        var ignored = Artist("Unfollowed Artist");
+
+        db.Artists.AddRange(kept, pending, unreachable, ignored);
+
+        // Marked as wanted, which is what puts it on the shelf. Everything a
+        // first discography browse writes is unmonitored, so without this the
+        // shelf is empty and the whole list is the count below.
+        var wanted = Group(db, "Record Nobody Owns", "Album");
+        wanted.Monitored = true;
+        db.ArtistCredits.Add(GroupCredit(kept, wanted));
+
+        // A gap nobody marked. Missing, admitted by `Discography.IsGap`, and
+        // deliberately not on the shelf — it is counted instead, so the screen
+        // can tell "nothing marked" from "nothing missing".
+        db.ArtistCredits.Add(GroupCredit(kept, Group(db, "Record Nobody Marked", "Album")));
+
+        // Held, and through the arm that is easy to miss: the file points at a
+        // release, and the release at the group. "All Lossless" has two FLACs.
+        var owned = Group(db, "Record Already Held", "Album");
+        clean.ReleaseGroupId = owned.Id;
+        db.ArtistCredits.Add(GroupCredit(kept, owned));
+
+        // Held through the *other* arm, which is the one attribution writes when
+        // it knows the album and not the pressing: the file points straight at
+        // the release group, with no release in between. A rule reading only the
+        // release arm offers to sell somebody a record already on their artist
+        // page. Lossless and loose, so it adds nothing to either list above.
+        var byGroup = Group(db, "Record Held Only By A Group Link", "Album");
+        db.ArtistCredits.Add(GroupCredit(kept, byGroup));
+
+        var grouped = File("Kept/Group Linked/01.flac", release: null);
+        grouped.ReleaseGroupId = byGroup.Id;
+        db.MediaFiles.Add(grouped);
+
+        // Not held either, and still not a gap — `Discography.IsGap` hides it.
+        db.ArtistCredits.Add(
+            GroupCredit(kept, Group(db, "Greatest Hits", "Album", "Compilation")));
+
+        // Nobody followed them, so their records are not a question.
+        db.ArtistCredits.Add(
+            GroupCredit(ignored, Group(db, "Record By Somebody Unfollowed", "Album")));
+
         await db.SaveChangesAsync(Token);
     }
 
@@ -497,6 +632,42 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
             ReleaseId = release.Id,
             Position = position,
             JoinPhrase = join,
+            CreditedAs = artist.Name,
+        };
+
+    /// <summary>A release group, as the discography browse would have written it.</summary>
+    private static ReleaseGroup Group(
+        FonotecaDbContext db,
+        string title,
+        string? primaryType,
+        string? secondaryTypes = null)
+    {
+        var group = new ReleaseGroup
+        {
+            Id = ReleaseGroupId.New(),
+            Title = title,
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PrimaryType = primaryType,
+            SecondaryTypes = secondaryTypes,
+            FirstReleaseYear = 1999,
+        };
+
+        db.ReleaseGroups.Add(group);
+        return group;
+    }
+
+    /// <summary>
+    /// The credit the discography browse writes: an artist against a release
+    /// group rather than a release, which is the only thing that fills
+    /// <c>ArtistCredit.ReleaseGroupId</c>.
+    /// </summary>
+    private static ArtistCredit GroupCredit(Artist artist, ReleaseGroup group) =>
+        new()
+        {
+            Id = Guid.CreateVersion7(),
+            ArtistId = artist.Id,
+            ReleaseGroupId = group.Id,
+            Position = 0,
             CreditedAs = artist.Name,
         };
 
