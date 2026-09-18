@@ -14,8 +14,9 @@ import { useCallback, useState } from 'react'
 import { api } from '../api.ts'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
+import { CoverDialog } from './CoverDialog.tsx'
 import { CERTAINTY } from './certainty.ts'
-import { releaseArt } from './coverArt.ts'
+import { releaseCover } from './coverArt.ts'
 import styles from './ReleasePage.module.css'
 import { workGroups } from './workGroups.ts'
 
@@ -97,21 +98,35 @@ export function ReleasePage() {
 function Header({ release }: { readonly release: components['schemas']['ReleaseSummary'] }) {
   const certainty = CERTAINTY[release.certainty]
   const missing = release.trackCount - release.held
+  const [choosing, setChoosing] = useState(false)
+  // Bumped after a change so the header asks for the new picture at once.
+  const [coverVersion, setCoverVersion] = useState(0)
 
   return (
     <Stack gap={16} align="start">
       {/*
         The cover, at the one fixed size the design system has for a header. It
-        is the Cover Art Archive's picture of *this pressing*, which is the point
+        is the Cover Art Archive's picture of *this pressing* unless somebody
+        chose another, and this is where they choose it — the point
         on the page where an edition is decided: two releases with the same title
         and track list are told apart by their sleeves long before anyone reads
         the year.
       */}
-      <Artwork
-        name={release.title}
-        size="lg"
-        {...(release.mbid != null ? { src: releaseArt(release.mbid) } : {})}
-      />
+      <Stack direction="column" gap={8} align="center">
+        <Artwork name={release.title} size="lg" src={releaseCover(release.id, coverVersion)} />
+        <Button size="sm" variant="ghost" onClick={() => setChoosing(true)}>
+          Change cover
+        </Button>
+      </Stack>
+
+      {choosing ? (
+        <CoverDialog
+          releaseId={release.id}
+          title={release.title}
+          onClose={() => setChoosing(false)}
+          onChanged={() => setCoverVersion((version) => version + 1)}
+        />
+      ) : null}
 
       <Stack direction="column" gap={8}>
         <h1 className={styles.title}>

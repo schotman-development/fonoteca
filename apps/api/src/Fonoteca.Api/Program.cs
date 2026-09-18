@@ -177,6 +177,11 @@ builder.Services.AddMusicBrainz(options =>
     options.ApplicationVersion = ThisAssembly.Version;
 });
 
+builder.Services.AddCoverArtArchive(options =>
+{
+    options.Contact = fonoteca.MusicBrainzContact;
+});
+
 // Pictures of artists, which no other provider here has. The contact is
 // MusicBrainz's, not a second setting: Wikimedia's user-agent policy asks the
 // same question, and making an operator answer it twice is how one of the two

@@ -15,7 +15,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './AcquirePage.module.css'
-import { releaseArt } from './coverArt.ts'
+import { releaseArt, releaseCover } from './coverArt.ts'
 import { QobuzAlbumDialog, type Replacing } from './QobuzAlbumDialog.tsx'
 import { readiness } from './qobuz.ts'
 
@@ -516,7 +516,11 @@ function UpgradeTile({
         monogram, which is the honest picture of an album nothing has
         identified — 75 of the 520 rows on this library.
       */
-      {...(item.mbid != null ? { image: releaseArt(item.mbid) } : {})}
+      {...(item.releaseId != null
+        ? { image: releaseCover(item.releaseId) }
+        : item.mbid != null
+          ? { image: releaseArt(item.mbid) }
+          : {})}
       subtitle={[item.artist, item.year].filter(Boolean).join(' · ') || 'No credited artist'}
       meta={
         <>
@@ -666,7 +670,7 @@ function IncompleteTile({
     <CatalogueCard
       variant="album"
       title={album.title}
-      {...(album.mbid != null ? { image: releaseArt(album.mbid) } : {})}
+      image={releaseCover(album.releaseId)}
       subtitle={[album.artist, album.year].filter(Boolean).join(' · ') || 'No credited artist'}
       meta={
         <>

@@ -1,0 +1,81 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-8);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  text-align: start;
+  cursor: pointer;
+}
+
+.option:hover {
+  border-color: var(--color-border-default);
+}
+
+.option[aria-pressed="true"] {
+  border-color: var(--color-accent-solid);
+  box-shadow: inset 0 0 0 1px var(--color-accent-solid);
+}
+
+.option:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.option:disabled {
+  cursor: progress;
+}
+
+/*
+ * Contained, not cropped: the whole point of the screen is telling a square
+ * sleeve from a fold-out spread, and cropping to a square would hide the one.
+ */
+.thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  background-color: var(--color-surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.upload {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.upload:focus-within {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.upload[data-disabled] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

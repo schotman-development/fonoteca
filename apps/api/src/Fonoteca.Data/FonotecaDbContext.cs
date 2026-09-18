@@ -28,6 +28,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
 
     public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
+    public DbSet<ReleaseCover> ReleaseCovers => Set<ReleaseCover>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -353,6 +354,16 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // stamp, a person answers half of it — so there is nothing stable to
             // point at. `Files` is what catches that instead; see the entity.
             e.HasIndex(x => x.GatheredUtc);
+        });
+
+        modelBuilder.Entity<ReleaseCover>(e =>
+        {
+            e.HasKey(x => x.ReleaseId);
+            e.Property(x => x.MediaType).HasMaxLength(100);
+            e.HasOne<Release>()
+                .WithOne()
+                .HasForeignKey<ReleaseCover>(x => x.ReleaseId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         base.OnModelCreating(modelBuilder);

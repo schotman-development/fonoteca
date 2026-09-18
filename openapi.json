@@ -2047,6 +2047,202 @@
         }
       }
     },
+    "/api/catalogue/releases/{id}/cover": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The album's cover, as stored in the catalogue.",
+        "description": "The first request for an album with no stored cover fetches the Cover Art Archive's front at 500px and keeps it, so the archive is asked once per album. An album the archive holds no front for is remembered as such and answers 404 without asking again. Served under an ETag with `no-cache`, so a changed cover shows on the next view and an unchanged one costs a 304.",
+        "operationId": "GetReleaseCover",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Use an uploaded picture as the album's cover.",
+        "description": "The request body is the image itself, its Content-Type one of JPEG, PNG, GIF, WebP, BMP or AVIF — never SVG, which is a document that runs script. At most 10 MB.",
+        "operationId": "UploadReleaseCover",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/releases/{id}/cover/options": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every image the Cover Art Archive holds for this album, to choose from.",
+        "operationId": "GetReleaseCoverOptions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseCoverOptions"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/releases/{id}/cover/archive/{imageId}": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Use this Cover Art Archive image as the album's cover.",
+        "operationId": "ChooseReleaseCover",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/qobuz/status": {
       "get": {
         "tags": [
@@ -5059,6 +5255,70 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "ReleaseCoverOption": {
+        "required": [
+          "id",
+          "front",
+          "types",
+          "comment"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "front": {
+            "type": "boolean"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "comment": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ReleaseCoverOptions": {
+        "required": [
+          "mbid",
+          "chosen",
+          "uploaded",
+          "images"
+        ],
+        "type": "object",
+        "properties": {
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "chosen": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int64"
+          },
+          "uploaded": {
+            "type": "boolean"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseCoverOption"
+            }
           }
         }
       },

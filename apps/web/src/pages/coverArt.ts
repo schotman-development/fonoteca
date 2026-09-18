@@ -19,6 +19,27 @@ export function embeddedArt(mediaFileId: string): string {
 }
 
 /**
+ * The cover of an album the catalogue holds, as stored there.
+ *
+ * **Served by the API, not the archive.** The archive is asked once per album
+ * and the answer kept, so a grid of covers is a page of row reads rather than a
+ * page of CDN requests — and a person can replace the archive's choice, which
+ * a hot-link to `front-250` could never show. `version` changes the URL after
+ * such a change, so the page that made it redraws at once.
+ */
+export function releaseCover(releaseId: string, version = 0): string {
+  const url = `${apiBaseUrl}/api/catalogue/releases/${releaseId}/cover`
+  return version === 0 ? url : `${url}?v=${version}`
+}
+
+/**
+ * One Cover Art Archive image, at thumbnail size — for choosing between them.
+ */
+export function archiveImage(mbid: string, imageId: number): string {
+  return `https://coverartarchive.org/release/${mbid}/${imageId}-250`
+}
+
+/**
  * The Cover Art Archive's front cover for a release, at thumbnail size.
  *
  * **Fetched by the browser, not proxied through the API.** It is a plain

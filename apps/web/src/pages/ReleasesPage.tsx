@@ -7,7 +7,7 @@ import { api } from '../api.ts'
 import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { CERTAINTY } from './certainty.ts'
-import { releaseArt } from './coverArt.ts'
+import { releaseCover } from './coverArt.ts'
 import styles from './ReleasesPage.module.css'
 
 type ReleaseSummary = components['schemas']['ReleaseSummary']
@@ -221,7 +221,7 @@ function ReleaseCard({ release }: { readonly release: ReleaseSummary }) {
     <CatalogueCard
       variant="album"
       title={release.title}
-      {...(release.mbid != null ? { image: releaseArt(release.mbid) } : {})}
+      image={releaseCover(release.id)}
       /*
         The artist alone on this line. The row this replaced ran artist, year
         and format together, and at tile width that sentence truncates in the

@@ -446,6 +446,10 @@ public static partial class CatalogueEndpoints
         // MusicBrainz at all. See CatalogueEndpoints.ReleaseSeed.cs.
         MapReleaseSeedEndpoints(group);
 
+        // Album covers, stored rather than hot-linked. See
+        // CatalogueEndpoints.Cover.cs.
+        MapCoverEndpoints(group);
+
         return app;
     }
 

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Providers.AcoustId;
 using Fonoteca.Providers.AudioDb;
+using Fonoteca.Providers.CoverArt;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
 using Fonoteca.Providers.Wikidata;
@@ -262,6 +263,39 @@ public static class ProviderServiceCollectionExtensions
 
         services.AddKeyedSingleton<IArtistPortraits, AudioDbPortraits>(
             ArtistPortraitSources.AudioDb);
+
+        return services;
+    }
+
+    /// <summary>Registers <see cref="ICoverArtArchive"/> and the HTTP client behind it.</summary>
+    /// <remarks>
+    /// A gate of zero: the archive is a CDN that browsers here fetched from
+    /// directly and in parallel before covers were stored, so serialising the
+    /// server's far rarer requests buys nothing but a slow first page.
+    /// </remarks>
+    public static IServiceCollection AddCoverArtArchive(
+        this IServiceCollection services,
+        Action<CoverArtArchiveOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(CoverArtArchiveOptions.HttpClientName, (_, _) =>
+            new RequestGate(TimeSpan.Zero));
+
+        var client = services.AddHttpClient(CoverArtArchiveOptions.HttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = CoverArtArchiveOptions.Server;
+            http.DefaultRequestHeaders.Add(
+                "User-Agent",
+                $"Fonoteca/0.1 ( {Options<CoverArtArchiveOptions>(provider).Contact} )");
+        });
+
+        AddResilienceThenGate(client, CoverArtArchiveOptions.HttpClientName);
+
+        services.AddSingleton<ICoverArtArchive, CoverArtArchiveClient>();
 
         return services;
     }

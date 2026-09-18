@@ -19,7 +19,7 @@ import styles from './ArtistPage.module.css'
 import type { AlbumSectionKey, ArtistAlbum } from './artistAlbums.ts'
 import { albumsOf, leaf, sameArtist, sectionsOf } from './artistAlbums.ts'
 import { countryName, lifeSpan } from './artistFacts.ts'
-import { artistImageUrl, releaseArt } from './coverArt.ts'
+import { artistImageUrl, releaseArt, releaseCover } from './coverArt.ts'
 import { workGroups } from './workGroups.ts'
 
 type TrackRow = components['schemas']['TrackRow']
@@ -469,7 +469,11 @@ function AlbumCard({ album, artist }: { readonly album: ArtistAlbum; readonly ar
       title={album.title}
       subtitle={subtitle}
       meta={meta}
-      {...(album.mbid != null ? { image: releaseArt(album.mbid) } : {})}
+      {...(releaseId != null
+        ? { image: releaseCover(releaseId) }
+        : album.mbid != null
+          ? { image: releaseArt(album.mbid) }
+          : {})}
       {...(releaseId != null
         ? {
             render: (props) => (

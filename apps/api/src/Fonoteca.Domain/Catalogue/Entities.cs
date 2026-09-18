@@ -832,6 +832,31 @@ public sealed class ReleaseCandidateSet
     public required DateTimeOffset GatheredUtc { get; set; }
 }
 
+/// <summary>
+/// The picture shown for one release, kept rather than fetched on every view.
+/// </summary>
+/// <remarks>
+/// <b>A row with no bytes is an answer:</b> the archive was asked and holds no
+/// front cover. Without it every page showing that album would ask again. A
+/// row is only written when the archive answered, so an outage retries.
+/// </remarks>
+public sealed class ReleaseCover
+{
+    public required ReleaseId ReleaseId { get; init; }
+
+    public byte[]? Bytes { get; set; }
+
+    public string? MediaType { get; set; }
+
+    /// <summary>
+    /// Which archive image this is. Null beside bytes means a person uploaded it.
+    /// </summary>
+    public long? ArchiveImageId { get; set; }
+
+    /// <summary>When the picture last changed; the ETag it is served under.</summary>
+    public required DateTimeOffset SavedUtc { get; set; }
+}
+
 /// <summary>Result of decode-testing a file.</summary>
 public enum IntegrityState
 {
