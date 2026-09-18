@@ -56,6 +56,33 @@ services:
       postgres:
         condition: service_healthy
 
+  # A second opinion on the library. Navidrome reads the same files the passes
+  # do and builds its own catalogue from the tags alone, so what it shows is
+  # what a Subsonic client would see — an independent check on what the tag
+  # write pass actually put in the files.
+  #
+  # Opt-in: `podman compose --profile tools up -d`
+  navidrome:
+    image: docker.io/deluan/navidrome:latest
+    profiles: ['tools']
+    restart: unless-stopped
+    environment:
+      # This is a test instance reading somebody else's music. Don't report it.
+      ND_ENABLEINSIGHTSCOLLECTOR: 'false'
+    ports:
+      - '${NAVIDROME_PORT:-4533}:4533'
+    volumes:
+      # The same root the API walks, and `:ro` because the point is to observe
+      # the library rather than to become a second thing that writes to it.
+      # Deliberately not ${Fonoteca__Staging__Path}-aware: a `.part` file is not
+      # audio to anyone.
+      - '${Fonoteca__LibraryPath:?set Fonoteca__LibraryPath in .env}:/music:ro'
+      - navidrome-data:/data
+    # No `user:` on purpose. The upstream compose file says `user: 1000:1000`,
+    # which is right for docker; under rootless podman container uid 0 IS the
+    # host user, and uid 1000 is a subuid that owns none of the library.
+
 volumes:
   postgres-data:
   pgadmin-data:
+  navidrome-data:
