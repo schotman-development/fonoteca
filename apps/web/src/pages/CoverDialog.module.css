@@ -1,10 +1,23 @@
-.grid {
+/*
+ * One row, scrolled sideways, as every set of tiles outside the browse lists is.
+ * The padding and the margin cancelling it keep the focus ring, which is drawn
+ * outside the button, from being clipped by the scroller.
+ */
+.shelf {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: 150px;
   gap: var(--space-12);
-  margin: 0;
-  padding: 0;
+  margin: calc(-1 * var(--space-4));
+  padding: var(--space-4) var(--space-4) var(--space-12);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--space-4);
   list-style: none;
+}
+
+.shelf > li {
+  scroll-snap-align: start;
 }
 
 .option {

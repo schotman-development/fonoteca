@@ -863,7 +863,7 @@ function AlbumPage({
                       <h2 id={`${id}more`} className={styles.heading}>
                         More by {album.credit}
                       </h2>
-                      <CatalogueGrid aria-label={`More by ${album.credit}`}>
+                      <CatalogueGrid layout="shelf" aria-label={`More by ${album.credit}`}>
                         {profile.moreBy.map((other) => (
                           <CatalogueCard
                             key={other.title}
@@ -1326,7 +1326,7 @@ function AlbumPage({
                         <h2 id={`${id}credits${index}`} className={styles.heading}>
                           {group}
                         </h2>
-                        <CatalogueGrid aria-label={`${group}: ${album.title}`}>
+                        <CatalogueGrid layout="shelf" aria-label={`${group}: ${album.title}`}>
                           {people.map((person) => (
                             <CatalogueCard
                               key={person.name}

@@ -88,6 +88,29 @@
 }
 
 /*
+ * A shelf: one row, scrolled sideways, with tracks the same width as the grid's.
+ *
+ * The padding and the negative margin that cancels it are room for the focus
+ * ring, which is drawn outside the tile: `overflow-x: auto` clips the block
+ * axis too, so without them the first and last tile lose their ring's edges.
+ *
+ * `max-inline-size` is for a parent that sizes to its content. A row of fixed
+ * tracks has no narrower content size, so without it the list grows as wide as
+ * every tile together and pushes the page sideways instead of scrolling.
+ */
+.root[data-layout="shelf"] {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--catalogue-card-column);
+  max-inline-size: calc(100% + 2 * var(--space-4));
+  margin: calc(-1 * var(--space-4));
+  padding: var(--space-4) var(--space-4) var(--space-12);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--space-4);
+}
+
+/*
  * `min-width: 0` on the item, not just on the card. A grid item's automatic
  * minimum size is its content, so without this a long unbroken title overflows
  * the fixed track it was given — the ellipsis never appears and the tile spills
@@ -95,4 +118,6 @@
  */
 .item {
   min-width: 0;
+  /* Only a shelf scrolls, so only a shelf snaps. */
+  scroll-snap-align: start;
 }

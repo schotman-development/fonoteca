@@ -223,6 +223,35 @@ export const PinnedSize: Story = {
 }
 
 /**
+ * `layout="shelf"`: the same tiles in one row that scrolls sideways, which is
+ * every set of tiles outside the artist list, the album list and an artist's
+ * Discography tab. Doubled up so the row is longer than the canvas.
+ */
+export const Shelf: Story = {
+  render: () => (
+    <CatalogueGrid layout="shelf" aria-label="More by the same artist">
+      {ALBUMS.map((album) => (
+        <AlbumTile key={album.id} album={album} />
+      ))}
+      {ALBUMS.map((album) => (
+        <AlbumTile key={`${album.id}:again`} album={album} />
+      ))}
+    </CatalogueGrid>
+  ),
+  // One row: every tile on the same line, at the album width, and the list
+  // scrolls rather than wrapping.
+  play: async ({ canvasElement }) => {
+    const shelf = canvasElement.querySelector('ul')
+    if (shelf == null) throw new Error('no shelf')
+
+    const tiles = [...shelf.children].map((tile) => tile.getBoundingClientRect())
+    await expect(new Set(tiles.map((tile) => tile.top)).size).toBe(1)
+    await expect(tiles[0]?.width).toBeCloseTo(ALBUM_COLUMN, 1)
+    await expect(shelf.scrollWidth).toBeGreaterThan(shelf.clientWidth)
+  },
+}
+
+/**
  * Long titles, at both sizes. The tile truncates rather than growing, so the
  * `1fr` tracks stay equal and the row stays a row.
  */

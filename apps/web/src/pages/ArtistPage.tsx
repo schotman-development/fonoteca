@@ -6,6 +6,7 @@ import {
   Button,
   CatalogueCard,
   CatalogueGrid,
+  type CatalogueGridProps,
   Disclosure,
   Field,
   Input,
@@ -314,7 +315,13 @@ function Profile({
               ) : null}
 
               {sections.slice(0, 1).map((section) => (
-                <Shelf key="first" section={section} artist={shown} id={`${id}shelfTop`} />
+                <Shelf
+                  key="first"
+                  section={section}
+                  artist={shown}
+                  id={`${id}shelfTop`}
+                  layout="shelf"
+                />
               ))}
 
               {(
@@ -329,7 +336,7 @@ function Profile({
                       <h2 id={`${id}people${index}`} className={styles.heading}>
                         {title}
                       </h2>
-                      <CatalogueGrid size="artist" aria-label={`${title}: ${shown}`}>
+                      <CatalogueGrid size="artist" layout="shelf" aria-label={`${title}: ${shown}`}>
                         {people.map((person) => {
                           const face = artistImageUrl(person)
                           return (
@@ -659,12 +666,15 @@ function Shelf({
   artist,
   id,
   detail = false,
+  layout = 'grid',
 }: {
   readonly section: AlbumSection
   readonly artist: string
   readonly id: string
   /** The line saying what the shelf lists, which the overview leaves out. */
   readonly detail?: boolean
+  /** One row on the overview; only the Discography tab wraps. */
+  readonly layout?: CatalogueGridProps['layout']
 }) {
   // A band shelf names its group and needs no sentence under it.
   const title = section.band == null ? SECTIONS[section.key].title : `With ${section.band}`
@@ -681,7 +691,7 @@ function Shelf({
         </Text>
       ) : null}
 
-      <CatalogueGrid aria-label={`${title}: ${artist}`}>
+      <CatalogueGrid layout={layout} aria-label={`${title}: ${artist}`}>
         {section.albums.map((album) => (
           <AlbumCard
             key={album.key}

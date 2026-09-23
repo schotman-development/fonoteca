@@ -828,7 +828,7 @@ function ArtistPage({
                     <h2 id={`${id}shelf${index}`} className={styles.heading}>
                       {shelf.title}
                     </h2>
-                    <CatalogueGrid aria-label={`${shelf.title}: ${shown}`}>
+                    <CatalogueGrid layout="shelf" aria-label={`${shelf.title}: ${shown}`}>
                       {shelf.albums.map((album) => (
                         <CatalogueCard
                           key={`${album.title}:${album.year}`}
@@ -881,7 +881,7 @@ function ArtistPage({
                       <h2 id={`${id}people${index}`} className={styles.heading}>
                         {title}
                       </h2>
-                      <CatalogueGrid size="artist" aria-label={`${title}: ${shown}`}>
+                      <CatalogueGrid size="artist" layout="shelf" aria-label={`${title}: ${shown}`}>
                         {people.map((person) => (
                           <CatalogueCard
                             key={person.name}

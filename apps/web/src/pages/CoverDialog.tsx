@@ -155,7 +155,7 @@ export function CoverDialog({
         ) : null}
 
         {state.status === 'ready' && state.data.mbid != null && state.data.images.length > 0 ? (
-          <ul className={styles.grid}>
+          <ul className={styles.shelf}>
             {state.data.images.map((image) => {
               const current = image.id === state.data.chosen
               const label =

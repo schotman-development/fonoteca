@@ -394,7 +394,10 @@ function Album({
                       More by{' '}
                       {credits.find((credit) => credit.group === 'Main')?.name ?? release.artist}
                     </h2>
-                    <CatalogueGrid aria-label={`More by ${release.artist ?? release.title}`}>
+                    <CatalogueGrid
+                      layout="shelf"
+                      aria-label={`More by ${release.artist ?? release.title}`}
+                    >
                       {moreBy.map((other) => (
                         <CatalogueCard
                           key={other.id}
@@ -665,7 +668,11 @@ function Album({
                       <h2 id={`${id}credits${index}`} className={styles.heading}>
                         {group}
                       </h2>
-                      <CatalogueGrid size="artist" aria-label={`${group}: ${release.title}`}>
+                      <CatalogueGrid
+                        size="artist"
+                        layout="shelf"
+                        aria-label={`${group}: ${release.title}`}
+                      >
                         {people.map((person) => {
                           const face = artistImageUrl({ id: person.artistId })
                           const key = `${group}/${person.artistId}`

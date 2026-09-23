@@ -37,9 +37,11 @@
 /*
  * A shelf: one row of covers, scrolled sideways.
  *
- * Not `CatalogueGrid`, which wraps — and wrapping is the wrong shape for these
- * two lists. They are 520 and 47 tiles long, so a grid of them is a page of
- * album art with the search box somewhere past the horizon; a shelf keeps each
+ * Not `CatalogueGrid layout="shelf"`, because that puts each tile in an `<li>`
+ * and a toolbar cannot hold one (see below). And a shelf rather than a grid,
+ * because wrapping is the wrong shape for these two lists. They are 520 and 47
+ * tiles long, so a grid of them is a page of album art with the search box
+ * somewhere past the horizon; a shelf keeps each
  * list to one row's height however long it is, which is what makes two of them
  * plus a search box fit on one screen.
  *

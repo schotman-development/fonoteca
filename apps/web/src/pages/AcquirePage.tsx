@@ -208,7 +208,7 @@ export function AcquirePage() {
       ) : null}
 
       {results.status === 'ready' && results.data !== null && results.data.length > 0 ? (
-        <CatalogueGrid aria-label="Qobuz search results">
+        <CatalogueGrid layout="shelf" aria-label="Qobuz search results">
           {results.data.map((album) => (
             <AlbumCard key={album.id} album={album} onOpen={() => setOpen(album)} />
           ))}

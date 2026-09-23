@@ -13,6 +13,15 @@ export type CatalogueGridProps = HTMLAttributes<HTMLUListElement> & {
    * reader when they arrive.
    */
   readonly size?: CatalogueCardVariant
+  /**
+   * `shelf` lays the same tiles out in one row that scrolls sideways.
+   *
+   * **Only three screens wrap: the artist list, the album list and an artist's
+   * Discography tab.** Those are where a person came to browse everything.
+   * Anywhere else a collection of tiles is a shelf, because it is one part of
+   * the page, and a wrapped one can push the rest of the page off the screen.
+   */
+  readonly layout?: 'grid' | 'shelf'
   readonly ref?: Ref<HTMLUListElement>
 }
 
@@ -32,11 +41,12 @@ export type CatalogueGridProps = HTMLAttributes<HTMLUListElement> & {
  * wrapped in `<li>` here rather than by the caller so that the markup cannot be
  * got wrong from outside — `Children.map` preserves the keys you gave them.
  */
-export function CatalogueGrid({ size, className, children, ...rest }: CatalogueGridProps) {
+export function CatalogueGrid({ size, layout, className, children, ...rest }: CatalogueGridProps) {
   return (
     <ul
       className={className ? `${styles.root} ${className}` : styles.root}
       data-size={size}
+      data-layout={layout}
       {...rest}
     >
       {Children.map(children, (child: ReactNode) =>
