@@ -29,8 +29,25 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("BannerLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BannerUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<int?>("BeganYear")
                         .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("BiographyLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BiographyText")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BiographyUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("Country")
                         .HasMaxLength(10)
@@ -43,6 +60,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<DateTimeOffset?>("DiscographyLookupUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("EditsJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<bool>("Ended")
                         .HasColumnType("boolean");
 
@@ -51,6 +71,9 @@ namespace Fonoteca.Data.Migrations
 
                     b.Property<bool>("Followed")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("FollowedUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Gender")
                         .HasMaxLength(100)
@@ -157,6 +180,88 @@ namespace Fonoteca.Data.Migrations
                     b.HasIndex("ReleaseId");
 
                     b.ToTable("ArtistCredits");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.ArtistImage", b =>
+                {
+                    b.Property<Guid>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("portrait");
+
+                    b.Property<byte[]>("Bytes")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("SavedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ArtistId", "Kind");
+
+                    b.ToTable("ArtistImages");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.DiscoveredRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CoverUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("FoundUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Monitored")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("SeenUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("TrackCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtistId", "Source", "SourceId")
+                        .IsUnique();
+
+                    b.ToTable("DiscoveredRecords");
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.MediaFile", b =>
@@ -439,6 +544,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<int?>("DiscCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("EditsJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Label")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -560,6 +668,16 @@ namespace Fonoteca.Data.Migrations
                     b.Property<string>("PrimaryType")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset?>("ReviewLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReviewText")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("SecondaryTypes")
                         .HasMaxLength(500)
@@ -721,6 +839,26 @@ namespace Fonoteca.Data.Migrations
                     b.HasOne("Fonoteca.Domain.Catalogue.Release", null)
                         .WithMany("Credits")
                         .HasForeignKey("ReleaseId");
+
+                    b.Navigation("Artist");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.ArtistImage", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Artist", null)
+                        .WithMany()
+                        .HasForeignKey("ArtistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.DiscoveredRecord", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Artist", "Artist")
+                        .WithMany()
+                        .HasForeignKey("ArtistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Artist");
                 });

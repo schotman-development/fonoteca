@@ -36,6 +36,8 @@ function pendingSentence(status: {
   readonly pendingArtists: number
   readonly pendingPortraits: number
   readonly pendingDiscographies: number
+  readonly pendingArticles: number
+  readonly pendingBanners: number
 }): string {
   const parts: string[] = []
 
@@ -79,6 +81,25 @@ function pendingSentence(status: {
       `${status.pendingDiscographies.toLocaleString()} discograph${
         status.pendingDiscographies === 1 ? 'y' : 'ies'
       } to fetch`,
+    )
+  }
+
+  // Fifth and sixth: Wikipedia articles for artists and held albums, and
+  // banners for album artists. Without them a library whose other stages are
+  // done shows an enabled button over an empty sentence.
+  if (status.pendingArticles > 0) {
+    parts.push(
+      `${status.pendingArticles.toLocaleString()} article${
+        status.pendingArticles === 1 ? '' : 's'
+      } to look for`,
+    )
+  }
+
+  if (status.pendingBanners > 0) {
+    parts.push(
+      `${status.pendingBanners.toLocaleString()} banner${
+        status.pendingBanners === 1 ? '' : 's'
+      } to look for`,
     )
   }
 

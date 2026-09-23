@@ -159,6 +159,29 @@ public sealed class AudioDbPortraitsTests : IDisposable
         Assert.Contains("/api/v1/json/2/", Assert.Single(stub.Requests).Uri.AbsolutePath, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The fanart in the same document answers the banner, and never the portrait.
+    /// </summary>
+    [Fact]
+    public async Task TheFanartIsTheBannerAndNeverThePortrait()
+    {
+        var (portraits, stub) = Build(_ => Ok("""
+            { "artists": [ { "strArtistThumb": null,
+              "strArtistFanart": "https://r2.theaudiodb.com/images/media/artist/fanart/wide.jpg" } ] }
+            """));
+
+        var provider = _providers[^1];
+        var banners = provider.GetRequiredService<IArtistBanners>();
+
+        Assert.Empty(await portraits.FindAsync([new ArtistToPicture(Shostakovich, "Anyone")], Token));
+
+        var banner = Assert.Single(await banners.FindAsync([Shostakovich], Token));
+        Assert.EndsWith("fanart/wide.jpg", banner.Value.AbsoluteUri, StringComparison.Ordinal);
+
+        // One instance behind both faces, one lookup each time it is asked.
+        Assert.Equal(2, stub.Requests.Count);
+    }
+
     public void Dispose()
     {
         foreach (var provider in _providers) provider.Dispose();

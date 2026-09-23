@@ -177,6 +177,29 @@ export class ApiError extends Error {
   }
 }
 
+type DeleteParams<P extends DeletePath> = paths[P] extends { delete: { parameters: infer Q } }
+  ? Q
+  : never
+
+type NeedsDeleteParams<P extends DeletePath> =
+  DeleteParams<P> extends { path: Record<string, unknown> } ? true : false
+
+export type DeleteOptions<P extends DeletePath> = RequestInit & { params?: DeleteParams<P> }
+
+/**
+ * Mandatory for a route with a `{segment}`, exactly as GET and POST have it.
+ *
+ * The first DELETE here removed a running pass and had nothing to fill in, so
+ * this was an `init?` for as long as that was the only kind. Removing a *record*
+ * — an uploaded portrait — is the first that names one, and an optional
+ * argument cannot be made required by a condition: the call that forgot
+ * `{ id }` would compile and send a literal `{id}` in the URL.
+ */
+type DeleteArgs<P extends DeletePath> =
+  NeedsDeleteParams<P> extends true
+    ? [options: DeleteOptions<P> & { params: DeleteParams<P> }]
+    : [options?: DeleteOptions<P>]
+
 export type ApiClient = {
   /**
    * GET, with the route's own parameters when it has any.
@@ -196,10 +219,14 @@ export type ApiClient = {
    */
   post<P extends PostPath>(path: P, ...options: PostArgs<P>): Promise<PostResponse<P>>
   /**
-   * DELETE, for endpoints where the thing being removed is a running operation
-   * rather than a record. Answers with nothing.
+   * DELETE, with the route's own parameters when it has any. Answers with
+   * nothing.
+   *
+   * `api.delete('/api/library/tags')` to stop a running pass, and
+   * `api.delete('/api/…/{id}/portrait', { params: { path: { id } } })` to remove
+   * a record.
    */
-  delete<P extends DeletePath>(path: P, init?: RequestInit): Promise<void>
+  delete<P extends DeletePath>(path: P, ...options: DeleteArgs<P>): Promise<void>
 }
 
 export function createApiClient(options: ApiClientOptions): ApiClient {
@@ -267,8 +294,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       return (await request('POST', String(path), request0)) as PostResponse<P>
     },
 
-    async delete<P extends DeletePath>(path: P, init?: RequestInit): Promise<void> {
-      await request('DELETE', String(path), init)
+    async delete<P extends DeletePath>(path: P, ...options: DeleteArgs<P>): Promise<void> {
+      // Erased inside the implementation, exactly as `get`'s and `post`'s are.
+      const request0 = options[0] as (RequestInit & { params?: UrlParams }) | undefined
+
+      await request('DELETE', String(path), request0)
     },
   }
 }

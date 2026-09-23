@@ -95,3 +95,38 @@
 .metaRow {
   flex: 1 0 100%;
 }
+
+/*
+ * A tile that carries a second action.
+ *
+ * `MissingTile`'s card *is* a button — the press is a Qobuz search, which is
+ * what the shelf is for — so the unwant control cannot live in the card's meta
+ * slot the way the artist page's does: a `<button>` inside a `<button>` is
+ * invalid, and the inner one never receives the click. It goes underneath the
+ * card instead, which is the same place on the tile and the only one available.
+ *
+ * It still joins the shelf's roving tab stop, because `Shelf` finds its tiles
+ * with `querySelectorAll('button')` and this is one. That is deliberate: two
+ * arrow presses per record rather than one, against the alternative of every
+ * unwant button on the shelf being a tab stop of its own — the exact failure
+ * the roving effect was written for and measured at 520.
+ */
+.unwantable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+/*
+ * Pinned to the bottom, not merely last.
+ *
+ * The tiles are grid items in one row, so they are all as tall as the tallest —
+ * and the titles wrap to two lines on some records and one on others. Left to
+ * flow, the button would sit at a different height on every tile and the shelf
+ * would read as ragged. `margin-block-start: auto` puts every one of them on
+ * the same line, which is the same reason `.metaRow` claims a whole row.
+ */
+.unwant {
+  margin-block-start: auto;
+}

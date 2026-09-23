@@ -1090,6 +1090,69 @@
         }
       }
     },
+    "/api/catalogue/discovered/{id}/monitor": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Mark a record a shop named as one you want, or stop wanting it.",
+        "description": "`SetReleaseGroupMonitored` for a record only a shop has heard of. Two endpoints rather than one because they address different things: a release group is an album the catalogue knows, a discovered record is a question a shop raised, and the whole point of keeping them apart is that a question cannot be mistaken for a catalogue entry.\n\nThe wanted flag is the one column on a discovered record a person owns. Every later browse restates the shop's own facts — title, year, barcode, sleeve — and leaves this alone.",
+        "operationId": "SetDiscoveredRecordMonitored",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseGroupMonitorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseGroupMonitorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/releases": {
       "get": {
         "tags": [
@@ -2494,6 +2557,382 @@
         }
       }
     },
+    "/api/catalogue/artists/{id}/portrait": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The artist's picture, from the shelf where one exists.",
+        "description": "An uploaded picture first, then `artist.*` beside the artist's own records, then a redirect to whatever a provider found. The shelf outranks the provider because it is what every other player reading this library shows, and the tag write is what puts a picture there. Served under an ETag with `no-cache`, so a changed picture shows on the next view.",
+        "operationId": "GetArtistPortrait",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "302": {
+            "description": "Found"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Use an uploaded picture for this artist.",
+        "description": "The request body is the image itself, its Content-Type one of JPEG, PNG, GIF, WebP, BMP or AVIF — never SVG, which is a document that runs script. At most 10 MB. Stored beside the provider's answer rather than over it, so deleting it puts the provider's picture back. It reaches the library the next time tags are written for this artist.",
+        "operationId": "UploadArtistPortrait",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Stop using the uploaded picture for this artist.",
+        "description": "The provider's picture applies again. The copy already written onto the artist's shelf is left where it is until tags are written again — this endpoint touches the catalogue, never the library.",
+        "operationId": "DeleteArtistPortrait",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/artists/{id}/banner": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The wide picture for the head of the artist's page.",
+        "description": "The same three sources the portrait has, reading `backdrop.*` off the shelf. Navidrome does not show artist banners at all; Jellyfin, Kodi and Plex do.",
+        "operationId": "GetArtistBanner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "302": {
+            "description": "Found"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Use an uploaded picture as this artist's banner.",
+        "description": "The request body is the image itself, its Content-Type one of JPEG, PNG, GIF, WebP, BMP or AVIF — never SVG, which is a document that runs script. At most 10 MB. Stored beside the provider's answer rather than over it, so deleting it puts the provider's picture back. It reaches the library the next time tags are written for this artist.",
+        "operationId": "UploadArtistBanner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Stop using the uploaded banner for this artist.",
+        "description": "The provider's picture applies again. The copy already written onto the artist's shelf is left where it is until tags are written again — this endpoint touches the catalogue, never the library.",
+        "operationId": "DeleteArtistBanner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/artists/{id}/edits": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Correct what the catalogue says about an artist.",
+        "description": "The whole form, every time. A field equal to what the providers hold is not an edit, so sending the provider's value back undoes one. Stored beside the providers' answers rather than over them, so no enrichment pass replaces it. The tag writer does not read these.",
+        "operationId": "EditArtist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtistEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/releases/{id}/edits": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Correct what the catalogue says about an album.",
+        "description": "The whole form, every time, as for an artist. The album-level fields — type, first release year, review — are kept on this edition, so another edition of the same album does not show them.",
+        "operationId": "EditRelease",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/qobuz/status": {
       "get": {
         "tags": [
@@ -2722,6 +3161,48 @@
           }
         }
       },
+      "AlbumCredit": {
+        "required": [
+          "artistId",
+          "name",
+          "role",
+          "group",
+          "tracks",
+          "portrait"
+        ],
+        "type": "object",
+        "properties": {
+          "artistId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "tracks": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "portrait": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "AlbumDownload": {
         "required": [
           "albumId",
@@ -2898,7 +3379,8 @@
         "required": [
           "artist",
           "tracks",
-          "discography"
+          "discography",
+          "profile"
         ],
         "type": "object",
         "properties": {
@@ -2913,6 +3395,9 @@
           },
           "discography": {
             "$ref": "#/components/schemas/ArtistDiscography"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ArtistProfile"
           }
         }
       },
@@ -2945,6 +3430,107 @@
             "items": {
               "$ref": "#/components/schemas/DiscographyRow"
             }
+          }
+        }
+      },
+      "ArtistEditRequest": {
+        "required": [
+          "name",
+          "latinName",
+          "sortName",
+          "disambiguation",
+          "type",
+          "country",
+          "gender",
+          "beganYear",
+          "endedYear",
+          "ended",
+          "genres",
+          "biography",
+          "portrait",
+          "banner"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "latinName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sortName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "disambiguation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "country": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "gender": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "beganYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "endedYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "biography": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "portrait": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "banner": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3001,6 +3587,111 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ArtistSummary"
+            }
+          }
+        }
+      },
+      "ArtistProfile": {
+        "required": [
+          "mbid",
+          "name",
+          "latinName",
+          "portraitLookupUtc",
+          "portraitUploaded",
+          "banner",
+          "bannerLookupUtc",
+          "bannerUploaded",
+          "biography",
+          "biographyLookupUtc",
+          "discographyLookupUtc",
+          "edited",
+          "members",
+          "memberOf"
+        ],
+        "type": "object",
+        "properties": {
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "latinName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "portraitLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "portraitUploaded": {
+            "type": "boolean"
+          },
+          "banner": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "bannerLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "bannerUploaded": {
+            "type": "boolean"
+          },
+          "biography": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WrittenText"
+              }
+            ]
+          },
+          "biographyLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "discographyLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "edited": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedArtist"
+            }
+          },
+          "memberOf": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedArtist"
             }
           }
         }
@@ -3815,7 +4506,8 @@
           "primaryType",
           "secondaryTypes",
           "firstReleaseYear",
-          "monitored"
+          "monitored",
+          "editions"
         ],
         "type": "object",
         "properties": {
@@ -3854,6 +4546,24 @@
           },
           "monitored": {
             "type": "boolean"
+          },
+          "editions": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "EditResponse": {
+        "required": [
+          "edited"
+        ],
+        "type": "object",
+        "properties": {
+          "edited": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -3885,6 +4595,8 @@
           "pendingArtists",
           "pendingPortraits",
           "pendingDiscographies",
+          "pendingArticles",
+          "pendingBanners",
           "lastCompleted"
         ],
         "type": "object",
@@ -3929,6 +4641,14 @@
             "format": "int32"
           },
           "pendingDiscographies": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingArticles": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingBanners": {
             "type": "integer",
             "format": "int32"
           },
@@ -4136,10 +4856,45 @@
           }
         }
       },
+      "FileQuality": {
+        "required": [
+          "codec",
+          "lossless",
+          "bitDepth",
+          "sampleRateHz",
+          "bitrateKbps"
+        ],
+        "type": "object",
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "lossless": {
+            "type": "boolean"
+          },
+          "bitDepth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "sampleRateHz": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bitrateKbps": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "FileRow": {
         "required": [
           "path",
-          "sizeBytes"
+          "sizeBytes",
+          "quality",
+          "integrity"
         ],
         "type": "object",
         "properties": {
@@ -4149,6 +4904,19 @@
           "sizeBytes": {
             "type": "integer",
             "format": "int64"
+          },
+          "quality": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FileQuality"
+              }
+            ]
+          },
+          "integrity": {
+            "type": "string"
           }
         }
       },
@@ -5117,6 +5885,24 @@
             "items": {
               "type": "string"
             }
+          },
+          "source": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "coverUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -5908,6 +6694,226 @@
           }
         }
       },
+      "RelatedArtist": {
+        "required": [
+          "id",
+          "name",
+          "portrait"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "portrait": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ReleaseAbout": {
+        "required": [
+          "groupId",
+          "groupMbid",
+          "artistId",
+          "artistBanner",
+          "disambiguation",
+          "primaryType",
+          "secondaryTypes",
+          "firstReleaseYear",
+          "releasedMonth",
+          "releasedDay",
+          "label",
+          "catalogNumber",
+          "barcode",
+          "monitored",
+          "coverSource",
+          "coverLookupUtc",
+          "review",
+          "reviewLookupUtc",
+          "releaseLookupUtc",
+          "probedUtc",
+          "edited"
+        ],
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "groupMbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "artistId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "artistBanner": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "disambiguation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "primaryType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "firstReleaseYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "releasedMonth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "releasedDay": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "catalogNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "barcode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "monitored": {
+            "type": "boolean"
+          },
+          "coverSource": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "coverLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "review": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WrittenText"
+              }
+            ]
+          },
+          "reviewLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "releaseLookupUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "probedUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "edited": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ReleaseCard": {
+        "required": [
+          "id",
+          "mbid",
+          "title",
+          "year"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "ReleaseCoverOption": {
         "required": [
           "id",
@@ -5983,7 +6989,10 @@
         "required": [
           "release",
           "tracks",
-          "contributable"
+          "contributable",
+          "about",
+          "credits",
+          "moreBy"
         ],
         "type": "object",
         "properties": {
@@ -5999,6 +7008,21 @@
           "contributable": {
             "type": "integer",
             "format": "int32"
+          },
+          "about": {
+            "$ref": "#/components/schemas/ReleaseAbout"
+          },
+          "credits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlbumCredit"
+            }
+          },
+          "moreBy": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseCard"
+            }
           }
         }
       },
@@ -6022,6 +7046,126 @@
             "items": {
               "$ref": "#/components/schemas/AttributionShare"
             }
+          }
+        }
+      },
+      "ReleaseEditRequest": {
+        "required": [
+          "title",
+          "credit",
+          "disambiguation",
+          "primaryType",
+          "secondaryTypes",
+          "firstReleaseYear",
+          "releasedYear",
+          "releasedMonth",
+          "releasedDay",
+          "country",
+          "status",
+          "label",
+          "catalogNumber",
+          "barcode",
+          "formats",
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "credit": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "disambiguation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "primaryType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "firstReleaseYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "releasedYear": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "releasedMonth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "releasedDay": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "country": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "catalogNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "barcode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formats": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "review": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -6498,7 +7642,8 @@
           "duration",
           "recordingId",
           "held",
-          "files"
+          "files",
+          "artist"
         ],
         "type": "object",
         "properties": {
@@ -6543,6 +7688,12 @@
             "items": {
               "$ref": "#/components/schemas/FileRow"
             }
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -6843,6 +7994,7 @@
           "failed",
           "skipped",
           "coversWritten",
+          "portraitsWritten",
           "cancelled"
         ],
         "type": "object",
@@ -6894,6 +8046,10 @@
             "format": "int32"
           },
           "coversWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "portraitsWritten": {
             "type": "integer",
             "format": "int32"
           },
@@ -7067,7 +8223,8 @@
           "roles",
           "album",
           "folder",
-          "files"
+          "files",
+          "performers"
         ],
         "type": "object",
         "properties": {
@@ -7114,6 +8271,12 @@
             "items": {
               "$ref": "#/components/schemas/FileRow"
             }
+          },
+          "performers": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -7268,6 +8431,32 @@
           "files": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "WrittenText": {
+        "required": [
+          "text",
+          "source",
+          "url",
+          "byPerson"
+        ],
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "byPerson": {
+            "type": "boolean"
           }
         }
       }

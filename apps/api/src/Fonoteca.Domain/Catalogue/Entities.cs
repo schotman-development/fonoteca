@@ -124,6 +124,22 @@ public sealed class ReleaseGroup
     /// </remarks>
     public bool Monitored { get; set; }
 
+    /// <summary>
+    /// The lead section of the album's English Wikipedia article, as plain text.
+    /// </summary>
+    /// <remarks>
+    /// On the group rather than the release because the article is about the
+    /// album, not a pressing. Found through Wikidata's <c>P436</c>, the
+    /// MusicBrainz release group id, and credited by <see cref="ReviewUrl"/>.
+    /// </remarks>
+    public string? ReviewText { get; set; }
+
+    /// <summary>The article <see cref="ReviewText"/> was taken from.</summary>
+    public string? ReviewUrl { get; set; }
+
+    /// <summary>When an article was last looked for, answer or not.</summary>
+    public DateTimeOffset? ReviewLookupUtc { get; set; }
+
     public ICollection<Release> Releases { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
 }
@@ -205,6 +221,16 @@ public sealed class Release
     /// that holds only the audio, and without the format that reads as damage.
     /// </remarks>
     public string? MediumFormats { get; set; }
+
+    /// <summary>
+    /// What a person changed on the album page, by field, as JSON.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Artist.EditsJson"/>'s counterpart, for the same reason. It
+    /// holds the album-level fields the page edits too — type, first release
+    /// year, review — so an edit made on one edition shows on that edition only.
+    /// </remarks>
+    public string? EditsJson { get; set; }
 
     public ICollection<Track> Tracks { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
@@ -949,6 +975,159 @@ public sealed class ReleaseCover
     public required DateTimeOffset SavedUtc { get; set; }
 }
 
+/// <summary>
+/// A picture a person chose for an artist, as bytes this catalogue holds.
+/// </summary>
+/// <remarks>
+/// <b>Rule 4, and it is the whole reason this table exists rather than a
+/// column.</b> <c>Artist.PortraitUrl</c> is what a provider answered; this is
+/// what somebody handed the application instead, and folding the two would lose
+/// the ability to go back to the provider's. Deleting the row is exactly that:
+/// an undo, with the provider's picture underneath it unharmed.
+///
+/// <b>Only uploads live here, unlike <see cref="ReleaseCover"/>.</b> That table
+/// holds fetched sleeves too, because a cover has no URL on the row to fall
+/// back to and a fetch that found nothing still has to be remembered. Here the
+/// row already carries both — <c>PortraitUrl</c> for the answer and
+/// <c>PortraitLookupUtc</c> for the asking — so a second copy of a provider's
+/// picture would be a cache with no question to answer.
+///
+/// The bytes are served under <see cref="SavedUtc"/> as an ETag, and written on
+/// to the artist's shelf by the tag write, which is what makes them portable.
+/// </remarks>
+public sealed class ArtistImage
+{
+    public required ArtistId ArtistId { get; init; }
+
+    /// <summary>
+    /// Which picture this is, from <see cref="ArtistImageKind"/>.
+    /// </summary>
+    /// <remarks>
+    /// Part of the key rather than a column beside two sets of bytes, so a third
+    /// kind is a row rather than a migration — and so an artist with a banner
+    /// and no portrait is one row rather than a half-empty one.
+    /// </remarks>
+    public required string Kind { get; init; }
+
+    public required byte[] Bytes { get; set; }
+
+    /// <summary>
+    /// What to serve it as, and what names the file on the shelf.
+    /// </summary>
+    /// <remarks>
+    /// Held to <c>FilePreview</c>'s raster allowlist on the way in, which is
+    /// what keeps <c>image/svg+xml</c> out: an SVG is a document that runs
+    /// script, and this is written into a library and served back.
+    /// </remarks>
+    public required string MediaType { get; set; }
+
+    /// <summary>When the picture last changed; the ETag it is served under.</summary>
+    public required DateTimeOffset SavedUtc { get; set; }
+}
+
+/// <summary>
+/// A record a discovery source says an artist made, as that source stated it.
+/// </summary>
+/// <remarks>
+/// <b>This is a question, not a catalogue entry, and the separate table is what
+/// says so.</b> <see cref="Abstractions.IReleaseDiscovery"/> puts it in its own
+/// words — a row from that seam is "this exists and you have not got it", which
+/// a person reads on a shelf and acts on by searching. Written into
+/// <see cref="ReleaseGroup"/> instead, as it was until this table existed, the
+/// question becomes indistinguishable from a fact: it counts towards the
+/// artist's discography, it is credited to them, and nothing can retract it.
+/// Measured on this library before the change, <b>38,487 of 180,625 release
+/// groups</b> were shop guesses wearing that shape.
+///
+/// <b>Every field the source stated is kept, including the ones nothing reads
+/// yet.</b> <see cref="Barcode"/> is the one that matters most and the one the
+/// old path discarded: it is the only identifier here that is not
+/// provider-specific, so it is how a later pass recognises this record as one
+/// MusicBrainz has since described — the recognition the old shape called a
+/// one-way door. Discarding a field because no reader exists for it today is
+/// exactly how an earlier pass stops a later one from learning anything.
+///
+/// <b>Nothing is filtered on the way in.</b> Whether a record is worth showing
+/// — <c>Discography.IsGap</c>'s question, and
+/// <c>EnrichmentService.MinimumTracksToOffer</c>'s — is a rule about these
+/// rows, so it runs where the shelf is built. That is this codebase's standing
+/// bargain, stated in <c>CLAUDE.md</c> as <i>what is cached is answers, never
+/// rankings</i>, and it is what lets that rule change without re-asking a shop
+/// about every artist in the catalogue.
+///
+/// <b>Keyed on <see cref="Source"/> and <see cref="SourceId"/>, never on a
+/// title.</b> A shop retitles its own rows — "Mendelssohn &amp; Bruch: Violin
+/// Concertos" and "Mendelssohn/Bruch: Violin Concertos (Bonus Track Version)"
+/// are one album listed twice on this library's data — so a title-keyed upsert
+/// mints a fresh row every time the wording moves, and each one arrives after
+/// the baseline and is therefore marked wanted.
+/// </remarks>
+public sealed class DiscoveredRecord
+{
+    public required DiscoveredRecordId Id { get; init; }
+
+    /// <summary>Who the source was asked about.</summary>
+    public required ArtistId ArtistId { get; init; }
+
+    public Artist? Artist { get; set; }
+
+    /// <summary>Which source said so — <c>ReleaseDiscoverySources</c>' own name for it.</summary>
+    public required string Source { get; init; }
+
+    /// <summary>
+    /// The source's own id for this record. Opaque, and meaningless to any other
+    /// provider — but stable within this one, which is what makes the row
+    /// updatable rather than re-minted.
+    /// </summary>
+    public required string SourceId { get; init; }
+
+    /// <summary>As the source prints it, edition suffix and all.</summary>
+    public required string Title { get; set; }
+
+    public int? Year { get; set; }
+
+    /// <summary>
+    /// The UPC, where the source gave one. The join back to a MusicBrainz
+    /// release — see the remarks on the type.
+    /// </summary>
+    public string? Barcode { get; set; }
+
+    /// <summary>The sleeve, as the source serves it.</summary>
+    /// <remarks>
+    /// A URL rather than bytes, unlike <see cref="ReleaseCover"/>, and the
+    /// difference is what the picture is for: a cover in the catalogue is served
+    /// under an ETag to a page that may be looked at for years, where this is a
+    /// thumbnail on a shelf of records nobody owns, fetched by the browser
+    /// straight from the shop's own CDN. Storing bytes for a row that should
+    /// disappear the moment somebody buys the record would be keeping the
+    /// heaviest part of the answer longest.
+    /// </remarks>
+    public string? CoverUrl { get; set; }
+
+    /// <summary>How many tracks the source says it has, or null where it did not say.</summary>
+    public int? TrackCount { get; set; }
+
+    /// <summary>Somebody wants this record.</summary>
+    /// <remarks>
+    /// <see cref="ReleaseGroup.Monitored"/>'s counterpart for a record the
+    /// catalogue does not hold, and a fact nothing can recompute for the same
+    /// reason: a person set it.
+    /// </remarks>
+    public bool Monitored { get; set; }
+
+    /// <summary>When a source first named this record.</summary>
+    public required DateTimeOffset FoundUtc { get; init; }
+
+    /// <summary>When a source last still named it.</summary>
+    /// <remarks>
+    /// Separate from <see cref="FoundUtc"/> because they answer different
+    /// questions: the first is "is this new to us", which decides monitoring,
+    /// and the second is "does the shop still list it", which is what lets a row
+    /// the shop has dropped be recognised as stale rather than believed forever.
+    /// </remarks>
+    public DateTimeOffset SeenUtc { get; set; }
+}
+
 /// <summary>Result of decode-testing a file.</summary>
 public enum IntegrityState
 {
@@ -1115,6 +1294,39 @@ public sealed class Artist
     public bool Followed { get; set; }
 
     /// <summary>
+    /// When somebody first followed them, and what "new release" is measured from.
+    /// </summary>
+    /// <remarks>
+    /// <b>The acquire shelf needs a line between their back catalogue and what
+    /// they put out afterwards, and every other way of drawing it was wrong.</b>
+    /// Monitoring used to be decided by whether <see cref="DiscographyLookupUtc"/>
+    /// was null — a first browse laid the baseline, a later one marked what had
+    /// turned up since. That stamp belongs to MusicBrainz, so the day a second
+    /// source was asked about an artist MusicBrainz had already answered for, the
+    /// shop's first real answer read as a hundred arrivals at once. Measured
+    /// here: <b>1,224 rows across 28 followed artists, every one of them their
+    /// whole Qobuz catalogue</b>, marked wanted in a single run.
+    ///
+    /// So the line is drawn from a fact about the <i>record</i> rather than about
+    /// our worklist — see <c>Discography.IsNewRelease</c>. A record released at
+    /// or after this date is one they made while somebody was watching; anything
+    /// older is back catalogue however late we hear about it. That survives a
+    /// source being added, fixed, re-browsed, rate-limited or failing, which is
+    /// the whole class of event that produced the bug.
+    ///
+    /// <b>Set once and never cleared</b>, including on unfollow. Toggling the
+    /// button twice must not move the line, and keeping the original date is what
+    /// preserves the reading <see cref="Followed"/> already documents: unfollow
+    /// for a year, re-follow, and that year's records are still new releases.
+    ///
+    /// Null on an artist nobody has followed, and on one followed before this
+    /// column existed — both read as "no line drawn", which monitors nothing.
+    /// Silence is the safe direction here: an unmarked record costs one click on
+    /// their page, where a wrongly marked one costs the shelf.
+    /// </remarks>
+    public DateTimeOffset? FollowedUtc { get; set; }
+
+    /// <summary>
     /// When MusicBrainz was last asked what this artist has released.
     /// </summary>
     /// <remarks>
@@ -1136,6 +1348,54 @@ public sealed class Artist
     /// not happen, so a transient outage retries and a real answer does not.
     /// </remarks>
     public DateTimeOffset? DiscographyLookupUtc { get; set; }
+
+    /// <summary>
+    /// The lead section of their English Wikipedia article, as plain text.
+    /// </summary>
+    /// <remarks>
+    /// Somebody else's prose under CC BY-SA, so it never travels without
+    /// <see cref="BiographyUrl"/>: the page credits the article it came from.
+    /// Found through Wikidata, which holds the MusicBrainz id under <c>P434</c>
+    /// and the article under its <c>enwiki</c> sitelink — so the lookup cannot
+    /// be wrong about who, only silent.
+    /// </remarks>
+    public string? BiographyText { get; set; }
+
+    /// <summary>The article <see cref="BiographyText"/> was taken from.</summary>
+    public string? BiographyUrl { get; set; }
+
+    /// <summary>
+    /// When a biography was last looked for, answer or not. Rule 1: most
+    /// session players have no article, and keyed on the text they would be
+    /// re-asked about on every run.
+    /// </summary>
+    public DateTimeOffset? BiographyLookupUtc { get; set; }
+
+    /// <summary>
+    /// A wide photograph for the head of their page — TheAudioDB's fanart.
+    /// </summary>
+    /// <remarks>
+    /// Looked up by MusicBrainz id, so like the portrait it cannot be of the
+    /// wrong artist. Null is the ordinary answer and the page blurs the
+    /// portrait instead.
+    /// </remarks>
+    public string? BannerUrl { get; set; }
+
+    /// <summary>When a banner was last looked for, answer or not.</summary>
+    public DateTimeOffset? BannerLookupUtc { get; set; }
+
+    /// <summary>
+    /// What a person changed on the artist page, by field, as JSON.
+    /// </summary>
+    /// <remarks>
+    /// <b>Rule 4, and the reason this is not written over the columns above.</b>
+    /// Those are MusicBrainz's and Wikipedia's answers and a pass rewrites them;
+    /// a person's answer lives here, where no pass writes, and wins wherever a
+    /// field is present. A present field with a null value is an answer too —
+    /// "this orchestra has no country" — which is why the shape is a map and
+    /// not a row of nullable columns. Read and written by <see cref="PersonEdits"/>.
+    /// </remarks>
+    public string? EditsJson { get; set; }
 
     /// <summary>Billed credits — the printed credit line, with its order.</summary>
     public ICollection<ArtistCredit> Credits { get; init; } = [];

@@ -663,6 +663,37 @@ internal static partial class Log
     public static partial void CoverNotWritten(ILogger logger, string path, string reason);
 
     [LoggerMessage(
+        EventId = 1307,
+        Level = LogLevel.Information,
+        Message = "Portrait written to {Path}{Displaced}")]
+    public static partial void PortraitWritten(ILogger logger, string path, string displaced);
+
+    /// <remarks>
+    /// Debug, and once per run rather than per folder: an artist page whose
+    /// shelf is spelled differently from the catalogue's name writes nothing, and
+    /// without this the run reports a clean finish with no picture and no reason.
+    /// Not a warning — the ordinary cause is an artist with no shelf of their
+    /// own, whose records are filed under the band.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1309,
+        Level = LogLevel.Debug,
+        Message = "No folder in this run is {Artist}'s own shelf, so their picture was not written")]
+    public static partial void PortraitHasNoShelf(ILogger logger, string artist);
+
+    /// <remarks>
+    /// Warning, like <see cref="CoverNotWritten"/>, and never counted as a file
+    /// whose tags failed: the tags went in and only the picture beside them did
+    /// not. Also the line a shelf gets when the download was refused, so the
+    /// path here is sometimes the portrait's URL rather than a folder.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1308,
+        Level = LogLevel.Warning,
+        Message = "Portrait not written to {Path}: {Reason}")]
+    public static partial void PortraitNotWritten(ILogger logger, string path, string reason);
+
+    [LoggerMessage(
         EventId = 1400,
         Level = LogLevel.Warning,
         Message = "Trashing '{Path}' to '{Destination}'.")]

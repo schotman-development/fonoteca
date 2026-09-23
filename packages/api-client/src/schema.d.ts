@@ -422,6 +422,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/discovered/{id}/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a record a shop named as one you want, or stop wanting it.
+         * @description `SetReleaseGroupMonitored` for a record only a shop has heard of. Two endpoints rather than one because they address different things: a release group is an album the catalogue knows, a discovered record is a question a shop raised, and the whole point of keeping them apart is that a question cannot be mistaken for a catalogue entry.
+         *
+         *     The wanted flag is the one column on a discovered record a person owns. Every later browse restates the shop's own facts — title, year, barcode, sleeve — and leaves this alone.
+         */
+        post: operations["SetDiscoveredRecordMonitored"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/releases": {
         parameters: {
             query?: never;
@@ -968,6 +990,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/artists/{id}/portrait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The artist's picture, from the shelf where one exists.
+         * @description An uploaded picture first, then `artist.*` beside the artist's own records, then a redirect to whatever a provider found. The shelf outranks the provider because it is what every other player reading this library shows, and the tag write is what puts a picture there. Served under an ETag with `no-cache`, so a changed picture shows on the next view.
+         */
+        get: operations["GetArtistPortrait"];
+        put?: never;
+        /**
+         * Use an uploaded picture for this artist.
+         * @description The request body is the image itself, its Content-Type one of JPEG, PNG, GIF, WebP, BMP or AVIF — never SVG, which is a document that runs script. At most 10 MB. Stored beside the provider's answer rather than over it, so deleting it puts the provider's picture back. It reaches the library the next time tags are written for this artist.
+         */
+        post: operations["UploadArtistPortrait"];
+        /**
+         * Stop using the uploaded picture for this artist.
+         * @description The provider's picture applies again. The copy already written onto the artist's shelf is left where it is until tags are written again — this endpoint touches the catalogue, never the library.
+         */
+        delete: operations["DeleteArtistPortrait"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/artists/{id}/banner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The wide picture for the head of the artist's page.
+         * @description The same three sources the portrait has, reading `backdrop.*` off the shelf. Navidrome does not show artist banners at all; Jellyfin, Kodi and Plex do.
+         */
+        get: operations["GetArtistBanner"];
+        put?: never;
+        /**
+         * Use an uploaded picture as this artist's banner.
+         * @description The request body is the image itself, its Content-Type one of JPEG, PNG, GIF, WebP, BMP or AVIF — never SVG, which is a document that runs script. At most 10 MB. Stored beside the provider's answer rather than over it, so deleting it puts the provider's picture back. It reaches the library the next time tags are written for this artist.
+         */
+        post: operations["UploadArtistBanner"];
+        /**
+         * Stop using the uploaded banner for this artist.
+         * @description The provider's picture applies again. The copy already written onto the artist's shelf is left where it is until tags are written again — this endpoint touches the catalogue, never the library.
+         */
+        delete: operations["DeleteArtistBanner"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/artists/{id}/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct what the catalogue says about an artist.
+         * @description The whole form, every time. A field equal to what the providers hold is not an edit, so sending the provider's value back undoes one. Stored beside the providers' answers rather than over them, so no enrichment pass replaces it. The tag writer does not read these.
+         */
+        post: operations["EditArtist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/releases/{id}/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct what the catalogue says about an album.
+         * @description The whole form, every time, as for an artist. The album-level fields — type, first release year, review — are kept on this edition, so another edition of the same album does not show them.
+         */
+        post: operations["EditRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/qobuz/status": {
         parameters: {
             query?: never;
@@ -1088,6 +1206,15 @@ export interface components {
             /** Format: int32 */
             recordings: number;
         };
+        AlbumCredit: {
+            /** Format: uuid */
+            artistId: string;
+            name: string;
+            role: string;
+            group: string;
+            tracks: null | number[];
+            portrait: null | string;
+        };
         AlbumDownload: {
             albumId: string;
             title: string;
@@ -1141,6 +1268,7 @@ export interface components {
             artist: components["schemas"]["ArtistSummary"];
             tracks: components["schemas"]["TrackRow"][];
             discography: components["schemas"]["ArtistDiscography"];
+            profile: components["schemas"]["ArtistProfile"];
         };
         ArtistDiscography: {
             /** Format: int32 */
@@ -1150,6 +1278,24 @@ export interface components {
             /** Format: date-time */
             fetchedAtUtc: null | string;
             missing: components["schemas"]["DiscographyRow"][];
+        };
+        ArtistEditRequest: {
+            name: string;
+            latinName: null | string;
+            sortName: null | string;
+            disambiguation: null | string;
+            type: null | string;
+            country: null | string;
+            gender: null | string;
+            /** Format: int32 */
+            beganYear: null | number;
+            /** Format: int32 */
+            endedYear: null | number;
+            ended: boolean;
+            genres: string[];
+            biography: null | string;
+            portrait: null | string;
+            banner: null | string;
         };
         ArtistFollowByMbidRequest: {
             artist: string;
@@ -1166,6 +1312,27 @@ export interface components {
             /** Format: int32 */
             total: number;
             items: components["schemas"]["ArtistSummary"][];
+        };
+        ArtistProfile: {
+            /** Format: uuid */
+            mbid: null | string;
+            name: string;
+            latinName: null | string;
+            /** Format: date-time */
+            portraitLookupUtc: null | string;
+            portraitUploaded: boolean;
+            banner: null | string;
+            /** Format: date-time */
+            bannerLookupUtc: null | string;
+            bannerUploaded: boolean;
+            biography: null | components["schemas"]["WrittenText"];
+            /** Format: date-time */
+            biographyLookupUtc: null | string;
+            /** Format: date-time */
+            discographyLookupUtc: null | string;
+            edited: string[];
+            members: components["schemas"]["RelatedArtist"][];
+            memberOf: components["schemas"]["RelatedArtist"][];
         };
         ArtistSummary: {
             /** Format: uuid */
@@ -1389,6 +1556,11 @@ export interface components {
             /** Format: int32 */
             firstReleaseYear: null | number;
             monitored: boolean;
+            /** Format: int32 */
+            editions: number;
+        };
+        EditResponse: {
+            edited: string[];
         };
         EnrichmentStartedResponse: {
             jobId: string;
@@ -1413,6 +1585,10 @@ export interface components {
             pendingPortraits: number;
             /** Format: int32 */
             pendingDiscographies: number;
+            /** Format: int32 */
+            pendingArticles: number;
+            /** Format: int32 */
+            pendingBanners: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {
@@ -1471,10 +1647,22 @@ export interface components {
             tags: components["schemas"]["FileTagRow"][];
             note: null | string;
         };
+        FileQuality: {
+            codec: string;
+            lossless: boolean;
+            /** Format: int32 */
+            bitDepth: null | number;
+            /** Format: int32 */
+            sampleRateHz: number;
+            /** Format: int32 */
+            bitrateKbps: number;
+        };
         FileRow: {
             path: string;
             /** Format: int64 */
             sizeBytes: number;
+            quality: null | components["schemas"]["FileQuality"];
+            integrity: string;
         };
         FileTagRow: {
             name: string;
@@ -1743,6 +1931,9 @@ export interface components {
             query: string;
             primaryType: null | string;
             secondaryTypes: string[];
+            source?: null | string;
+            sourceId?: null | string;
+            coverUrl?: null | string;
         };
         MissingTrack: {
             /** Format: int32 */
@@ -1951,6 +2142,54 @@ export interface components {
             tag: string;
             detail: null | string;
         };
+        RelatedArtist: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            portrait: null | string;
+        };
+        ReleaseAbout: {
+            /** Format: uuid */
+            groupId: null | string;
+            /** Format: uuid */
+            groupMbid: null | string;
+            /** Format: uuid */
+            artistId: null | string;
+            artistBanner: null | string;
+            disambiguation: null | string;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            /** Format: int32 */
+            firstReleaseYear: null | number;
+            /** Format: int32 */
+            releasedMonth: null | number;
+            /** Format: int32 */
+            releasedDay: null | number;
+            label: null | string;
+            catalogNumber: null | string;
+            barcode: null | string;
+            monitored: boolean;
+            coverSource: null | string;
+            /** Format: date-time */
+            coverLookupUtc: null | string;
+            review: null | components["schemas"]["WrittenText"];
+            /** Format: date-time */
+            reviewLookupUtc: null | string;
+            /** Format: date-time */
+            releaseLookupUtc: null | string;
+            /** Format: date-time */
+            probedUtc: null | string;
+            edited: string[];
+        };
+        ReleaseCard: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            mbid: null | string;
+            title: string;
+            /** Format: int32 */
+            year: null | number;
+        };
         ReleaseCoverOption: {
             /** Format: int64 */
             id: number;
@@ -1972,12 +2211,37 @@ export interface components {
             tracks: components["schemas"]["ReleaseTrackRow"][];
             /** Format: int32 */
             contributable: number;
+            about: components["schemas"]["ReleaseAbout"];
+            credits: components["schemas"]["AlbumCredit"][];
+            moreBy: components["schemas"]["ReleaseCard"][];
         };
         ReleaseDisagreement: {
             /** Format: uuid */
             releaseId: string;
             title: string;
             folders: components["schemas"]["AttributionShare"][];
+        };
+        ReleaseEditRequest: {
+            title: string;
+            credit: null | string;
+            disambiguation: null | string;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            /** Format: int32 */
+            firstReleaseYear: null | number;
+            /** Format: int32 */
+            releasedYear: null | number;
+            /** Format: int32 */
+            releasedMonth: null | number;
+            /** Format: int32 */
+            releasedDay: null | number;
+            country: null | string;
+            status: null | string;
+            label: null | string;
+            catalogNumber: null | string;
+            barcode: null | string;
+            formats: null | string;
+            review: null | string;
         };
         ReleaseGroupMonitorRequest: {
             monitor: boolean;
@@ -2104,6 +2368,7 @@ export interface components {
             recordingId: string;
             held: boolean;
             files: components["schemas"]["FileRow"][];
+            artist: null | string;
         };
         /** @enum {unknown} */
         ReplacementVerdict: "Replace" | "NothingArrived" | "Incomplete" | "NotBetter" | "NotMeasured" | "ArrivalNotMeasured" | "LandedInside" | "NotHeld";
@@ -2196,6 +2461,8 @@ export interface components {
             skipped: number;
             /** Format: int32 */
             coversWritten: number;
+            /** Format: int32 */
+            portraitsWritten: number;
             cancelled: boolean;
         };
         TrackAlbum: {
@@ -2247,6 +2514,7 @@ export interface components {
             album: null | components["schemas"]["TrackAlbum"];
             folder: string;
             files: components["schemas"]["FileRow"][];
+            performers: null | string;
         };
         TrashRequest: {
             paths: string[];
@@ -2288,6 +2556,12 @@ export interface components {
             folder: string;
             /** Format: int32 */
             files: number;
+        };
+        WrittenText: {
+            text: string;
+            source: string;
+            url: null | string;
+            byPerson: boolean;
         };
     };
     responses: never;
@@ -3171,6 +3445,50 @@ export interface operations {
         };
     };
     SetReleaseGroupMonitored: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseGroupMonitorRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseGroupMonitorResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SetDiscoveredRecordMonitored: {
         parameters: {
             query?: never;
             header?: never;
@@ -4259,6 +4577,304 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetArtistPortrait: {
+        parameters: {
+            query?: {
+                width?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Found */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    UploadArtistPortrait: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DeleteArtistPortrait: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetArtistBanner: {
+        parameters: {
+            query?: {
+                width?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Found */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    UploadArtistBanner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DeleteArtistBanner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    EditArtist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistEditRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    EditRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseEditRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

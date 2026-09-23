@@ -1,0 +1,230 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  max-inline-size: 1200px;
+  margin-inline: auto;
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+}
+
+/*
+ * The banner carries no text. Everything readable sits below it on the page
+ * surface, so contrast never depends on what the picture happens to be.
+ */
+.banner {
+  position: relative;
+  block-size: clamp(160px, 28vw, 300px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--color-surface-sunken);
+}
+
+.banner img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.banner[data-fallback] img {
+  filter: blur(40px) saturate(1.3);
+  transform: scale(1.4);
+  opacity: 0.7;
+}
+
+.identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-24);
+  padding-inline: var(--space-24);
+  margin-block-start: calc(-1 * var(--space-64));
+  position: relative;
+}
+
+.portrait {
+  inline-size: 160px;
+  flex: none;
+  border-radius: var(--radius-full);
+  border: 6px solid var(--color-surface-base);
+  background-color: var(--color-surface-base);
+  box-shadow: var(--shadow-md);
+}
+
+.names {
+  flex: 1;
+  min-inline-size: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.1;
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-32);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  min-inline-size: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.facts dd {
+  margin: 0;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-sm);
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-12) var(--space-16);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--font-size-sm);
+}
+
+.link {
+  color: var(--color-text-link);
+}
+
+.link:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.tracks {
+  overflow-x: auto;
+}
+
+.bio {
+  max-inline-size: 70ch;
+  line-height: 1.6;
+  font-size: var(--font-size-md);
+}
+
+.bio p {
+  margin: 0 0 var(--space-12);
+}
+
+.bio[data-collapsed] {
+  max-block-size: calc(6 * 1.6em);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+.textarea {
+  inline-size: 100%;
+  padding: var(--space-8);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+
+.textarea:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 1px;
+}
+
+.cover {
+  inline-size: 220px;
+  flex: none;
+  border-radius: var(--radius-md);
+  border: 6px solid var(--color-surface-base);
+  background-color: var(--color-surface-base);
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 600px) {
+  .cover {
+    inline-size: 160px;
+  }
+}
+
+.tracklist {
+  overflow-x: auto;
+}
+
+.tracklist caption {
+  text-align: start;
+  padding-block-end: var(--space-8);
+}
+
+.group th {
+  padding-block: var(--space-12) var(--space-4);
+  text-align: start;
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.path {
+  overflow-wrap: anywhere;
+}
+
+.credit[aria-expanded="true"] {
+  background-color: var(--color-interactive-selected);
+}
+
+.credit[aria-expanded="true"]:hover {
+  background-color: var(--color-interactive-selected-hover);
+}

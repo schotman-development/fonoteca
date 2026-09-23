@@ -81,4 +81,35 @@ public static class AlbumFolder
 
         return cut == 0 ? string.Empty : path[..(cut - 1)];
     }
+
+    /// <summary>
+    /// The folder an album sits <i>in</i>, which is where a library keeps one
+    /// artist's records.
+    /// </summary>
+    /// <remarks>
+    /// <b>Derived from <see cref="Of"/> rather than counting segments itself</b>,
+    /// so the two cannot disagree the day <see cref="Depth"/> changes — which is
+    /// the drift this file already warns about for the album cut.
+    ///
+    /// <b>The name of this folder is a claim, and the caller has to check it.</b>
+    /// Every other rule here is about which files belong together, which a
+    /// library is nearly always right about. This one says whose shelf a
+    /// directory <i>is</i>, and the shelf holding a record is routinely not the
+    /// artist's own: 47 of Janine Jansen's 54 files sit under <c>Johann Sebastian
+    /// Bach</c> and <c>Antonio Vivaldi</c>, because a classical library files a
+    /// performance under its composer. So this returns the path and asserts
+    /// nothing about who it belongs to — see <c>ArtistNameMatch</c> for the half
+    /// that decides.
+    ///
+    /// Empty for anything not at least <see cref="Depth"/> deep. A file loose at
+    /// the root has no album folder and therefore no artist folder either, and
+    /// the library root is nobody's shelf.
+    /// </remarks>
+    public static string ParentOf(string path)
+    {
+        var album = Of(path);
+        var cut = album.LastIndexOf('/');
+
+        return cut <= 0 ? string.Empty : album[..cut];
+    }
 }

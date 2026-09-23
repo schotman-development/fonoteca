@@ -373,6 +373,8 @@ public static class LibraryEndpoints
             PendingArtists: pending.Artists,
             PendingPortraits: pending.Portraits,
             PendingDiscographies: pending.Discographies,
+            PendingArticles: pending.Articles,
+            PendingBanners: pending.Banners,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -601,6 +603,12 @@ public sealed record EnrichmentStatusResponse(
     /// wrong wait.
     /// </remarks>
     int PendingDiscographies,
+
+    /// <summary>Artists and held albums with no Wikipedia article looked for yet.</summary>
+    int PendingArticles,
+
+    /// <summary>Album artists with no banner looked for yet.</summary>
+    int PendingBanners,
 
     EnrichmentSummary? LastCompleted);
 

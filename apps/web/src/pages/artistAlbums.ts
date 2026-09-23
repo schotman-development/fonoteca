@@ -73,6 +73,12 @@ export type ArtistAlbum = {
    * "Robert Cray Band", which is one band and would be two headings.
    */
   readonly band: { readonly id: string; readonly name: string } | null
+  /**
+   * Who plays it, where that is somebody other than this artist — the first of
+   * its tracks that says. What a composer's shelf prints instead of the billing
+   * line, which on a classical sleeve names the composer back to them.
+   */
+  readonly performers: string | null
   readonly trackCount: number
   readonly fileCount: number
   /**
@@ -193,6 +199,7 @@ export function albumsOf(tracks: readonly TrackRow[]): ArtistAlbum[] {
         albumArtist: track.album?.artist ?? null,
         billedOnRelease: track.album?.billed ?? null,
         band: track.album?.band ?? null,
+        performers: null,
         folders: [],
         roles: [],
         trackCount: 0,
@@ -205,6 +212,7 @@ export function albumsOf(tracks: readonly TrackRow[]): ArtistAlbum[] {
     if (!album.folders.includes(folder)) album.folders.push(folder)
     for (const role of track.roles) if (!album.roles.includes(role)) album.roles.push(role)
 
+    album.performers ??= track.performers
     album.trackCount += 1
     album.fileCount += track.files.length
     if (track.album == null) album.unplaced += 1

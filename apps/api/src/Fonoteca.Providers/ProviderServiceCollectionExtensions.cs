@@ -245,6 +245,26 @@ public static class ProviderServiceCollectionExtensions
         services.AddKeyedSingleton<IArtistPortraits, WikidataPortraits>(
             ArtistPortraitSources.Wikidata);
 
+        // Wikipedia beside it, because Wikidata is how an article is found: it
+        // holds the MusicBrainz id and the sitelink on one item.
+        services.AddKeyedSingleton(WikipediaArticles.HttpClientName, (provider, _) =>
+            new RequestGate(Options<WikidataOptions>(provider).MinimumRequestInterval));
+
+        var wikipedia = services.AddHttpClient(WikipediaArticles.HttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = WikipediaArticles.Server;
+            http.DefaultRequestHeaders.Add("User-Agent", UserAgentFor(Options<WikidataOptions>(provider)));
+        });
+
+        wikipedia.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        });
+
+        AddResilienceThenGate(wikipedia, WikipediaArticles.HttpClientName);
+
+        services.AddSingleton<IEncyclopedia, WikipediaArticles>();
+
         return services;
     }
 
@@ -275,8 +295,14 @@ public static class ProviderServiceCollectionExtensions
 
         AddResilienceThenGate(client, AudioDbOptions.HttpClientName);
 
-        services.AddKeyedSingleton<IArtistPortraits, AudioDbPortraits>(
-            ArtistPortraitSources.AudioDb);
+        // One instance behind both faces, as AcoustIdClient is: the portrait and
+        // the banner are two fields of the same document.
+        services.AddSingleton<AudioDbPortraits>();
+        services.AddKeyedSingleton<IArtistPortraits>(
+            ArtistPortraitSources.AudioDb,
+            static (provider, _) => provider.GetRequiredService<AudioDbPortraits>());
+        services.AddSingleton<IArtistBanners>(
+            static provider => provider.GetRequiredService<AudioDbPortraits>());
 
         return services;
     }

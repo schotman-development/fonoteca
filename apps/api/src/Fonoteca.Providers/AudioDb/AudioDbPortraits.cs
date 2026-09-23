@@ -28,15 +28,16 @@ namespace Fonoteca.Providers.AudioDb;
 /// under Latin spellings, and no folding table turns Cyrillic into "Shostakovich".
 /// Together the two answer for 37 of the 40.
 ///
-/// <c>strArtistThumb</c> is the portrait. <c>strArtistFanart</c> and
-/// <c>strArtistLogo</c> arrive in the same document and are deliberately not
-/// read: fanart is a wide backdrop, which is the exact failure that made
-/// Wikidata's P18 unusable for AC/DC, and a logo is not a picture of anybody.
+/// <c>strArtistThumb</c> is the portrait. <c>strArtistFanart</c> arrives in
+/// the same document and is never a portrait — a wide backdrop is the exact
+/// failure that made Wikidata's P18 unusable for AC/DC — so it answers
+/// <see cref="IArtistBanners"/> instead, which wants exactly that.
+/// <c>strArtistLogo</c> is not a picture of anybody and is not read.
 /// </remarks>
 public sealed class AudioDbPortraits(
     IHttpClientFactory clients,
     IOptions<AudioDbOptions> options,
-    ILogger<AudioDbPortraits> logger) : IArtistPortraits
+    ILogger<AudioDbPortraits> logger) : IArtistPortraits, IArtistBanners
 {
     /// <summary>Name used in <see cref="ProviderException.Provider"/> and in log messages.</summary>
     public const string ProviderName = "TheAudioDB";
@@ -70,9 +71,9 @@ public sealed class AudioDbPortraits(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var thumb = await LookupAsync(artist.Id, cancellationToken).ConfigureAwait(false);
+            var thumb = (await LookupAsync(artist.Id, cancellationToken).ConfigureAwait(false))?.Thumb;
 
-            if (thumb is null) continue;
+            if (string.IsNullOrWhiteSpace(thumb)) continue;
 
             if (Image(thumb) is { } picture)
             {
@@ -87,8 +88,33 @@ public sealed class AudioDbPortraits(
         return found;
     }
 
-    /// <summary>This artist's thumbnail, or null when they have none.</summary>
-    private async Task<string?> LookupAsync(Mbid artist, CancellationToken cancellationToken)
+    /// <summary>Their fanart, for the artists that have one.</summary>
+    /// <remarks>One request each, like the portraits, and an artist with none is left out.</remarks>
+    public async Task<IReadOnlyDictionary<Mbid, Uri>> FindAsync(
+        IReadOnlyCollection<Mbid> artists,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(artists);
+
+        var found = new Dictionary<Mbid, Uri>();
+
+        foreach (var artist in artists.Distinct())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var fanart = (await LookupAsync(artist, cancellationToken).ConfigureAwait(false))?.Fanart;
+
+            if (!string.IsNullOrWhiteSpace(fanart) && Image(fanart) is { } picture)
+            {
+                found[artist] = picture;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>What they hold for this artist, or null when it is nothing.</summary>
+    private async Task<AudioDbArtistBody?> LookupAsync(Mbid artist, CancellationToken cancellationToken)
     {
         var key = options.Value.ApiKey;
 
@@ -162,9 +188,8 @@ public sealed class AudioDbPortraits(
             // `{"artists":null}` is how they say they hold nothing for this id,
             // and an empty array happens too.
             var artists = body?.Artists;
-            var thumb = artists is { Count: > 0 } ? artists[0].Thumb : null;
 
-            return string.IsNullOrWhiteSpace(thumb) ? null : thumb;
+            return artists is { Count: > 0 } ? artists[0] : null;
         }
     }
 
@@ -213,6 +238,9 @@ internal sealed record AudioDbArtistBody
     /// <summary>The portrait. Their other two images are a backdrop and a logo.</summary>
     [JsonPropertyName("strArtistThumb")]
     public string? Thumb { get; init; }
+
+    [JsonPropertyName("strArtistFanart")]
+    public string? Fanart { get; init; }
 }
 
 [JsonSourceGenerationOptions(NumberHandling = JsonNumberHandling.AllowReadingFromString)]

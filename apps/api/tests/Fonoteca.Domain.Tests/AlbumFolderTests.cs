@@ -56,4 +56,36 @@ public sealed class AlbumFolderTests
     [Fact]
     public void AFileLooseAtTheRootBelongsToTheRoot() =>
         Assert.Equal(string.Empty, AlbumFolder.Of("stray.flac"));
+
+    [Fact]
+    public void AnAlbumSitsOnItsArtistsShelf() =>
+        Assert.Equal(
+            "Michael Jackson",
+            AlbumFolder.ParentOf("Michael Jackson/Thriller/04 Thriller.flac"));
+
+    [Fact]
+    public void ADiscOfAnAlbumReachesTheSameShelf() =>
+        // Cut from the album rather than from the path, so the extra directory a
+        // box set adds cannot push the shelf down into the album.
+        Assert.Equal(
+            "Andrea Bocelli",
+            AlbumFolder.ParentOf("Andrea Bocelli/Vivere/Digital Media 01/01 Con Te Partirò.flac"));
+
+    [Fact]
+    public void TheShelfIsWhereTheRecordSitsAndNotWhoseItIs() =>
+        // The measured shape, and the reason the caller checks the name: a
+        // classical library files a performance under the composer, so this is
+        // Bach's shelf holding a record of Janine Jansen's.
+        Assert.Equal(
+            "Johann Sebastian Bach",
+            AlbumFolder.ParentOf("Johann Sebastian Bach/Violin Concertos/02 Allegro.flac"));
+
+    [Theory]
+    [InlineData("stray.flac")]
+    [InlineData("Prince/While My Guitar Gently Weeps - Prince, Tom Petty.flac")]
+    public void AFileShallowerThanAnAlbumHasNoShelf(string path) =>
+        // Nothing above an album is nobody's shelf, and the library root least of
+        // all. The loose file under Prince is the one in this library, and it
+        // costs that artist nothing: the shelf is reached from their albums.
+        Assert.Equal(string.Empty, AlbumFolder.ParentOf(path));
 }

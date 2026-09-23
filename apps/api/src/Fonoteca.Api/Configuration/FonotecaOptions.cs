@@ -314,6 +314,27 @@ public sealed class FonotecaOptions : IValidatableObject
     public string McpToken { get; init; } = string.Empty;
 
     /// <summary>
+    /// The password <c>/rest</c> requires. Empty turns the endpoint off.
+    /// </summary>
+    /// <remarks>
+    /// OpenSubsonic, so somebody else's music client can play the library — ADR
+    /// 0012. Off by default and 404 without it, the same posture <see
+    /// cref="McpToken"/> takes.
+    ///
+    /// <b>This is held recoverably and there is no way round it.</b> The
+    /// protocol's own authentication is <c>t = md5(password + salt)</c>, which a
+    /// server can only check by computing it, so a hash here would not work. It
+    /// is one password, for one surface, that does not exist until it is set.
+    ///
+    /// <b>Setting it is the first reason anybody has to expose this port.</b>
+    /// Every <c>/api</c> route is still as open as it was, so an authenticated
+    /// <c>/rest</c> reachable from outside sits beside an unauthenticated
+    /// everything-else. If the port is going any further than this machine,
+    /// something in front of it has to say so.
+    /// </remarks>
+    public string SubsonicPassword { get; init; } = string.Empty;
+
+    /// <summary>
     /// The rules that involve more than one setting.
     /// </summary>
     /// <remarks>

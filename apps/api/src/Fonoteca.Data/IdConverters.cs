@@ -32,6 +32,9 @@ internal sealed class MediaFileIdConverter()
 internal sealed class ArtistIdConverter()
     : ValueConverter<ArtistId, Guid>(id => id.Value, v => new ArtistId(v));
 
+internal sealed class DiscoveredRecordIdConverter()
+    : ValueConverter<DiscoveredRecordId, Guid>(id => id.Value, v => new DiscoveredRecordId(v));
+
 internal sealed class MbidConverter() : ValueConverter<Mbid, Guid>(id => id.Value, v => new Mbid(v));
 
 internal sealed class AcoustIdConverter()

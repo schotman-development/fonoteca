@@ -521,15 +521,33 @@ nothing here sits under, cut by `Discography.IsGap` — **an explicit placeholde
 the only `TODO(you)` in the repo, with six tests prefixed `PlaceholderDecision_`
 written to be rewritten. An open decision, not an oversight.**
 
-**`Artist.Followed` and `ReleaseGroup.Monitored` are the only two facts in the
-catalogue nothing can recompute** — everything else derives from audio, a
-provider or a person's answer; these two are standing intent, and a rescan must
-never touch either. Monitoring is a filter, not an instruction: a *first* browse
-is the baseline and writes everything unmonitored, later browses mark what
-appeared. Stated consequence, not fixed: unfollow for a year and re-follow, and a
-year of releases is marked wanted. A discovered group is minted with a null
-`Mbid`, which is a one-way door — `ReleaseGroup` has no barcode column, so
-nothing can later recognise it as a MusicBrainz record.
+**What a shop says goes in `DiscoveredRecords`, never in `ReleaseGroups`.** A
+discovery row is a *question* — `IReleaseDiscovery` says so in its own words —
+and a question written into the catalogue's album table becomes a fact nothing
+can retract: credited to the artist, counted in their discography, and skipped
+by the prune, which only considers rows carrying an MBID. It was measured at
+**38,487 of 180,625 release groups**, and not one of them could ever stop being
+reported as missing — not even by buying the record, since the files land under
+the MusicBrainz group instead. Keyed on `(ArtistId, Source, SourceId)`, because a
+shop rewords its own titles and a title-keyed upsert mints a fresh row each time
+it does. **Every field the source stated is kept**, the barcode above all: it is
+how a later pass recognises the record as one MusicBrainz has since described,
+and dropping it is what made the old shape a one-way door.
+
+**Nothing about a discovered row is judged on the way in** — not the track count,
+not whether the library already holds it. Both are rules about the row rather
+than facts in it, so `Discography.IsGap` runs where each shelf is built and the
+row stops being a gap the moment the catalogue gains the album. *What is cached
+is answers, never rankings*, applied to the one place that was storing a verdict.
+
+**`Artist.Followed`, `ReleaseGroup.Monitored` and `DiscoveredRecord.Monitored`
+are the only facts in the catalogue nothing can recompute** — everything else
+derives from audio, a provider or a person's answer; these are standing intent,
+and a rescan must never touch them. Monitoring is a filter, not an instruction: a
+*first* browse is the baseline and writes everything unmonitored, later browses
+mark what appeared. A later browse restates a discovered row's title, year,
+barcode and sleeve and leaves `Monitored` alone. Stated consequence, not fixed:
+unfollow for a year and re-follow, and a year of releases is marked wanted.
 
 ## Providers
 

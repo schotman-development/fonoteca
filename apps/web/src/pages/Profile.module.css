@@ -1,0 +1,358 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  max-inline-size: 1200px;
+  min-inline-size: 0;
+}
+
+.back {
+  align-self: flex-start;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.back:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * The banner carries no text. Everything readable sits below it on the page
+ * surface, so contrast never depends on what the picture happens to be.
+ */
+.banner {
+  position: relative;
+  block-size: clamp(160px, 28vw, 300px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--color-surface-inset);
+}
+
+.banner img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.identity {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-24);
+  padding-inline: var(--space-24);
+  margin-block-start: calc(-1 * var(--space-64));
+  position: relative;
+}
+
+.portrait {
+  inline-size: 160px;
+  flex: none;
+  border-radius: var(--radius-full);
+  border: 6px solid var(--color-surface-base);
+  background-color: var(--color-surface-base);
+  box-shadow: var(--shadow-md);
+}
+
+/*
+ * The picture overlaps the banner and the words never do: they start below its
+ * edge, so their contrast is the page's and not the photograph's.
+ */
+.names,
+.actions {
+  padding-block-start: calc(var(--space-64) + var(--space-12));
+}
+
+@media (max-width: 600px) {
+  .names,
+  .actions {
+    padding-block-start: 0;
+  }
+}
+
+.names {
+  flex: 1;
+  min-inline-size: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.1;
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-32);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  min-inline-size: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.facts dd {
+  margin: 0;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-sm);
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-12) var(--space-16);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--font-size-sm);
+}
+
+.link {
+  color: var(--color-text-link);
+}
+
+.link:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.tracks {
+  overflow-x: auto;
+}
+
+.bio {
+  max-inline-size: 70ch;
+  line-height: 1.6;
+  font-size: var(--font-size-md);
+}
+
+.bio p {
+  margin: 0 0 var(--space-12);
+}
+
+.bio[data-collapsed] {
+  max-block-size: calc(6 * 1.6em);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+.textarea {
+  inline-size: 100%;
+  padding: var(--space-8);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+
+.textarea:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 1px;
+}
+
+.cover {
+  inline-size: 220px;
+  flex: none;
+  border-radius: var(--radius-md);
+  border: 6px solid var(--color-surface-base);
+  background-color: var(--color-surface-base);
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 600px) {
+  .cover {
+    inline-size: 160px;
+  }
+}
+
+.tracklist {
+  overflow-x: auto;
+}
+
+.tracklist caption {
+  text-align: start;
+  padding-block-end: var(--space-8);
+}
+
+.group th {
+  padding-block: var(--space-12) var(--space-4);
+  text-align: start;
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.path {
+  overflow-wrap: anywhere;
+}
+
+.credit[aria-expanded="true"] {
+  background-color: var(--color-interactive-selected);
+}
+
+.credit[aria-expanded="true"]:hover {
+  background-color: var(--color-interactive-selected-hover);
+}
+
+/*
+ * A missing track stays in place and recedes. The gap is the information, so
+ * the row also says "missing" in words; the stripe is the redundant cue.
+ */
+.tracklist tbody tr[data-missing] {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 6px,
+    var(--color-surface-sunken) 6px,
+    var(--color-surface-sunken) 7px
+  );
+}
+
+/* The track-by-track table's two truncating columns carry the widths. */
+.trackCol {
+  width: 42%;
+}
+
+.folderCol {
+  width: 30%;
+}
+
+/* Text sets its own colour, so this owns the decoration and the focus ring only. */
+.album {
+  text-decoration: none;
+}
+
+.album:hover {
+  text-decoration: underline;
+}
+
+.album:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.shelf {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* A caption is the table's accessible name; visible, and quiet. */
+.caption {
+  caption-side: top;
+  text-align: start;
+  padding: var(--space-4) var(--space-8) var(--space-8);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+/*
+ * The work heading above a row group: the row group's name, so a `<th>`, with
+ * the inline padding of Table's cells so the title lines up with the tracks.
+ */
+.work,
+.workGutter {
+  padding: var(--space-8) var(--space-8) var(--space-4);
+  background-color: var(--color-surface-sunken);
+}
+
+.work {
+  text-align: start;
+}
+
+/*
+ * The picture control on an artist's page.
+ *
+ * A label wrapping a visually hidden `input[type=file]`, which is the only way
+ * to style the control at all: a file input cannot be restyled, and replacing
+ * it with a button that clicks it loses the keyboard and the drop target.
+ * `:focus-within` is what puts the focus ring back where the eye expects it.
+ */
+.upload {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.upload:focus-within {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.upload[data-disabled] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

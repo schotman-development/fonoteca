@@ -356,6 +356,21 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        group.MapPost("/discovered/{id:guid}/monitor", SetDiscoveredRecordMonitored)
+            .WithName("SetDiscoveredRecordMonitored")
+            .WithSummary("Mark a record a shop named as one you want, or stop wanting it.")
+            .WithDescription(
+                "`SetReleaseGroupMonitored` for a record only a shop has heard of. Two "
+                + "endpoints rather than one because they address different things: a release "
+                + "group is an album the catalogue knows, a discovered record is a question a "
+                + "shop raised, and the whole point of keeping them apart is that a question "
+                + "cannot be mistaken for a catalogue entry.\n\n"
+                + "The wanted flag is the one column on a discovered record a person owns. "
+                + "Every later browse restates the shop's own facts — title, year, barcode, "
+                + "sleeve — and leaves this alone.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         group.MapGet("/releases", GetReleases)
             .WithName("GetReleases")
             .WithSummary("Albums the library holds at least one track of.")
@@ -546,6 +561,8 @@ public static partial class CatalogueEndpoints
         // Album covers, stored rather than hot-linked. See
         // CatalogueEndpoints.Cover.cs.
         MapCoverEndpoints(group);
+        MapPortraitEndpoints(group);
+        MapProfileEndpoints(group);
 
         return app;
     }
@@ -722,6 +739,27 @@ public static partial class CatalogueEndpoints
                 recording.Duration,
                 WorkTitle = recording.Work == null ? null : recording.Work.Title,
                 Billed = recording.Credits.Any(c => c.ArtistId == artistId),
+
+                // Who plays it, where this artist is not the one playing: the
+                // rest of the billing line, then the ensembles and conductors
+                // linked to the recording. On a composer's page that is the
+                // performance; on a musician's own track it is usually empty.
+                OthersBilled = recording.Credits
+                    .Where(c => c.ArtistId != artistId)
+                    .OrderBy(c => c.Position)
+                    .Select(c => c.CreditedAs ?? c.Artist!.LatinName ?? c.Artist!.Name)
+                    .ToList(),
+                Players = recording.Relationships
+                    .Where(r => r.ArtistId != artistId)
+                    .Select(r => new
+                    {
+                        r.Type,
+                        Name = db.Artists
+                            .Where(a => a.Id == r.ArtistId)
+                            .Select(a => a.LatinName ?? a.Name)
+                            .FirstOrDefault(),
+                    })
+                    .ToList(),
                 Roles = recording.Relationships
                     .Where(r => r.ArtistId == artistId)
                     .Select(r => r.Type)
@@ -738,6 +776,8 @@ public static partial class CatalogueEndpoints
                     {
                         f.Path,
                         f.SizeBytes,
+                        f.Quality,
+                        f.Integrity,
                         f.ReleaseId,
                         ReleaseTitle = f.Release == null ? null : f.Release.Title,
                         ReleaseYear = f.Release == null ? null : f.Release.ReleasedYear,
@@ -818,7 +858,8 @@ public static partial class CatalogueEndpoints
                             .FirstOrDefault()))
                     .FirstOrDefault(),
                 Folder: FolderOf(row.Files[0].Path),
-                Files: [.. row.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
+                Files: [.. row.Files.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
+                Performers: Performers(row.OthersBilled, row.Players.Select(player => (player.Type, player.Name)))))
             .ToList();
 
         // Release groups credited to this artist. `ArtistCredit.ReleaseGroupId`
@@ -863,6 +904,20 @@ public static partial class CatalogueEndpoints
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+        // **What a shop stocks is not part of a discography, and is not on
+        // this page.** It was, briefly, as a second shelf — and a second shelf
+        // is a duplicate whether it is interleaved or folded away, because the
+        // two catalogues name one record differently and nothing they share
+        // settles which rows are the same. Measured here: shop barcodes match
+        // the catalogue's 106 times in 94,660, a shop selling the digital
+        // edition under its own UPC. Whether a record can be bought belongs to
+        // the acquire shelf, which is where wanting one is expressed.
+        //
+        // `DiscoveredRecords` is still written and still read — by
+        // `QobuzEndpoints`, and as the raw material for enriching these rows
+        // with what a shop knows and MusicBrainz does not. It may enrich a row
+        // here; it may not add one.
+
         var missing = groups
             .Where(group => !group.Held)
             .Select(group => new
@@ -895,8 +950,84 @@ public static partial class CatalogueEndpoints
                 group.PrimaryType,
                 group.Secondary,
                 group.FirstReleaseYear,
-                group.Monitored))
+                group.Monitored,
+                Editions: 1))
             .ToList();
+
+        // Different performances of one work, folded. Separated by primary
+        // type, so an album and the single named after it stay two rows — see
+        // `Discography.Collapse` for what this can and cannot take away.
+        missing =
+        [
+            .. Discography
+                .Collapse(
+                    missing,
+                    row => row.Title,
+                    row => row.PrimaryType,
+                    row => row.FirstReleaseYear,
+                    row => row.Monitored)
+                .Select(edition => edition.Row with { Editions = edition.Count })
+                // Sorted *after* folding, not before. The folded row carries a
+                // representative's year, which is rarely the year of the row
+                // that happened to sort first — left in place the shelf read
+                // 2014, 2010, 2022, 2008.
+                .OrderByDescending(row => row.FirstReleaseYear ?? int.MaxValue)
+                .ThenBy(row => row.Title, StringComparer.CurrentCulture),
+        ];
+
+        // Both directions of the one artist-to-artist link stored: the groups
+        // this artist was in, and — for a group — who was in it.
+        var members = await db.Relationships
+            .AsNoTracking()
+            .Where(r => r.Type == RelationshipTargets.Member && r.TargetId == id && r.ArtistId != null)
+            .Select(r => r.ArtistId!.Value)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var related = members.Concat(typed).Distinct().ToList();
+
+        var people = related.Count == 0
+            ? []
+            : await db.Artists
+                .AsNoTracking()
+                .Where(a => related.Contains(a.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        IReadOnlyList<RelatedArtist> Cards(List<ArtistId> ids) =>
+        [
+            .. people
+                .Where(person => ids.Contains(person.Id))
+                .Select(person => Describe(person, 0))
+                .Select(person => new RelatedArtist(person.Id, person.Name, person.Portrait))
+                .OrderBy(person => person.Name, StringComparer.CurrentCulture),
+        ];
+
+        var edits = PersonEdits.Read(artist.EditsJson);
+
+        // Asked for rather than joined: the bytes are megabytes and the page
+        // wants only which kinds have any.
+        var uploaded = await db.ArtistImages
+            .Where(row => row.ArtistId == artist.Id)
+            .Select(row => row.Kind)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var profile = new ArtistProfile(
+            artist.Mbid?.Value,
+            PersonEdits.Apply(edits, "name", artist.Name) ?? artist.Name,
+            PersonEdits.Apply(edits, "latinName", artist.LatinName),
+            artist.PortraitLookupUtc,
+            uploaded.Contains(ArtistImageKind.Portrait.Name),
+            PersonEdits.Apply(edits, "banner", artist.BannerUrl),
+            artist.BannerLookupUtc,
+            uploaded.Contains(ArtistImageKind.Banner.Name),
+            Written(edits, "biography", artist.BiographyText, artist.BiographyUrl),
+            artist.BiographyLookupUtc,
+            artist.DiscographyLookupUtc,
+            [.. edits.Keys.Order(StringComparer.Ordinal)],
+            Cards(members),
+            Cards(typed));
 
         return TypedResults.Ok(new ArtistDetailResponse(
             Describe(artist, rows.Count),
@@ -905,14 +1036,53 @@ public static partial class CatalogueEndpoints
                 groups.Count,
                 groups.Count(group => group.Held),
                 artist.DiscographyLookupUtc,
-                missing)));
+                missing),
+            profile));
     }
+
+    /// <summary>
+    /// Who performs a recording, in one line: the billing line first, then ensembles, then conductors.
+    /// </summary>
+    private static string? Performers(
+        IEnumerable<string> billed,
+        IEnumerable<(string Type, string? Name)> players)
+    {
+        var names = billed
+            .Concat(players
+                .Where(player => player.Type is "ensemble" or "conductor" && player.Name is not null)
+                .OrderBy(player => player.Type == "ensemble" ? 0 : 1)
+                .ThenBy(player => player.Name, StringComparer.Ordinal)
+                .Select(player => player.Name!))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return names.Count == 0 ? null : string.Join(", ", names);
+    }
+
+    private static FileRow FileRowOf(
+        string path,
+        long sizeBytes,
+        AudioQuality? quality,
+        IntegrityState integrity) =>
+        new(
+            path,
+            sizeBytes,
+            quality is null
+                ? null
+                : new FileQuality(
+                    quality.Codec.ToUpperInvariant(),
+                    quality.IsLossless,
+                    quality.BitDepth,
+                    quality.SampleRateHz,
+                    (int)(quality.BitrateBps / 1000)),
+            integrity.ToString());
 
     /// <summary>Follow or unfollow an artist the catalogue already holds.</summary>
     internal static async Task<Results<Ok<ArtistFollowResponse>, ProblemHttpResult>> SetArtistFollowed(
         Guid id,
         ArtistFollowRequest request,
         FonotecaDbContext db,
+        IClock clock,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -939,21 +1109,27 @@ public static partial class CatalogueEndpoints
 
         artist.Followed = request.Follow;
 
+        // The line "new release" is measured from, drawn once. `??=` rather than
+        // an assignment is the whole of the unfollow story: re-following keeps
+        // the original date, so the records released while they were unfollowed
+        // are still new ones — which is the reading the note below already
+        // describes, now written where it is actually decided.
+        if (request.Follow) artist.FollowedUtc ??= StoreTime.ToStorePrecision(clock.UtcNow);
+
         // DiscographyLookupUtc is deliberately left alone in both directions.
         // Unfollowing keeps what was already fetched, so re-following costs no
         // provider turns; and clearing it on a follow would re-browse an artist
         // somebody had merely toggled twice.
         //
-        // **It has a consequence for monitoring, and it is the accepted one.**
-        // Because the stamp survives, a re-follow's next browse is a *later*
-        // browse rather than a fresh baseline — so everything the artist
-        // released while they were unfollowed arrives as new and is marked
-        // wanted automatically. Unfollow for a year, re-follow, and a year of
-        // records lands on the acquire shelf. That is the intended reading:
-        // they are records nobody here has seen. Resetting instead means
-        // clearing this stamp, which spends the browse again on anybody who
-        // merely toggled the button twice — the thing this line exists to
-        // avoid.
+        // **It no longer decides monitoring, and that separation is the fix for
+        // a measured bug.** It used to: a null stamp meant "first browse, lay
+        // the baseline". But the stamp is MusicBrainz's, so the first time a
+        // second source was asked about an artist MusicBrainz had already
+        // answered for, that source's whole answer read as arrivals — 1,224 rows
+        // across 28 followed artists, every one of them a back catalogue, marked
+        // wanted in one run. `FollowedUtc` above is the line now, and it is a
+        // date records are compared against rather than a record of which of our
+        // own passes ran first.
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return TypedResults.Ok(new ArtistFollowResponse(artist.Id.Value, artist.Followed));
@@ -1001,6 +1177,47 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new ReleaseGroupMonitorResponse(group.Id.Value, group.Monitored));
     }
 
+    /// <summary>Mark a record only a shop knows about as wanted, or stop wanting it.</summary>
+    /// <remarks>
+    /// <see cref="SetReleaseGroupMonitored"/>'s twin, kept separate because the
+    /// two address different kinds of thing — see the endpoint's description.
+    /// </remarks>
+    internal static async Task<Results<Ok<ReleaseGroupMonitorResponse>, ProblemHttpResult>>
+        SetDiscoveredRecordMonitored(
+            Guid id,
+            ReleaseGroupMonitorRequest request,
+            FonotecaDbContext db,
+            CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return TypedResults.Problem(
+                title: "Nothing to set",
+                detail: "The request body must say whether to `monitor`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var recordId = new DiscoveredRecordId(id);
+
+        var record = await db.DiscoveredRecords
+            .FirstOrDefaultAsync(r => r.Id == recordId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (record is null)
+        {
+            return TypedResults.Problem(
+                title: "No such record",
+                detail: $"No shop has named a record with id {id}.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        record.Monitored = request.Monitor;
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new ReleaseGroupMonitorResponse(record.Id.Value, record.Monitored));
+    }
+
     /// <summary>Follow an artist by MusicBrainz id, minting them if need be.</summary>
     /// <remarks>
     /// <b>The only way to reach an artist the library holds nothing by.</b>
@@ -1014,6 +1231,7 @@ public static partial class CatalogueEndpoints
         ArtistFollowByMbidRequest request,
         FonotecaDbContext db,
         IMusicBrainzCatalogue musicBrainz,
+        IClock clock,
         CancellationToken cancellationToken)
     {
         if (request is null
@@ -1041,6 +1259,7 @@ public static partial class CatalogueEndpoints
             // Already in the catalogue as a byproduct of some file. Following is
             // then a flag on a row that already exists, and no lookup is spent.
             existing.Followed = true;
+            existing.FollowedUtc ??= StoreTime.ToStorePrecision(clock.UtcNow);
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
             return TypedResults.Ok(new ArtistFollowResponse(existing.Id.Value, true));
@@ -1074,6 +1293,7 @@ public static partial class CatalogueEndpoints
             Disambiguation = described.Disambiguation,
             Mbid = mbid,
             Followed = true,
+            FollowedUtc = StoreTime.ToStorePrecision(clock.UtcNow),
         };
 
         db.Artists.Add(artist);
@@ -1178,6 +1398,7 @@ public static partial class CatalogueEndpoints
                 release.Status,
                 release.MediumFormats,
                 release.DiscCount,
+                release.EditsJson,
                 TrackCount = release.TrackCount ?? release.Tracks.Count,
                 Held = release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
                 Files = release.Files.Count,
@@ -1200,7 +1421,7 @@ public static partial class CatalogueEndpoints
             .ConfigureAwait(false);
 
         var items = rows
-            .Select(row => new ReleaseSummary(
+            .Select(row => WithEdits(new ReleaseSummary(
                 row.Id.Value,
                 row.Mbid?.Value,
                 row.Title,
@@ -1214,7 +1435,7 @@ public static partial class CatalogueEndpoints
                 row.Held,
                 row.Files,
                 ((ReleaseAttributionOutcome)row.Certainty).ToString(),
-                row.Alternatives))
+                row.Alternatives), row.EditsJson))
             .ToList();
 
         return TypedResults.Ok(new ReleaseListResponse(total, items));
@@ -1236,10 +1457,26 @@ public static partial class CatalogueEndpoints
                 r.Mbid,
                 r.Title,
                 r.ReleasedYear,
+                r.ReleasedMonth,
+                r.ReleasedDay,
                 r.Country,
                 r.Status,
                 r.MediumFormats,
                 r.DiscCount,
+                r.Disambiguation,
+                r.Label,
+                r.CatalogNumber,
+                r.Barcode,
+                r.EditsJson,
+                r.ReleaseGroupId,
+                GroupMbid = r.ReleaseGroup == null ? null : r.ReleaseGroup.Mbid,
+                PrimaryType = r.ReleaseGroup == null ? null : r.ReleaseGroup.PrimaryType,
+                SecondaryTypes = r.ReleaseGroup == null ? null : r.ReleaseGroup.SecondaryTypes,
+                FirstReleaseYear = r.ReleaseGroup == null ? null : r.ReleaseGroup.FirstReleaseYear,
+                Monitored = r.ReleaseGroup != null && r.ReleaseGroup.Monitored,
+                ReviewText = r.ReleaseGroup == null ? null : r.ReleaseGroup.ReviewText,
+                ReviewUrl = r.ReleaseGroup == null ? null : r.ReleaseGroup.ReviewUrl,
+                ReviewLookupUtc = r.ReleaseGroup == null ? null : r.ReleaseGroup.ReviewLookupUtc,
                 TrackCount = r.TrackCount ?? r.Tracks.Count,
                 Held = r.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
                 Files = r.Files.Count,
@@ -1247,6 +1484,7 @@ public static partial class CatalogueEndpoints
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new
                     {
+                        credit.ArtistId,
                         credit.CreditedAs,
                         credit.JoinPhrase,
                         Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
@@ -1254,6 +1492,8 @@ public static partial class CatalogueEndpoints
                     .ToList(),
                 Certainty = r.Files.Max(file => (int)file.AttributionOutcome),
                 Alternatives = r.Files.Max(file => file.EditionAlternatives),
+                LookedUp = r.Files.Max(file => file.ReleaseLookupUtc),
+                Probed = r.Files.Max(file => file.LastVerifiedUtc),
             })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1286,29 +1526,61 @@ public static partial class CatalogueEndpoints
                 // reads the absence and stays a flat list.
                 WorkTitle = track.Recording!.Work == null ? null : track.Recording.Work.Title,
 
+                // The recording's own billing line and typed links, which the
+                // credits below are rolled up from.
+                Billed = track.Recording.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new
+                    {
+                        credit.ArtistId,
+                        Name = credit.CreditedAs ?? credit.Artist!.LatinName ?? credit.Artist!.Name,
+                        credit.JoinPhrase,
+                    })
+                    .ToList(),
+                Links = track.Recording.Relationships
+                    .Where(link => link.ArtistId != null)
+                    .Select(link => new { ArtistId = link.ArtistId!.Value, link.Type, link.Attribute })
+                    .ToList(),
+                Writers = track.Recording.Work == null
+                    ? null
+                    : track.Recording.Work.Relationships
+                        .Where(link => link.ArtistId != null)
+                        .Select(link => new { ArtistId = link.ArtistId!.Value, link.Type })
+                        .ToList(),
+
                 // Files linked to *this track*, not merely holding the same
                 // recording. A recording the library owns twice — once here and
                 // once on a compilation — must not make both look held.
                 Files = db.MediaFiles
                     .Where(file => file.TrackId == track.Id)
                     .OrderBy(file => file.Path)
-                    .Select(file => new { file.Path, file.SizeBytes })
+                    .Select(file => new { file.Path, file.SizeBytes, file.Quality, file.Integrity })
                     .ToList(),
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        var credit = CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase)));
+
         var rows = tracks
-            .Select(track => new ReleaseTrackRow(
-                track.DiscNumber,
-                track.Position,
-                track.Number,
-                track.Title ?? string.Empty,
-                track.WorkTitle,
-                Format(track.Length),
-                track.RecordingId.Value,
-                track.Files.Count > 0,
-                [.. track.Files.Select(file => new FileRow(file.Path, file.SizeBytes))]))
+            .Select(track =>
+            {
+                var own = CreditLine(track.Billed.Select(billed => (billed.Name, billed.JoinPhrase)));
+
+                return new ReleaseTrackRow(
+                    track.DiscNumber,
+                    track.Position,
+                    track.Number,
+                    track.Title ?? string.Empty,
+                    track.WorkTitle,
+                    Format(track.Length),
+                    track.RecordingId.Value,
+                    track.Files.Count > 0,
+                    [.. track.Files.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
+                    // Only where it says something the album's line does not:
+                    // a guest on one song, a compilation's own artist.
+                    own is not null && own != credit ? own : null);
+            })
             .ToList();
 
         // Its own query rather than a column on the projection above: the
@@ -1321,24 +1593,223 @@ public static partial class CatalogueEndpoints
             .CountAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // Everybody the credits name, read once, for the names the links do not
+        // carry and the portraits the cards show.
+        var named = release.Artists.Select(a => a.ArtistId)
+            .Concat(tracks.SelectMany(track => track.Billed.Select(billed => billed.ArtistId)))
+            .Concat(tracks.SelectMany(track => track.Links.Select(link => link.ArtistId)))
+            .Concat(tracks.SelectMany(track => track.Writers?.Select(link => link.ArtistId) ?? []))
+            .Distinct()
+            .ToList();
+
+        var people = (await db.Artists
+            .AsNoTracking()
+            .Where(a => named.Contains(a.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .ToDictionary(a => a.Id, a => Describe(a, 0));
+
+        var credits = AlbumCredits(
+            release.Artists.Select(a => a.ArtistId).ToList(),
+            tracks.Select(track => new TrackCredits(
+                [.. track.Billed.Select(billed => billed.ArtistId)],
+                [.. track.Links.Select(link => (link.ArtistId, Role(link.Type, link.Attribute)))],
+                [.. (track.Writers ?? []).Select(link => (link.ArtistId, link.Type))]))
+                .ToList(),
+            people);
+
+        var cover = await db.ReleaseCovers
+            .AsNoTracking()
+            .Where(row => row.ReleaseId == releaseId)
+            .Select(row => new
+            {
+                Held = row.Bytes != null,
+                row.ArchiveImageId,
+                row.QobuzAlbumId,
+                row.SavedUtc,
+            })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Other albums the library holds under the first name on this one's
+        // billing line — the "more by" shelf.
+        var lead = release.Artists.Select(a => (ArtistId?)a.ArtistId).FirstOrDefault();
+
+        var moreBy = lead is not { } leadId
+            ? []
+            : await db.Releases
+                .AsNoTracking()
+                .Where(r => r.Id != releaseId
+                    && r.Files.Any()
+                    && r.Credits.Any(c => c.ArtistId == leadId))
+                .OrderBy(r => r.ReleasedYear ?? int.MaxValue)
+                .ThenBy(r => r.Title)
+                .Take(12)
+                .Select(r => new ReleaseCard(r.Id.Value, r.Mbid == null ? null : r.Mbid.Value.Value, r.Title, r.ReleasedYear))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        // The hero is the lead artist's banner, with their own corrections laid
+        // over it; no banner is a plain band, never a blown-up sleeve.
+        var leadRow = lead is not { } leading
+            ? null
+            : await db.Artists
+                .AsNoTracking()
+                .Where(a => a.Id == leading)
+                .Select(a => new { a.BannerUrl, a.EditsJson })
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        var edits = PersonEdits.Read(release.EditsJson);
+        string? Field(string field, string? provider) => PersonEdits.Apply(edits, field, provider);
+
+        var about = new ReleaseAbout(
+            release.ReleaseGroupId?.Value,
+            release.GroupMbid?.Value,
+            lead?.Value,
+            leadRow is null
+                ? null
+                : PersonEdits.Apply(PersonEdits.Read(leadRow.EditsJson), "banner", leadRow.BannerUrl),
+            Field("disambiguation", release.Disambiguation),
+            Field("primaryType", release.PrimaryType),
+            Split(Field("secondaryTypes", release.SecondaryTypes)),
+            Integer(Field("firstReleaseYear", Number(release.FirstReleaseYear))),
+            Integer(Field("releasedMonth", Number(release.ReleasedMonth))),
+            Integer(Field("releasedDay", Number(release.ReleasedDay))),
+            Field("label", release.Label),
+            Field("catalogNumber", release.CatalogNumber),
+            Field("barcode", release.Barcode),
+            release.Monitored,
+            cover is not { Held: true }
+                ? null
+                : cover.ArchiveImageId is not null ? "archive"
+                : cover.QobuzAlbumId is not null ? "qobuz"
+                : "upload",
+            cover?.SavedUtc,
+            Written(edits, "review", release.ReviewText, release.ReviewUrl),
+            release.ReviewLookupUtc,
+            release.LookedUp,
+            release.Probed,
+            [.. edits.Keys.Order(StringComparer.Ordinal)]);
+
         return TypedResults.Ok(new ReleaseDetailResponse(
-            new ReleaseSummary(
-                release.Id.Value,
-                release.Mbid?.Value,
-                release.Title,
-                CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
-                release.ReleasedYear,
-                release.Country,
-                release.Status,
-                release.MediumFormats,
-                release.DiscCount,
-                release.TrackCount,
-                release.Held,
-                release.Files,
-                ((ReleaseAttributionOutcome)release.Certainty).ToString(),
-                release.Alternatives),
+            WithEdits(
+                new ReleaseSummary(
+                    release.Id.Value,
+                    release.Mbid?.Value,
+                    release.Title,
+                    credit,
+                    release.ReleasedYear,
+                    release.Country,
+                    release.Status,
+                    release.MediumFormats,
+                    release.DiscCount,
+                    release.TrackCount,
+                    release.Held,
+                    release.Files,
+                    ((ReleaseAttributionOutcome)release.Certainty).ToString(),
+                    release.Alternatives),
+                release.EditsJson),
             rows,
-            contributable));
+            contributable,
+            about,
+            credits,
+            moreBy));
+    }
+
+    /// <summary>One track's credits, by artist, for <see cref="AlbumCredits"/>.</summary>
+    private sealed record TrackCredits(
+        IReadOnlyList<ArtistId> Billed,
+        IReadOnlyList<(ArtistId Artist, string Role)> Links,
+        IReadOnlyList<(ArtistId Artist, string Role)> Writers);
+
+    /// <summary>A relationship as a person would name the role.</summary>
+    /// <remarks>An ensemble's attribute is its artist type, so "Orchestra" reads as "orchestra".</remarks>
+    private static string Role(string type, string? attribute) =>
+        type == "ensemble" && attribute is { Length: > 0 }
+            ? attribute.ToLowerInvariant()
+            : type;
+
+    /// <summary>
+    /// The album's credits, rolled up from its tracks, one card per artist and group.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only what the catalogue stores</b>: the release's billing line, each
+    /// recording's billing line, the conductors and ensembles linked to a
+    /// recording, and the writers linked to its work. No instruments and no
+    /// production roles — MusicBrainz has them, and nothing here asks for them —
+    /// so there is never a Production group.
+    ///
+    /// The billed artists are Main and appear nowhere else, with whatever roles
+    /// the tracks give them; everyone else lands in Performers or Composition
+    /// with the running-order places they are credited on, or null where that
+    /// is every track.
+    /// </remarks>
+    private static List<AlbumCredit> AlbumCredits(
+        List<ArtistId> main,
+        List<TrackCredits> tracks,
+        Dictionary<ArtistId, ArtistSummary> people)
+    {
+        var roles = new Dictionary<(string Group, ArtistId Artist), (SortedSet<string> Roles, SortedSet<int> Places)>();
+
+        void Add(string group, ArtistId artist, string role, int place)
+        {
+            if (main.Contains(artist)) group = "Main";
+
+            if (!roles.TryGetValue((group, artist), out var entry))
+            {
+                roles[(group, artist)] = entry = (new SortedSet<string>(StringComparer.Ordinal), []);
+            }
+
+            entry.Roles.Add(role);
+            entry.Places.Add(place);
+        }
+
+        for (var index = 0; index < tracks.Count; index++)
+        {
+            var place = index + 1;
+            var track = tracks[index];
+
+            foreach (var artist in track.Billed) Add("Performers", artist, "credited", place);
+            foreach (var (artist, role) in track.Links) Add("Performers", artist, role, place);
+            foreach (var (artist, role) in track.Writers) Add("Composition", artist, role, place);
+        }
+
+        var credits = new List<AlbumCredit>();
+
+        foreach (var artist in main.Distinct())
+        {
+            if (!people.TryGetValue(artist, out var person)) continue;
+
+            var theirs = roles.GetValueOrDefault(("Main", artist)).Roles?
+                .Where(role => role != "credited")
+                .ToList() ?? [];
+
+            credits.Add(new AlbumCredit(
+                artist.Value,
+                person.Name,
+                theirs.Count == 0 ? "album artist" : string.Join(", ", theirs),
+                "Main",
+                null,
+                person.Portrait));
+        }
+
+        foreach (var group in new[] { "Performers", "Composition" })
+        {
+            credits.AddRange(roles
+                .Where(entry => entry.Key.Group == group && people.ContainsKey(entry.Key.Artist))
+                .Select(entry => new AlbumCredit(
+                    entry.Key.Artist.Value,
+                    people[entry.Key.Artist].Name,
+                    string.Join(", ", entry.Value.Roles),
+                    group,
+                    entry.Value.Places.Count == tracks.Count ? null : [.. entry.Value.Places],
+                    people[entry.Key.Artist].Portrait))
+                .OrderBy(credit => credit.Tracks is null ? 0 : 1)
+                .ThenBy(credit => credit.Name, StringComparer.CurrentCulture));
+        }
+
+        return credits;
     }
 
     /// <summary>
@@ -3834,25 +4305,31 @@ public static partial class CatalogueEndpoints
     /// have to know the delimiter, and then the wire format would be a fact
     /// about how the column happens to be stored.
     /// </remarks>
-    private static ArtistSummary Describe(Artist artist, int trackCount) =>
-        new(
+    /// <remarks>A person's corrections are laid over the providers' answers here — see <c>PersonEdits</c>.</remarks>
+    private static ArtistSummary Describe(Artist artist, int trackCount)
+    {
+        var edits = PersonEdits.Read(artist.EditsJson);
+        string? Field(string field, string? provider) => PersonEdits.Apply(edits, field, provider);
+
+        var name = Field("name", artist.Name) ?? artist.Name;
+
+        return new(
             artist.Id.Value,
-            artist.LatinName ?? artist.Name,
-            artist.SortName,
-            artist.Disambiguation,
-            artist.Type,
+            Field("latinName", artist.LatinName) ?? name,
+            Field("sortName", artist.SortName),
+            Field("disambiguation", artist.Disambiguation),
+            Field("type", artist.Type),
             trackCount,
-            artist.PortraitUrl,
-            artist.Country,
-            artist.Gender,
-            artist.BeganYear,
-            artist.EndedYear,
-            artist.Ended,
-            artist.Genres is { Length: > 0 } genres
-                ? genres.Split(", ", StringSplitOptions.RemoveEmptyEntries)
-                : [],
+            Field("portrait", artist.PortraitUrl),
+            Field("country", artist.Country),
+            Field("gender", artist.Gender),
+            Integer(Field("beganYear", Number(artist.BeganYear))),
+            Integer(Field("endedYear", Number(artist.EndedYear))),
+            Field("ended", Flag(artist.Ended)) == "true",
+            Split(Field("genres", artist.Genres)),
             artist.LookupUtc,
             artist.Followed);
+    }
 
     /// <summary>One artist's claim on one recording. Never leaves this file.</summary>
     private readonly record struct ArtistTrack(ArtistId ArtistId, RecordingId RecordingId);
@@ -3942,7 +4419,8 @@ public sealed record ArtistSummary(
 public sealed record ArtistDetailResponse(
     ArtistSummary Artist,
     IReadOnlyList<TrackRow> Tracks,
-    ArtistDiscography Discography);
+    ArtistDiscography Discography,
+    ArtistProfile Profile);
 
 /// <summary>What MusicBrainz says this artist released, against what is held.</summary>
 /// <param name="Known">
@@ -3950,6 +4428,12 @@ public sealed record ArtistDetailResponse(
 /// Zero on an artist nobody has followed, which is not the same as an artist
 /// who released nothing — <paramref name="FetchedAtUtc"/> is what tells them
 /// apart.
+///
+/// <b>MusicBrainz's figure and nothing else's.</b> A shop's inventory is counted
+/// in <paramref name="Discovered"/>, because the two are different claims and
+/// folding them made this number and <paramref name="Held"/> both wrong — on one
+/// artist here, 39 known against MusicBrainz's 26, under a sentence on the page
+/// naming MusicBrainz as the source.
 /// </param>
 /// <param name="Held">How many of those the library holds at least one file of.</param>
 /// <param name="FetchedAtUtc">
@@ -3964,11 +4448,55 @@ public sealed record ArtistDetailResponse(
 /// <paramref name="Held"/> travel beside it rather than being inferable from its
 /// length.
 /// </param>
+/// <remarks>
+/// <b>One source, and no shop rows.</b> What a shop stocks was briefly a second
+/// list here and a second list is a duplicate however it is presented: the two
+/// catalogues name one record differently and nothing they share settles which
+/// rows are the same. Whether a record can be bought is the acquire shelf's
+/// question, and `DiscoveredRecords` is kept to enrich these rows rather than to
+/// add to them.
+/// </remarks>
 public sealed record ArtistDiscography(
     int Known,
     int Held,
     DateTimeOffset? FetchedAtUtc,
     IReadOnlyList<DiscographyRow> Missing);
+
+/// <summary>One record a shop says the artist made that MusicBrainz has not named.</summary>
+/// <remarks>
+/// <b>A separate list from <c>Missing</c> rather than more nullable columns on
+/// it, because the two are different kinds of claim.</b> A row there is
+/// MusicBrainz's: it carries an MBID, a type and a sleeve the Cover Art Archive
+/// holds against that very record. A row here is a shop's inventory — no MBID
+/// to be had, no type stated, and a picture from the shop's own CDN. Folded into
+/// one list they were indistinguishable on the wire, which is how
+/// <c>DiscographyRow.Mbid</c> came to be null on 13 of one artist's 31 rows
+/// under a doc saying null was not expected.
+/// </remarks>
+/// <param name="Id">This row's own id — what <c>SetDiscoveredRecordMonitored</c> takes.</param>
+/// <param name="Source">Which shop said so.</param>
+/// <param name="SourceId">Their id for it, for a caller that wants to go and buy it.</param>
+/// <param name="CoverUrl">
+/// The sleeve as the shop serves it, fetched by the browser rather than proxied
+/// — the same bargain <c>releaseArt</c> takes against the Cover Art Archive.
+/// </param>
+/// <param name="TrackCount">What the shop says, or null where it did not say.</param>
+/// <param name="Monitored">Somebody wants this record. See <c>ReleaseGroup.Monitored</c>.</param>
+/// <param name="Editions">
+/// Rows the shop listed for this record, 1 where it listed one. A shop sells a
+/// record and its bonus-track reissue as two products; folding them is
+/// <see cref="Discography.Collapse"/>'s job and this is what it folded.
+/// </param>
+public sealed record DiscoveredRow(
+    Guid Id,
+    string Source,
+    string SourceId,
+    string Title,
+    int? Year,
+    string? CoverUrl,
+    int? TrackCount,
+    bool Monitored,
+    int Editions);
 
 /// <summary>One record the artist made that the library has no file of.</summary>
 /// <param name="Mbid">
@@ -3982,6 +4510,13 @@ public sealed record ArtistDiscography(
 /// where the flag is set. False on everything the first browse wrote — see
 /// <c>ReleaseGroup.Monitored</c> for why the default decides the feature.
 /// </param>
+/// <param name="Editions">
+/// Recordings MusicBrainz names under this title and type, 1 where it names
+/// one. Vivaldi's shelf carries 132 rows called "The Four Seasons" — different
+/// performances, correctly stored, indistinguishable on screen. The count is
+/// printed rather than the rows dropped silently: somebody after a particular
+/// performance has to be told the others are there.
+/// </param>
 public sealed record DiscographyRow(
     Guid Id,
     Guid? Mbid,
@@ -3989,7 +4524,8 @@ public sealed record DiscographyRow(
     string? PrimaryType,
     IReadOnlyList<string> SecondaryTypes,
     int? FirstReleaseYear,
-    bool Monitored);
+    bool Monitored,
+    int Editions);
 
 /// <param name="Follow">True to follow, false to unfollow.</param>
 /// <remarks>
@@ -4052,7 +4588,14 @@ public sealed record TrackRow(
     IReadOnlyList<string> Roles,
     TrackAlbum? Album,
     string Folder,
-    IReadOnlyList<FileRow> Files);
+    IReadOnlyList<FileRow> Files,
+
+    /// <summary>
+    /// Who performs it, where that is somebody other than this artist — the
+    /// rest of the billing line, then ensembles, then conductors. What a
+    /// composer's page prints beside each recording of their music.
+    /// </summary>
+    string? Performers);
 
 /// <summary>The album a track was attributed to, as much of it as a row needs.</summary>
 /// <param name="Mbid">
@@ -4110,7 +4653,17 @@ public sealed record TrackAlbum(
 /// <summary>A group the artist belongs to, as much of it as a shelf heading needs.</summary>
 public sealed record TrackBand(Guid Id, string Name);
 
-public sealed record FileRow(string Path, long SizeBytes);
+/// <param name="Quality">What the probe pass measured, or null until it has decoded the file.</param>
+/// <param name="Integrity">Unchecked, Intact, Corrupt, Truncated or Unreadable.</param>
+public sealed record FileRow(string Path, long SizeBytes, FileQuality? Quality, string Integrity);
+
+/// <summary>A probed file's format, as much as a badge needs.</summary>
+public sealed record FileQuality(
+    string Codec,
+    bool Lossless,
+    int? BitDepth,
+    int SampleRateHz,
+    int BitrateKbps);
 
 /// <summary>A page of releases, with the total the filter matched.</summary>
 public sealed record ReleaseListResponse(int Total, IReadOnlyList<ReleaseSummary> Items);
@@ -4166,7 +4719,57 @@ public sealed record ReleaseSummary(
 public sealed record ReleaseDetailResponse(
     ReleaseSummary Release,
     IReadOnlyList<ReleaseTrackRow> Tracks,
-    int Contributable);
+    int Contributable,
+    ReleaseAbout About,
+    IReadOnlyList<AlbumCredit> Credits,
+    IReadOnlyList<ReleaseCard> MoreBy);
+
+/// <summary>Everything the album page shows that the list does not need.</summary>
+/// <param name="GroupId">The release group, which is what "Want" marks.</param>
+/// <param name="ArtistId">The first artist on the billing line, whose other albums "More by" lists.</param>
+/// <param name="ArtistBanner">That artist's banner, the page's hero; null draws a plain band.</param>
+/// <param name="CoverSource">"archive", "qobuz" or "upload"; null when there is no picture.</param>
+/// <param name="CoverLookupUtc">When the stored picture or the "neither has one" stamp was written; null when nobody has looked.</param>
+/// <param name="ReleaseLookupUtc">The latest attribution stamp among its files.</param>
+/// <param name="ProbedUtc">The latest probe among its files.</param>
+/// <param name="Edited">The fields a person changed.</param>
+public sealed record ReleaseAbout(
+    Guid? GroupId,
+    Guid? GroupMbid,
+    Guid? ArtistId,
+    string? ArtistBanner,
+    string? Disambiguation,
+    string? PrimaryType,
+    IReadOnlyList<string> SecondaryTypes,
+    int? FirstReleaseYear,
+    int? ReleasedMonth,
+    int? ReleasedDay,
+    string? Label,
+    string? CatalogNumber,
+    string? Barcode,
+    bool Monitored,
+    string? CoverSource,
+    DateTimeOffset? CoverLookupUtc,
+    WrittenText? Review,
+    DateTimeOffset? ReviewLookupUtc,
+    DateTimeOffset? ReleaseLookupUtc,
+    DateTimeOffset? ProbedUtc,
+    IReadOnlyList<string> Edited);
+
+/// <summary>One artist's part in an album.</summary>
+/// <param name="Role">"album artist", "credited", "conductor", "orchestra", "composer" — joined where several.</param>
+/// <param name="Group">Main, Performers or Composition.</param>
+/// <param name="Tracks">1-based places in the running order; null for every track.</param>
+public sealed record AlbumCredit(
+    Guid ArtistId,
+    string Name,
+    string Role,
+    string Group,
+    IReadOnlyList<int>? Tracks,
+    string? Portrait);
+
+/// <summary>Another album, as much as a card needs.</summary>
+public sealed record ReleaseCard(Guid Id, Guid? Mbid, string Title, int? Year);
 
 /// <param name="Number">The printed number, which is not always the position: "A1", "12a".</param>
 /// <param name="WorkTitle">
@@ -4183,7 +4786,10 @@ public sealed record ReleaseTrackRow(
     string? Duration,
     Guid RecordingId,
     bool Held,
-    IReadOnlyList<FileRow> Files);
+    IReadOnlyList<FileRow> Files,
+
+    /// <summary>The recording's own billing line, where it differs from the album's.</summary>
+    string? Artist);
 
 /// <summary>
 /// What the folders make of the attribution.

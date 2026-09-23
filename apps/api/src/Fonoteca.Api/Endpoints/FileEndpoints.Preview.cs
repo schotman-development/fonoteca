@@ -103,7 +103,7 @@ public static partial class FileEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
-    private static Results<PhysicalFileHttpResult, NotFound, ProblemHttpResult> GetContent(
+    internal static Results<PhysicalFileHttpResult, NotFound, ProblemHttpResult> GetContent(
         FileSystemAudioFileStore store,
         HttpContext context,
         string path)
@@ -199,7 +199,7 @@ public static partial class FileEndpoints
             Note: reading?.Note));
     }
 
-    private static async Task<Results<FileStreamHttpResult, FileContentHttpResult, NotFound, ProblemHttpResult>> GetArt(
+    internal static async Task<Results<FileStreamHttpResult, FileContentHttpResult, NotFound, ProblemHttpResult>> GetArt(
         FileSystemAudioFileStore store,
         AudioFileDescriber describer,
         HttpContext context,

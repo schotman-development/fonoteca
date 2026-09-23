@@ -1,4 +1,4 @@
-import type { components } from '@fonoteca/api-client'
+import { type components, describeError } from '@fonoteca/api-client'
 import {
   Badge,
   Button,
@@ -883,8 +883,13 @@ function Missing({
  * without one would also be invisible to the roving tab stop.
  *
  * The sleeve comes from the Cover Art Archive keyed on the *release group*,
- * which is the only key there is: no pressing has been chosen, because none has
- * been owned.
+ * which is the only key there is for a record MusicBrainz names: no pressing has
+ * been chosen, because none has been owned.
+ *
+ * **A row a shop raised has no MBID to key on and carries its own sleeve
+ * instead.** The archive cannot answer about a record it has never heard of, so
+ * without that URL every one of these renders a monogram — measured at 13 of one
+ * artist's 31 rows before the shop's cover was kept.
  */
 function MissingTile({
   record,
@@ -893,41 +898,154 @@ function MissingTile({
   readonly record: MissingRecord
   readonly onSearch: (record: MissingRecord) => void
 }) {
-  const image = record.mbid != null ? releaseGroupArt(record.mbid) : null
+  const image = record.mbid != null ? releaseGroupArt(record.mbid) : record.coverUrl
 
   return (
-    <CatalogueCard
-      variant="album"
-      title={record.title}
-      {...(image != null ? { image } : {})}
-      subtitle={[record.artist, record.year].filter(Boolean).join(' · ')}
-      meta={
-        <span className={styles.metaRow}>
-          <Stack gap={4} wrap>
-            {/*
+    <div className={styles.unwantable}>
+      <CatalogueCard
+        variant="album"
+        title={record.title}
+        {...(image != null ? { image } : {})}
+        subtitle={[record.artist, record.year].filter(Boolean).join(' · ')}
+        meta={
+          <span className={styles.metaRow}>
+            <Stack gap={4} wrap>
+              {/*
               An untyped group is one `Discography.IsGap` lets through rather
               than one it recognised, and on an obscure artist that is most of
               them — so the tile says which it is instead of printing nothing.
             */}
-            <Badge tone="neutral" size="sm">
-              {record.primaryType ?? 'Untyped'}
-            </Badge>
-
-            {record.secondaryTypes.map((type) => (
-              <Badge key={type} tone="neutral" size="sm">
-                {type}
+              {/*
+              A shop's row is named by its source rather than typed: the shop
+              states no type at all, and "Untyped" would turn that silence into
+              a category. An untyped *MusicBrainz* group is a different thing —
+              a record nobody has classified yet — and still says so.
+            */}
+              <Badge tone="neutral" size="sm">
+                {record.source ?? record.primaryType ?? 'Untyped'}
               </Badge>
-            ))}
-          </Stack>
-        </span>
+
+              {record.secondaryTypes.map((type) => (
+                <Badge key={type} tone="neutral" size="sm">
+                  {type}
+                </Badge>
+              ))}
+            </Stack>
+          </span>
+        }
+        render={(props) => (
+          <button {...props} type="button" onClick={() => onSearch(record)}>
+            {props.children}
+            <VisuallyHidden> Search Qobuz for this record.</VisuallyHidden>
+          </button>
+        )}
+      />
+
+      {/*
+        After the card, which is both where it reads and the order the keyboard
+        wants: `Shelf` collects its roving tab stops with
+        `querySelectorAll('button')` in DOM order, so rendering this first made
+        the dismissal the shelf's opening tab stop instead of the cover — the
+        press the screen exists for.
+      */}
+      <UnwantButton record={record} />
+    </div>
+  )
+}
+
+/**
+ * Take a record off the wanted list from the shelf it is cluttering.
+ *
+ * **The shelf is the only place the unwanted record is in front of you.** The
+ * artist page can already mark and unmark, but finding the one row you do not
+ * care about means opening the artist it belongs to — and the reason to unmark
+ * it is that it is on this screen, in the way.
+ *
+ * `Discography.IsNewRelease` puts a record here without being asked, so some of
+ * what lands is a live album, a reissue or a record somebody simply does not
+ * want. `Monitored` is a person's answer (rule 4) and nothing recomputes it, so
+ * unwanting is final in the only sense that matters: no pass will put it back.
+ *
+ * **It toggles rather than removing the tile, and that is the cheap way to get
+ * undo.** `useApiQuery` has no invalidation, so dropping the row would mean
+ * holding a dismissed set here and correcting two counts in `Missing`'s sentence
+ * to match — more state than the feature is worth, and no way back from a
+ * mis-click. The row is gone on the next load, which is when the numbers above
+ * it are right again anyway.
+ *
+ * **Which endpoint depends on who named the record, and the id is the same field
+ * either way.** `MissingRecord.releaseGroupId` carries a `DiscoveredRecordId`
+ * when `source` is set — the shelf interleaves both halves and the wire shape is
+ * one record — so reading `source` is not a display detail here, it is what says
+ * which table the id belongs to.
+ */
+function UnwantButton({ record }: { readonly record: MissingRecord }) {
+  const [wanted, setWanted] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const toggle = async () => {
+    const next = !wanted
+
+    setBusy(true)
+
+    try {
+      if (record.source != null) {
+        await api.post('/api/catalogue/discovered/{id}/monitor', {
+          params: { path: { id: record.releaseGroupId } },
+          json: { monitor: next },
+        })
+      } else {
+        await api.post('/api/catalogue/release-groups/{id}/monitor', {
+          params: { path: { id: record.releaseGroupId } },
+          json: { monitor: next },
+        })
       }
-      render={(props) => (
-        <button {...props} type="button" onClick={() => onSearch(record)}>
-          {props.children}
-          <VisuallyHidden> Search Qobuz for this record.</VisuallyHidden>
-        </button>
-      )}
-    />
+
+      setWanted(next)
+      setError(null)
+    } catch (cause) {
+      setError(describeError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <span className={styles.unwant}>
+      <Button
+        size="sm"
+        variant={wanted ? 'secondary' : 'primary'}
+        disabled={busy}
+        /*
+          The record is in the name because a shelf of these is otherwise a row
+          of buttons all called "Not interested" — the same lesson the artist
+          page's `MonitorButton` states for its column of them.
+        */
+        aria-label={`${wanted ? 'Stop wanting' : 'Want'} ${record.title} by ${record.artist}`}
+        onClick={() => void toggle()}
+      >
+        {/*
+          "Undo" rather than "Wanted", because the second state is transient and
+          the only reason to be in it is a mis-click: the row is off the list
+          already and will be gone from this shelf on the next load. A label
+          naming the state leaves somebody working out which way the button
+          points; one naming the action does not.
+        */}
+        {wanted ? 'Not interested' : 'Undo'}
+      </Button>
+
+      {/*
+        `role="alert"` because the press is the only thing that produces this and
+        the button gives no other sign of having failed — without it somebody
+        not looking at this one tile in a scrolling shelf is told nothing at all.
+      */}
+      {error != null ? (
+        <Text size="xs" tone="warning" role="alert">
+          {error}
+        </Text>
+      ) : null}
+    </span>
   )
 }
 

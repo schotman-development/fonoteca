@@ -75,89 +75,49 @@ export function releaseGroupArt(mbid: string): string {
 }
 
 /**
- * A photograph of the artist, at a size worth downloading.
+ * Where a portrait comes from now: this application, not the provider.
  *
- * **Fetched by the browser, not proxied**, for `releaseArt`'s reason and against
- * the same kind of host: these are the providers' own CDNs, and a proxy would
- * buy one thing at the cost of an endpoint, a cache and a rate limit to look
- * after.
+ * **The endpoint answers from the shelf first.** An uploaded picture, then
+ * `artist.*` beside the artist's own records, then a redirect to whatever a
+ * provider found. What that buys is the thing this whole feature began as: the
+ * page and every other player reading the same disk show the same face, because
+ * they are reading the same file.
  *
- * **Three sources reach this, and the differences show.** Qobuz serves a press
- * photo: square, cropped to the faces, and what this is for. TheAudioDB serves
- * a contributor's artist thumbnail, which it keeps in a different field from
- * album art — measured on this library, 15 of 16 are genuine photographs.
- * Wikidata serves whatever Commons holds, which is often a wide concert shot:
- * measured, AC/DC's was a photograph of the Olympic Stadium.
+ * **`width` is forwarded rather than applied here.** Which rendition a provider
+ * has is the provider's business, and it is written down once, in
+ * `PortraitRendition` — Commons honours `?width=`, Qobuz puts the rendition in
+ * the path, TheAudioDB has none. A second opinion in TypeScript would fail as a
+ * 404 from somebody's CDN, which reads as a missing photograph rather than as a
+ * bug. The measurement that made it worth doing at all is on that class: a grid
+ * of unsized Qobuz `large` files was **39.7 MB of images drawn into 112px
+ * circles**.
  *
- * **No source stores a display-sized image, and this is where that is fixed.**
- * The stored URL is the biggest rendition, because that is the one that keeps
- * the choice open; every box this application draws is small. Measured in
- * Chromium: a tile is 112px and the artist page's portrait is *86*.
- *
- * They resize different ways and all of them are handled by width alone, so a
- * caller asks for a size and never for a provider:
- *
- * - Commons honours `?width=`. Its originals are frequently several megabytes of
- *   scanned photograph — one is 972 KB whole and 28 KB at 250.
- * - Qobuz puts the rendition in the path. `large` is not a fixed size: measured
- *   across 251 of them the median is 211 KB and the largest is **13.3 MB at
- *   4480x6720**, so a grid of them was 39.7 MB of images into 112px circles.
- *   `small` is 129-438px and 3-20 KB, which is the whole page in about the size
- *   of one of the old ones.
- * - TheAudioDB offers no renditions at all and falls through unchanged. Their
- *   thumbnails are already small, which is why that costs nothing.
- */
-export function artistPortrait(url: string, width = 250): string {
-  const sized = new URL(url)
-
-  if (sized.pathname.startsWith('/wiki/Special:FilePath/')) {
-    sized.searchParams.set('width', String(width))
-    return sized.toString()
-  }
-
-  // Qobuz. `small` covers a 112px circle on a 2x display at the low end of its
-  // range and comfortably above it at the high end; anything bigger than that is
-  // for a box this application does not currently draw, and `medium` is the
-  // honest answer there rather than the 13 MB one.
-  const rendition = width <= 400 ? 'small' : 'medium'
-
-  return url.replace('/images/artists/covers/large/', `/images/artists/covers/${rendition}/`)
-}
-
-/**
- * The picture for an artist.
- *
- * **An album sleeve is not one, and it used to be the fallback here.** The
- * reasoning was that a record of theirs is the nearest honest thing when no
+ * **An album sleeve is not a portrait, and it used to be the fallback here.**
+ * The reasoning was that a record of theirs is the nearest honest thing when no
  * photograph exists — and on the page it read as the opposite, because the
- * artists reaching the fallback are by definition the ones the preferred
- * sources have never heard of, which is very nearly the same set as the artists
- * who are not on the front of their own sleeves. So the tile showing a face was
- * a household name and the tile showing a cover was a session player, a
- * conductor or a guest, wearing a picture of somebody else's album. A monogram
- * says "no picture"; a sleeve says "this is them", and is wrong.
- *
- * Three sources now stand behind `portrait` — one searched by name and two
- * looked up by MusicBrainz id — which is what makes dropping the fallback
- * affordable rather than merely correct.
- *
- * A fourth was measured and left out for the same reason the fallback was:
- * Deezer covers the most artists and **16 of the 20 pictures it supplied here
- * were album covers**, because its artist image is whatever the label gave it.
+ * artists reaching the fallback are by definition the ones the preferred sources
+ * have never heard of, which is very nearly the same set as the artists who are
+ * not on the front of their own sleeves. A monogram says "no picture"; a sleeve
+ * says "this is them", and is wrong. The endpoint answers 404 and the box draws
+ * its monogram.
  *
  * Lives here rather than on either page because there are two of them — a tile
- * and the page it opens — and two copies of "photograph, then nothing" is how
- * one ends up showing something the other does not. That is the one
- * disagreement a person is guaranteed to notice, because they get there by
- * clicking the first.
- *
- * Returns the URL or nothing, rather than a props object, because the two
- * callers spell the prop differently: `CatalogueCard` takes `image` and
- * `Artwork` takes `src`.
+ * and the page it opens — and two copies of this is how one ends up showing
+ * something the other does not. That is the one disagreement a person is
+ * guaranteed to notice, because they get there by clicking the first.
  */
-export function artistImageUrl(
-  artist: { readonly portrait?: string | null },
-  width?: number,
-): string | undefined {
-  return artist.portrait != null ? artistPortrait(artist.portrait, width) : undefined
+export function artistBannerUrl(artist: { readonly id: string }): string {
+  // No width: a banner is drawn at the full width of the page, so the biggest
+  // rendition is the right one and `PortraitRendition`'s default would shrink it.
+  return `${apiBaseUrl}/api/catalogue/artists/${artist.id}/banner?width=1600`
+}
+
+export function artistImageUrl(artist: { readonly id: string }, width?: number): string {
+  const sized = width != null ? `?width=${width}` : ''
+
+  // Absolute, through `apiBaseUrl`, like every other picture this file builds:
+  // the API is a separate origin in development, and a relative path is served
+  // by Vite — which answers 200 with `index.html`, so the box falls back to its
+  // monogram and nothing anywhere reports an error.
+  return `${apiBaseUrl}/api/catalogue/artists/${artist.id}/portrait${sized}`
 }

@@ -177,23 +177,12 @@ public sealed class QobuzCovers(
 
     /// <summary>A barcode in the one form two catalogues can be compared in.</summary>
     /// <remarks>
-    /// <b>Leading zeros are a formatting difference, not a different record.</b>
-    /// The same album is a 12-digit UPC in one catalogue and the 13-digit EAN of
-    /// it — the same digits behind a <c>0</c> — in the other, and MusicBrainz
-    /// holds both shapes. Compared literally, the key that was supposed to make
-    /// this safe fails on exactly the releases it was reached for.
-    ///
-    /// Non-digits go for the same reason: a barcode typed with spaces or hyphens
-    /// is the same barcode. Anything left holding no digits is not one.
+    /// <see cref="Barcodes"/>' rule, which was written here and moved to the
+    /// domain when the discography shelf needed the same comparison between the
+    /// same two catalogues. Kept as a named local so the call sites below still
+    /// read as a question about a barcode.
     /// </remarks>
-    private static string? Barcode(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-
-        var digits = new string([.. value.Where(char.IsAsciiDigit)]).TrimStart('0');
-
-        return digits.Length == 0 ? null : digits;
-    }
+    private static string? Barcode(string? value) => Barcodes.Normalise(value);
 
     /// <summary>The year out of a <c>YYYY-MM-DD</c>, or null.</summary>
     /// <remarks>

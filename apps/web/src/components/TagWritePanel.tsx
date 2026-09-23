@@ -48,11 +48,14 @@ export function TagWritePanel({
   scope,
   label,
   onWritten,
+  size = 'md',
 }: {
   readonly scope?: TagWriteScope
   /** What the button is about, for the confirmation sentence. */
   readonly label?: string
   readonly onWritten?: () => void
+  /** The button's size, which is the page's choice rather than the scope's. */
+  readonly size?: 'sm' | 'md'
 }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [started, setStarted] = useState<string | null>(null)
@@ -162,7 +165,7 @@ export function TagWritePanel({
       <Stack gap={8} align="center" wrap>
         <Button
           variant={scope === undefined ? 'primary' : 'secondary'}
-          size={scope === undefined ? 'md' : 'sm'}
+          size={size}
           onClick={() => void write()}
           disabled={busy || running}
         >
@@ -283,8 +286,11 @@ function Result({ summary }: { readonly summary: Summary }) {
           ? ` · ${summary.coversWritten.toLocaleString()} album${
               summary.coversWritten === 1 ? '' : 's'
             } got a cover`
-          : ''}{' '}
-        · took {formatDuration(summary.durationMilliseconds)}
+          : ''}
+        {/* Only the artist button writes one, and only onto the shelf named for
+            them, so this is 1 or nothing rather than a count worth spelling. */}
+        {summary.portraitsWritten > 0 ? ' · the artist got a picture' : ''} · took{' '}
+        {formatDuration(summary.durationMilliseconds)}
         {summary.cancelled ? ' · stopped early' : ''}
       </Text>
 

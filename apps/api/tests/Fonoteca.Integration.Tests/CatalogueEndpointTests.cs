@@ -9,6 +9,7 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fonoteca.Integration.Tests;
 
@@ -238,6 +239,82 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(after);
         Assert.DoesNotContain(after.Items, a => a.Id == _seed.Orphan);
+    }
+
+    /// <summary>
+    /// The date "new release" is measured from is written once and survives a
+    /// re-follow.
+    /// </summary>
+    /// <remarks>
+    /// <b>The <c>??=</c> is the whole of the unfollow story, and nothing else
+    /// tests it.</b> <c>Discography.IsNewRelease</c> compares a record's year
+    /// against <c>Artist.FollowedUtc</c>, so moving that date forward on a second
+    /// follow would silently reclassify everything released in between as back
+    /// catalogue — the records somebody re-followed them to hear about. Written
+    /// as a plain assignment this test fails and no other does.
+    ///
+    /// Unfollowing is asserted not to clear it for the same reason, and because
+    /// a cleared date reads as "nobody is watching", which monitors nothing at
+    /// all until the next follow.
+    /// </remarks>
+    [Fact]
+    public async Task TheFollowDateIsWrittenOnceAndOutlivesAReFollow()
+    {
+        var client = _factory.CreateClient();
+
+        var follow = new Uri(
+            $"/api/catalogue/artists/{_seed.Orphan}/follow", UriKind.Relative);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await client.PostAsJsonAsync(follow, new ArtistFollowRequest(true), Token))
+                .StatusCode);
+
+        DateTimeOffset first;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var artist = await db.Artists
+                .AsNoTracking()
+                .SingleAsync(row => row.Id == new ArtistId(_seed.Orphan), Token);
+
+            Assert.True(artist.Followed);
+            first = Assert.NotNull(artist.FollowedUtc);
+        }
+
+        // Unfollow, then follow again — the toggle a person makes by accident,
+        // and the one a year away from this is made on purpose.
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await client.PostAsJsonAsync(follow, new ArtistFollowRequest(false), Token))
+                .StatusCode);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var artist = await db.Artists
+                .AsNoTracking()
+                .SingleAsync(row => row.Id == new ArtistId(_seed.Orphan), Token);
+
+            // Unfollowing keeps the date. Clearing it would read as "nobody is
+            // watching" and monitor nothing.
+            Assert.False(artist.Followed);
+            Assert.Equal(first, artist.FollowedUtc);
+        }
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await client.PostAsJsonAsync(follow, new ArtistFollowRequest(true), Token))
+                .StatusCode);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var artist = await db.Artists
+                .AsNoTracking()
+                .SingleAsync(row => row.Id == new ArtistId(_seed.Orphan), Token);
+
+            Assert.True(artist.Followed);
+            Assert.Equal(first, artist.FollowedUtc);
+        }
     }
 
     /// <summary>
@@ -602,6 +679,64 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         }
     }
 
+    /// <summary>
+    /// What a shop stocks never reaches the artist page, on any shelf.
+    /// </summary>
+    /// <remarks>
+    /// <b>A stated decision, pinned here because it is invisible in the code
+    /// that no longer exists.</b> The shop's answers were briefly a second
+    /// shelf on this page and a second shelf is a duplicate however it is
+    /// dressed: the two catalogues name one record differently, and nothing
+    /// they share settles which rows are the same — measured on the live
+    /// library, shop barcodes match the catalogue's <b>106</b> times in
+    /// <b>94,660</b>, because a shop sells the digital edition under its own
+    /// UPC.
+    ///
+    /// So this page answers one question from one source. Whether a record can
+    /// be bought belongs to the acquire shelf, which is where wanting one is
+    /// expressed. <c>DiscoveredRecords</c> is still written and still read —
+    /// asserted below, because the row surviving is the point: it is the raw
+    /// material for enriching these rows with what a shop knows and MusicBrainz
+    /// does not, and deleting it would be the one-way door this table was built
+    /// to replace.
+    /// </remarks>
+    [Fact]
+    public async Task WhatAShopStocksIsNotOnTheArtistPage()
+    {
+        using var client = _factory!.CreateClient();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.DiscoveredRecords.Add(new DiscoveredRecord
+            {
+                Id = DiscoveredRecordId.New(),
+                ArtistId = new ArtistId(_seed.Bonamassa),
+                Source = "qobuz",
+                SourceId = "shop-1",
+                Title = "Blues DeLuxe",
+                Year = 2004,
+                Barcode = "028947635222",
+                TrackCount = 11,
+                FoundUtc = DateTimeOffset.UtcNow,
+                SeenUtc = DateTimeOffset.UtcNow,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var page = await ArtistAsync(client, _seed.Bonamassa);
+
+        // Not as a row of its own, and not folded into MusicBrainz's list
+        // either — the shelf is `Missing` and nothing else.
+        Assert.DoesNotContain(page.Discography.Missing, row => row.Title == "Blues DeLuxe");
+
+        // And the shop's answer is kept, unretracted.
+        await using (var kept = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.True(await kept.DiscoveredRecords.AnyAsync(Token));
+        }
+    }
+
     private static async Task<ArtistDetailResponse> ArtistAsync(HttpClient client, Guid id)
     {
         var body = await client.GetFromJsonAsync<ArtistDetailResponse>(
@@ -856,6 +991,278 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         var incomplete = Assert.Single(report.Incomplete);
         Assert.Equal(2, incomplete.Held);
         Assert.Equal(3, incomplete.TrackCount);
+    }
+
+    /// <summary>
+    /// The album's credits are rolled up from its tracks: the billing line is
+    /// Main with the roles the tracks give it, and everyone else is placed.
+    /// </summary>
+    /// <remarks>
+    /// The symphony is billed to Karajan, who also conducts both movements, so
+    /// he is Main as "conductor"; the orchestra and the composer are on every
+    /// track, which is a null place list rather than [1, 2]. A conductor added
+    /// to one track of Seesaw lands in Performers with that one place.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumsCreditsAreRolledUpFromItsTracks()
+    {
+        using var client = _factory!.CreateClient();
+
+        var symphony = await ReleaseAsync(client, _seed.Symphony);
+
+        var main = Assert.Single(symphony.Credits, credit => credit.Group == "Main");
+        Assert.Equal(_seed.Karajan, main.ArtistId);
+        Assert.Equal("conductor", main.Role);
+        Assert.Null(main.Tracks);
+
+        var orchestra = Assert.Single(symphony.Credits, credit => credit.Group == "Performers");
+        Assert.Equal(_seed.Berliner, orchestra.ArtistId);
+        Assert.Null(orchestra.Tracks);
+
+        var composer = Assert.Single(symphony.Credits, credit => credit.Group == "Composition");
+        Assert.Equal(_seed.Mozart, composer.ArtistId);
+        Assert.Equal("composer", composer.Role);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var fire = await db.Recordings.SingleAsync(r => r.Title == "Close to My Fire", Token);
+            var solti = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Solti), Token);
+
+            db.Relationships.Add(Link(solti, "conductor", recording: fire));
+            await db.SaveChangesAsync(Token);
+        }
+
+        var seesaw = await ReleaseAsync(client, _seed.Seesaw);
+
+        var guest = Assert.Single(seesaw.Credits, credit => credit.ArtistId == _seed.Solti);
+        Assert.Equal("Performers", guest.Group);
+        Assert.Equal([2], guest.Tracks);
+
+        // The duet's own billing line is the album's, so the row says nothing extra.
+        Assert.Null(seesaw.Tracks[0].Artist);
+    }
+
+    /// <summary>The album page's facts, including what nobody has asked about yet.</summary>
+    [Fact]
+    public async Task AnAlbumPageCarriesItsGroupAndWhatIsNotYetAsked()
+    {
+        using var client = _factory!.CreateClient();
+
+        var symphony = await ReleaseAsync(client, _seed.Symphony);
+
+        Assert.NotNull(symphony.About.GroupId);
+        Assert.NotNull(symphony.About.GroupMbid);
+        Assert.Equal(_seed.Karajan, symphony.About.ArtistId);
+        Assert.Equal("Album", symphony.About.PrimaryType);
+        Assert.Null(symphony.About.Review);
+        Assert.Null(symphony.About.ReviewLookupUtc);
+        Assert.Null(symphony.About.CoverSource);
+        Assert.Null(symphony.About.CoverLookupUtc);
+        Assert.Empty(symphony.About.Edited);
+        Assert.All(symphony.Tracks.SelectMany(track => track.Files), file => Assert.Null(file.Quality));
+        Assert.All(symphony.Tracks.SelectMany(track => track.Files), file => Assert.Equal("Unchecked", file.Integrity));
+        Assert.Null(symphony.About.ArtistBanner);
+
+        // The hero is the lead artist's banner.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var karajan = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Karajan), Token);
+            karajan.BannerUrl = "https://r2.theaudiodb.com/images/media/artist/fanart/karajan.jpg";
+            await db.SaveChangesAsync(Token);
+        }
+
+        var bannered = await ReleaseAsync(client, _seed.Symphony);
+        Assert.EndsWith("fanart/karajan.jpg", bannered.About.ArtistBanner, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A composer's page says who plays each recording: ensembles, then conductors.
+    /// </summary>
+    [Fact]
+    public async Task AComposersTracksSayWhoPerformsThem()
+    {
+        using var client = _factory!.CreateClient();
+
+        var mozart = await ArtistAsync(client, _seed.Mozart);
+
+        Assert.All(
+            mozart.Tracks,
+            track => Assert.Equal("Berliner Philharmoniker, Herbert von Karajan", track.Performers));
+
+        // And on the conductor's own page, the performers are everyone but him.
+        var karajan = await ArtistAsync(client, _seed.Karajan);
+
+        Assert.All(karajan.Tracks, track => Assert.Equal("Berliner Philharmoniker", track.Performers));
+    }
+
+    /// <summary>Membership reads both ways: a group's members, a person's groups.</summary>
+    [Fact]
+    public async Task MembershipIsShownOnBothPages()
+    {
+        using var client = _factory!.CreateClient();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Relationships.Add(new Relationship
+            {
+                Id = Guid.CreateVersion7(),
+                SourceType = RelationshipTargets.Artist,
+                SourceId = _seed.Karajan,
+                TargetType = RelationshipTargets.Artist,
+                TargetId = _seed.Berliner,
+                Type = RelationshipTargets.Member,
+                ArtistId = new ArtistId(_seed.Karajan),
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var berliner = await ArtistAsync(client, _seed.Berliner);
+        var member = Assert.Single(berliner.Profile.Members);
+        Assert.Equal("Herbert von Karajan", member.Name);
+        Assert.Empty(berliner.Profile.MemberOf);
+
+        var karajan = await ArtistAsync(client, _seed.Karajan);
+        Assert.Equal(_seed.Berliner, Assert.Single(karajan.Profile.MemberOf).Id);
+    }
+
+    /// <summary>
+    /// A person's edit is kept beside the provider's answer and shown on the
+    /// page and the list; sending the provider's value back undoes it.
+    /// </summary>
+    /// <remarks>
+    /// Rule 4. The column keeps what MusicBrainz said, so the pass that asks
+    /// again cannot overwrite the person, and a report on the rule stays true.
+    /// </remarks>
+    [Fact]
+    public async Task AnArtistEditIsKeptBesideTheProvidersAnswer()
+    {
+        using var client = _factory!.CreateClient();
+
+        var before = await ArtistAsync(client, _seed.Karajan);
+        var form = FormOf(before);
+
+        var saved = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/artists/{_seed.Karajan}/edits", UriKind.Relative),
+            form with { SortName = "Karajan, Heribert", Biography = "Mine.\n\nTwo paragraphs." },
+            Token);
+
+        saved.EnsureSuccessStatusCode();
+        var edited = await saved.Content.ReadFromJsonAsync<EditResponse>(Token);
+        Assert.Equal(["biography", "sortName"], edited!.Edited);
+
+        var after = await ArtistAsync(client, _seed.Karajan);
+        Assert.Equal("Karajan, Heribert", after.Artist.SortName);
+        Assert.Equal(["biography", "sortName"], after.Profile.Edited);
+        Assert.True(after.Profile.Biography!.ByPerson);
+        Assert.Equal("You", after.Profile.Biography.Source);
+
+        var list = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
+        Assert.Equal("Karajan, Heribert", list!.Items.Single(a => a.Id == _seed.Karajan).SortName);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Karajan), Token);
+            Assert.Equal("Karajan, Herbert von", row.SortName);
+        }
+
+        var undone = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/artists/{_seed.Karajan}/edits", UriKind.Relative), form, Token);
+
+        undone.EnsureSuccessStatusCode();
+
+        var restored = await ArtistAsync(client, _seed.Karajan);
+        Assert.Empty(restored.Profile.Edited);
+        Assert.Equal("Karajan, Herbert von", restored.Artist.SortName);
+    }
+
+    /// <summary>A picture URL goes into an <c>img src</c>, so only a web address is taken.</summary>
+    [Fact]
+    public async Task AnArtistEditWithAScriptForAPictureIsRefused()
+    {
+        using var client = _factory!.CreateClient();
+
+        var form = FormOf(await ArtistAsync(client, _seed.Karajan));
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/artists/{_seed.Karajan}/edits", UriKind.Relative),
+            form with { Portrait = "javascript:alert(1)" },
+            Token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty((await ArtistAsync(client, _seed.Karajan)).Profile.Edited);
+    }
+
+    /// <summary>An album edit shows on its page and on the list, and the release row keeps MusicBrainz's.</summary>
+    [Fact]
+    public async Task AnAlbumEditShowsOnThePageAndTheList()
+    {
+        using var client = _factory!.CreateClient();
+
+        var before = await ReleaseAsync(client, _seed.Seesaw);
+
+        var form = new ReleaseEditRequest(
+            Title: "Seesaw (Deluxe)",
+            Credit: before.Release.Artist,
+            Disambiguation: before.About.Disambiguation,
+            PrimaryType: before.About.PrimaryType,
+            SecondaryTypes: before.About.SecondaryTypes,
+            FirstReleaseYear: before.About.FirstReleaseYear,
+            ReleasedYear: before.Release.Year,
+            ReleasedMonth: 5,
+            ReleasedDay: null,
+            Country: before.Release.Country,
+            Status: before.Release.Status,
+            Label: "Provogue",
+            CatalogNumber: before.About.CatalogNumber,
+            Barcode: before.About.Barcode,
+            Formats: before.Release.Formats,
+            Review: null);
+
+        var saved = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/releases/{_seed.Seesaw}/edits", UriKind.Relative), form, Token);
+
+        saved.EnsureSuccessStatusCode();
+
+        var after = await ReleaseAsync(client, _seed.Seesaw);
+        Assert.Equal("Seesaw (Deluxe)", after.Release.Title);
+        Assert.Equal("Provogue", after.About.Label);
+        Assert.Equal(5, after.About.ReleasedMonth);
+        Assert.Equal(["label", "releasedMonth", "title"], after.About.Edited);
+
+        var list = await client.GetFromJsonAsync<ReleaseListResponse>(
+            new Uri("/api/catalogue/releases", UriKind.Relative), Token);
+        Assert.Contains(list!.Items, item => item.Title == "Seesaw (Deluxe)");
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal("Seesaw", (await db.Releases.SingleAsync(r => r.Id == new ReleaseId(_seed.Seesaw), Token)).Title);
+    }
+
+    private static ArtistEditRequest FormOf(ArtistDetailResponse detail) =>
+        new(
+            Name: detail.Profile.Name,
+            LatinName: detail.Profile.LatinName,
+            SortName: detail.Artist.SortName,
+            Disambiguation: detail.Artist.Disambiguation,
+            Type: detail.Artist.Type,
+            Country: detail.Artist.Country,
+            Gender: detail.Artist.Gender,
+            BeganYear: detail.Artist.BeganYear,
+            EndedYear: detail.Artist.EndedYear,
+            Ended: detail.Artist.Ended,
+            Genres: detail.Artist.Genres,
+            Biography: detail.Profile.Biography?.Text,
+            Portrait: detail.Artist.Portrait,
+            Banner: detail.Profile.Banner);
+
+    private static async Task<ReleaseDetailResponse> ReleaseAsync(HttpClient client, Guid id)
+    {
+        var body = await client.GetFromJsonAsync<ReleaseDetailResponse>(
+            new Uri($"/api/catalogue/releases/{id}", UriKind.Relative), Token);
+
+        Assert.NotNull(body);
+        return body;
     }
 
     private async Task<Seeded> SeedAsync()

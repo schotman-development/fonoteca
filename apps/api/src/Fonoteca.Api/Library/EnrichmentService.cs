@@ -5,6 +5,7 @@ using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Acquisition;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Identification;
 using Fonoteca.Providers.AudioDb;
@@ -67,6 +68,8 @@ public sealed class EnrichmentService(
     [FromKeyedServices(ArtistPortraitSources.Qobuz)] IArtistPortraits pressPhotos,
     [FromKeyedServices(ArtistPortraitSources.AudioDb)] IArtistPortraits audioDbPhotos,
     [FromKeyedServices(ReleaseDiscoverySources.Qobuz)] IReleaseDiscovery qobuzReleases,
+    IEncyclopedia encyclopedia,
+    IArtistBanners banners,
     IOptions<WikidataOptions> portraitOptions,
     IOptions<FonotecaOptions> options,
     IHubContext<JobsHub, IJobsClient> hub,
@@ -176,7 +179,18 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return new EnrichmentPending(unasked + personFiled, artists, portraits, discographies);
+            var articles = await db.Artists.Where(UnreadArtist).CountAsync(cancellationToken)
+                .ConfigureAwait(false)
+                + await db.ReleaseGroups.Where(UnreadAlbum).CountAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+            var banners = await db.Artists
+                .Where(UnbanneredArtist)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return new EnrichmentPending(
+                unasked + personFiled, artists, portraits, discographies, articles, banners);
         }
     }
 
@@ -347,6 +361,26 @@ public sealed class EnrichmentService(
             // two orders of magnitude: the whole library is a dozen requests, so
             // a run cancelled before it has lost seconds rather than hours.
             await PicturesAsync(counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            // Sixth and seventh, before the discographies for the pictures'
+            // reason: both describe what is already here. An article is a
+            // batched Wikidata query and then a Wikipedia request each; a
+            // banner is a request per artist, but only for artists a release is
+            // billed to.
+            await BatchesAsync(
+                "biographies",
+                token => BiographiesAsync(ArticleBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            await BatchesAsync(
+                "album articles",
+                token => ReviewsAsync(ArticleBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            await BatchesAsync(
+                "artist banners",
+                token => BannersAsync(BannerBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
             // Fifth, and last — and the reason changed out from under this line
             // when the worklist widened past the followed set. It used to be
@@ -942,16 +976,6 @@ public sealed class EnrichmentService(
             // record and nothing wrong.
             if (row is null) return;
 
-            // Whether anybody has ever browsed this artist, read *before* the
-            // stamp below overwrites it. This is what separates the two cases
-            // that decide monitoring: a first browse is the baseline — the back
-            // catalogue as it stood when somebody followed them, monitored by
-            // nothing — and a later one can only be turning up records that did
-            // not exist last time we looked, which is what "future releases"
-            // means here. Read after the assignment it is always false and every
-            // record ever written would be monitored.
-            var baseline = row.DiscographyLookupUtc is null;
-
             // Stamped whether or not MusicBrainz credited them with anything.
             // "We asked and they have released nothing else" is an answer, and a
             // row left unstamped on it is re-asked about on every run forever.
@@ -975,28 +999,12 @@ public sealed class EnrichmentService(
                     .ConfigureAwait(false))
                 .ToHashSet();
 
-            // Records this artist was not credited with last time, on a run that
-            // is not the first. Collected rather than flagged in place because
-            // the writer hands back an id and the entity it minted is not
-            // necessarily loaded — see the monitoring loop below.
+            // Records this artist released at or after somebody followed them,
+            // among those they were not already credited with. Collected rather
+            // than flagged in place because the writer hands back an id and the
+            // entity it minted is not necessarily loaded — see the monitoring
+            // loop below.
             var arrived = new List<ReleaseGroupId>();
-
-            // What the catalogue already holds by them, as titles rather than
-            // ids. `already` answers "have we written this credit"; this answers
-            // "is this record already here", which is a different question and
-            // the only one a shop's album can be put to — it arrives with no
-            // MBID, so a title and a year are all there is to compare.
-            //
-            // <b>Seeded before the loop, on purpose.</b> The groups that loop
-            // mints are Added and unsaved, and EF queries the database rather
-            // than the change tracker — so the same query run afterwards would
-            // miss exactly the rows just written and re-mint every one of them
-            // through the provider path. It is appended to as the loop goes.
-            var held = await db.ReleaseGroups
-                .Where(group => already.Contains(group.Id))
-                .Select(group => new HeldRecord(group.Title, group.FirstReleaseYear))
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
 
             foreach (var group in released)
             {
@@ -1010,11 +1018,12 @@ public sealed class EnrichmentService(
                         group.FirstReleaseYear)
                     .ConfigureAwait(false);
 
-                held.Add(new HeldRecord(group.Title, group.FirstReleaseYear));
-
                 if (!already.Add(groupId)) continue;
 
-                if (!baseline) arrived.Add(groupId);
+                if (Discography.IsNewRelease(row.FollowedUtc, group.FirstReleaseYear))
+                {
+                    arrived.Add(groupId);
+                }
 
                 // Position 0 and no join phrase: this is not a printed billing
                 // line, it is "MusicBrainz credits this artist with this record".
@@ -1061,11 +1070,11 @@ public sealed class EnrichmentService(
                 }
             }
 
-            await DiscoverAsync(db, artist, held, arrived, baseline, counts, cancellationToken)
+            await DiscoverAsync(db, artist, row.FollowedUtc, counts, cancellationToken)
                 .ConfigureAwait(false);
 
-            // A record that turned up after somebody followed this artist is
-            // monitored; everything the first browse wrote is not. `FindAsync`
+            // A record released at or after somebody followed this artist is
+            // monitored; their back catalogue is not. `FindAsync`
             // rather than a query, because the writer has either just Added
             // these or loaded them a moment ago — both are in the change
             // tracker, which `FindAsync` checks before it touches the database,
@@ -1083,40 +1092,6 @@ public sealed class EnrichmentService(
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
-
-    /// <summary>One record the catalogue already holds by an artist, as a shop could recognise it.</summary>
-    /// <remarks>
-    /// A title and a year, because a provider's album arrives with no MBID and
-    /// those are the only comparable facts — see <see cref="ReleaseTitleMatch"/>
-    /// for what that costs and why it errs towards showing a duplicate rather
-    /// than hiding a gap.
-    /// </remarks>
-    private sealed record HeldRecord(string Title, int? Year);
-
-    /// <summary>
-    /// The fewest tracks a discovered record may have before it is worth offering.
-    /// </summary>
-    /// <remarks>
-    /// <b>A shop's artist page is not a discography, and without this the
-    /// feature makes the problem it exists to solve worse.</b> Measured against
-    /// this installation, one artist's <c>artist/get?extra=albums</c> reports
-    /// <b>166</b> records — singles, EPs, one-track promos and compilations
-    /// alongside the albums. Minted with no <c>PrimaryType</c> (the shop never
-    /// said "album" and inventing the word would be a claim it did not make),
-    /// every one of them satisfies <c>Discography.IsGap</c>, which deliberately
-    /// keeps untyped records. The next re-browse would then mark all 166
-    /// monitored, and the shelf a person asked to be made shorter would grow by
-    /// two orders of magnitude.
-    ///
-    /// Four is a knob and not a principle, in <c>ArtistNameMatch.CatalogueMargin</c>'s
-    /// sense: it keeps EPs, which are records somebody made on purpose, and drops
-    /// the one-to-three-track rows that are overwhelmingly singles and promos.
-    /// An unknown count is <b>kept</b> rather than dropped — a silence is not a
-    /// small number, the same reading <c>Dwarfs</c> gives an absent album count —
-    /// which errs towards a visible extra row over a hidden gap, the direction
-    /// <see cref="ReleaseTitleMatch"/> states.
-    /// </remarks>
-    private const int MinimumTracksToOffer = 4;
 
     /// <summary>
     /// What the shops say this artist released, for records the catalogue has no row for.
@@ -1147,28 +1122,68 @@ public sealed class EnrichmentService(
     /// is supplementary by construction — the catalogue half has already
     /// succeeded — so its refusal is worth a line and nothing more.
     ///
-    /// <b>Minted with a null <c>Mbid</c>, and that is a one-way door.</b>
-    /// <c>ReleaseGroup</c> has no barcode column — a group spans every pressing
-    /// and each pressing has its own UPC — so nothing can later recognise one of
-    /// these as a MusicBrainz record. The alternative was inventing an
-    /// identifier, which is worse. <c>DiscoveredRelease.Barcode</c> is carried
-    /// against the day a <c>Release</c> is written from one of these, where ADR
-    /// 0011's key does work.
+    /// <b>Written to <c>DiscoveredRecords</c>, not to <c>ReleaseGroups</c>, and
+    /// that separation is the whole design.</b> What a shop says is a question —
+    /// <see cref="IReleaseDiscovery"/> puts it in those words — and a question
+    /// written into the catalogue's own album table becomes a fact nothing can
+    /// retract: credited to the artist, counted in their discography, and
+    /// unreachable by the prune above, which only considers rows carrying an
+    /// MBID. Measured before this changed, 38,487 of this library's 180,625
+    /// release groups were shop guesses in that shape, and not one of them could
+    /// ever stop being reported as missing — not even by buying the record,
+    /// because the files land under the MusicBrainz group instead.
     ///
-    /// <b>Monitoring is decided by the caller's baseline rule, not here.</b> A
-    /// discovered record joins <paramref name="arrived"/> on exactly the same
-    /// terms as a MusicBrainz one, so "released after you followed them" means
-    /// one thing across both sources rather than two.
+    /// <b>Every field the source stated is kept, including the ones nothing
+    /// reads yet.</b> The old path took the title and the year and dropped the
+    /// barcode, the source's own id and the cover — then the missing barcode was
+    /// written up as the reason a discovered record could never be recognised as
+    /// a MusicBrainz one. That is an earlier pass deciding what a later pass is
+    /// allowed to learn, which is the one thing no pass here may do.
+    ///
+    /// <b>Nothing is judged on the way in.</b> No title match against what the
+    /// library holds, no <c>Discography.MinimumTracksToOffer</c>: both are rules about
+    /// these rows rather than facts about them, and both now run where the shelf
+    /// is built — so changing either costs a page load instead of re-asking a
+    /// shop about every artist in the catalogue. <c>CLAUDE.md</c>'s standing
+    /// bargain: what is cached is answers, never rankings.
+    ///
+    /// <b>A row without a source id is not written at all</b>, because it is the
+    /// one thing that makes the row updatable rather than re-minted the next time
+    /// the shop rewords its own title. That is a refusal to record something
+    /// unidentifiable, not a filter on what the shelf may show.
+    ///
+    /// <b><see cref="DiscoveredRecord.Monitored"/> is set on the way in and never
+    /// touched again.</b> A record the artist released at or after somebody
+    /// followed them is wanted, on the same terms as a MusicBrainz one; every
+    /// later sighting updates what the shop says and leaves the person's answer
+    /// alone.
     /// </remarks>
+    /// <param name="followedUtc">
+    /// <c>Artist.FollowedUtc</c>, which is what <c>Discography.IsNewRelease</c>
+    /// measures from. Deliberately not "has this shop been asked before": that
+    /// reading is what marked every followed artist's whole Qobuz catalogue
+    /// wanted the first time this source was asked about somebody MusicBrainz had
+    /// already answered for.
+    /// </param>
     private async Task DiscoverAsync(
         FonotecaDbContext db,
         PendingArtist artist,
-        List<HeldRecord> held,
-        List<ReleaseGroupId> arrived,
-        bool baseline,
+        DateTimeOffset? followedUtc,
         Tally counts,
         CancellationToken cancellationToken)
     {
+        var now = clock.UtcNow;
+
+        // Read once, up front, keyed the way the unique index is. EF queries the
+        // database rather than the change tracker, so a row added a moment ago in
+        // this same scope is invisible to a second query — the trap three live
+        // unique-index collisions in this codebase already came from.
+        var known = (await db.DiscoveredRecords
+                .Where(record => record.ArtistId == artist.Id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(record => (record.Source, record.SourceId));
+
         foreach (var (name, source) in ReleaseSources)
         {
             DiscoveredReleases found;
@@ -1189,45 +1204,41 @@ public sealed class EnrichmentService(
             {
                 if (string.IsNullOrWhiteSpace(record.Title)) continue;
 
-                if (record.TrackCount is { } tracks && tracks < MinimumTracksToOffer) continue;
+                if (string.IsNullOrWhiteSpace(record.SourceId)) continue;
 
-                // Against everything already known by this artist, including the
-                // records minted moments ago in this same scope — which is why
-                // the list is passed in and appended to rather than re-queried.
-                if (held.Any(entry => ReleaseTitleMatch.IsSameRecord(
-                        record.Title, record.Year, entry.Title, entry.Year)))
+                if (known.TryGetValue((name, record.SourceId), out var seen))
                 {
+                    // The shop's answer, refreshed. A retitled row, a barcode
+                    // they have since filled in, a new sleeve — all of it is
+                    // theirs to restate, and none of it is `Monitored`, which is
+                    // the one column here a person owns.
+                    seen.Title = record.Title;
+                    seen.Year = record.Year;
+                    seen.Barcode = record.Barcode;
+                    seen.CoverUrl = record.CoverUrl;
+                    seen.TrackCount = record.TrackCount;
+                    seen.SeenUtc = now;
                     continue;
                 }
 
-                var minted = new ReleaseGroup
+                var minted = new DiscoveredRecord
                 {
-                    Id = ReleaseGroupId.New(),
+                    Id = DiscoveredRecordId.New(),
+                    ArtistId = artist.Id,
+                    Source = name,
+                    SourceId = record.SourceId,
                     Title = record.Title,
-                    FirstReleaseYear = record.Year,
-
-                    // Deliberately untyped. The shop said it sells this record;
-                    // it did not say what kind of record it is, and "Album" here
-                    // would be this application's word rather than anybody's
-                    // fact. `Discography.IsGap` keeps untyped records for exactly
-                    // this reason, and the tile prints "Untyped" so the screen
-                    // says which it is.
-                    PrimaryType = null,
+                    Year = record.Year,
+                    Barcode = record.Barcode,
+                    CoverUrl = record.CoverUrl,
+                    TrackCount = record.TrackCount,
+                    Monitored = Discography.IsNewRelease(followedUtc, record.Year),
+                    FoundUtc = now,
+                    SeenUtc = now,
                 };
 
-                db.ReleaseGroups.Add(minted);
-
-                db.ArtistCredits.Add(new ArtistCredit
-                {
-                    Id = Guid.CreateVersion7(),
-                    ArtistId = artist.Id,
-                    ReleaseGroupId = minted.Id,
-                    Position = 0,
-                });
-
-                held.Add(new HeldRecord(record.Title, record.Year));
-
-                if (!baseline) arrived.Add(minted.Id);
+                db.DiscoveredRecords.Add(minted);
+                known[(name, record.SourceId)] = minted;
 
                 counts.RecordsDiscovered++;
             }
@@ -1489,6 +1500,277 @@ public sealed class EnrichmentService(
     /// there being four of them.
     /// </remarks>
     private readonly record struct PictureBatch(int Claimed);
+
+    /// <summary>Artists nobody has looked for a Wikipedia article about.</summary>
+    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnreadArtist =
+        artist => artist.BiographyLookupUtc == null && artist.Mbid != null;
+
+    /// <summary>
+    /// Albums the library holds that nobody has looked for an article about.
+    /// </summary>
+    /// <remarks>
+    /// Held only: the discography browse mints every record an artist ever made,
+    /// and an article about one nobody owns has no page to appear on.
+    /// </remarks>
+    private static readonly System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UnreadAlbum =
+        group => group.ReviewLookupUtc == null
+            && group.Mbid != null
+            && group.Releases.Any(release => release.Files.Count != 0);
+
+    /// <summary>
+    /// Artists a release is billed to that nobody has looked for a banner of.
+    /// </summary>
+    /// <remarks>
+    /// Billed on a release rather than every artist, because this source costs
+    /// a request each and a banner only shows on a page somebody opens — which
+    /// is an album artist's, not a session player's. Keyed on the billing so the
+    /// count is one query: an artist billed later joins the worklist then.
+    /// </remarks>
+    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnbanneredArtist =
+        artist => artist.BannerLookupUtc == null
+            && artist.Mbid != null
+            && artist.Credits.Any(credit => credit.ReleaseId != null);
+
+    /// <summary>Banners asked per batch: small, because each is a request and a failure ends the stage.</summary>
+    private const int BannerBatchSize = 25;
+
+    /// <summary>
+    /// The most articles asked per batch, for the banners' reason.
+    /// </summary>
+    /// <remarks>
+    /// This was the portrait batch size, 250, back when Wikipedia answered
+    /// about twenty articles at a time. A whole article is one request each
+    /// (<see cref="WikipediaArticles"/> says why), so at that size a batch is
+    /// four minutes of requests reporting no progress, and an outage at the end
+    /// of one discards every answer in it unstamped.
+    ///
+    /// <b>A ceiling over the configured size, never a replacement for it.</b>
+    /// Hardcoding this would put the article stages out of reach of the one
+    /// thing that tests batching: a test lowers <c>BatchSize</c> to 2 to get
+    /// two batches out of three rows, and a fixed 25 silently makes that one
+    /// batch. The sibling picture test says what that costs — a pipeline bug
+    /// every one- and two-item test sails past cost this codebase twenty-five
+    /// minutes of a live run.
+    /// </remarks>
+    private const int MaxArticleBatchSize = 25;
+
+    /// <summary>Articles asked per batch: the configured size, capped.</summary>
+    private int ArticleBatchSize =>
+        Math.Min(Math.Max(portraitOptions.Value.BatchSize, 1), MaxArticleBatchSize);
+
+    /// <summary>
+    /// One stage whose unit is a batch, drained until a claim comes back empty.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PicturesAsync"/>'s shape: a batch either stamps every row it
+    /// claimed or throws, so the loop cannot re-claim a page forever; and a
+    /// throw ends the stage without stamping, because an outage means nothing
+    /// is known about anyone in the batch.
+    /// </remarks>
+    private async Task BatchesAsync(
+        string label,
+        Func<CancellationToken, Task<int>> batch,
+        Tally counts,
+        string jobId,
+        int pending,
+        CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            int claimed;
+
+            try
+            {
+                claimed = await batch(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // The backstop: a failed batch ends this stage, never the pass.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                counts.Failed++;
+                Log.BatchStageEnded(logger, label, cause.Message);
+                return;
+            }
+
+            if (claimed == 0) return;
+
+            counts.Examined += claimed;
+
+            await Report(jobId, counts.Examined, pending, label, "running").ConfigureAwait(false);
+        }
+    }
+
+    private async Task<int> BiographiesAsync(int size, CancellationToken cancellationToken)
+    {
+        List<PendingArtist> page;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            page = await db.Artists
+                .AsNoTracking()
+                .Where(UnreadArtist)
+                .OrderBy(artist => artist.Id)
+                .Select(artist => new PendingArtist(artist.Id, artist.Name, artist.Mbid!.Value))
+                .Take(Math.Max(size, 1))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (page.Count == 0) return 0;
+
+        var found = await encyclopedia
+            .ArtistsAsync([.. page.Select(artist => artist.Mbid)], cancellationToken)
+            .ConfigureAwait(false);
+
+        var stampedAt = StoreTime.ToStorePrecision(clock.UtcNow);
+
+        var save = scopeFactory.CreateAsyncScope();
+        await using (save.ConfigureAwait(false))
+        {
+            var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var ids = page.Select(artist => artist.Id).ToList();
+
+            var rows = await db.Artists
+                .Where(artist => ids.Contains(artist.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                row.BiographyLookupUtc = stampedAt;
+
+                if (found.TryGetValue(row.Mbid!.Value, out var article))
+                {
+                    row.BiographyText = article.Text;
+                    row.BiographyUrl = article.Url.AbsoluteUri;
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return page.Count;
+    }
+
+    private async Task<int> ReviewsAsync(int size, CancellationToken cancellationToken)
+    {
+        List<(ReleaseGroupId Id, Mbid Mbid)> page;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            page = (await db.ReleaseGroups
+                .AsNoTracking()
+                .Where(UnreadAlbum)
+                .OrderBy(group => group.Id)
+                .Select(group => new { group.Id, Mbid = group.Mbid!.Value })
+                .Take(Math.Max(size, 1))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+                .ConvertAll(group => (group.Id, group.Mbid));
+        }
+
+        if (page.Count == 0) return 0;
+
+        var found = await encyclopedia
+            .ReleaseGroupsAsync([.. page.Select(group => group.Mbid)], cancellationToken)
+            .ConfigureAwait(false);
+
+        var stampedAt = StoreTime.ToStorePrecision(clock.UtcNow);
+
+        var save = scopeFactory.CreateAsyncScope();
+        await using (save.ConfigureAwait(false))
+        {
+            var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var ids = page.Select(group => group.Id).ToList();
+
+            var rows = await db.ReleaseGroups
+                .Where(group => ids.Contains(group.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                row.ReviewLookupUtc = stampedAt;
+
+                if (found.TryGetValue(row.Mbid!.Value, out var article))
+                {
+                    row.ReviewText = article.Text;
+                    row.ReviewUrl = article.Url.AbsoluteUri;
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return page.Count;
+    }
+
+    private async Task<int> BannersAsync(int size, CancellationToken cancellationToken)
+    {
+        List<PendingArtist> page;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            page = await db.Artists
+                .AsNoTracking()
+                .Where(UnbanneredArtist)
+                .OrderBy(artist => artist.Id)
+                .Select(artist => new PendingArtist(artist.Id, artist.Name, artist.Mbid!.Value))
+                .Take(size)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (page.Count == 0) return 0;
+
+        var found = await banners
+            .FindAsync([.. page.Select(artist => artist.Mbid)], cancellationToken)
+            .ConfigureAwait(false);
+
+        var stampedAt = StoreTime.ToStorePrecision(clock.UtcNow);
+
+        var save = scopeFactory.CreateAsyncScope();
+        await using (save.ConfigureAwait(false))
+        {
+            var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var ids = page.Select(artist => artist.Id).ToList();
+
+            var rows = await db.Artists
+                .Where(artist => ids.Contains(artist.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                row.BannerLookupUtc = stampedAt;
+
+                if (found.TryGetValue(row.Mbid!.Value, out var banner))
+                {
+                    row.BannerUrl = banner.AbsoluteUri;
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return page.Count;
+    }
 
     /// <summary>
     /// The per-artist picture sources, best first.
@@ -1968,7 +2250,17 @@ public sealed class EnrichmentService(
 
         public int ArtistsPictured;
 
-        /// <summary>Records a shop named that the catalogue had no row for.</summary>
+        /// <summary>
+        /// Rows a shop named that this run had not written down before.
+        /// </summary>
+        /// <remarks>
+        /// <b>Not "records the library is missing", and the difference grew when
+        /// the cut moved to read time.</b> Everything a shop lists is stored now
+        /// — singles, promos and copies of albums already held — so this counts
+        /// what was written, which is the only thing the pass knows. How many of
+        /// them are worth showing is <c>Discography.IsGap</c>'s answer and it is
+        /// given per page load, not per run.
+        /// </remarks>
         public int RecordsDiscovered;
     }
 
@@ -2098,7 +2390,18 @@ public enum EnrichmentStatus
 /// number on the panel and the slowest stage behind it — one gated browse each,
 /// plus the shops.
 /// </param>
-public sealed record EnrichmentPending(int Files, int Artists, int Portraits, int Discographies)
+/// <param name="Articles">
+/// Artists and held albums nobody has looked for a Wikipedia article about. One
+/// number for both, because it is one kind of work: a batched query per 250.
+/// </param>
+/// <param name="Banners">Album artists nobody has looked for a banner of.</param>
+public sealed record EnrichmentPending(
+    int Files,
+    int Artists,
+    int Portraits,
+    int Discographies,
+    int Articles,
+    int Banners)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -2108,7 +2411,7 @@ public sealed record EnrichmentPending(int Files, int Artists, int Portraits, in
     /// zero and the button is disabled — a stage left out of this total is a
     /// stage that can never be reached.
     /// </remarks>
-    public int Total => Files + Artists + Portraits + Discographies;
+    public int Total => Files + Artists + Portraits + Discographies + Articles + Banners;
 }
 
 /// <summary>Where a running pass has got to.</summary>

@@ -29,6 +29,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
 
     public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
     public DbSet<ReleaseCover> ReleaseCovers => Set<ReleaseCover>();
+    public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
+    public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -39,6 +41,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         configurationBuilder.Properties<TrackId>().HaveConversion<TrackIdConverter>();
         configurationBuilder.Properties<MediaFileId>().HaveConversion<MediaFileIdConverter>();
         configurationBuilder.Properties<ArtistId>().HaveConversion<ArtistIdConverter>();
+        configurationBuilder.Properties<DiscoveredRecordId>()
+            .HaveConversion<DiscoveredRecordIdConverter>();
         configurationBuilder.Properties<Mbid>().HaveConversion<MbidConverter>();
         configurationBuilder.Properties<AcoustId>().HaveConversion<AcoustIdConverter>();
 
@@ -80,6 +84,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
             e.Property(x => x.PrimaryType).HasMaxLength(100);
             e.Property(x => x.SecondaryTypes).HasMaxLength(500);
+            e.Property(x => x.ReviewUrl).HasMaxLength(1000);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
         });
@@ -95,6 +100,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Status).HasMaxLength(50);
             e.Property(x => x.Disambiguation).HasMaxLength(1000);
             e.Property(x => x.MediumFormats).HasMaxLength(200);
+            e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Barcode);
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
@@ -268,6 +274,9 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // rather than let a URL nobody will ever click roll back the stamp
             // that stops it being asked for again — Genres' lesson.
             e.Property(x => x.PortraitUrl).HasMaxLength(1000);
+            e.Property(x => x.BiographyUrl).HasMaxLength(1000);
+            e.Property(x => x.BannerUrl).HasMaxLength(1000);
+            e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops");
 
@@ -416,6 +425,28 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.GatheredUtc);
         });
 
+        modelBuilder.Entity<DiscoveredRecord>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Source).HasMaxLength(64).IsRequired();
+            e.Property(x => x.SourceId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
+            e.Property(x => x.Barcode).HasMaxLength(64);
+            e.Property(x => x.CoverUrl).HasMaxLength(2000);
+
+            e.HasOne(x => x.Artist)
+                .WithMany()
+                .HasForeignKey(x => x.ArtistId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The natural key, and the reason this table can be written twice
+            // without growing: a source's own id for a record survives the shop
+            // retitling it, where a title does not. Scoped by artist as well
+            // because the same compilation is listed under everyone on it, and
+            // the shelf it appears on is one artist's.
+            e.HasIndex(x => new { x.ArtistId, x.Source, x.SourceId }).IsUnique();
+        });
+
         modelBuilder.Entity<ReleaseCover>(e =>
         {
             e.HasKey(x => x.ReleaseId);
@@ -424,6 +455,20 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasOne<Release>()
                 .WithOne()
                 .HasForeignKey<ReleaseCover>(x => x.ReleaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ArtistImage>(e =>
+        {
+            // Keyed on the pair, so one artist can have a portrait and a banner.
+            // The default is what the rows written before the banner existed
+            // are: every one of them is a portrait.
+            e.HasKey(x => new { x.ArtistId, x.Kind });
+            e.Property(x => x.Kind).HasMaxLength(20).HasDefaultValue("portrait");
+            e.Property(x => x.MediaType).HasMaxLength(100);
+            e.HasOne<Artist>()
+                .WithMany()
+                .HasForeignKey(x => x.ArtistId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Headers;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Library;
 using Fonoteca.Data;
@@ -48,7 +50,18 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     /// <summary>The sleeve a person picked, as bytes nothing here has to decode.</summary>
     private static readonly byte[] ChosenCover = [0xFF, 0xD8, 0xFF, 0xDB, 9, 8, 7, 6];
 
+    /// <summary>The photograph a provider holds, as bytes nothing here has to decode.</summary>
+    private static readonly byte[] PortraitBytes = [0xFF, 0xD8, 0xFF, 0xE0, 5, 4, 3, 2, 1];
+
+    private const string PortraitUrl = "https://static.example/portraits/miles.jpg";
+
     private readonly List<ServiceProvider> _providers = [];
+
+    /// <summary>What the CDN answers with, and every request that reached it.</summary>
+    private StubHttpHandler _portraits = null!;
+
+    /// <summary>Set to make the picture host fail instead of answering.</summary>
+    private Exception? _portraitFailure;
 
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
@@ -63,6 +76,18 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
         await db.Database.MigrateAsync(Token);
 
         _root = Directory.CreateTempSubdirectory("fonoteca-tagwrite-pass-").FullName;
+
+        // Built here rather than in a field initialiser so a test can make the
+        // host fail: a lambda over `this` is not allowed in one.
+        _portraits = new StubHttpHandler(_ => _portraitFailure is null
+            ? new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(PortraitBytes)
+                {
+                    Headers = { ContentType = new MediaTypeHeaderValue("image/jpeg") },
+                },
+            }
+            : throw _portraitFailure);
     }
 
     public async ValueTask DisposeAsync()
@@ -422,6 +447,82 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>
+    /// A multi-disc rip gets one sleeve, at the album root rather than per disc.
+    /// </summary>
+    /// <remarks>
+    /// The whole point of writing a file rather than embedding a picture is that
+    /// a player globs for it beside the album, and what it globs there is
+    /// narrower than it looks: Navidrome's <c>CoverArtPriority</c> searches the
+    /// album directory for <c>cover</c>, <c>folder</c> and <c>front</c>, while
+    /// disc-level art is a separate <c>DiscArtPriority</c> matching <c>disc*</c>
+    /// and <c>cd*</c> — not <c>cover.*</c>. A sleeve written into <c>CD 01</c> is
+    /// therefore found by nothing and the embedded spread goes on winning, which
+    /// is the exact report this feature came from.
+    /// </remarks>
+    [Fact]
+    public async Task AMultiDiscRipGetsOneCoverAtTheAlbumRoot()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(
+            ("Miles Davis/Kind of Blue/CD 01/01 track.flac", 1),
+            ("Miles Davis/Kind of Blue/CD 02/02 track.flac", 2));
+
+        await SeedCoverAsync(ChosenCover);
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(2, summary.Examined);
+        Assert.Equal(1, summary.CoversWritten);
+
+        Assert.Equal(
+            ChosenCover,
+            await File.ReadAllBytesAsync(
+                Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg"), Token));
+
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.Combine(_root, "Miles Davis/Kind of Blue"), "cover.*", SearchOption.AllDirectories)
+            .Where(path => Path.GetDirectoryName(path) != Path.Combine(_root, "Miles Davis/Kind of Blue")));
+    }
+
+    /// <summary>
+    /// A sleeve under a different extension is displaced too, not left beside it.
+    /// </summary>
+    /// <remarks>
+    /// The name comes from the stored image's own type, so a release whose cover
+    /// was a PNG and is now a JPEG would otherwise end up with <c>cover.png</c>
+    /// and <c>cover.jpg</c> in one folder. A player's glob then has two matches
+    /// and nothing says the new one wins — the same failure, reintroduced by the
+    /// fix for it.
+    /// </remarks>
+    [Fact]
+    public async Task ACoverUnderAnotherExtensionIsDisplacedAsWell()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(ChosenCover);
+
+        var stale = new byte[] { 0x89, 0x50, 0x4E, 0x47, 4, 5, 6 };
+        await File.WriteAllBytesAsync(
+            Path.Combine(_root, "Miles Davis/Kind of Blue/cover.png"), stale, Token);
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library)).CoversWritten);
+
+        Assert.Equal(
+            new[] { "cover.jpg" },
+            Directory.EnumerateFiles(Path.Combine(_root, "Miles Davis/Kind of Blue"), "cover.*")
+                .Select(Path.GetFileName)
+                .ToArray());
+
+        var displaced = Directory
+            .EnumerateFiles(_root + "-trash", "cover.png", SearchOption.AllDirectories)
+            .Single();
+
+        Assert.Equal(stale, await File.ReadAllBytesAsync(displaced, Token));
+    }
+
+    /// <summary>
     /// A cover already in the folder is moved to the trash, never overwritten.
     /// </summary>
     /// <remarks>
@@ -520,6 +621,368 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// The artist button leaves the artist's picture on their shelf.
+    /// </summary>
+    /// <remarks>
+    /// The point of the whole thing: Navidrome, Jellyfin, Kodi and Plex all look
+    /// for <c>artist.*</c> beside an artist's records before they ask anybody
+    /// external, so this is what stops two catalogues on one disk showing two
+    /// different faces for the same person.
+    /// </remarks>
+    [Fact]
+    public async Task TheArtistsOwnShelfGetsTheirPicture()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var summary = await RunAsync(TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"));
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.Equal(
+            PortraitBytes,
+            await File.ReadAllBytesAsync(Path.Combine(_root, "Miles Davis/artist.jpg"), Token));
+    }
+
+    /// <summary>
+    /// A shelf that merely holds their playing is not their shelf.
+    /// </summary>
+    /// <remarks>
+    /// <b>The failure this rule exists for, in the shape it was measured in.</b>
+    /// 47 of Janine Jansen's 54 files sit under <c>Johann Sebastian Bach</c> and
+    /// <c>Antonio Vivaldi</c>, because a classical library files a performance
+    /// under its composer — and every one of them is on her page, so every one of
+    /// them reaches this pass under her scope. Without the name check her
+    /// photograph lands on two dead composers' shelves and every other player on
+    /// the disk starts showing a violinist as Bach.
+    /// </remarks>
+    [Fact]
+    public async Task ThePictureDoesNotLandOnAComposersShelf()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(
+            ("Miles Davis/Kind of Blue/01 track.flac", 1),
+            ("Johann Sebastian Bach/Violin Concertos/01 track.flac", 2));
+
+        await SeedPortraitAsync();
+
+        var summary = await RunAsync(TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"));
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/artist.jpg")));
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "Johann Sebastian Bach"), "artist.*"));
+    }
+
+    /// <summary>
+    /// The other two buttons name nobody, so they write no picture.
+    /// </summary>
+    /// <remarks>
+    /// Not an oversight and not a smaller version of the artist run: a library
+    /// pass walks every shelf in the place, and "which artist is this folder for"
+    /// is a question it has no answer to. The one thing that can answer it is a
+    /// person pressing the button on one artist's page.
+    /// </remarks>
+    [Fact]
+    public async Task TheLibraryButtonWritesNoPicture()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(0, summary.PortraitsWritten);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "Miles Davis"), "artist.*"));
+        Assert.Empty(_portraits.Requests);
+    }
+
+    /// <summary>
+    /// A picture already on the shelf is displaced by the one the catalogue shows.
+    /// </summary>
+    /// <remarks>
+    /// <b>The same rule a sleeve follows, and it has to be.</b> This application
+    /// shows the artist's picture and a person can change which one it is; a
+    /// shelf that kept whatever was there first would be a one-way door, and the
+    /// page and every other player on the disk would show different faces for
+    /// the same person — which is the whole complaint this feature exists for.
+    /// </remarks>
+    [Fact]
+    public async Task APictureAlreadyOnTheShelfIsDisplaced()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var existing = new byte[] { 1, 2, 3 };
+        var stale = Path.Combine(_root, "Miles Davis/artist.png");
+        await File.WriteAllBytesAsync(stale, existing, Token);
+
+        var summary = await RunAsync(TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"));
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.Equal(
+            PortraitBytes,
+            await File.ReadAllBytesAsync(Path.Combine(_root, "Miles Davis/artist.jpg"), Token));
+
+        // Under a different extension, so leaving it would give a player's glob
+        // two matches and let the stale one win.
+        Assert.False(File.Exists(stale));
+
+        var displaced = Directory
+            .EnumerateFiles(_root + "-trash", "artist.png", SearchOption.AllDirectories)
+            .Single();
+
+        Assert.Equal(existing, await File.ReadAllBytesAsync(displaced, Token));
+    }
+
+    /// <summary>
+    /// A second run over an unchanged shelf writes nothing and displaces nothing.
+    /// </summary>
+    /// <remarks>
+    /// The bytes are the worklist, as the diff is for tags. Unlike a sleeve —
+    /// which is read from the database for nothing — proving a shelf is already
+    /// right means having the picture to compare it against, so the request is
+    /// made and the write is what gets skipped. One request per run, not per
+    /// file, and nothing lands in the trash for a picture that did not change.
+    /// </remarks>
+    [Fact]
+    public async Task ASecondRunOverAnUnchangedShelfWritesNothing()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var scope = TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis");
+
+        Assert.Equal(1, (await RunAsync(scope)).PortraitsWritten);
+        Assert.Single(_portraits.Requests);
+
+        var written = Path.Combine(_root, "Miles Davis/artist.jpg");
+        var stamped = File.GetLastWriteTimeUtc(written);
+
+        Assert.Equal(0, (await RunAsync(scope)).PortraitsWritten);
+
+        // Asked again, and that is the cost of comparing.
+        Assert.Equal(2, _portraits.Requests.Count);
+
+        // Not rewritten, and the old one not trashed on the way.
+        Assert.Equal(stamped, File.GetLastWriteTimeUtc(written));
+        Assert.False(Directory.Exists(_root + "-trash"));
+    }
+
+    /// <summary>
+    /// With file mutation off, nothing is written and nothing is downloaded.
+    /// </summary>
+    /// <remarks>
+    /// The flag gates this as it gates the tags and the covers. The download sits
+    /// behind it rather than in front: a dry run that spent a request on a
+    /// picture it cannot write would be spending somebody else's bandwidth to
+    /// produce nothing.
+    /// </remarks>
+    [Fact]
+    public async Task WithMutationOffNoPictureIsFetchedOrWritten()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var summary = await RunAsync(
+            TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"),
+            Build(allowMutation: false));
+
+        Assert.Equal(0, summary.PortraitsWritten);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "Miles Davis"), "artist.*"));
+        Assert.Empty(_portraits.Requests);
+    }
+
+    /// <summary>
+    /// An artist nobody has found a picture of is not a folder to write into.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistWithNoPictureGetsNoFile()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        var summary = await RunAsync(TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"));
+
+        Assert.Equal(0, summary.PortraitsWritten);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "Miles Davis"), "artist.*"));
+        Assert.Empty(_portraits.Requests);
+    }
+
+    /// <summary>
+    /// A picture host that hangs costs the picture and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <b>The regression test for the sharpest edge in this feature.</b>
+    /// <c>HttpClient.Timeout</c> does not throw <c>TimeoutException</c> — it
+    /// cancels its own source, so what comes out is a
+    /// <c>TaskCanceledException</c>, which <i>is</i> an
+    /// <c>OperationCanceledException</c> with nobody's token cancelled. Caught
+    /// by the filter the sleeve can afford, it escaped past the caller's
+    /// <c>SaveChanges</c> and left the row holding the old size against a file
+    /// whose tags had already been written — rule 2, and the next scan then
+    /// discards every derived column on it. The per-file backstop rethrows a
+    /// cancellation, and the run reported a clean finish because nobody had
+    /// cancelled anything. So: the rescan at the end is the assertion that
+    /// matters.
+    /// </remarks>
+    [Fact]
+    public async Task APictureHostThatHangsCostsOnlyThePicture()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        _portraitFailure = new TaskCanceledException("timed out", new TimeoutException());
+
+        var services = Build();
+
+        var summary = await RunAsync(
+            TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"), services);
+
+        Assert.False(summary.Cancelled);
+        Assert.Equal(1, summary.Examined);
+        Assert.Equal(1, summary.Written);
+        Assert.Equal(0, summary.Failed);
+        Assert.Equal(0, summary.PortraitsWritten);
+
+        // The row carries what was written, so the scan reads the file as the
+        // one it already knows rather than as a modified one to strip.
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+
+        Assert.Equal(0, rescan.Summary!.Updated);
+        Assert.Equal(1, rescan.Summary.Unchanged);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var row = await db.MediaFiles.SingleAsync(Token);
+
+        Assert.NotNull(row.RecordingId);
+        Assert.NotNull(row.ReleaseId);
+    }
+
+    /// <summary>
+    /// An uploaded picture is the one written, and nothing is fetched for it.
+    /// </summary>
+    /// <remarks>
+    /// Rule 4: a person's answer and a provider's are different facts, and the
+    /// person's wins. The assertion that matters is the second one — the bytes
+    /// are already in the database, so a run that has an upload makes no request
+    /// at all and cannot be held up by somebody else's CDN.
+    /// </remarks>
+    [Fact]
+    public async Task AnUploadedPictureIsWrittenInsteadOfTheProvidersAndCostsNoRequest()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var chosen = new byte[] { 0xFF, 0xD8, 0xFF, 0xE1, 7, 7, 7 };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ArtistImages.Add(new ArtistImage
+            {
+                ArtistId = await MilesAsync(),
+                Kind = ArtistImageKind.Portrait.Name,
+                Bytes = chosen,
+                MediaType = "image/jpeg",
+                SavedUtc = DateTimeOffset.UtcNow,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"));
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.Equal(
+            chosen,
+            await File.ReadAllBytesAsync(Path.Combine(_root, "Miles Davis/artist.jpg"), Token));
+
+        Assert.Empty(_portraits.Requests);
+    }
+
+    /// <summary>
+    /// Both of an artist's pictures go onto the shelf in one run.
+    /// </summary>
+    /// <remarks>
+    /// The banner is written as <c>backdrop.*</c> because that is what this
+    /// library already holds 123 of — the stated consequence being that
+    /// whatever wrote those writes the same name, so the two tools displace
+    /// each other's file. Navidrome shows no artist banner at all; this one is
+    /// for Jellyfin, Kodi and Plex.
+    /// </remarks>
+    [Fact]
+    public async Task BothPicturesReachTheShelfInOneRun()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync();
+
+        var banner = new byte[] { 0xFF, 0xD8, 0xFF, 0xE2, 4, 4, 4 };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ArtistImages.Add(new ArtistImage
+            {
+                ArtistId = await MilesAsync(),
+                Kind = ArtistImageKind.Banner.Name,
+                Bytes = banner,
+                MediaType = "image/jpeg",
+                SavedUtc = DateTimeOffset.UtcNow,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.ForArtist(await MilesAsync(), "Miles Davis"));
+
+        // Two pictures, one shelf, one run.
+        Assert.Equal(2, summary.PortraitsWritten);
+        Assert.Equal(
+            PortraitBytes,
+            await File.ReadAllBytesAsync(Path.Combine(_root, "Miles Davis/artist.jpg"), Token));
+        Assert.Equal(
+            banner,
+            await File.ReadAllBytesAsync(Path.Combine(_root, "Miles Davis/backdrop.jpg"), Token));
+    }
+
+    /// <summary>The picture a provider found, as the portraits stage leaves it.</summary>
+    private async Task SeedPortraitAsync(string url = PortraitUrl)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var artist = await db.Artists.SingleAsync(row => row.Mbid == ArtistMbid, Token);
+
+        artist.PortraitUrl = url;
+        artist.PortraitLookupUtc = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync(Token);
+    }
+
+    private async Task<ArtistId> MilesAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        return await db.Artists
+            .Where(artist => artist.Mbid == ArtistMbid)
+            .Select(artist => artist.Id)
+            .SingleAsync(Token);
+    }
+
     private async Task<TagWriteSummary> RunAsync(TagWriteScope scope, ServiceProvider? services = null)
     {
         var provider = services ?? Build();
@@ -544,6 +1007,10 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     private ServiceProvider Build(bool allowMutation = true)
     {
         var services = new ServiceCollection();
+
+        // The portrait is the one thing this pass fetches rather than reads, so
+        // the socket under it is stubbed the way the provider suites stub theirs.
+        services.AddSingleton<IHttpClientFactory>(_ => new StubClients(_portraits));
 
         services.AddLogging();
         services.AddSignalR();
@@ -759,5 +1226,19 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
         public void StopApplication()
         {
         }
+    }
+
+    /// <summary>
+    /// One handler behind every client, so a test can see what was fetched.
+    /// </summary>
+    /// <remarks>
+    /// <c>IHttpClientFactory</c> rather than a registered named client, because
+    /// the pass asks for the plain one — it is downloading a static image from a
+    /// CDN, not calling a provider's API through its gate.
+    /// </remarks>
+    private sealed class StubClients(StubHttpHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) =>
+            new(handler, disposeHandler: false);
     }
 }

@@ -81,10 +81,17 @@ namespace Fonoteca.Api.Library;
 ///
 /// <item><b>The chosen sleeve goes out as a file beside the album, and its unit
 /// is the folder rather than the file.</b> Everything else here is a tag, and a
-/// cover is not one: it is written once per directory, as <c>cover.jpg</c>, and
-/// the files themselves are not touched by it. See
+/// cover is not one: it is written once per album folder, named for its own
+/// image type, and the files themselves are not touched by it. See
 /// <see cref="EnsureCoverAsync"/> for why that is the shape and not an embedded
 /// picture.</item>
+///
+/// <item><b>The artist's photograph goes out the same way, and only from the
+/// artist button.</b> A picture of a person is a fact about nothing in any file,
+/// so the only thing that can say whose shelf it belongs on is somebody pressing
+/// the button on one artist's page — and even then the folder's name is checked
+/// against the artist's, because most of a violinist's files sit on composers'
+/// shelves. See <see cref="EnsurePortraitAsync"/>.</item>
 /// </list>
 /// </remarks>
 public sealed class TagWriteService(
@@ -95,6 +102,7 @@ public sealed class TagWriteService(
     TagWriterOptions writerOptions,
     FileSystemAudioFileStore store,
     IOptions<FonotecaOptions> options,
+    IHttpClientFactory clients,
     IClock clock,
     ILogger<TagWriteService> logger) : IHostedService
 {
@@ -322,6 +330,7 @@ public sealed class TagWriteService(
         var elapsed = Stopwatch.StartNew();
         var counts = new Tally();
         var covers = new CoverRun(clock.UtcNow);
+        var portraits = new PortraitRun(scope.Artist, clock.UtcNow);
         var correlationId = Guid.CreateVersion7().ToString("N")[..12];
 
         var pending = await CountAsync(scope, cancellationToken).ConfigureAwait(false);
@@ -354,7 +363,8 @@ public sealed class TagWriteService(
 
                     try
                     {
-                        await HandleAsync(file, counts, covers, correlationId, cancellationToken)
+                        await HandleAsync(
+                                file, counts, covers, portraits, correlationId, cancellationToken)
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
@@ -403,6 +413,13 @@ public sealed class TagWriteService(
             // Between files, or between pages. The file being written finished.
         }
 
+        // Rule 6: refusing is an answer, and this one is otherwise invisible —
+        // the run finishes clean, the panel says nothing, and no picture arrives.
+        if (portraits is { Artist: not null, Shelved: false, Subject: not null })
+        {
+            Log.PortraitHasNoShelf(logger, scope.Label);
+        }
+
         var summary = new TagWriteSummary(
             JobId: jobId,
             Scope: scope.Label,
@@ -417,6 +434,7 @@ public sealed class TagWriteService(
             Failed: counts.Failed,
             Skipped: counts.Missing,
             CoversWritten: counts.CoversWritten,
+            PortraitsWritten: counts.PortraitsWritten,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.TagWriteCompleted(
@@ -500,6 +518,7 @@ public sealed class TagWriteService(
         PendingTagWrite file,
         Tally counts,
         CoverRun covers,
+        PortraitRun portraits,
         string correlationId,
         CancellationToken cancellationToken)
     {
@@ -586,6 +605,11 @@ public sealed class TagWriteService(
             await EnsureCoverAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
                 .ConfigureAwait(false);
 
+            // The artist's photograph, once per shelf. Same scope, same reason.
+            await EnsurePortraitAsync(
+                    file, counts, portraits, db, provider, correlationId, cancellationToken)
+                .ConfigureAwait(false);
+
             // Always, and not only when something was committed.
             // `IEventLog.AppendAsync` does not save itself — that is what makes
             // one scope and one save per file the resumability story — so
@@ -599,7 +623,7 @@ public sealed class TagWriteService(
     }
 
     /// <summary>
-    /// The album's chosen sleeve, written once beside the music as <c>cover.jpg</c>.
+    /// The album's chosen sleeve, written once beside the music as <c>cover.*</c>.
     /// </summary>
     /// <remarks>
     /// <b>Why a file beside the album rather than a picture inside each one.</b>
@@ -612,24 +636,38 @@ public sealed class TagWriteService(
     /// exists to prove a tag write did <i>not</i> disturb the pictures — taught
     /// to expect this one change. That is a pass of its own and this is not it.
     ///
-    /// <b>Once per directory, not once per file.</b> A cover is a fact about a
-    /// folder, so the first file in each one does the work and the rest of the
-    /// album skips this entirely. Multi-disc rips get one per disc directory,
-    /// which is what a player looking beside the audio needs.
+    /// <b>Once per album, not once per file, and the album is
+    /// <see cref="AlbumFolder"/>'s.</b> A cover is a fact about a folder, so the
+    /// first file of each album does the work and the rest skip this entirely.
+    /// The cut is the shared one rather than the file's own directory because a
+    /// multi-disc rip must get <i>one</i> cover at the album root: what a player
+    /// globs beside the audio is a separate and narrower setting — Navidrome's
+    /// <c>DiscArtPriority</c> matches <c>disc*</c> and <c>cd*</c> and not
+    /// <c>cover.*</c> — so a sleeve written into <c>CD 01</c> is found by
+    /// nothing and the embedded picture wins, which is the failure this exists
+    /// to end.
     ///
     /// <b>The bytes are the worklist, exactly as the diff is for tags.</b> A
-    /// folder already holding this image is read and left alone, so a second run
-    /// costs one file read per album and writes nothing.
+    /// folder already holding this image and nothing else claiming the glob is
+    /// read and left alone, so a second run costs one file read per album and
+    /// writes nothing.
     ///
-    /// <b>A different <c>cover.*</c> already there is displaced, never
-    /// overwritten.</b> It goes to <c>Fonoteca:TrashPath</c> under a stamped
-    /// folder — the file manager's own convention, and the reason this is
-    /// reversible. It cannot call <c>FileManagerService.TrashAsync</c> to do it:
-    /// that takes <see cref="LibraryWorkGate"/>, which this pass is holding.
+    /// <b>Every other <c>cover.*</c> there is displaced, never overwritten.</b>
+    /// All of them, not just the name this sleeve would take: a PNG answered
+    /// later by a JPEG otherwise leaves both, and a player's glob then has two
+    /// matches with the stale one able to win. They go to
+    /// <c>Fonoteca:TrashPath</c> under a stamped folder — the file manager's own
+    /// convention, and the reason this is reversible. It cannot call
+    /// <c>FileManagerService.TrashAsync</c> to do it: that takes
+    /// <see cref="LibraryWorkGate"/>, which this pass is holding.
     ///
-    /// <b>It never marks the file as failed.</b> A folder this process cannot
-    /// write to is a cover problem, not a tagging one, and the tags may already
-    /// have been written by the time this runs.
+    /// <b>It never marks the file as failed, and the catch is on
+    /// <see cref="Exception"/> for that reason.</b> A folder this process cannot
+    /// write to is a cover problem, not a tagging one — and the caller has
+    /// already committed the tags but not yet saved the row carrying the new
+    /// size and mtime, so anything escaping here would cost that save and hand
+    /// the next scan a file it reads as modified. Cancellation is the one thing
+    /// let through: the save takes the same token and would throw on it anyway.
     /// </remarks>
     private async Task EnsureCoverAsync(
         PendingTagWrite file,
@@ -640,65 +678,86 @@ public sealed class TagWriteService(
         string correlationId,
         CancellationToken cancellationToken)
     {
-        var separator = file.Path.LastIndexOf('/');
-        var folder = separator < 0 ? string.Empty : file.Path[..separator];
+        // The album, not the file's own directory: a disc folder is not an album
+        // and a sleeve written into one is found by nothing.
+        var folder = AlbumFolder.Of(file.Path);
 
         // The whole album behind the first file is answered by this line.
         if (!covers.Folders.Add(folder)) return;
 
         if (file.ReleaseId is not { } releaseId) return;
 
-        if (!covers.Sleeves.TryGetValue(releaseId, out var sleeve))
-        {
-            // `Bytes != null` is the whole filter: a row with no bytes is a stamp
-            // saying both sources were asked and neither answered, not a cover.
-            sleeve = await db.ReleaseCovers
-                .AsNoTracking()
-                .Where(cover => cover.ReleaseId == releaseId && cover.Bytes != null)
-                .Select(cover => new StoredCover(cover.Bytes!, cover.MediaType))
-                .FirstOrDefaultAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            covers.Sleeves[releaseId] = sleeve;
-        }
-
-        if (sleeve is null) return;
-
-        // An image type with no filename is one this application would refuse to
-        // serve back, so it is not one to write into somebody's library either.
-        if (FilePreview.ImageExtensionFor(sleeve.MediaType) is not { } extension)
-        {
-            Log.CoverNotWritten(logger, folder, $"'{sleeve.MediaType}' is not an image with a name");
-            return;
-        }
-
-        var target = folder.Length == 0 ? $"cover.{extension}" : $"{folder}/cover.{extension}";
-        var absolute = store.AbsolutePathFor(new LibraryPath(target));
-        var displaced = string.Empty;
+        // Named for the log until the sleeve's own type names the file.
+        var target = folder;
 
         try
         {
-            if (File.Exists(absolute))
+            if (!covers.Sleeves.TryGetValue(releaseId, out var sleeve))
             {
-                var present = await File.ReadAllBytesAsync(absolute, cancellationToken)
+                // `Bytes != null` is the whole filter: a row with no bytes is a
+                // stamp saying both sources were asked and neither answered.
+                sleeve = await db.ReleaseCovers
+                    .AsNoTracking()
+                    .Where(cover => cover.ReleaseId == releaseId && cover.Bytes != null)
+                    .Select(cover => new StoredCover(cover.Bytes!, cover.MediaType))
+                    .FirstOrDefaultAsync(cancellationToken)
                     .ConfigureAwait(false);
 
-                // Already ours, or already right. Either way nothing to do, and
-                // this is what makes re-running the pass cheap.
-                if (present.AsSpan().SequenceEqual(sleeve.Bytes)) return;
-
-                if (!writerOptions.AllowFileMutation)
-                {
-                    Log.CoverNotWritten(logger, target, "file mutation is off");
-                    return;
-                }
-
-                displaced = Displace(target, absolute, covers.Stamp);
+                covers.Sleeves[releaseId] = sleeve;
             }
-            else if (!writerOptions.AllowFileMutation)
+
+            if (sleeve is null) return;
+
+            // An image type with no filename is one this application would refuse
+            // to serve back, so it is not one to write into somebody's library.
+            if (FilePreview.ImageExtensionFor(sleeve.MediaType) is not { } extension)
+            {
+                Log.CoverNotWritten(logger, folder, $"'{sleeve.MediaType}' is not an image with a name");
+                return;
+            }
+
+            target = folder.Length == 0 ? $"cover.{extension}" : $"{folder}/cover.{extension}";
+
+            // Inside the try: `Resolve` refuses a path reaching outside the root
+            // or through a directory symlink, and that is a cover problem.
+            var absolute = store.AbsolutePathFor(new LibraryPath(target));
+
+            // Every image the folder already names `cover.*`, the way a player
+            // globs for one — not only the name this sleeve would take.
+            var directory = Path.GetDirectoryName(absolute)!;
+            var rivals = Directory.Exists(directory)
+                ? Directory.GetFiles(directory, "cover.*", CoverGlob)
+                    .Where(path => FilePreview.Of(path).Kind == PreviewKind.Image)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray()
+                : [];
+
+            // Already ours and alone. Nothing to do, and this is what makes
+            // re-running the pass cheap.
+            if (rivals is [var only]
+                && string.Equals(only, absolute, StringComparison.Ordinal)
+                && (await File.ReadAllBytesAsync(only, cancellationToken).ConfigureAwait(false))
+                    .AsSpan().SequenceEqual(sleeve.Bytes))
+            {
+                return;
+            }
+
+            if (!writerOptions.AllowFileMutation)
             {
                 Log.CoverNotWritten(logger, target, "file mutation is off");
                 return;
+            }
+
+            var displaced = new List<string>();
+
+            foreach (var rival in rivals)
+            {
+                var name = Path.GetFileName(rival);
+
+                displaced.Add(Displace(
+                    folder.Length == 0 ? name : $"{folder}/{name}",
+                    rival,
+                    covers.Stamp));
             }
 
             var staged = await store
@@ -710,40 +769,452 @@ public sealed class TagWriteService(
                 await staged.Content.WriteAsync(sleeve.Bytes, cancellationToken).ConfigureAwait(false);
                 await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            counts.CoversWritten++;
+            Log.CoverWritten(
+                logger,
+                target,
+                displaced.Count == 0 ? string.Empty : $", displacing {string.Join(", ", displaced)}");
+
+            // Keyed by MediaFileId like every other entry this pass writes,
+            // because a path is up to 4096 bytes and SubjectId is 200. The file
+            // named is the one whose folder got the cover, which is also the one
+            // whose save this entry rides on.
+            var payload = JsonSerializer.Serialize(new
+            {
+                path = target,
+                mediaType = sleeve.MediaType,
+                bytes = sleeve.Bytes.Length,
+                displaced = displaced.Count == 0 ? null : displaced,
+            });
+
+            await provider.GetRequiredService<IEventLog>()
+                .AppendAsync(
+                    DomainEvent.Create(
+                        $"{EventPrefix}.cover",
+                        TagWriter.FileSubject,
+                        file.Id.ToString(),
+                        Actor,
+                        clock.UtcNow,
+                        payload,
+                        correlationId),
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
-        catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
+        // Not a cancellation: the caller's `SaveChanges` takes the same token
+        // and would throw on it anyway, so swallowing it here buys nothing and
+        // costs a warning line naming a cover problem that is a stopped pass.
+        catch (Exception cause) when (cause is not OperationCanceledException)
         {
-            Log.CoverNotWritten(logger, target, cause.Message);
+            Log.CoverNotWritten(logger, target, Because(cause));
+        }
+    }
+
+    /// <summary>
+    /// <c>cover.*</c> the way a player looks for it: this folder only, and
+    /// case-insensitively, because <c>Cover.JPG</c> wins the same glob on a
+    /// case-sensitive disk and would be left sitting beside the new sleeve.
+    /// </summary>
+    private static readonly EnumerationOptions CoverGlob = new()
+    {
+        MatchCasing = MatchCasing.CaseInsensitive,
+    };
+
+    /// <summary>The largest portrait worth writing into a library. The cover upload's own cap.</summary>
+    private const int MaxPortraitBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// How long one picture may take before the pass stops waiting for it.
+    /// </summary>
+    /// <remarks>
+    /// Short, because a stalled CDN would otherwise hold up a run over eight
+    /// thousand files for a photograph. Asked once per run, so the whole cost of
+    /// getting this wrong is one artist's picture missing until the next run.
+    /// </remarks>
+    private static readonly TimeSpan PortraitTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The artist's photograph, written once beside their records as <c>artist.*</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>The artist page's button is the only one that writes this, and that is
+    /// the design rather than a gap.</b> A picture of a person is not a fact
+    /// about any file, so nothing in a path or a tag says which shelf it belongs
+    /// on — the claim has to come from somewhere, and the only place it exists is
+    /// a person pressing "write tags" on one artist's page. The library-wide and
+    /// album buttons pass through the same code and write nothing, because
+    /// neither one names an artist.
+    ///
+    /// <b>Even then the folder's name is checked, and the measurement is why.</b>
+    /// The scope's files are every track the artist page lists, which is not the
+    /// same as every track on their shelf: 47 of Janine Jansen's 54 files sit
+    /// under <c>Johann Sebastian Bach</c> and <c>Antonio Vivaldi</c>, because a
+    /// classical library files a performance under its composer. Writing her
+    /// photograph into every folder her playing reaches would put a violinist's
+    /// portrait on two dead composers' shelves. So the folder is taken only when
+    /// its name <i>is</i> the artist, by <see cref="ArtistNameMatch"/> — the same
+    /// rule that guards the one portrait source keyed on a name. Measured over
+    /// the followed artists, 27 of 28 have a folder that answers to this and the
+    /// twenty-eighth has no folder at all, his music being filed under the band.
+    ///
+    /// <b>What the catalogue shows is what goes on the shelf, so a picture
+    /// already there is displaced.</b> The same rule a sleeve follows, and for
+    /// the same reason: this application displays the artist's picture, a person
+    /// can change which one it is, and a folder still holding the old one would
+    /// make every other player on the disk disagree with the page that chose it.
+    /// The alternative — leaving whatever is there — sounds safer and is not: it
+    /// makes the folder a one-way door that no picked or uploaded portrait can
+    /// ever reach.
+    ///
+    /// <b>Displaced, never overwritten.</b> Every <c>artist.*</c> the shelf
+    /// holds goes to <c>Fonoteca:TrashPath</c> under the run's stamp — all of
+    /// them, not only the name this picture would take, or a PNG answered later
+    /// by a JPEG leaves two files for a player's glob to choose between. There
+    /// is no undo journal carrying image bytes, so the trash is the undo.
+    ///
+    /// <b>The bytes are the worklist, which costs one request.</b> A shelf
+    /// already holding exactly this picture is left untouched — but proving that
+    /// means having the picture to compare, so unlike a sleeve, which is read
+    /// from the database for nothing, this is fetched before it can be skipped.
+    /// One request per run rather than per file, and only when a run names an
+    /// artist who has a portrait and a shelf to put it on.
+    ///
+    /// <b>The bytes come over the wire, which nothing else in this pass does.</b>
+    /// <c>Artists.PortraitUrl</c> is a URL rather than stored bytes — the browser
+    /// fetches it directly — so writing one into a library means downloading it
+    /// here. One request per run, from the plain client rather than a provider's:
+    /// these are CDN hosts (Qobuz, TheAudioDB, Wikimedia) serving a static image,
+    /// not the rate-limited APIs the six <c>RequestGate</c>s exist to protect,
+    /// and taking a provider's gate for a picture would queue behind
+    /// identification's lookups for no reason.
+    ///
+    /// It never marks the file as failed, for <see cref="EnsureCoverAsync"/>'s
+    /// reason exactly: the tags are already committed and the row carrying the
+    /// new size is not yet saved.
+    /// </remarks>
+    private async Task EnsurePortraitAsync(
+        PendingTagWrite file,
+        Tally counts,
+        PortraitRun portraits,
+        FonotecaDbContext db,
+        IServiceProvider provider,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        // The whole library and one album both arrive here naming nobody.
+        if (portraits.Artist is not { } artistId) return;
+
+        // The shelf the album sits on, which is a claim about whose it is and is
+        // checked below. Empty for a file too shallow to have one.
+        var folder = AlbumFolder.ParentOf(file.Path);
+
+        if (folder.Length == 0) return;
+
+        // Every album on the shelf behind the first one is answered by this
+        // line — and both kinds are done inside this one visit, or the portrait
+        // would take the gate and the banner would never be reached.
+        if (!portraits.Folders.Add(folder)) return;
+
+        try
+        {
+            if (!portraits.Asked)
+            {
+                portraits.Asked = true;
+                portraits.Subject = await SubjectAsync(db, artistId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (Exception cause)
+            when (cause is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            Log.PortraitNotWritten(logger, folder, Because(cause));
             return;
         }
 
-        counts.CoversWritten++;
-        Log.CoverWritten(logger, target, displaced.Length == 0 ? string.Empty : $", displacing {displaced}");
+        if (portraits.Subject is not { } subject) return;
 
-        // Keyed by MediaFileId like every other entry this pass writes, because
-        // a path is up to 4096 bytes and SubjectId is 200. The file named is the
-        // one whose folder got the cover, which is also the one whose save this
-        // entry rides on.
-        var payload = JsonSerializer.Serialize(new
+        // Bach's shelf is not Janine Jansen's, however much of her playing
+        // sits on it.
+        if (!subject.Owns(folder)) return;
+
+        // The shelf was found and it is theirs, whatever happens below.
+        portraits.Shelved = true;
+
+        foreach (var kind in ArtistImageKind.All)
         {
-            path = target,
-            mediaType = sleeve.MediaType,
-            bytes = sleeve.Bytes.Length,
-            displaced = displaced.Length == 0 ? null : displaced,
-        });
+            await WriteImageAsync(
+                    kind, folder, file, counts, portraits, subject, provider, correlationId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
 
-        await provider.GetRequiredService<IEventLog>()
-            .AppendAsync(
-                DomainEvent.Create(
-                    $"{EventPrefix}.cover",
-                    TagWriter.FileSubject,
-                    file.Id.ToString(),
-                    Actor,
-                    clock.UtcNow,
-                    payload,
-                    correlationId),
-                cancellationToken)
+    /// <summary>
+    /// The artist, their two pictures, and which of each a person chose.
+    /// </summary>
+    /// <remarks>
+    /// One query for both kinds and both sources. <b>The picked URL, not the raw
+    /// column</b>: a person correcting a picture writes it into
+    /// <c>EditsJson</c> beside the provider's answer rather than over it (rule
+    /// 4), so a pass reading <c>PortraitUrl</c> alone writes the provider's
+    /// picture onto the shelf and silently discards the correction. Applied in
+    /// memory because <c>PersonEdits</c> parses JSON and EF cannot.
+    /// </remarks>
+    private static async Task<PortraitSubject?> SubjectAsync(
+        FonotecaDbContext db,
+        ArtistId artistId,
+        CancellationToken cancellationToken)
+    {
+        var row = await db.Artists
+            .AsNoTracking()
+            .Where(artist => artist.Id == artistId)
+            .Select(artist => new
+            {
+                artist.Name,
+                artist.LatinName,
+                artist.PortraitUrl,
+                artist.BannerUrl,
+                artist.EditsJson,
+                Uploaded = db.ArtistImages
+                    .Where(upload => upload.ArtistId == artist.Id)
+                    .Select(upload => new { upload.Kind, upload.Bytes, upload.MediaType })
+                    .ToList(),
+            })
+            .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        if (row is null) return null;
+
+        var edits = PersonEdits.Read(row.EditsJson);
+
+        ArtistPicture Picture(ArtistImageKind kind, string? provider)
+        {
+            var upload = row.Uploaded.Find(candidate => candidate.Kind == kind.Name);
+
+            return new ArtistPicture(
+                PersonEdits.Apply(edits, kind.Name, provider), upload?.Bytes, upload?.MediaType);
+        }
+
+        return new PortraitSubject(
+            row.Name,
+            row.LatinName,
+            Picture(ArtistImageKind.Portrait, row.PortraitUrl),
+            Picture(ArtistImageKind.Banner, row.BannerUrl));
+    }
+
+    /// <summary>
+    /// One picture, written beside the artist's records under its own name.
+    /// </summary>
+    /// <remarks>
+    /// Its own try, so a banner nobody can fetch does not cost the portrait
+    /// beside it — and the filter is the token's rather than the exception's,
+    /// for the reason spelled out on the catch itself.
+    /// </remarks>
+    private async Task WriteImageAsync(
+        ArtistImageKind kind,
+        string folder,
+        PendingTagWrite file,
+        Tally counts,
+        PortraitRun portraits,
+        PortraitSubject subject,
+        IServiceProvider provider,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var chosen = subject.For(kind);
+
+        if (!chosen.Any) return;
+
+        // Named for the log until the picture's own type names the file.
+        var target = folder;
+
+        try
+        {
+            if (!writerOptions.AllowFileMutation)
+            {
+                Log.PortraitNotWritten(logger, folder, "file mutation is off");
+                return;
+            }
+
+            // A person's picture is already here; only a provider's has to be
+            // fetched, and an artist with an upload costs no request at all.
+            var picture = chosen.Uploaded
+                ?? await PortraitAsync(portraits, kind, chosen.Url!, cancellationToken)
+                    .ConfigureAwait(false);
+
+            if (picture is null) return;
+
+            // An image type with no filename is one this application would refuse
+            // to serve back, so it is not one to write into somebody's library.
+            if (FilePreview.ImageExtensionFor(picture.MediaType) is not { } extension)
+            {
+                Log.PortraitNotWritten(
+                    logger, folder, $"'{picture.MediaType}' is not an image with a name");
+                return;
+            }
+
+            target = $"{folder}/{kind.FileName(extension)}";
+
+            // Inside the try: `Resolve` refuses a path reaching outside the root
+            // or through a directory symlink, and that is a picture problem.
+            var absolute = store.AbsolutePathFor(new LibraryPath(target));
+
+            // Every image the shelf already names for this kind, the way a
+            // player globs for one — not only the name this picture would take,
+            // or a PNG answered later by a JPEG leaves both and the stale one
+            // can win.
+            var directory = Path.GetDirectoryName(absolute)!;
+            var rivals = Directory.Exists(directory)
+                ? Directory.GetFiles(directory, kind.Glob, CoverGlob)
+                    .Where(path => FilePreview.Of(path).Kind == PreviewKind.Image)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray()
+                : [];
+
+            // Already this picture and alone. The bytes are the worklist here as
+            // they are for a sleeve — the difference is only that these had to be
+            // fetched to be compared, which is one request for the whole run.
+            if (rivals is [var only]
+                && string.Equals(only, absolute, StringComparison.Ordinal)
+                && (await File.ReadAllBytesAsync(only, cancellationToken).ConfigureAwait(false))
+                    .AsSpan().SequenceEqual(picture.Bytes))
+            {
+                return;
+            }
+
+            var displaced = new List<string>();
+
+            foreach (var rival in rivals)
+            {
+                var name = Path.GetFileName(rival);
+
+                displaced.Add(Displace($"{folder}/{name}", rival, portraits.Stamp));
+            }
+
+            var staged = await store
+                .OpenForCreateAsync(new LibraryPath(target), picture.Bytes.Length, cancellationToken)
+                .ConfigureAwait(false);
+
+            await using (staged.ConfigureAwait(false))
+            {
+                await staged.Content.WriteAsync(picture.Bytes, cancellationToken).ConfigureAwait(false);
+                await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            counts.PortraitsWritten++;
+            Log.PortraitWritten(
+                logger,
+                target,
+                displaced.Count == 0 ? string.Empty : $", displacing {string.Join(", ", displaced)}");
+
+            // Keyed by MediaFileId like every other entry this pass writes, and
+            // riding the same save. The source is in the payload because it is
+            // the only record of which provider's guess this was.
+            var payload = JsonSerializer.Serialize(new
+            {
+                path = target,
+                kind = kind.Name,
+                mediaType = picture.MediaType,
+                bytes = picture.Bytes.Length,
+                source = chosen.Uploaded is null ? chosen.Url : "uploaded",
+                displaced = displaced.Count == 0 ? null : displaced,
+            });
+
+            await provider.GetRequiredService<IEventLog>()
+                .AppendAsync(
+                    DomainEvent.Create(
+                        $"{EventPrefix}.portrait",
+                        TagWriter.FileSubject,
+                        file.Id.ToString(),
+                        Actor,
+                        clock.UtcNow,
+                        payload,
+                        correlationId),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        // <b>Not "is not OperationCanceledException", which is what
+        // <see cref="EnsureCoverAsync"/> can afford and this cannot.</b> That
+        // one does no network I/O, so the only cancellation it can see is the
+        // pass being stopped. This one holds an <c>HttpClient</c> whose
+        // <see cref="PortraitTimeout"/> throws <c>TaskCanceledException</c> — an
+        // <c>OperationCanceledException</c> — with the caller's token untouched,
+        // so the narrower filter let a slow CDN out of here and the damage was
+        // three deep: the caller's `SaveChanges` never ran, leaving the row
+        // holding the old size against a file whose tags had already been
+        // written (rule 2, and the next scan then discards the catalogue on it);
+        // the per-file backstop rethrows a cancellation rather than counting it;
+        // and `RunAsync` swallowed it into a summary reporting a clean finish,
+        // because `Cancelled` reads the token, which nobody had cancelled. What
+        // separates the two is the token, so that is what the filter asks about.
+        catch (Exception cause)
+            when (cause is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            Log.PortraitNotWritten(logger, target, Because(cause));
+        }
+    }
+
+    /// <summary>
+    /// The picture itself, downloaded once however many shelves ask for it.
+    /// </summary>
+    /// <remarks>
+    /// <b>A failed fetch is an answer for the rest of the run.</b> The flag goes
+    /// up before the request rather than after it, so a CDN that is down costs
+    /// one attempt and not one per folder.
+    ///
+    /// <c>MaxResponseContentBufferSize</c> is the cap, so a host answering with
+    /// something enormous throws out of the read rather than being held in memory
+    /// first and measured after.
+    /// </remarks>
+    private async Task<FetchedImage?> PortraitAsync(
+        PortraitRun portraits,
+        ArtistImageKind kind,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        if (portraits.Fetched.TryGetValue(kind.Name, out var already)) return already;
+
+        portraits.Fetched[kind.Name] = null;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var address)
+            || (address.Scheme != Uri.UriSchemeHttps && address.Scheme != Uri.UriSchemeHttp))
+        {
+            Log.PortraitNotWritten(logger, url, "the stored portrait is not an http address");
+            return null;
+        }
+
+        var http = clients.CreateClient();
+
+        http.Timeout = PortraitTimeout;
+        http.MaxResponseContentBufferSize = MaxPortraitBytes;
+
+        using var response = await http.GetAsync(address, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Log.PortraitNotWritten(logger, url, $"the picture answered {(int)response.StatusCode}");
+            return null;
+        }
+
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+
+        // The allowlist the upload path holds every cover to, for the same
+        // reason: no text/html and no image/svg+xml, both documents that run
+        // script, and this writes the bytes into the library rather than serving
+        // them.
+        if (!FilePreview.IsSafeImageMediaType(mediaType))
+        {
+            Log.PortraitNotWritten(logger, url, $"it answered with {mediaType ?? "no type"}");
+            return null;
+        }
+
+        var fetched = new FetchedImage(
+            await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false),
+            mediaType);
+
+        portraits.Fetched[kind.Name] = fetched;
+
+        return fetched;
     }
 
     /// <summary>
@@ -800,6 +1271,9 @@ public sealed class TagWriteService(
 
         /// <summary>Album folders that got a sleeve. Counted per folder, unlike everything above.</summary>
         public int CoversWritten;
+
+        /// <summary>Artist folders that got a photograph. Per folder too, and there is rarely more than one.</summary>
+        public int PortraitsWritten;
     }
 
     /// <summary>
@@ -828,6 +1302,90 @@ public sealed class TagWriteService(
 
     /// <summary>A chosen cover as the catalogue holds it.</summary>
     private sealed record StoredCover(byte[] Bytes, string? MediaType);
+
+    /// <summary>
+    /// What one run has already answered about the artist's photograph.
+    /// </summary>
+    /// <remarks>
+    /// Three answers cached rather than two, because unlike a sleeve the picture
+    /// is not in the database: the artist is read once, the image is downloaded
+    /// once, and each shelf is considered once. <see cref="Asked"/> and
+    /// <see cref="Fetched"/> exist so that "no portrait" and "not looked yet" stay
+    /// different — a null without them is a query per file.
+    /// </remarks>
+    private sealed class PortraitRun(ArtistId? artist, DateTimeOffset startedAt)
+    {
+        /// <summary>Whose page the button was on, or null for the other two scopes.</summary>
+        public ArtistId? Artist { get; } = artist;
+
+        /// <summary>One stamp for the whole run, so a displaced picture lands with the sleeves.</summary>
+        public string Stamp { get; } =
+            startedAt.ToString("yyyy-MM-dd HHmmss", CultureInfo.InvariantCulture);
+
+        /// <summary>Whether any folder in this run turned out to be the artist's own.</summary>
+        public bool Shelved { get; set; }
+
+        public HashSet<string> Folders { get; } = new(StringComparer.Ordinal);
+
+        public bool Asked { get; set; }
+
+        public PortraitSubject? Subject { get; set; }
+
+        /// <summary>
+        /// What each kind's URL answered with, by kind.
+        /// </summary>
+        /// <remarks>
+        /// Present-with-null is "asked and got nothing", which is why this is a
+        /// dictionary rather than a pair of fields: a CDN that is down has to
+        /// cost one attempt for the run, not one per shelf.
+        /// </remarks>
+        public Dictionary<string, FetchedImage?> Fetched { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The artist a portrait would be written for, and which picture is theirs.
+    /// </summary>
+    /// <remarks>
+    /// <b>An upload outranks whatever a provider found</b>, and it is why this
+    /// carries bytes as well as a URL: rule 4 again, a person's answer and a
+    /// rule's answer being different facts. The uploaded bytes are already in
+    /// the database, so a run that has one downloads nothing at all.
+    /// </remarks>
+    /// <summary>
+    /// The artist a picture would be written for, and which picture is theirs.
+    /// </summary>
+    /// <remarks>
+    /// <b>An upload outranks whatever a provider found</b>, and it is why this
+    /// carries bytes as well as a URL: rule 4 again, a person's answer and a
+    /// rule's answer being different facts. The uploaded bytes are already in
+    /// the database, so a run that has one downloads nothing at all.
+    /// </remarks>
+    private sealed record PortraitSubject(
+        string Name,
+        string? LatinName,
+        ArtistPicture Portrait,
+        ArtistPicture Banner)
+    {
+        /// <summary>Whether a shelf is named for this artist.</summary>
+        public bool Owns(string folder) => ArtistShelf.IsNamedFor(folder, Name, LatinName);
+
+        public ArtistPicture For(ArtistImageKind kind) =>
+            kind == ArtistImageKind.Banner ? Banner : Portrait;
+    }
+
+    /// <summary>One of an artist's pictures, from both sources at once.</summary>
+    private sealed record ArtistPicture(string? Url, byte[]? Bytes, string? MediaType)
+    {
+        /// <summary>The picture a person handed us, or null to go and fetch one.</summary>
+        public FetchedImage? Uploaded =>
+            Bytes is { Length: > 0 } bytes ? new FetchedImage(bytes, MediaType) : null;
+
+        /// <summary>Whether either source has anything to write.</summary>
+        public bool Any => Uploaded is not null || Url is { Length: > 0 };
+    }
+
+    /// <summary>A picture downloaded for this run, with the type the host called it.</summary>
+    private sealed record FetchedImage(byte[] Bytes, string? MediaType);
 
     private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid);
 
@@ -941,9 +1499,16 @@ public sealed record TagWriteProgress(
 /// <param name="Skipped">Files that were not on disk. Left alone; an unmounted volume is not an empty library.</param>
 /// <param name="CoversWritten">
 /// Album folders that got the catalogue's chosen sleeve written beside the music
-/// as <c>cover.jpg</c>. <b>Counted per folder, unlike every other number here</b>
+/// as <c>cover.*</c>, named for the image's own type. <b>Counted per album,
+/// unlike every other number here</b>
 /// — a twelve-track album is twelve examined files and one cover — so it is
 /// deliberately not part of any total.
+/// </param>
+/// <param name="PortraitsWritten">
+/// Artist folders that got the artist's photograph written beside their records
+/// as <c>artist.*</c>. <b>Per folder like the covers, and all but always one or
+/// zero</b>: only the artist button writes these, and it writes to the one shelf
+/// named for that artist.
 /// </param>
 public sealed record TagWriteSummary(
     string JobId,
@@ -959,4 +1524,5 @@ public sealed record TagWriteSummary(
     int Failed,
     int Skipped,
     int CoversWritten,
+    int PortraitsWritten,
     bool Cancelled);

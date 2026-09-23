@@ -6,6 +6,7 @@ using Fonoteca.Api.Library;
 using Fonoteca.Api.Mcp;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Api.Startup;
+using Fonoteca.Api.Subsonic;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Events;
@@ -303,6 +304,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors(CorsPolicy);
 app.Use(LibraryTools.Guard);
+app.Use(SubsonicEndpoints.Guard);
 
 app.MapHealthChecks("/health");
 app.MapSystemEndpoints();
@@ -314,6 +316,12 @@ app.MapHub<JobsHub>(JobsHub.Route);
 
 // Not part of the contract packages/api-client is generated from.
 app.MapMcp(LibraryTools.Route).ExcludeFromDescription();
+
+// Neither is this one: OpenSubsonic is somebody else's contract, and a client
+// generated from it would be a TypeScript wrapper around an API nothing in this
+// workspace calls. Registered whether or not Fonoteca:SubsonicPassword is set
+// and refused per request without one — see SubsonicEndpoints.Guard.
+app.MapSubsonicEndpoints();
 
 await app.RunAsync().ConfigureAwait(false);
 

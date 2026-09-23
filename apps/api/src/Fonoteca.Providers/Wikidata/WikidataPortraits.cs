@@ -109,7 +109,7 @@ public sealed class WikidataPortraits(
         var wanted = artists.Select(artist => artist.Id).Distinct().ToList();
         if (wanted.Count == 0) return new Dictionary<Mbid, Uri>();
 
-        var payload = await SendAsync(Query(wanted), cancellationToken).ConfigureAwait(false);
+        var payload = await SendAsync(clients, Query(wanted), cancellationToken).ConfigureAwait(false);
 
         var found = Parse(payload, wanted);
 
@@ -134,7 +134,10 @@ public sealed class WikidataPortraits(
         return QueryPrefix + values + QuerySuffix;
     }
 
-    private async Task<string> SendAsync(string query, CancellationToken cancellationToken)
+    internal static async Task<string> SendAsync(
+        IHttpClientFactory clients,
+        string query,
+        CancellationToken cancellationToken)
     {
         // POST, and not for tidiness: 300 ids is a 12 KB query string, and the
         // endpoint answers an over-long GET with an empty 200 body — which
@@ -250,7 +253,7 @@ public sealed class WikidataPortraits(
         return found;
     }
 
-    private static bool Value(JsonElement binding, string name, out string value)
+    internal static bool Value(JsonElement binding, string name, out string value)
     {
         value = string.Empty;
 

@@ -55,6 +55,12 @@ public readonly record struct ArtistId(Guid Value)
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct DiscoveredRecordId(Guid Value)
+{
+    public static DiscoveredRecordId New() => new(Guid.CreateVersion7());
+    public override string ToString() => Value.ToString();
+}
+
 /// <summary>
 /// A MusicBrainz identifier. Distinct from our own ids: it is assigned
 /// externally, may be absent, and is the join key back to MusicBrainz data.

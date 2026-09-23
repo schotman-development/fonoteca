@@ -593,7 +593,26 @@ public static class QobuzEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (credited.Count == 0) return (followed.Count, unbrowsed, 0, []);
+        // The shops' rows for the same followed set, cut by the same rule the
+        // artist page cuts them with — at read time, so a record stops being a
+        // gap the moment the catalogue gains the album rather than when somebody
+        // remembers to clear a row.
+        //
+        // <b>Read before the early return below, not after.</b> A followed set
+        // with no MusicBrainz credits at all is exactly the case the shop half
+        // exists for — MusicBrainz learns about a record when an editor adds it,
+        // a shop lists it on release day — so returning on an empty `credited`
+        // dropped the whole of it precisely where it was the only answer.
+        var discovered = await db.DiscoveredRecords
+            .AsNoTracking()
+            .Where(record => ids.Contains(record.ArtistId))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (credited.Count == 0 && discovered.Count == 0)
+        {
+            return (followed.Count, unbrowsed, 0, []);
+        }
 
         // Who a record is filed under on the shelf. A release group credited to
         // two followed artists is one record and must not be two tiles, so the
@@ -658,12 +677,21 @@ public static class QobuzEndpoints
                 group.FirstReleaseYear)))
             .ToList();
 
+        var shopGaps = discovered.Count == 0
+            ? []
+            : await ShopGapsAsync().ConfigureAwait(false);
+
         var records = gaps
-            // The shelf is the wanted list, not the discography. Everything the
-            // first browse wrote is unmonitored by definition — see
-            // `ReleaseGroup.Monitored` — so this shelf starts empty on a newly
-            // followed artist and fills with what a person marked on the artist
-            // page, plus whatever turned up after they followed them.
+            // The shelf is the wanted list, not the discography. What fills it
+            // by itself is `Discography.IsNewRelease` — records dated at or
+            // after `Artist.FollowedUtc` — so a newly followed artist's back
+            // catalogue is never on it, however many sources describe it and
+            // whenever they are first asked. Anything older reaches the shelf
+            // only because a person marked it on the artist page.
+            //
+            // Note this is no longer "empty until the second browse": follow
+            // somebody who put a record out this year and it is here on the
+            // first one, which is the point.
             .Where(group => group.Monitored)
 
             // By artist, then the artist page's own order within one. The two
@@ -690,7 +718,84 @@ public static class QobuzEndpoints
                 group.Secondary))
             .ToList();
 
-        return (followed.Count, unbrowsed, gaps.Count - records.Count, records);
+        // Interleaved rather than appended: the ordering that earns its place
+        // here keeps an artist's records adjacent, and a shop's row is one of
+        // that artist's records like any other.
+        var wanted = records
+            .Concat(shopGaps.Where(record => record.Monitored).Select(record => new MissingRecord(
+                record.Id.Value,
+                null,
+                record.Title,
+                names[record.ArtistId],
+                record.Year,
+                Join(names[record.ArtistId], record.Title),
+                null,
+                [],
+                record.Source,
+                record.SourceId,
+                record.CoverUrl)))
+            .OrderBy(record => record.Artist, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(record => record.Year ?? int.MaxValue)
+            .ThenBy(record => record.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return (
+            followed.Count,
+            unbrowsed,
+            gaps.Count + shopGaps.Count - wanted.Count,
+            wanted);
+
+        // Local, because it needs `credited`, `groups` and `discovered` and is
+        // read once. Per artist, since the catalogue a shop's row is compared
+        // against is that artist's records and not the followed set's.
+        async Task<List<DiscoveredRecord>> ShopGapsAsync()
+        {
+            var byArtist = credited
+                .GroupBy(credit => credit.ArtistId)
+                .ToDictionary(g => g.Key, g => g.Select(credit => credit.Group).ToHashSet());
+
+            var titles = groups.ToDictionary(
+                group => group.Id,
+                group => new CataloguedRecord(group.Title, group.FirstReleaseYear));
+
+            var barcodes = (await db.Releases
+                    .AsNoTracking()
+                    .Where(release => release.ReleaseGroupId != null
+                        && billed.Keys.Contains(release.ReleaseGroupId.Value)
+                        && release.Barcode != null)
+                    .Select(release => new
+                    {
+                        Group = release.ReleaseGroupId!.Value,
+                        Barcode = release.Barcode!,
+                    })
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .GroupBy(row => row.Group)
+                // Normalised where the set is built, for `Discography.IsGap`'s
+                // stated reason: a literal compare between a shop's UPC and
+                // MusicBrainz's EAN never matches, and fails silently.
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(row => Barcodes.Normalise(row.Barcode))
+                        .OfType<string>()
+                        .ToList());
+
+            return discovered
+                .Where(record =>
+                {
+                    var mine = byArtist.TryGetValue(record.ArtistId, out var held)
+                        ? held
+                        : [];
+
+                    return Discography.IsGap(
+                        new DiscoveredRecordFacts(
+                            record.Title, record.Year, record.Barcode, record.TrackCount),
+                        [.. mine.Where(titles.ContainsKey).Select(id => titles[id])],
+                        mine.SelectMany(id => barcodes.TryGetValue(id, out var upcs) ? upcs : [])
+                            .ToHashSet(StringComparer.Ordinal));
+                })
+                .ToList();
+        }
     }
 
     /// <summary>
@@ -1058,9 +1163,11 @@ public sealed record UpgradeListResponse(
 
 /// <summary>A record by a followed artist that the library holds no file of.</summary>
 /// <param name="ReleaseGroupId">
-/// The catalogue's own id for the release group. There is no page for a record
-/// nothing is filed under, so this identifies the row rather than linking
-/// anywhere — it is the key the shelf renders on.
+/// The catalogue's own id for the release group, or — where
+/// <paramref name="Source"/> is set — the discovered record's. There is no page
+/// for a record nothing is filed under, so this identifies the row rather than
+/// linking anywhere: it is the key the shelf renders on, and the two id spaces
+/// are both <c>Guid</c> and never mixed within one row.
 /// </param>
 /// <param name="Mbid">
 /// MusicBrainz's id for the group, and here for the sleeve: the Cover Art
@@ -1083,6 +1190,24 @@ public sealed record UpgradeListResponse(
 /// than that it is none of them. Printed because <c>Discography.IsGap</c> lets
 /// untyped groups through, so a tile has to be able to say so.
 /// </param>
+/// <param name="Source">
+/// Which shop named this record, where the catalogue has never heard of it —
+/// and null for a MusicBrainz row, which is how a reader tells the two apart.
+/// <b>One shelf and not two, unlike the artist page.</b> That page counts what
+/// MusicBrainz knows and must not mix a shop's inventory into the figure; this
+/// one is the wanted list, and what somebody wants is one list ordered by artist
+/// whatever named each row.
+/// </param>
+/// <param name="SourceId">
+/// The shop's own id for it, so the press can open that album rather than search
+/// for its title. Null wherever <paramref name="Source"/> is.
+/// </param>
+/// <param name="CoverUrl">
+/// The sleeve as the shop serves it. The Cover Art Archive is keyed on an MBID
+/// and a record it has never heard of has none, so this is the only picture
+/// there is for one of these rows — and dropping it, as the old shape did, is
+/// what left 13 of one artist's 31 rows permanently showing a monogram.
+/// </param>
 public sealed record MissingRecord(
     Guid ReleaseGroupId,
     Guid? Mbid,
@@ -1091,7 +1216,10 @@ public sealed record MissingRecord(
     int? Year,
     string Query,
     string? PrimaryType,
-    IReadOnlyList<string> SecondaryTypes);
+    IReadOnlyList<string> SecondaryTypes,
+    string? Source = null,
+    string? SourceId = null,
+    string? CoverUrl = null);
 
 /// <summary>An album held in part, with what is missing from it named.</summary>
 /// <param name="Mbid">MusicBrainz's identifier, for the cover. See <see cref="UpgradeCandidate"/>.</param>

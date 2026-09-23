@@ -95,7 +95,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
-    private static async Task<Results<FileContentHttpResult, ProblemHttpResult>> GetReleaseCover(
+    internal static async Task<Results<FileContentHttpResult, ProblemHttpResult>> GetReleaseCover(
         Guid id,
         FonotecaDbContext db,
         ICoverArtArchive archive,
