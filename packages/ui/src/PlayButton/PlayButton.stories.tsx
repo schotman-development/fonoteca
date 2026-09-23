@@ -111,8 +111,8 @@ export const States: Story = {
  * **The shared-element guarantee, asserted.** One `HTMLAudioElement` means one
  * current track: clicking a second row takes `data-current` off the first.
  *
- * It also proves the geometry — a 20px `sm` button plus `reset.css`'s 2px focus
- * ring at 2px offset is exactly 28px, one `--density-row-compact`.
+ * It also proves the geometry — a 24px `sm` button plus `reset.css`'s 2px focus
+ * ring at 2px offset is exactly 32px, one `--density-row-compact`.
  */
 export const InATrackTable: Story = {
   parameters: { layout: 'padded' },

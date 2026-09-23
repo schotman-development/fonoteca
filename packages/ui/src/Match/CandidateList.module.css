@@ -12,7 +12,7 @@
   min-inline-size: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-12);
+  gap: var(--space-16);
   padding: 0;
   margin: 0;
   border: 0;
@@ -22,17 +22,17 @@
   padding: 0;
   /* A legend is not a flex item of its own fieldset, so the gap above does not
      apply to it. */
-  margin-block-end: var(--space-6);
+  margin-block-end: var(--space-8);
 }
 
 .description {
-  margin-block-start: calc(-1 * var(--space-6));
+  margin-block-start: calc(-1 * var(--space-8));
 }
 
 .options {
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-12);
   min-inline-size: 0;
 }
 
@@ -41,7 +41,7 @@
 }
 
 .empty {
-  padding: var(--space-16);
+  padding: var(--space-24);
   border: var(--border-width-thin) dashed var(--color-border-default);
   border-radius: var(--radius-md);
   text-align: center;
@@ -54,9 +54,9 @@
  */
 .refusal {
   display: flex;
-  gap: var(--space-12);
+  gap: var(--space-16);
   align-items: start;
-  padding: var(--space-12);
+  padding: var(--space-20);
   border: var(--border-width-thin) solid var(--color-border-subtle);
   border-radius: var(--radius-md);
 }
@@ -73,7 +73,7 @@
 .refusal input[type="radio"] {
   inline-size: var(--space-16);
   block-size: var(--space-16);
-  margin-block-start: var(--space-2);
+  margin-block-start: var(--space-4);
   accent-color: var(--color-accent-solid);
   cursor: pointer;
 }
@@ -86,7 +86,7 @@
 .refusalText {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-4);
   min-inline-size: 0;
 }
 
@@ -119,8 +119,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-8);
-  padding-block: var(--space-12);
+  gap: var(--space-12);
+  padding-block: var(--space-16);
   border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
   background-color: var(--color-surface-raised);
 }

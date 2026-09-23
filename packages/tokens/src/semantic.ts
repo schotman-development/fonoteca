@@ -13,7 +13,7 @@
  * violations, so these values are computed rather than chosen.
  */
 
-import { absolute, amber, blue, gray, green, red } from './primitives.ts'
+import { absolute, amber, denim, green, red, sand } from './primitives.ts'
 
 /**
  * Declared as a type alias rather than an interface on purpose: only type
@@ -106,77 +106,90 @@ export type StatusColors = {
 
 export const light: SemanticTokens = {
   color: {
+    /*
+     * The page is not white; cards are. A white card on an off-white page reads
+     * as lifted without needing a border or a shadow to say so, which is what
+     * lets both be quieter everywhere else.
+     */
     surface: {
-      base: absolute.white,
+      base: sand[50],
       raised: absolute.white,
-      sunken: gray[50],
-      inset: gray[100],
-      overlay: 'rgba(18, 20, 22, 0.45)',
+      sunken: sand[100],
+      inset: sand[200],
+      overlay: 'rgba(43, 40, 35, 0.40)',
     },
+    /* Lighter than the neutrals beside them, and used less: space separates
+       most things here, and a rule is kept for where space cannot. */
     border: {
-      subtle: gray[200],
-      default: gray[300],
-      strong: gray[400],
-      focus: blue[800],
+      subtle: sand[200],
+      default: sand[300],
+      strong: sand[400],
+      focus: denim[700],
     },
+    /*
+     * Three steps that are visibly three steps. A secondary barely
+     * distinguishable from primary makes every label on a screen compete with
+     * the value beside it.
+     */
     text: {
-      primary: gray[900], // 16.1:1 on white
-      secondary: gray[800], // 11.5:1
-      tertiary: gray[700], // 8.2:1
-      disabled: gray[500], // 2.1:1 — exempt; see the note on the type
-      inverse: absolute.white,
-      link: blue[800], // 5.0:1
+      primary: sand[900], // 14.1:1 on base
+      secondary: sand[800], // 7.3:1
+      tertiary: sand[700], // 5.5:1 on base, 4.8:1 on inset
+      disabled: sand[500], // exempt; see the note on the type
+      inverse: sand[50],
+      link: denim[700], // 6.0:1
     },
     accent: {
-      subtle: blue[50],
-      subtleHover: blue[100],
-      solid: blue[800], // 5.0:1 with onSolid
-      solidHover: blue[900],
-      solidActive: blue[950],
-      border: blue[300],
-      text: blue[800], // 5.0:1 on white, 4.5:1 on subtle
+      subtle: denim[50],
+      subtleHover: denim[100],
+      solid: denim[700], // 6.2:1 with onSolid
+      solidHover: denim[800],
+      solidActive: denim[900],
+      border: denim[200],
+      text: denim[700], // 6.0:1 on base, 5.5:1 on subtle
       onSolid: absolute.white,
     },
     success: {
-      subtle: green[50],
-      solid: green[500], // 7.7:1 with onSolid
-      border: green[300],
-      text: green[950], // 8.4:1 on white, 7.8:1 on subtle
-      onSolid: gray[900],
+      subtle: '#eef6ee',
+      solid: green[500], // 7.3:1 with onSolid
+      border: green[200],
+      text: green[950], // 8.4:1 on white, 7.6:1 on subtle
+      onSolid: sand[900],
     },
     warning: {
-      subtle: amber[50],
-      solid: amber[500], // 9.6:1 with onSolid
-      border: amber[300],
-      text: amber[950], // 6.8:1 on white, 6.4:1 on subtle
-      onSolid: gray[900],
+      subtle: '#fbf4e2',
+      solid: amber[500], // 9.1:1 with onSolid
+      border: amber[200],
+      text: '#80470a', // 7.4:1 on white, 6.8:1 on subtle
+      onSolid: sand[900],
     },
     danger: {
-      subtle: red[50],
-      solid: red[900], // 5.5:1 with onSolid
-      border: red[300],
-      text: red[900], // 5.5:1 on white, 5.1:1 on subtle
+      subtle: '#fbefed',
+      solid: '#a8322d', // 6.7:1 with onSolid
+      border: red[200],
+      text: '#a8322d', // 6.7:1 on white, 5.9:1 on subtle
       onSolid: absolute.white,
     },
     info: {
-      subtle: blue[50],
-      solid: blue[800],
-      border: blue[300],
-      text: blue[800],
+      subtle: denim[50],
+      solid: denim[700],
+      border: denim[200],
+      text: denim[700],
       onSolid: absolute.white,
     },
     interactive: {
-      hover: gray[100],
-      active: gray[200],
-      selected: blue[50],
-      selectedHover: blue[100],
-      disabledSurface: gray[100],
+      hover: '#f3f1ec',
+      active: sand[200],
+      selected: denim[50],
+      selectedHover: denim[100],
+      disabledSurface: sand[100],
     },
   },
+  /* Warm-tinted and wide rather than dark and tight: a lift, not a cut-out. */
   shadow: {
-    sm: '0 1px 2px rgba(18, 20, 22, 0.08)',
-    md: '0 2px 8px rgba(18, 20, 22, 0.10), 0 1px 2px rgba(18, 20, 22, 0.06)',
-    lg: '0 8px 24px rgba(18, 20, 22, 0.14), 0 2px 6px rgba(18, 20, 22, 0.08)',
+    sm: '0 1px 3px rgba(43, 40, 35, 0.06)',
+    md: '0 4px 16px rgba(43, 40, 35, 0.07), 0 1px 3px rgba(43, 40, 35, 0.05)',
+    lg: '0 12px 40px rgba(43, 40, 35, 0.12), 0 2px 8px rgba(43, 40, 35, 0.06)',
   },
 }
 
@@ -192,81 +205,82 @@ export const light: SemanticTokens = {
  *
  * Solid fills keep their light-theme values, because their contrast is measured
  * against their own foreground rather than the page, and that relationship does
- * not change with the theme.
+ * not change with the theme. The page is warm here too: a blue-black at night
+ * is as cold as blue-white by day.
  */
 export const dark: SemanticTokens = {
   color: {
     surface: {
-      base: gray[950],
-      raised: gray[900],
-      sunken: gray[1000],
-      inset: gray[1000],
-      overlay: 'rgba(0, 0, 0, 0.65)',
+      base: sand[1000],
+      raised: sand[950],
+      sunken: sand[1100],
+      inset: sand[1100],
+      overlay: 'rgba(0, 0, 0, 0.60)',
     },
     border: {
-      subtle: '#2a2f34',
-      default: '#3a4046',
-      strong: gray[700],
-      focus: blue[400],
+      subtle: '#2e2b27',
+      default: '#3d3934',
+      strong: sand[700],
+      focus: denim[400],
     },
     text: {
-      primary: gray[100], // 14.9:1 on surface.raised
-      secondary: gray[400], // 10.3:1
-      tertiary: gray[500], // 7.4:1
-      disabled: gray[600], // exempt; see the note on the type
-      inverse: gray[950],
-      link: blue[300], // 7.9:1
+      primary: sand[200], // 13.6:1 on surface.raised
+      secondary: sand[500], // 8.0:1
+      tertiary: sand[600], // 6.3:1, 4.6:1 on interactive.selectedHover
+      disabled: sand[700], // exempt; see the note on the type
+      inverse: sand[1000],
+      link: denim[300], // 7.8:1
     },
     accent: {
-      subtle: 'rgba(34, 139, 230, 0.16)',
-      subtleHover: 'rgba(34, 139, 230, 0.26)',
-      solid: blue[800],
-      solidHover: blue[900],
-      solidActive: blue[950],
-      border: 'rgba(34, 139, 230, 0.45)',
-      text: blue[300], // 7.9:1 on surface.raised
+      subtle: 'rgba(95, 140, 200, 0.16)',
+      subtleHover: 'rgba(95, 140, 200, 0.26)',
+      solid: denim[700],
+      solidHover: denim[800],
+      solidActive: denim[900],
+      border: 'rgba(95, 140, 200, 0.45)',
+      text: denim[300], // 7.8:1 on surface.raised
       onSolid: absolute.white,
     },
     success: {
-      subtle: 'rgba(64, 192, 87, 0.16)',
-      solid: green[500], // 9.2:1 with onSolid
-      border: 'rgba(64, 192, 87, 0.40)',
-      text: green[300], // 10.5:1
-      onSolid: gray[950],
+      subtle: 'rgba(64, 192, 87, 0.14)',
+      solid: green[500],
+      border: 'rgba(64, 192, 87, 0.36)',
+      text: green[300],
+      onSolid: sand[1000],
     },
     warning: {
-      subtle: 'rgba(250, 176, 5, 0.16)',
-      solid: amber[500], // 11.5:1 with onSolid
-      border: 'rgba(250, 176, 5, 0.40)',
-      text: amber[300], // 11.8:1
-      onSolid: gray[950],
+      subtle: 'rgba(250, 176, 5, 0.14)',
+      solid: amber[500],
+      border: 'rgba(250, 176, 5, 0.36)',
+      text: amber[300],
+      onSolid: sand[1000],
     },
     danger: {
-      subtle: 'rgba(250, 82, 82, 0.16)',
-      solid: red[900], // 5.5:1 with onSolid
-      border: 'rgba(250, 82, 82, 0.40)',
-      text: red[300], // 8.4:1
+      subtle: 'rgba(250, 82, 82, 0.14)',
+      solid: '#a8322d',
+      border: 'rgba(250, 82, 82, 0.36)',
+      text: red[300],
       onSolid: absolute.white,
     },
     info: {
-      subtle: 'rgba(34, 139, 230, 0.16)',
-      solid: blue[800],
-      border: 'rgba(34, 139, 230, 0.40)',
-      text: blue[300],
+      subtle: 'rgba(95, 140, 200, 0.16)',
+      solid: denim[700],
+      border: 'rgba(95, 140, 200, 0.40)',
+      text: denim[300],
       onSolid: absolute.white,
     },
     interactive: {
       hover: 'rgba(255, 255, 255, 0.05)',
       active: 'rgba(255, 255, 255, 0.09)',
-      selected: 'rgba(34, 139, 230, 0.18)',
-      selectedHover: 'rgba(34, 139, 230, 0.26)',
+      selected: 'rgba(95, 140, 200, 0.18)',
+      selectedHover: 'rgba(95, 140, 200, 0.22)',
       disabledSurface: 'rgba(255, 255, 255, 0.04)',
     },
   },
   shadow: {
-    sm: '0 1px 2px rgba(0, 0, 0, 0.40)',
-    md: '0 2px 8px rgba(0, 0, 0, 0.50), 0 1px 2px rgba(0, 0, 0, 0.35)',
-    lg: '0 8px 24px rgba(0, 0, 0, 0.60), 0 2px 6px rgba(0, 0, 0, 0.40)',
+    sm: '0 1px 3px rgba(0, 0, 0, 0.35)',
+    md: '0 4px 16px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.30)',
+    lg: '0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35)',
   },
 }
 

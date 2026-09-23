@@ -24,7 +24,7 @@
  * nobody else could use.
  */
 .root {
-  --catalogue-card-gap: var(--space-12);
+  --catalogue-card-gap: var(--space-20);
   --catalogue-card-album: 160px;
   --catalogue-card-artist: calc((4 * var(--catalogue-card-album) - var(--catalogue-card-gap)) / 5);
 
@@ -44,7 +44,7 @@
    */
   grid-template-columns: repeat(auto-fill, min(var(--catalogue-card-column), 100%));
   justify-content: start;
-  gap: var(--space-16) var(--catalogue-card-gap);
+  gap: var(--space-24) var(--catalogue-card-gap);
   margin: 0;
   padding: 0;
   list-style: none;

@@ -5,9 +5,10 @@
  * ThemeSwitch's keys off `aria-checked`.
  *
  * The sizes are chosen against the row heights they sit in, and `sm` has no
- * slack: `reset.css` draws focus as a 2px ring at 2px offset, so a 20px button
- * occupies exactly 28px — one `--density-row-compact` — when focused. Growing it
- * to 24px would clip the ring against the row, silently.
+ * slack: `reset.css` draws focus as a 2px ring at 2px offset, so a 24px button
+ * occupies exactly 32px — one `--density-row-compact` — when focused. Growing it
+ * further would clip the ring against the row, silently. `md` is a small
+ * control's height, so it lines up with the buttons beside it.
  */
 .root {
   display: inline-grid;
@@ -25,23 +26,23 @@
 }
 
 .root[data-size="sm"] {
-  inline-size: 20px;
-  block-size: 20px;
+  inline-size: 24px;
+  block-size: 24px;
 }
 
 .root[data-size="md"] {
-  inline-size: 28px;
-  block-size: 28px;
+  inline-size: var(--density-control-sm);
+  block-size: var(--density-control-sm);
 }
 
 .root[data-size="sm"] .glyph {
-  inline-size: 12px;
-  block-size: 12px;
+  inline-size: 14px;
+  block-size: 14px;
 }
 
 .root[data-size="md"] .glyph {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 18px;
+  block-size: 18px;
 }
 
 .root:hover {

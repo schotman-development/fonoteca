@@ -16,7 +16,7 @@ export type FitMeterProps = Omit<HTMLAttributes<HTMLDivElement>, 'children'> & {
    * evidence; a zero one produced evidence that says no.
    */
   readonly value: number | null
-  /** The same fact in its own units — "10 of 10 tracks". */
+  /** The same fact as a count — "10 of 10 slots". */
   readonly detail?: ReactNode
   /** What null means *here* — "MusicBrainz prints no track lengths for this one." */
   readonly unmeasurable?: ReactNode
@@ -70,28 +70,31 @@ export function FitMeter({
       style={fillStyle}
       {...rest}
     >
+      {/* The count sits beside the percentage it restates, so the eye reads a
+          meter as a single fact rather than a small table. */}
       <div className={styles.heading}>
-        <Text size={size === 'sm' ? '2xs' : 'xs'} tone="tertiary">
+        <Text size={size === 'sm' ? '2xs' : 'xs'} tone="secondary">
           {label}
         </Text>
-        <Text size={size === 'sm' ? 'xs' : 'sm'} weight="medium" family="mono">
-          {formatCoverage(value)}
-        </Text>
+        <span className={styles.reading}>
+          {measured && detail != null ? (
+            <Text size="2xs" tone="tertiary">
+              {detail}
+            </Text>
+          ) : null}
+          <Text size={size === 'sm' ? 'xs' : 'sm'} weight="medium" family="mono">
+            {formatCoverage(value)}
+          </Text>
+        </span>
       </div>
 
-      {/* Decoration. The words above and below carry the whole fact, so a
-          screen reader that never sees this loses nothing. */}
+      {/* Decoration. The words around it carry the whole fact, so a screen
+          reader that never sees this loses nothing. */}
       <div className={styles.track} aria-hidden="true">
         <div className={styles.fill} />
       </div>
 
-      {measured ? (
-        detail != null ? (
-          <Text size="2xs" tone="tertiary">
-            {detail}
-          </Text>
-        ) : null
-      ) : (
+      {measured ? null : (
         <Text size="2xs" tone="tertiary">
           {unmeasurable ?? 'Not measurable.'}
         </Text>

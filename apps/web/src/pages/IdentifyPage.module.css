@@ -260,14 +260,15 @@
   display: block;
   /* A percentage width keeps the longest option from setting the column's width. */
   inline-size: 100%;
+  block-size: var(--density-control-sm);
   margin-block-start: var(--space-4);
-  padding: var(--space-2) var(--space-4);
+  padding-inline: var(--space-8);
   border: var(--border-width-thin) solid var(--color-border-default);
   border-radius: var(--radius-sm);
   background-color: var(--color-surface-raised);
   color: var(--color-text-primary);
   font-family: var(--font-family-sans);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .picker:focus-visible {

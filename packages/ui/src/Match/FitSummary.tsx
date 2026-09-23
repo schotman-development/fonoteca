@@ -75,7 +75,7 @@ export function FitSummary({
         label="Coverage"
         value={fit.coverage}
         tone={fit.coverage >= 0.75 ? 'success' : fit.coverage >= 0.5 ? 'warning' : 'danger'}
-        detail={`${fit.filesExplained.toLocaleString()} of ${fit.slotCount.toLocaleString()} slots filled`}
+        detail={`${fit.filesExplained.toLocaleString()} of ${fit.slotCount.toLocaleString()} slots`}
         className={styles.meter}
       />
 
@@ -83,7 +83,9 @@ export function FitSummary({
         label="Tracks held"
         value={fit.trackCount === 0 ? null : fit.held / fit.trackCount}
         tone="accent"
-        detail={`${formatRatio(fit.held, fit.trackCount)} tracks`}
+        // No unit: the label already says tracks, and a suffix would push this
+        // meter's heading onto two lines beside its neighbours.
+        detail={formatRatio(fit.held, fit.trackCount)}
         unmeasurable="This release lists no tracks."
         className={styles.meter}
       />
@@ -105,11 +107,18 @@ export function FitSummary({
          * about one album — a badge on every one trains the eye to skip it —
          * and wrong here, where the entire job is comparison down a column and
          * a cell that is sometimes blank is harder to compare than one that is
-         * always filled.
+         * always filled. The cell is always filled; only the exception is a
+         * badge, so the column is quiet until something in it is not.
          */}
-        <Badge tone={fit.official ? 'neutral' : 'warning'} variant="outline" size="sm">
-          {fit.official ? 'Official' : 'Unofficial'}
-        </Badge>
+        {fit.official ? (
+          <Text size="xs" tone="tertiary">
+            Official
+          </Text>
+        ) : (
+          <Badge tone="warning" size="sm">
+            Unofficial
+          </Badge>
+        )}
         {fit.editionAlternatives > 0 ? (
           <Badge tone="warning" size="sm">
             {fit.editionAlternatives === 1
@@ -133,13 +142,17 @@ type StatProps = {
 function Stat({ label, value, tone, note, spoken }: StatProps) {
   return (
     <div className={styles.stat}>
-      <Text size="xs" tone="tertiary">
-        {label}
-      </Text>
-      <Text size="sm" weight="medium" family="mono" tone={tone}>
-        {value}
-        {spoken != null ? <VisuallyHidden> {spoken}</VisuallyHidden> : null}
-      </Text>
+      {/* The same heading row as a meter's, so every value on the card sits on
+          one baseline and a column of candidates reads straight down. */}
+      <div className={styles.statHeading}>
+        <Text size="xs" tone="secondary">
+          {label}
+        </Text>
+        <Text size="sm" weight="medium" family="mono" tone={tone}>
+          {value}
+          {spoken != null ? <VisuallyHidden> {spoken}</VisuallyHidden> : null}
+        </Text>
+      </div>
       {note != null ? (
         <Text size="2xs" tone="tertiary">
           {note}

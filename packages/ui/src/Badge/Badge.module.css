@@ -4,7 +4,7 @@
   gap: var(--space-4);
 
   border: var(--border-width-thin) solid transparent;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-full);
   font-family: var(--font-family-sans);
   font-weight: var(--font-weight-medium);
   line-height: var(--line-height-tight);
@@ -17,14 +17,14 @@
 }
 
 .root[data-size="sm"] {
-  height: 18px;
-  padding-inline: var(--space-6);
+  height: 22px;
+  padding-inline: var(--space-8);
   font-size: var(--font-size-2xs);
 }
 
 .root[data-size="md"] {
-  height: 22px;
-  padding-inline: var(--space-8);
+  height: 26px;
+  padding-inline: var(--space-12);
   font-size: var(--font-size-xs);
 }
 

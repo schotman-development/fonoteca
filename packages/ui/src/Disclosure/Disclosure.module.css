@@ -12,9 +12,9 @@
 .trigger {
   display: flex;
   align-items: center;
-  gap: var(--space-6);
+  gap: var(--space-8);
   min-inline-size: 0;
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-6) var(--space-8);
   border: 0;
   border-radius: var(--radius-sm);
   font-family: var(--font-family-sans);
@@ -100,8 +100,8 @@
  * belonging to the row above it instead of starting a new one.
  */
 .detail {
-  padding-inline-start: calc(6px + var(--space-6) + var(--space-6));
-  padding-block-end: var(--space-4);
+  padding-inline-start: calc(6px + var(--space-8) + var(--space-8));
+  padding-block-end: var(--space-8);
 }
 
 .aside {

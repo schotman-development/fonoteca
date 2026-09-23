@@ -4,7 +4,7 @@ import { Text } from '../Text/Text.tsx'
 import styles from './Card.module.css'
 
 export type CardProps = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
-  /** Heading shown above a rule. Omit for a card that is only a surface. */
+  /** Heading shown above the content. Omit for a card that is only a surface. */
   readonly title?: ReactNode
   /** Shown at the far end of the title row — a count, a state, an action. */
   readonly aside?: ReactNode
@@ -20,7 +20,7 @@ export type CardProps = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
  * is the whole reason to spend an element on it.
  *
  * The title is rendered rather than accepted as arbitrary children so that
- * every card in the application has the same rule under it and the same type
+ * every card in the application has the same spacing under it and the same type
  * scale on it — which is what stops six panels drifting into six headers.
  */
 export function Card({ title, aside, padding = 'md', className, children, ...rest }: CardProps) {

@@ -13,8 +13,8 @@
   align-items: center;
   gap: var(--space-8);
   inline-size: 100%;
-  height: var(--density-row-cozy);
-  padding-inline: var(--space-8);
+  height: var(--density-control);
+  padding-inline: var(--space-12);
   border: var(--border-width-thin) solid var(--color-border-default);
   border-radius: var(--radius-sm);
   background-color: var(--color-surface-raised);
@@ -146,7 +146,7 @@
 .list {
   flex: 1 1 auto;
   margin: 0;
-  padding: var(--space-4);
+  padding: var(--space-8);
   list-style: none;
   overflow-y: auto;
 }
@@ -160,7 +160,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  padding: var(--space-6) var(--space-8);
+  padding: var(--space-8) var(--space-12);
   border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
@@ -188,7 +188,7 @@
 
 .empty {
   margin: 0;
-  padding: var(--space-16) var(--space-12);
+  padding: var(--space-24) var(--space-16);
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
@@ -196,9 +196,9 @@
 .footer {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-8);
   margin: 0;
-  padding: var(--space-6) var(--space-12);
+  padding: var(--space-8) var(--space-16);
   border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
   background-color: var(--color-surface-sunken);
   color: var(--color-text-tertiary);

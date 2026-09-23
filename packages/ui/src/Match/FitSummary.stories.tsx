@@ -35,7 +35,7 @@ export const PerfectFit: Story = {
     // exactly why both are on screen.
     await expect(canvas.getAllByText('100%')).toHaveLength(2)
     await expect(canvas.getByText('0.00 s')).toBeVisible()
-    await expect(canvas.getByText('10 of 10 tracks')).toBeVisible()
+    await expect(canvas.getByText('10 of 10')).toBeVisible()
   },
 }
 
@@ -64,7 +64,7 @@ export const TheBoxSet: Story = {
   args: { fit: THE_COLLECTION.fit },
   play: async ({ canvas }) => {
     await expect(canvas.getAllByText('26%').length).toBeGreaterThan(0)
-    await expect(canvas.getByText('20 of 76 slots filled')).toBeVisible()
+    await expect(canvas.getByText('20 of 76 slots')).toBeVisible()
   },
 }
 

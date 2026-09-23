@@ -78,7 +78,7 @@ function span({ track, gap }: { readonly track: number; readonly gap: number }, 
   return count * track + (count - 1) * gap
 }
 
-const ARTIST_COLUMN = 125.6
+const ARTIST_COLUMN = 124
 const ALBUM_COLUMN = 160
 
 async function expectColumn(root: HTMLElement, expected: number, index = 0) {

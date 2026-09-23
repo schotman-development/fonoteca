@@ -18,11 +18,11 @@ export { flatten, toVarRefs, varName } from './cssVars.ts'
 export {
   absolute,
   amber,
-  blue,
-  gray,
+  denim,
   green,
   primitives,
   red,
+  sand,
   violet,
 } from './primitives.ts'
 export * from './scales.ts'
@@ -49,9 +49,9 @@ export const ref = {
 
 /** Numeric row heights, for virtualization maths that cannot read the cascade. */
 export const rowHeightPx = {
-  compact: 28,
-  cozy: 36,
-  comfortable: 44,
+  compact: 32,
+  cozy: 40,
+  comfortable: 48,
 } as const
 
 export type Density = keyof typeof rowHeightPx

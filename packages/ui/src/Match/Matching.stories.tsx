@@ -538,8 +538,8 @@ export const TheBootlegTrap: Story = {
     )
   },
   play: async ({ canvas }) => {
-    await expect(canvas.getByText('17 of 31 slots filled')).toBeVisible()
-    await expect(canvas.getByText('10 of 10 slots filled')).toBeVisible()
+    await expect(canvas.getByText('17 of 31 slots')).toBeVisible()
+    await expect(canvas.getByText('10 of 10 slots')).toBeVisible()
     await expect(canvas.getAllByText('1.99 s').length).toBeGreaterThan(0)
     await expect(canvas.getByText('Unofficial')).toBeVisible()
   },

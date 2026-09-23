@@ -35,11 +35,11 @@
 }
 
 .headerCell {
-  padding-inline: var(--space-8);
-  border-block-end: var(--border-width-thin) solid var(--color-border-default);
+  padding-inline: var(--space-12);
+  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
   font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-tertiary);
   text-align: start;
   white-space: nowrap;
 }
@@ -52,7 +52,7 @@
 }
 
 .cell {
-  padding-inline: var(--space-8);
+  padding-inline: var(--space-12);
   border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
   vertical-align: middle;
 }

@@ -8,7 +8,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-6);
+  gap: var(--space-8);
 
   border: var(--border-width-thin) solid transparent;
   border-radius: var(--radius-sm);
@@ -25,14 +25,14 @@
 }
 
 .root[data-size="sm"] {
-  height: var(--density-row-compact);
-  padding-inline: var(--space-8);
+  height: var(--density-control-sm);
+  padding-inline: var(--space-12);
   font-size: var(--font-size-sm);
 }
 
 .root[data-size="md"] {
-  height: var(--density-row-cozy);
-  padding-inline: var(--space-12);
+  height: var(--density-control);
+  padding-inline: var(--space-16);
   font-size: var(--font-size-md);
 }
 

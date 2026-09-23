@@ -1,42 +1,57 @@
 /**
  * Primitive colour scales. These are raw values with no meaning attached —
  * nothing outside `semantic.ts` should reference them, and no component should
- * ever reference them at all. If you find yourself reaching for `gray[800]` in
+ * ever reference them at all. If you find yourself reaching for `sand[800]` in
  * a component, the semantic layer is missing a token.
  *
- * Hues are Open Color (https://yeun.github.io/open-color/), chosen because the
- * scales are already tuned for consistent perceived lightness across hues —
- * which matters when status colours sit next to each other in a dense table row.
+ * The status hues are Open Color (https://yeun.github.io/open-color/), chosen
+ * because the scales are already tuned for consistent perceived lightness
+ * across hues — which matters when status colours sit next to each other in a
+ * table row. The neutrals and the accent are this project's own; see below.
  */
 
-export const gray = {
-  50: '#f8f9fa',
-  100: '#f1f3f5',
-  200: '#e9ecef',
-  300: '#dee2e6',
-  400: '#ced4da',
-  500: '#adb5bd',
-  600: '#868e96',
-  700: '#495057',
-  800: '#343a40',
-  900: '#212529',
-  950: '#121416',
-  /** Below Open Color's range: the darkest surface, so `raised` has somewhere to sit above. */
-  1000: '#0b0d0e',
+/**
+ * The neutrals, and the one scale that is not Open Color. A cool blue-grey on
+ * pure white is what made every screen read as a spreadsheet; a grey with a
+ * little yellow in it, on a page that is not quite white, is the single change
+ * that most makes a long session easier on the eye. Warm enough to notice
+ * side by side, never enough to read as beige.
+ */
+export const sand = {
+  50: '#fbfaf8',
+  100: '#f5f3ef',
+  200: '#efece6',
+  300: '#e8e4dd',
+  400: '#d9d4cb',
+  500: '#bdb6aa',
+  600: '#a8a195',
+  700: '#6b665d',
+  800: '#58534b',
+  900: '#2b2823',
+  950: '#23211e',
+  1000: '#1a1916',
+  /** Below the dark base, so `sunken` has somewhere to sit beneath it. */
+  1100: '#131210',
 } as const
 
-export const blue = {
-  50: '#e7f5ff',
-  100: '#d0ebff',
-  200: '#a5d8ff',
-  300: '#74c0fc',
-  400: '#4dabf7',
-  500: '#339af0',
-  600: '#228be6',
-  700: '#1c7ed6',
-  800: '#1971c2',
-  900: '#1864ab',
-  950: '#10396b',
+/**
+ * The accent: Open Color's blue with most of the saturation taken out. A fully
+ * saturated fill is right for a single call to action and wrong for the dozen
+ * selected rows, links and focus rings that share it — it becomes the loudest
+ * thing on every screen.
+ */
+export const denim = {
+  50: '#eef3f8',
+  100: '#dfe8f2',
+  200: '#c2d4e8',
+  300: '#94b8de',
+  400: '#6d9acb',
+  500: '#4f80b5',
+  600: '#3d70a6',
+  700: '#2f6399',
+  800: '#285684',
+  900: '#20476d',
+  950: '#183651',
 } as const
 
 export const green = {
@@ -102,8 +117,8 @@ export const absolute = {
 } as const
 
 export const primitives = {
-  gray,
-  blue,
+  sand,
+  denim,
   green,
   amber,
   red,

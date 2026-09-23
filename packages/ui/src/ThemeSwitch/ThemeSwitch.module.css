@@ -21,13 +21,13 @@
 /* Sizes match Button's heights, so a switch and a button sit on one line. */
 
 .track[data-size="sm"] {
-  --switch-height: var(--density-row-compact);
+  --switch-height: var(--density-control-sm);
   --switch-width: 48px;
   --switch-glyph: 14px;
 }
 
 .track[data-size="md"] {
-  --switch-height: var(--density-row-cozy);
+  --switch-height: var(--density-control);
   --switch-width: 64px;
   --switch-glyph: 17px;
 }

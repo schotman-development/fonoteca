@@ -1,12 +1,12 @@
 /**
  * Theme-independent scales: the same in light and dark.
  *
- * Everything here is tuned for a DENSE DATA APPLICATION. Fonoteca's primary
- * screen is a table with six figures of rows, so the defaults that suit a
- * marketing page — 16px body text, 24px rhythm, generous line height — actively
- * work against it. The scales below start small and step tightly, and the
- * spacing scale is named in literal pixels so there is never any ambiguity
- * about what `space-6` means when you are trying to fit a row into 28px.
+ * Tuned for COMFORT over density. Most screens here are read rather than
+ * scanned, and sessions are long and spent deciding things, so type starts a
+ * step above the usual data-application sizes and everything breathes; the
+ * library table still fits a screen of rows at `compact`. The spacing scale is
+ * named in literal pixels so there is never any ambiguity about what `space-6`
+ * means.
  */
 
 /** Literal pixel values. Named by size so a dense layout can be reasoned about exactly. */
@@ -28,21 +28,22 @@ export const space = {
 } as const
 
 /**
- * Type scale. `md` (14px) is body text; `sm` (13px) is the table-cell default.
- * The steps below `lg` are deliberately 1px apart — at dense sizes a 1.25 ratio
- * jumps straight past the size you actually wanted.
+ * Type scale. `md` (15px) is body text; `sm` (14px) is the table-cell default,
+ * and nothing anybody reads goes below `2xs` (12px). The steps below `lg` are
+ * deliberately 1px apart — at these sizes a 1.25 ratio jumps straight past the
+ * size you actually wanted.
  */
 export const fontSize = {
-  '2xs': '11px',
-  xs: '12px',
-  sm: '13px',
-  md: '14px',
-  lg: '16px',
-  xl: '18px',
-  '2xl': '20px',
-  '3xl': '24px',
-  '4xl': '30px',
-  '5xl': '36px',
+  '2xs': '12px',
+  xs: '13px',
+  sm: '14px',
+  md: '15px',
+  lg: '17px',
+  xl: '19px',
+  '2xl': '22px',
+  '3xl': '26px',
+  '4xl': '32px',
+  '5xl': '40px',
 } as const
 
 export const fontWeight = {
@@ -54,10 +55,10 @@ export const fontWeight = {
 
 /** Unitless, so they scale with font-size. `tight` is for table rows. */
 export const lineHeight = {
-  tight: '1.2',
-  snug: '1.35',
-  normal: '1.5',
-  relaxed: '1.7',
+  tight: '1.25',
+  snug: '1.4',
+  normal: '1.6',
+  relaxed: '1.75',
 } as const
 
 export const letterSpacing = {
@@ -78,11 +79,11 @@ export const fontFamily = {
 
 export const radius = {
   none: '0px',
-  xs: '2px',
-  sm: '4px',
-  md: '6px',
-  lg: '8px',
-  xl: '12px',
+  xs: '4px',
+  sm: '6px',
+  md: '10px',
+  lg: '12px',
+  xl: '16px',
   full: '9999px',
 } as const
 
@@ -98,11 +99,21 @@ export const borderWidth = {
  * anything, so the density modes are fixed values rather than computed ones.
  */
 export const density = {
-  rowCompact: '28px',
-  rowCozy: '36px',
-  rowComfortable: '44px',
-  headerHeight: '32px',
-  toolbarHeight: '44px',
+  rowCompact: '32px',
+  rowCozy: '40px',
+  rowComfortable: '48px',
+  headerHeight: '40px',
+  /**
+   * The one height every control shares — button, text input, native select,
+   * switch, command-bar trigger, upload label — so a row of mixed controls
+   * lines up without anybody arranging it. `controlSm` is the same rule one
+   * step down, for controls that sit inside a table row or a dense toolbar.
+   * Deliberately separate from the row heights: a table getting roomier is no
+   * reason for every button in the application to grow with it.
+   */
+  control: '40px',
+  controlSm: '32px',
+  toolbarHeight: '52px',
   /** Reserved for the future playback transport bar. See the plan's playback section. */
   transportHeight: '72px',
   /**
@@ -111,7 +122,7 @@ export const density = {
    * grid track and the narrow-viewport breakpoint below which that track stops
    * being affordable.
    */
-  sidebarWidth: '224px',
+  sidebarWidth: '240px',
   /**
    * The reading width of the centred content column. Wide enough for the
    * catalogue grids to fit several tiles per row, narrow enough that a line of

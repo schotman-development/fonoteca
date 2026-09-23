@@ -1,10 +1,10 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-16);
+  gap: var(--space-24);
   max-inline-size: 1200px;
   margin-inline: auto;
-  padding: var(--space-16);
+  padding: var(--space-24);
   background-color: var(--color-surface-base);
   color: var(--color-text-primary);
 }
@@ -24,7 +24,7 @@
 }
 
 .panel {
-  padding: var(--space-16);
+  padding: var(--space-24);
   border: var(--border-width-thin) solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   background-color: var(--color-surface-raised);
@@ -38,7 +38,7 @@
 .bare {
   display: flex;
   flex-direction: column;
-  gap: var(--space-16);
+  gap: var(--space-20);
   min-inline-size: 0;
   margin: 0;
   padding: 0;
@@ -48,8 +48,8 @@
 .option {
   display: flex;
   flex-direction: column;
-  gap: var(--space-16);
-  padding: var(--space-16);
+  gap: var(--space-20);
+  padding: var(--space-24);
   border: var(--border-width-thin) solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   background-color: var(--color-surface-raised);
@@ -80,14 +80,14 @@
 
 .table th,
 .table td {
-  padding: var(--space-4) var(--space-8);
+  padding: var(--space-8) var(--space-12);
   border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
   text-align: start;
   vertical-align: top;
 }
 
 .table thead th {
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   font-weight: var(--font-weight-medium);
 }
 
@@ -102,8 +102,14 @@
 
 .search {
   display: flex;
-  align-items: end;
-  gap: var(--space-8);
+  align-items: start;
+  gap: var(--space-12);
+}
+
+/* Level with the input rather than with the field's bottom edge, which is the
+   hint under it. The offset is `Field`'s label line plus its gap. */
+.search > button {
+  margin-block-start: calc(var(--font-size-sm) * var(--line-height-snug) + var(--space-6));
 }
 
 .search > :first-child {
@@ -113,7 +119,7 @@
 .stickyBar {
   position: sticky;
   inset-block-end: 0;
-  padding: var(--space-12) 0;
+  padding: var(--space-16) 0;
   border-block-start: var(--border-width-thin) solid var(--color-border-subtle);
   background-color: var(--color-surface-base);
 }
@@ -122,13 +128,13 @@
   position: sticky;
   inset-block-start: 0;
   z-index: var(--z-index-sticky);
-  padding-block: var(--space-8);
+  padding-block: var(--space-12);
   border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
   background-color: var(--color-surface-base);
 }
 
 .result {
-  padding: var(--space-16);
+  padding: var(--space-24);
   border: var(--border-width-thin) solid var(--color-success-border);
   border-radius: var(--radius-md);
   background-color: var(--color-surface-raised);
@@ -138,8 +144,8 @@
 
 .split {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: var(--space-16);
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: var(--space-32);
   align-items: start;
 }
 
@@ -155,7 +161,7 @@
 .fileList {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-6);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -265,7 +271,7 @@
 .menuItem {
   display: block;
   inline-size: 100%;
-  padding: var(--space-6) var(--space-8);
+  padding: var(--space-8) var(--space-12);
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
@@ -294,7 +300,7 @@
 .carousel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-12);
+  gap: var(--space-20);
 }
 
 /* Snackbars */
@@ -316,21 +322,19 @@
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  padding: var(--space-6) var(--space-6) var(--space-6) var(--space-16);
-  border: var(--border-width-thin) solid var(--color-warning-border);
+  padding: var(--space-8) var(--space-8) var(--space-8) var(--space-16);
+  border: 0;
   border-inline-start: var(--border-width-thick) solid var(--color-warning-solid);
   border-radius: var(--radius-md);
   background-color: var(--color-warning-subtle);
 }
 
 .snackbar[data-tone="danger"] {
-  border-color: var(--color-danger-border);
   border-inline-start-color: var(--color-danger-solid);
   background-color: var(--color-danger-subtle);
 }
 
 .snackbar[data-tone="success"] {
-  border-color: var(--color-success-border);
   border-inline-start-color: var(--color-success-solid);
   background-color: var(--color-success-subtle);
 }

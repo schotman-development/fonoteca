@@ -70,7 +70,7 @@ export const Colour: Story = {
 export const Spacing: Story = {
   render: () => (
     <Stack direction="column" gap={16} style={{ padding: 'var(--space-24)' }}>
-      <Section title="Spacing — 2px base, tuned for dense layout">
+      <Section title="Spacing — literal pixels, so a layout can be reasoned about exactly">
         <Stack direction="column" gap={4}>
           {Object.keys(space).map((key) => (
             <Stack key={key} gap={12} align="center">
@@ -96,7 +96,7 @@ export const Spacing: Story = {
 export const Typography: Story = {
   render: () => (
     <Stack direction="column" gap={16} style={{ padding: 'var(--space-24)' }}>
-      <Section title="Type scale — steps 1px apart below 16px, because dense UI needs the precision">
+      <Section title="Type scale — 15px body, nothing read below 12px">
         <Stack direction="column" gap={8}>
           {Object.entries(fontSize).map(([key, value]) => (
             <Stack key={key} gap={16} align="baseline">

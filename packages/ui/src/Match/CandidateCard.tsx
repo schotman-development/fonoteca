@@ -153,11 +153,11 @@ export function CandidateCard({
         {...(image != null ? { src: image } : {})}
       />
       <span className={styles.identityText}>
-        <Text size="sm" weight="semibold" block>
+        <Text size="md" weight="semibold" block>
           {title}
         </Text>
         {subtitle != null ? (
-          <Text size="xs" tone="secondary" block>
+          <Text size="sm" tone="secondary" block>
             {subtitle}
           </Text>
         ) : null}

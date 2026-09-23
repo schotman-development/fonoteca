@@ -6,11 +6,11 @@
 }
 
 .root[data-padding="md"] {
-  padding: var(--space-16);
+  padding: var(--space-20);
 }
 
 .root[data-padding="lg"] {
-  padding: var(--space-24);
+  padding: var(--space-32);
 }
 
 .header {
@@ -18,9 +18,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-12);
-  margin-block-end: var(--space-12);
-  padding-block-end: var(--space-8);
-  border-block-end: var(--border-width-thin) solid var(--color-border-subtle);
+  margin-block-end: var(--space-16);
 }
 
 /*

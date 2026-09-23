@@ -8,7 +8,7 @@
 
 export type TokenTree = { readonly [key: string]: string | TokenTree }
 
-/** `{ fontSize: { '2xs': '11px' } }` → `--font-size-2xs` */
+/** `{ fontSize: { '2xs': '12px' } }` → `--font-size-2xs` */
 export type VarRefs<T> = {
   readonly [K in keyof T]: T[K] extends string ? string : VarRefs<T[K]>
 }
