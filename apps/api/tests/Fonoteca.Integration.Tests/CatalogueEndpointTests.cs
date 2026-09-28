@@ -755,35 +755,64 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     /// how the rows got there.
     /// </remarks>
 
+    /// <summary>
+    /// The album list and the album page say the same thing about every album:
+    /// the same display edition, billing line, year, sleeve and counts.
+    /// </summary>
+    /// <remarks>
+    /// The display edition and the year are chosen twice — in SQL for the list's
+    /// sort, in memory for what both screens show — so this is what stops the two
+    /// copies drifting.
+    /// </remarks>
     [Fact]
-    public async Task AReleaseListsWhatTheLibraryHoldsOfIt()
+    public async Task TheAlbumListAndTheAlbumPageAgree()
     {
         using var client = _factory!.CreateClient();
 
-        var list = await client.GetFromJsonAsync<ReleaseListResponse>(
-            new Uri("/api/catalogue/releases", UriKind.Relative), Token);
+        var list = await client.GetFromJsonAsync<AlbumListResponse>(
+            new Uri("/api/catalogue/albums", UriKind.Relative), Token);
+
+        Assert.NotNull(list);
+        Assert.NotEmpty(list.Items);
+
+        foreach (var summary in list.Items)
+        {
+            Assert.Equal(summary, (await AlbumAsync(client, summary.Id)).Album);
+        }
+    }
+
+    [Fact]
+    public async Task AnAlbumListsWhatTheLibraryHoldsOfIt()
+    {
+        using var client = _factory!.CreateClient();
+
+        var list = await client.GetFromJsonAsync<AlbumListResponse>(
+            new Uri("/api/catalogue/albums", UriKind.Relative), Token);
 
         Assert.NotNull(list);
 
-        var release = list.Items.Single(item => item.Title == "Seesaw");
+        var album = list.Items.Single(item => item.Title == "Seesaw");
 
-        // The Cover Art Archive is keyed on this, and it is the only way the
-        // browser can ask for a sleeve.
-        Assert.Equal(_seed.SeesawMbid, release.Mbid);
+        // The album is the release group; the pressing is named because every
+        // file is filed under the same one, and its sleeve stands for the album.
+        Assert.Equal(_seed.SeesawAlbum, album.Id);
+        Assert.Equal(_seed.SeesawAlbumMbid, album.Mbid);
+        Assert.Equal(_seed.Seesaw, album.EditionId);
+        Assert.Equal(_seed.Seesaw, album.CoverReleaseId);
 
-        // The release's own billing line, rebuilt with its join phrase intact.
-        Assert.Equal("Beth Hart & Joe Bonamassa", release.Artist);
+        // The pressing's own billing line, rebuilt with its join phrase intact.
+        Assert.Equal("Beth Hart & Joe Bonamassa", album.Artist);
 
-        Assert.Equal(2013, release.Year);
-        Assert.Equal("Digital Media", release.Formats);
+        Assert.Equal(2013, album.Year);
+        Assert.Equal("Digital Media", album.Formats);
 
         // Two of three tracks held, across three files: one track is held in two
         // encodings. Held counts tracks, so an album ripped twice at two thirds
         // of its length does not read as complete.
-        Assert.Equal(3, release.TrackCount);
-        Assert.Equal(2, release.Held);
-        Assert.Equal(3, release.Files);
-        Assert.Equal("Attributed", release.Certainty);
+        Assert.Equal(3, album.TrackCount);
+        Assert.Equal(2, album.Held);
+        Assert.Equal(3, album.Files);
+        Assert.Equal("Attributed", album.Certainty);
     }
 
     /// <summary>
@@ -791,14 +820,13 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     /// from it — which is the whole reason the full track list is persisted.
     /// </summary>
     [Fact]
-    public async Task AReleasePageShowsTheTracksTheLibraryIsMissing()
+    public async Task AnAlbumPageShowsTheTracksTheLibraryIsMissing()
     {
         using var client = _factory!.CreateClient();
 
-        var release = await client.GetFromJsonAsync<ReleaseDetailResponse>(
-            new Uri($"/api/catalogue/releases/{_seed.Seesaw}", UriKind.Relative), Token);
+        var release = await AlbumAsync(client, _seed.SeesawAlbum);
 
-        Assert.NotNull(release);
+        Assert.Equal(_seed.Seesaw, Assert.Single(release.Folders, folder => folder.Path == "Hart & Bonamassa/Seesaw").EditionId);
         Assert.Equal(3, release.Tracks.Count);
 
         var held = release.Tracks[0];
@@ -826,10 +854,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
-        var symphony = await client.GetFromJsonAsync<ReleaseDetailResponse>(
-            new Uri($"/api/catalogue/releases/{_seed.Symphony}", UriKind.Relative), Token);
-
-        Assert.NotNull(symphony);
+        var symphony = await AlbumAsync(client, _seed.SymphonyAlbum);
 
         Assert.All(
             symphony.Tracks,
@@ -837,10 +862,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         // And an album that performs no work says so, rather than repeating the
         // track title back as one.
-        var seesaw = await client.GetFromJsonAsync<ReleaseDetailResponse>(
-            new Uri($"/api/catalogue/releases/{_seed.Seesaw}", UriKind.Relative), Token);
+        var seesaw = await AlbumAsync(client, _seed.SeesawAlbum);
 
-        Assert.NotNull(seesaw);
         Assert.All(seesaw.Tracks, track => Assert.Null(track.WorkTitle));
     }
 
@@ -890,11 +913,11 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
     private static async Task<IReadOnlyList<string>> TitlesAsync(HttpClient client, string? sort)
     {
-        var body = await client.GetFromJsonAsync<ReleaseListResponse>(
+        var body = await client.GetFromJsonAsync<AlbumListResponse>(
             new Uri(
                 sort is null
-                    ? "/api/catalogue/releases?take=2"
-                    : $"/api/catalogue/releases?take=2&sort={sort}",
+                    ? "/api/catalogue/albums?take=2"
+                    : $"/api/catalogue/albums?take=2&sort={sort}",
                 UriKind.Relative),
             Token);
 
@@ -949,12 +972,12 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     [Fact]
-    public async Task AnUnknownReleaseIsAProblemDocument()
+    public async Task AnUnknownAlbumIsAProblemDocument()
     {
         using var client = _factory!.CreateClient();
 
         using var response = await client.GetAsync(
-            new Uri($"/api/catalogue/releases/{Guid.CreateVersion7()}", UriKind.Relative), Token);
+            new Uri($"/api/catalogue/albums/{Guid.CreateVersion7()}", UriKind.Relative), Token);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -977,12 +1000,12 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(report);
 
-        // Five folders, each internally consistent, each naming one release.
+        // Five folders, each internally consistent, each naming one album.
         Assert.Equal(5, report.Folders);
         Assert.Equal(5, report.FoldersAgreeing);
         Assert.Empty(report.FoldersSplit);
 
-        var spanning = Assert.Single(report.ReleasesSpanningFolders);
+        var spanning = Assert.Single(report.AlbumsSpanningFolders);
         Assert.Equal("Seesaw", spanning.Title);
         Assert.Equal(2, spanning.Folders.Count);
 
@@ -1008,7 +1031,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
-        var symphony = await ReleaseAsync(client, _seed.Symphony);
+        var symphony = await AlbumAsync(client, _seed.SymphonyAlbum);
 
         var main = Assert.Single(symphony.Credits, credit => credit.Group == "Main");
         Assert.Equal(_seed.Karajan, main.ArtistId);
@@ -1032,7 +1055,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             await db.SaveChangesAsync(Token);
         }
 
-        var seesaw = await ReleaseAsync(client, _seed.Seesaw);
+        var seesaw = await AlbumAsync(client, _seed.SeesawAlbum);
 
         var guest = Assert.Single(seesaw.Credits, credit => credit.ArtistId == _seed.Solti);
         Assert.Equal("Performers", guest.Group);
@@ -1048,9 +1071,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
-        var symphony = await ReleaseAsync(client, _seed.Symphony);
+        var symphony = await AlbumAsync(client, _seed.SymphonyAlbum);
 
-        Assert.NotNull(symphony.About.GroupId);
+        Assert.Equal(_seed.SymphonyAlbum, symphony.About.GroupId);
         Assert.NotNull(symphony.About.GroupMbid);
         Assert.Equal(_seed.Karajan, symphony.About.ArtistId);
         Assert.Equal("Album", symphony.About.PrimaryType);
@@ -1071,7 +1094,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             await db.SaveChangesAsync(Token);
         }
 
-        var bannered = await ReleaseAsync(client, _seed.Symphony);
+        var bannered = await AlbumAsync(client, _seed.SymphonyAlbum);
         Assert.EndsWith("fanart/karajan.jpg", bannered.About.ArtistBanner, StringComparison.Ordinal);
     }
 
@@ -1200,24 +1223,24 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     {
         using var client = _factory!.CreateClient();
 
-        var before = await ReleaseAsync(client, _seed.Seesaw);
+        var before = await AlbumAsync(client, _seed.SeesawAlbum);
 
         var form = new ReleaseEditRequest(
             Title: "Seesaw (Deluxe)",
-            Credit: before.Release.Artist,
+            Credit: before.Album.Artist,
             Disambiguation: before.About.Disambiguation,
             PrimaryType: before.About.PrimaryType,
             SecondaryTypes: before.About.SecondaryTypes,
             FirstReleaseYear: before.About.FirstReleaseYear,
-            ReleasedYear: before.Release.Year,
+            ReleasedYear: before.About.ReleasedYear,
             ReleasedMonth: 5,
             ReleasedDay: null,
-            Country: before.Release.Country,
-            Status: before.Release.Status,
+            Country: before.Album.Country,
+            Status: before.Album.Status,
             Label: "Provogue",
             CatalogNumber: before.About.CatalogNumber,
             Barcode: before.About.Barcode,
-            Formats: before.Release.Formats,
+            Formats: before.Album.Formats,
             Review: null);
 
         var saved = await client.PostAsJsonAsync(
@@ -1225,14 +1248,14 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         saved.EnsureSuccessStatusCode();
 
-        var after = await ReleaseAsync(client, _seed.Seesaw);
-        Assert.Equal("Seesaw (Deluxe)", after.Release.Title);
+        var after = await AlbumAsync(client, _seed.SeesawAlbum);
+        Assert.Equal("Seesaw (Deluxe)", after.Album.Title);
         Assert.Equal("Provogue", after.About.Label);
         Assert.Equal(5, after.About.ReleasedMonth);
         Assert.Equal(["label", "releasedMonth", "title"], after.About.Edited);
 
-        var list = await client.GetFromJsonAsync<ReleaseListResponse>(
-            new Uri("/api/catalogue/releases", UriKind.Relative), Token);
+        var list = await client.GetFromJsonAsync<AlbumListResponse>(
+            new Uri("/api/catalogue/albums", UriKind.Relative), Token);
         Assert.Contains(list!.Items, item => item.Title == "Seesaw (Deluxe)");
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
@@ -1256,10 +1279,10 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Portrait: detail.Artist.Portrait,
             Banner: detail.Profile.Banner);
 
-    private static async Task<ReleaseDetailResponse> ReleaseAsync(HttpClient client, Guid id)
+    private static async Task<AlbumDetailResponse> AlbumAsync(HttpClient client, Guid id)
     {
-        var body = await client.GetFromJsonAsync<ReleaseDetailResponse>(
-            new Uri($"/api/catalogue/releases/{id}", UriKind.Relative), Token);
+        var body = await client.GetFromJsonAsync<AlbumDetailResponse>(
+            new Uri($"/api/catalogue/albums/{id}", UriKind.Relative), Token);
 
         Assert.NotNull(body);
         return body;
@@ -1559,6 +1582,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Duet = duet.Id.Value,
             Seesaw = seesaw.Id.Value,
             Symphony = symphony.Id.Value,
+            SeesawAlbum = group.Id.Value,
+            SymphonyAlbum = symphonyGroup.Id.Value,
+            SeesawAlbumMbid = group.Mbid!.Value.Value,
             SeesawMbid = seesaw.Mbid!.Value.Value,
             AnthologyMbid = anthology.Mbid!.Value.Value,
         };
@@ -1781,7 +1807,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         // The same release, the same credit line, the same "not on it" — and now
         // a group he belongs to, which is the only thing that changed.
-        Assert.Equal(ring.ReleaseId, sameRing.ReleaseId);
+        Assert.Equal(ring.AlbumId, sameRing.AlbumId);
         Assert.False(sameRing.Billed);
         Assert.NotNull(sameRing.Band);
 
@@ -1819,6 +1845,12 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         public Guid Seesaw { get; init; }
 
         public Guid Symphony { get; init; }
+
+        public Guid SeesawAlbum { get; init; }
+
+        public Guid SymphonyAlbum { get; init; }
+
+        public Guid SeesawAlbumMbid { get; init; }
 
         public Guid SeesawMbid { get; init; }
 

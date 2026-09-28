@@ -105,6 +105,13 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new EditResponse([.. edits.Keys.Order(StringComparer.Ordinal)]));
     }
 
+    /// <summary>The fields of an album's form that belong to one pressing of it.</summary>
+    private static readonly string[] PressingFields =
+    [
+        "disambiguation", "releasedYear", "releasedMonth", "releasedDay", "country",
+        "status", "label", "catalogNumber", "barcode", "formats",
+    ];
+
     internal static async Task<Results<Ok<EditResponse>, ProblemHttpResult>> EditRelease(
         Guid id,
         ReleaseEditRequest request,
@@ -159,7 +166,29 @@ public static partial class CatalogueEndpoints
             ["review"] = request.Review,
         };
 
-        var edits = PersonEdits.Diff(wanted, ReleaseFields(release, credit));
+        var provider = ReleaseFields(release, credit);
+
+        // A pressing's facts are corrected only through the pressing the album
+        // is claimed to be — every one of its files under it, the album page's
+        // own rule. Through a display edition they keep what they were: the page
+        // cannot show them there, and a blank from it would be a deletion nobody
+        // asked for.
+        var claimed = await db.MediaFiles.AnyAsync(f => f.ReleaseId == releaseId, cancellationToken).ConfigureAwait(false)
+            && !await db.MediaFiles
+                .AnyAsync(f => f.ReleaseGroupId == release.ReleaseGroupId && f.ReleaseId != releaseId, cancellationToken)
+                .ConfigureAwait(false);
+
+        if (!claimed)
+        {
+            var kept = PersonEdits.Read(release.EditsJson);
+
+            foreach (var field in PressingFields)
+            {
+                wanted[field] = PersonEdits.Apply(kept, field, provider.GetValueOrDefault(field));
+            }
+        }
+
+        var edits = PersonEdits.Diff(wanted, provider);
 
         release.EditsJson = PersonEdits.Write(edits);
 
@@ -192,7 +221,8 @@ public static partial class CatalogueEndpoints
     private static Dictionary<string, string?> ReleaseFields(Release release, string? credit) =>
         new(StringComparer.Ordinal)
         {
-            ["title"] = release.Title,
+            // The album's title, which is what every page lays the edit over.
+            ["title"] = release.ReleaseGroup?.Title ?? release.Title,
             ["credit"] = credit,
             ["disambiguation"] = release.Disambiguation,
             ["primaryType"] = release.ReleaseGroup?.PrimaryType,
@@ -231,7 +261,7 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>The album list's and the album page's summary, with a person's corrections laid over it.</summary>
-    private static ReleaseSummary WithEdits(ReleaseSummary summary, string? editsJson)
+    private static AlbumSummary WithEdits(AlbumSummary summary, string? editsJson)
     {
         var edits = PersonEdits.Read(editsJson);
         if (edits.Count == 0) return summary;
@@ -240,10 +270,14 @@ public static partial class CatalogueEndpoints
         {
             Title = PersonEdits.Apply(edits, "title", summary.Title) ?? summary.Title,
             Artist = PersonEdits.Apply(edits, "credit", summary.Artist),
-            Year = Integer(PersonEdits.Apply(edits, "releasedYear", Number(summary.Year))),
-            Country = PersonEdits.Apply(edits, "country", summary.Country),
-            Status = PersonEdits.Apply(edits, "status", summary.Status),
-            Formats = PersonEdits.Apply(edits, "formats", summary.Formats),
+            // The album's year is when it was first released, so it is that
+            // correction that moves it — not one to a pressing's own date.
+            Year = Integer(PersonEdits.Apply(edits, "firstReleaseYear", Number(summary.Year))),
+
+            // A pressing's own facts, corrected or not, only where one is claimed.
+            Country = summary.EditionId is null ? null : PersonEdits.Apply(edits, "country", summary.Country),
+            Status = summary.EditionId is null ? null : PersonEdits.Apply(edits, "status", summary.Status),
+            Formats = summary.EditionId is null ? null : PersonEdits.Apply(edits, "formats", summary.Formats),
         };
     }
 

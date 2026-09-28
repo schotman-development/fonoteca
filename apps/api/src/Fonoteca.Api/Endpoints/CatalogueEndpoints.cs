@@ -185,7 +185,21 @@ public static partial class CatalogueEndpoints
 
     /// <summary>Attribution refusals: the recording is known, the edition is not.</summary>
     private static readonly ReleaseAttributionOutcome[] UnattributedOutcomes =
-        [ReleaseAttributionOutcome.NoConfidentFit, ReleaseAttributionOutcome.NoCandidate];
+    [
+        ReleaseAttributionOutcome.NoConfidentFit,
+        ReleaseAttributionOutcome.NoCandidate,
+        ReleaseAttributionOutcome.OrderContradicted,
+    ];
+
+    /// <summary>"Not from a release", by a person or an agent, on each of the three legs.</summary>
+    private static readonly AcoustIdOutcome[] UnreleasedIdentities =
+        [AcoustIdOutcome.Unreleased, AcoustIdOutcome.UnreleasedByAgent];
+
+    private static readonly EnrichmentOutcome[] UnreleasedRecordings =
+        [EnrichmentOutcome.Unreleased, EnrichmentOutcome.UnreleasedByAgent];
+
+    private static readonly ReleaseAttributionOutcome[] UnreleasedAttributions =
+        [ReleaseAttributionOutcome.Unreleased, ReleaseAttributionOutcome.UnreleasedByAgent];
 
     /// <summary>
     /// What a decision takes the library work gate as.
@@ -233,6 +247,7 @@ public static partial class CatalogueEndpoints
             ReleaseAttributionOutcome.AttributedByPerson => ReleaseAttributionOutcome.AttributedByAgent,
             ReleaseAttributionOutcome.NoReleaseByPerson => ReleaseAttributionOutcome.NoReleaseByAgent,
             ReleaseAttributionOutcome.Unreleased => ReleaseAttributionOutcome.UnreleasedByAgent,
+            ReleaseAttributionOutcome.AlbumByPerson => ReleaseAttributionOutcome.AlbumByAgent,
             _ => throw new ArgumentOutOfRangeException(nameof(decided), decided, "No agent twin."),
         };
 
@@ -371,25 +386,31 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        group.MapGet("/releases", GetReleases)
-            .WithName("GetReleases")
+        group.MapGet("/albums", GetAlbums)
+            .WithName("GetAlbums")
             .WithSummary("Albums the library holds at least one track of.")
             .WithDescription(
-                "Ordered by title, or by `sort=year` (newest first, undated last), "
-                + "`sort=artist` (the first billed name, uncredited last) or "
-                + "`sort=added` (whichever album gained a file most recently). "
-                + "`query` filters on the release title, case-insensitively, "
-                + "anywhere in the string. `held` against `trackCount` is what an incomplete rip "
-                + "looks like — though a CD+DVD-Video release is legitimately half missing on an "
-                + "audio-only library, which is why the medium formats are returned beside them.");
+                "An album is a release group; `editionId` names the pressing only where every "
+                + "file is filed under the same one. Ordered by title, or by `sort=year` "
+                + "(newest first, undated last), `sort=artist` (the first billed name, "
+                + "uncredited last) or `sort=added` (whichever album gained a file most "
+                + "recently). `query` filters on the album title, case-insensitively, anywhere "
+                + "in the string. `held` against `trackCount` is what an incomplete rip looks "
+                + "like, and is only given against a claimed pressing — though a CD+DVD-Video "
+                + "release is legitimately half missing on an audio-only library, which is why "
+                + "the medium formats are returned beside them.\n\n"
+                + "`noRelease` lists the album folders answered as coming from no release, which "
+                + "have no release group: unpaged, outside `total`, filtered on the folder name.");
 
-        group.MapGet("/releases/{id:guid}", GetRelease)
-            .WithName("GetRelease")
-            .WithSummary("One release and its whole track list, held or not.")
+        group.MapGet("/albums/{id:guid}", GetAlbum)
+            .WithName("GetAlbum")
+            .WithSummary("One album: every stored edition's tracks at once, held or not.")
             .WithDescription(
-                "The entire track list as MusicBrainz prints it, with each track flagged for "
-                + "whether the library holds it — so a missing track is visible as a gap rather "
-                + "than as an absence.")
+                "The claimed pressing's track list when there is one, with what the album's "
+                + "other stored editions print beside it, each track flagged for whether the "
+                + "library holds it — so a missing track is visible as a gap rather than as an "
+                + "absence. Files held to the album whose recording no edition prints are "
+                + "listed apart, as are the album folders they sit in.")
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/attribution", GetAttributionReport)
@@ -397,10 +418,11 @@ public static partial class CatalogueEndpoints
             .WithSummary("How the attributed albums compare with the folders on disk.")
             .WithDescription(
                 "The folder's boundary decides which files are considered together; its name "
-                + "plays no part in deciding which release they came from. This is where the two "
-                + "are compared. A release spanning folders is the disagreement worth a person's "
-                + "attention now that a folder can no longer be split across releases by the "
-                + "pass — and either side may be the wrong one.");
+                + "plays no part in deciding which album they came from. This is where the two "
+                + "are compared, album by album (release group), whether or not a pressing is "
+                + "claimed. An album spanning folders is the disagreement worth a person's "
+                + "attention — the same album ripped twice, or one of the two filed wrongly — and "
+                + "either side may be the wrong one.");
 
         group.MapGet("/matching", GetOpenQuestions)
             .WithName("GetOpenQuestions")
@@ -779,18 +801,19 @@ public static partial class CatalogueEndpoints
                         f.Quality,
                         f.Integrity,
                         f.ReleaseId,
-                        ReleaseTitle = f.Release == null ? null : f.Release.Title,
-                        ReleaseYear = f.Release == null ? null : f.Release.ReleasedYear,
-                        ReleaseMbid = f.Release == null ? null : f.Release.Mbid,
-
-                        // The release's *own* billing line, which is a different
-                        // claim from the recording's and the whole point of the
-                        // two fields below. `release.Credits` is the same
-                        // navigation the album list projects; nothing new is
-                        // fetched and no second query is issued.
-                        ReleaseCredits = f.Release == null
+                        f.ReleaseGroupId,
+                        AlbumTitle = f.ReleaseGroup == null ? null : f.ReleaseGroup.Title,
+                        AlbumYear = f.ReleaseGroup == null
                             ? null
-                            : f.Release.Credits
+                            : f.ReleaseGroup.FirstReleaseYear ?? (f.Release == null ? null : f.Release.ReleasedYear),
+                        AlbumMbid = f.ReleaseGroup == null ? null : f.ReleaseGroup.Mbid,
+
+                        // The billing line of the pressing the file is filed
+                        // under, or the album's own where no pressing is claimed —
+                        // a different claim from the recording's, and the whole
+                        // point of the two fields below.
+                        AlbumCredits = f.Release != null
+                            ? f.Release.Credits
                                 .OrderBy(credit => credit.Position)
                                 .Select(credit => new
                                 {
@@ -799,7 +822,19 @@ public static partial class CatalogueEndpoints
                                     credit.JoinPhrase,
                                     ArtistName = credit.Artist!.LatinName ?? credit.Artist!.Name,
                                 })
-                                .ToList(),
+                                .ToList()
+                            : f.ReleaseGroup == null
+                                ? null
+                                : f.ReleaseGroup.Credits
+                                    .OrderBy(credit => credit.Position)
+                                    .Select(credit => new
+                                    {
+                                        credit.ArtistId,
+                                        credit.CreditedAs,
+                                        credit.JoinPhrase,
+                                        ArtistName = credit.Artist!.LatinName ?? credit.Artist!.Name,
+                                    })
+                                    .ToList(),
                     })
                     .ToList(),
             })
@@ -816,6 +851,19 @@ public static partial class CatalogueEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // Where no pressing is claimed, the sleeve and the billing line are the
+        // display edition's — the album list's rule, so a card here shows the
+        // same cover and credit as the album it links to.
+        var unclaimed = tracks
+            .SelectMany(row => row.Files)
+            .Where(file => file.ReleaseGroupId != null && file.ReleaseId == null)
+            .Select(file => file.ReleaseGroupId!.Value)
+            .Distinct()
+            .ToList();
+
+        var displays = (await EditionFactsAsync(db, unclaimed, cancellationToken).ConfigureAwait(false))
+            .ToDictionary(entry => entry.Key, entry => DisplayEdition(entry.Value));
+
         var rows = tracks
             .Select(row => new TrackRow(
                 RecordingId: row.Id.Value,
@@ -827,35 +875,45 @@ public static partial class CatalogueEndpoints
                 Duration: Format(row.Duration),
                 Roles: Roles(row.Billed, row.Roles, row.WorkRoles),
                 Album: row.Files
-                    .Where(file => file.ReleaseId != null)
-                    .Select(file => new TrackAlbum(
-                        file.ReleaseId!.Value.Value,
-                        file.ReleaseMbid?.Value,
-                        file.ReleaseTitle!,
-                        file.ReleaseYear,
-                        CreditLine(file.ReleaseCredits!
-                            .Select(credit => (credit.CreditedAs ?? credit.ArtistName, credit.JoinPhrase))),
+                    .Where(file => file.ReleaseGroupId != null)
+                    .OrderBy(file => file.ReleaseId == null)
+                    .Select(file =>
+                    {
+                        var display = file.ReleaseId == null ? displays.GetValueOrDefault(file.ReleaseGroupId!.Value) : null;
+                        var credits = display is { Artists.Count: > 0 }
+                            ? display.Artists.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.Name, credit.JoinPhrase)).ToList()
+                            : file.AlbumCredits!.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.ArtistName, credit.JoinPhrase)).ToList();
+
+                        return new TrackAlbum(
+                        file.ReleaseGroupId!.Value.Value,
+                        file.AlbumMbid?.Value,
+                        file.ReleaseId?.Value,
+                        file.ReleaseId?.Value ?? display?.Id.Value,
+                        file.AlbumTitle!,
+                        file.AlbumYear,
+                        CreditLine(credits.Select(credit => (credit.Name, credit.JoinPhrase))),
                         // Null where the release records no credit at all, and
                         // that is not the same answer as false. Eight of this
                         // library's 644 releases are in that state, and reading
                         // their silence as "not the album artist" would move an
                         // artist's own record off their discography on the
                         // strength of a row nobody wrote.
-                        file.ReleaseCredits!.Count == 0
+                        credits.Count == 0
                             ? null
-                            : file.ReleaseCredits!.Exists(credit => credit.ArtistId == artistId),
+                            : credits.Exists(credit => credit.ArtistId == artistId),
                         // The act on the sleeve, where it is a band this artist
                         // was in. Null both when the release names somebody else
                         // and when no credit is recorded at all: unlike `Billed`
                         // those are one answer here, because both mean "no
                         // evidence of membership" and leave the album where it
                         // already was.
-                        file.ReleaseCredits!
+                        credits
                             .Where(credit => bands.ContainsKey(credit.ArtistId.Value))
                             .Select(credit => new TrackBand(
                                 credit.ArtistId.Value,
                                 bands[credit.ArtistId.Value]))
-                            .FirstOrDefault()))
+                            .FirstOrDefault());
+                    })
                     .FirstOrDefault(),
                 Folder: FolderOf(row.Files[0].Path),
                 Files: [.. row.Files.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
@@ -1302,7 +1360,7 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new ArtistFollowResponse(artist.Id.Value, true));
     }
 
-    internal static async Task<Ok<ReleaseListResponse>> GetReleases(
+    internal static async Task<Ok<AlbumListResponse>> GetAlbums(
         FonotecaDbContext db,
         CancellationToken cancellationToken,
         string? query = null,
@@ -1313,212 +1371,265 @@ public static partial class CatalogueEndpoints
         take = Math.Clamp(take, 1, MaxTake);
         skip = Math.Max(skip, 0);
 
-        // Only releases something was actually filed under. The attribution pass
-        // writes no others, so this is belt and braces — but a release whose only
-        // files were later removed by a scan would otherwise linger as an album
-        // the library does not have.
-        var releases = db.Releases.AsNoTracking().Where(release => release.Files.Any());
+        // An album is a release group some file is held to. Every filed file
+        // carries its group whether or not an edition of it is claimed, so this
+        // also lists the albums an edition-keyed list could not: those whose
+        // files are known to be the album without it being known which pressing.
+        var albums = db.ReleaseGroups.AsNoTracking().Where(g => g.Files.Any());
 
         if (!string.IsNullOrWhiteSpace(query))
         {
             var pattern = $"%{Escape(query.Trim())}%";
-            releases = releases.Where(release => EF.Functions.ILike(release.Title, pattern, "\\"));
+            albums = albums.Where(g => EF.Functions.ILike(g.Title, pattern, "\\"));
         }
 
-        var total = await releases.CountAsync(cancellationToken).ConfigureAwait(false);
+        var total = await albums.CountAsync(cancellationToken).ConfigureAwait(false);
 
         // In SQL, because this endpoint pages in SQL: sorting the returned page
         // would order 200 of 600 albums and call it a sort.
         //
-        // The artist key is the *first* billed credit rather than the assembled
-        // line — `CreditLine` runs in memory below and cannot be ordered on —
-        // which is the same name that line starts with, so the two agree. An
-        // album billed to nobody has no key at all and PostgreSQL puts a null
-        // last on an ascending sort, which is where an anthology belongs.
-        //
-        // Undated albums go last on newest-first too, via the coalesce: an
-        // absent year is not year zero, and it is not this year either.
+        // The artist key is the first billed credit on the display edition —
+        // the same rungs DisplayEdition applies in memory below, written again
+        // here because EF reads a helper taking the row as a closure. Undated
+        // albums go last on newest-first via the coalesce: an absent year is not
+        // year zero, and it is not this year either.
         var sorted = sort switch
         {
-            "year" => releases
-                .OrderByDescending(release => release.ReleasedYear ?? 0)
-                .ThenBy(release => release.Title),
-            "artist" => releases
-                .OrderBy(release => release.Credits
-                    .OrderBy(credit => credit.Position)
-                    .Select(credit => credit.CreditedAs ?? credit.Artist!.LatinName ?? credit.Artist!.Name)
-                    .FirstOrDefault())
-                .ThenBy(release => release.Title),
+            "year" => albums
+                .OrderByDescending(g => g.FirstReleaseYear
+                    ?? g.Releases.Where(r => r.Status == "Official").Min(r => r.ReleasedYear)
+                    ?? g.Releases.Min(r => r.ReleasedYear)
+                    ?? 0)
+                .ThenBy(g => g.Title),
+            "artist" => albums
+                .OrderBy(g => g.Releases
+                    .OrderByDescending(r => r.Files.Count != 0)
+                    .ThenByDescending(r => db.ReleaseCovers.Any(c => c.ReleaseId == r.Id && c.Bytes != null))
+                    .ThenByDescending(r => r.Status == "Official")
+                    .ThenBy(r => r.ReleasedYear ?? int.MaxValue)
+                    .ThenBy(r => r.Id)
+                    .Select(r => r.Credits
+                        .OrderBy(credit => credit.Position)
+                        .Select(credit => credit.CreditedAs ?? credit.Artist!.LatinName ?? credit.Artist!.Name)
+                        .FirstOrDefault())
+                    .FirstOrDefault()
+                    ?? g.Credits
+                        .OrderBy(credit => credit.Position)
+                        .Select(credit => credit.CreditedAs ?? credit.Artist!.LatinName ?? credit.Artist!.Name)
+                        .FirstOrDefault())
+                .ThenBy(g => g.Title),
             // "Added" is not a column and does not need to be: MediaFileId is a
             // UUIDv7, so the id a row was minted with is when the scan first saw
             // the file, and PostgreSQL orders uuids bytewise over the big-endian
             // millisecond those lead with. The newest file decides, so a bonus
-            // disc ripped later brings its album back to the top.
-            //
-            // A folder renamed through the file manager keeps its rows and so
-            // keeps its date, which is exactly why that endpoint exists; a file
-            // genuinely removed and re-added gets a new one, which is right.
-            // LastScannedUtc would tie more honestly and is deliberately not
-            // used: a tagger editing a file's bytes moves it, and that is not
-            // the album being added.
-            //
-            // What the id cannot do is order WITHIN a millisecond — everything
-            // after those 48 bits is fresh randomness, not a counter — so there
-            // is no tie to break and no point pretending there is one: albums
-            // inserted by the same scan come back shuffled, stably, since the
-            // ids never change. Measured on the target library that is 618
-            // albums over 263 milliseconds, 180 of those holding more than one.
-            // The first import is therefore walk order with each millisecond
-            // shuffled, and this order only says something about what arrived
-            // after it. A first-seen column is what would fix that, and it
-            // would have nothing truthful to backfill the existing rows with.
-            //
-            // The newest one is taken by ordering rather than by Max, because
-            // PostgreSQL has comparison operators for uuid but no aggregate over
-            // it: max(uuid) does not exist and the query fails with 42883.
-            "added" => releases
-                .OrderByDescending(release => release.Files
+            // disc ripped later brings its album back to the top. Within one
+            // millisecond the rest of the id is randomness, so albums inserted by
+            // one scan come back shuffled, stably. Ordered rather than Max'd,
+            // because PostgreSQL has no max(uuid).
+            "added" => albums
+                .OrderByDescending(g => g.Files
                     .OrderByDescending(file => file.Id)
                     .Select(file => file.Id)
                     .FirstOrDefault()),
-            _ => releases.OrderBy(release => release.Title),
+            _ => albums.OrderBy(g => g.Title),
         };
 
         var rows = await sorted
-            .ThenBy(release => release.Id)
+            .ThenBy(g => g.Id)
             .Skip(skip)
             .Take(take)
-            .Select(release => new
-            {
-                release.Id,
-                release.Mbid,
-                release.Title,
-                release.ReleasedYear,
-                release.Country,
-                release.Status,
-                release.MediumFormats,
-                release.DiscCount,
-                release.EditsJson,
-                TrackCount = release.TrackCount ?? release.Tracks.Count,
-                Held = release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
-                Files = release.Files.Count,
-                Artists = release.Credits
+            .Select(g => new AlbumFacts(
+                g.Id,
+                g.Mbid,
+                g.Title,
+                g.FirstReleaseYear,
+                g.Files.Count,
+                g.Files.Select(file => file.ReleaseId).Distinct().Count(),
+                g.Files.Select(file => file.ReleaseId).FirstOrDefault(),
+                g.Files.Where(file => file.TrackId != null).Select(file => file.TrackId).Distinct().Count(),
+
+                // Every claim its files carry, so the weakest can be named and an
+                // album with one coin-flip in it does not read as certain.
+                g.Files.Select(file => file.AttributionOutcome).Distinct().ToList(),
+                g.Files.Max(file => file.EditionAlternatives),
+                g.Credits
                     .OrderBy(credit => credit.Position)
-                    .Select(credit => new
-                    {
+                    .Select(credit => new EditionCredit(
+                        credit.ArtistId,
                         credit.CreditedAs,
                         credit.JoinPhrase,
-                        Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
-                    })
-                    .ToList(),
+                        credit.Artist!.LatinName ?? credit.Artist!.Name))
+                    .ToList()))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-                // The weakest claim any of its files carries, so a release with
-                // one coin-flip in it does not read as certain.
-                Certainty = release.Files.Max(file => (int)file.AttributionOutcome),
-                Alternatives = release.Files.Max(file => file.EditionAlternatives),
+        var editions = await EditionFactsAsync(db, [.. rows.Select(row => row.Id)], cancellationToken)
+            .ConfigureAwait(false);
+
+        var items = rows
+            .Select(row => AlbumSummaryOf(row, editions[row.Id]))
+            .ToList();
+
+        var noRelease = (await NoReleaseAlbumsAsync(db, cancellationToken).ConfigureAwait(false))
+            .Where(album => string.IsNullOrWhiteSpace(query)
+                || album.Title.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(album => sort == "artist" ? album.Folder : album.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return TypedResults.Ok(new AlbumListResponse(total, items, noRelease));
+    }
+
+    /// <summary>
+    /// The album folders somebody said are nobody's release, where nothing else
+    /// makes them an album.
+    /// </summary>
+    /// <remarks>
+    /// <b>Albums everywhere else are release groups, and these have none.</b> A
+    /// folder answered "not from a release" is still one of the library's albums —
+    /// a set of covers, a concert recording — and leaving it out of the count read
+    /// as though the folder were missing. Counted by <see cref="AlbumFolder"/>,
+    /// the unit every other album question is asked in, so a folder of six
+    /// singles is one album and not six.
+    ///
+    /// <b>Only where nothing else claims the folder.</b> One with a file filed
+    /// under an album already counts as that album, and one with a file still on
+    /// the Identify queue is unanswered rather than unreleased.
+    /// </remarks>
+    internal static async Task<List<NoReleaseAlbum>> NoReleaseAlbumsAsync(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var unfiled = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.ReleaseGroupId == null)
+            .Select(file => new
+            {
+                file.Path,
+                Unreleased = UnreleasedIdentities.Contains(file.AcoustIdOutcome)
+                    || UnreleasedRecordings.Contains(file.EnrichmentOutcome)
+                    || UnreleasedAttributions.Contains(file.AttributionOutcome),
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var items = rows
-            .Select(row => WithEdits(new ReleaseSummary(
-                row.Id.Value,
-                row.Mbid?.Value,
-                row.Title,
-                CreditLine(row.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
-                row.ReleasedYear,
-                row.Country,
-                row.Status,
-                row.MediumFormats,
-                row.DiscCount,
-                row.TrackCount,
-                row.Held,
-                row.Files,
-                ((ReleaseAttributionOutcome)row.Certainty).ToString(),
-                row.Alternatives), row.EditsJson))
-            .ToList();
+        var open = (await db.MediaFiles
+                .AsNoTracking()
+                .Where(OpenOnIdentify)
+                .Select(file => file.Path)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .Select(AlbumFolder.Of)
+            .ToHashSet(StringComparer.Ordinal);
 
-        return TypedResults.Ok(new ReleaseListResponse(total, items));
+        var albums = new List<NoReleaseAlbum>();
+
+        foreach (var folder in unfiled
+            .GroupBy(file => AlbumFolder.Of(file.Path), StringComparer.Ordinal)
+            .Where(folder => folder.Key.Length > 0
+                && !open.Contains(folder.Key)
+                && folder.Any(file => file.Unreleased)))
+        {
+            // ponytail: one query per candidate folder, tens in a real library;
+            // batch into one if a library ever holds hundreds.
+            //
+            // The prefix narrows, the album folder decides: a file loose under an
+            // artist has the artist's folder as its album, and every album below
+            // it shares the prefix.
+            var prefix = folder.Key + "/";
+
+            var filed = await db.MediaFiles
+                .AsNoTracking()
+                .Where(file => file.ReleaseGroupId != null && file.Path.StartsWith(prefix))
+                .Select(file => file.Path)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (filed.Any(path => AlbumFolder.Of(path) == folder.Key)) continue;
+
+            var artist = AlbumFolder.ParentOf(folder.First().Path);
+
+            albums.Add(new NoReleaseAlbum(
+                folder.Key,
+                folder.Key[(folder.Key.LastIndexOf('/') + 1)..],
+                artist.Length > 0 ? artist : null,
+                folder.Count()));
+        }
+
+        return albums;
     }
 
-    internal static async Task<Results<Ok<ReleaseDetailResponse>, ProblemHttpResult>> GetRelease(
+    internal static async Task<Results<Ok<AlbumDetailResponse>, ProblemHttpResult>> GetAlbum(
         Guid id,
         FonotecaDbContext db,
         CancellationToken cancellationToken)
     {
-        var releaseId = new ReleaseId(id);
+        var groupId = new ReleaseGroupId(id);
 
-        var release = await db.Releases
+        var album = await db.ReleaseGroups
             .AsNoTracking()
-            .Where(r => r.Id == releaseId)
-            .Select(r => new
+            .Where(g => g.Id == groupId)
+            .Select(g => new
             {
-                r.Id,
-                r.Mbid,
-                r.Title,
-                r.ReleasedYear,
-                r.ReleasedMonth,
-                r.ReleasedDay,
-                r.Country,
-                r.Status,
-                r.MediumFormats,
-                r.DiscCount,
-                r.Disambiguation,
-                r.Label,
-                r.CatalogNumber,
-                r.Barcode,
-                r.EditsJson,
-                r.ReleaseGroupId,
-                GroupMbid = r.ReleaseGroup == null ? null : r.ReleaseGroup.Mbid,
-                PrimaryType = r.ReleaseGroup == null ? null : r.ReleaseGroup.PrimaryType,
-                SecondaryTypes = r.ReleaseGroup == null ? null : r.ReleaseGroup.SecondaryTypes,
-                FirstReleaseYear = r.ReleaseGroup == null ? null : r.ReleaseGroup.FirstReleaseYear,
-                Monitored = r.ReleaseGroup != null && r.ReleaseGroup.Monitored,
-                ReviewText = r.ReleaseGroup == null ? null : r.ReleaseGroup.ReviewText,
-                ReviewUrl = r.ReleaseGroup == null ? null : r.ReleaseGroup.ReviewUrl,
-                ReviewLookupUtc = r.ReleaseGroup == null ? null : r.ReleaseGroup.ReviewLookupUtc,
-                TrackCount = r.TrackCount ?? r.Tracks.Count,
-                Held = r.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
-                Files = r.Files.Count,
-                Artists = r.Credits
-                    .OrderBy(credit => credit.Position)
-                    .Select(credit => new
-                    {
-                        credit.ArtistId,
-                        credit.CreditedAs,
-                        credit.JoinPhrase,
-                        Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
-                    })
-                    .ToList(),
-                Certainty = r.Files.Max(file => (int)file.AttributionOutcome),
-                Alternatives = r.Files.Max(file => file.EditionAlternatives),
-                LookedUp = r.Files.Max(file => file.ReleaseLookupUtc),
-                Probed = r.Files.Max(file => file.LastVerifiedUtc),
+                Facts = new AlbumFacts(
+                    g.Id,
+                    g.Mbid,
+                    g.Title,
+                    g.FirstReleaseYear,
+                    g.Files.Count,
+                    g.Files.Select(file => file.ReleaseId).Distinct().Count(),
+                    g.Files.Select(file => file.ReleaseId).FirstOrDefault(),
+                    g.Files.Where(file => file.TrackId != null).Select(file => file.TrackId).Distinct().Count(),
+                    g.Files.Select(file => file.AttributionOutcome).Distinct().ToList(),
+                    g.Files.Max(file => (int?)file.EditionAlternatives) ?? 0,
+                    g.Credits
+                        .OrderBy(credit => credit.Position)
+                        .Select(credit => new EditionCredit(
+                            credit.ArtistId,
+                            credit.CreditedAs,
+                            credit.JoinPhrase,
+                            credit.Artist!.LatinName ?? credit.Artist!.Name))
+                        .ToList()),
+                g.PrimaryType,
+                g.SecondaryTypes,
+                g.Monitored,
+                g.ReviewText,
+                g.ReviewUrl,
+                g.ReviewLookupUtc,
+                LookedUp = g.Files.Max(file => file.ReleaseLookupUtc),
+                Probed = g.Files.Max(file => file.LastVerifiedUtc),
             })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (release is null)
+        if (album is null)
         {
             return TypedResults.Problem(
-                title: "No such release",
-                detail: $"The catalogue has no release with id {id}.",
+                title: "No such album",
+                detail: $"The catalogue has no album with id {id}.",
                 statusCode: StatusCodes.Status404NotFound);
         }
 
+        var editions = (await EditionFactsAsync(db, [groupId], cancellationToken).ConfigureAwait(false))[groupId];
+        var summary = AlbumSummaryOf(album.Facts, editions);
+        var display = DisplayEdition(editions);
+        var claimed = summary.EditionId is { } claim ? new ReleaseId(claim) : (ReleaseId?)null;
+
+        var ids = editions.Select(edition => edition.Id).ToList();
+
         var tracks = await db.Tracks
             .AsNoTracking()
-            .Where(track => track.ReleaseId == releaseId)
+            .Where(track => ids.Contains(track.ReleaseId))
             .OrderBy(track => track.DiscNumber)
             .ThenBy(track => track.Position)
             .Select(track => new
             {
+                track.ReleaseId,
                 track.DiscNumber,
                 track.Position,
                 track.Number,
                 track.Title,
                 track.Length,
-                RecordingId = track.RecordingId,
+                track.RecordingId,
 
                 // The composition the recording performs, so the track list can
                 // gather four movements under one heading. Null on everything
@@ -1547,39 +1658,178 @@ public static partial class CatalogueEndpoints
                         .Where(link => link.ArtistId != null)
                         .Select(link => new { ArtistId = link.ArtistId!.Value, link.Type })
                         .ToList(),
-
-                // Files linked to *this track*, not merely holding the same
-                // recording. A recording the library owns twice — once here and
-                // once on a compilation — must not make both look held.
-                Files = db.MediaFiles
-                    .Where(file => file.TrackId == track.Id)
-                    .OrderBy(file => file.Path)
-                    .Select(file => new { file.Path, file.SizeBytes, file.Quality, file.Integrity })
-                    .ToList(),
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var credit = CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase)));
-
-        var rows = tracks
-            .Select(track =>
+        var files = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.ReleaseGroupId == groupId)
+            .Select(file => new
             {
-                var own = CreditLine(track.Billed.Select(billed => (billed.Name, billed.JoinPhrase)));
+                file.Path,
+                file.SizeBytes,
+                file.Quality,
+                file.Integrity,
+                file.RecordingId,
+                file.ReleaseId,
+                Recording = file.Recording == null ? null : file.Recording.Title,
+                Disc = file.Track == null ? (int?)null : file.Track.DiscNumber,
+                Position = file.Track == null ? (int?)null : file.Track.Position,
+                file.FolderPosition,
+                file.OrderOutcome,
+                file.TagDiscNumber,
+                file.TagTrackNumber,
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-                return new ReleaseTrackRow(
+        var byEdition = tracks.ToLookup(track => track.ReleaseId);
+        var slotsOf = ids.ToDictionary(
+            edition => edition,
+            edition => new EditionTracks(
+                edition,
+                [.. byEdition[edition].Select(track => new EditionSlot(
                     track.DiscNumber,
                     track.Position,
                     track.Number,
-                    track.Title ?? string.Empty,
-                    track.WorkTitle,
-                    Format(track.Length),
-                    track.RecordingId.Value,
-                    track.Files.Count > 0,
-                    [.. track.Files.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
+                    track.Title,
+                    track.Length,
+                    track.RecordingId))]));
+        var holding = files.Where(file => file.RecordingId is not null).Select(file => file.RecordingId!.Value).ToHashSet();
+
+        // The claimed edition sets the running order; the rest add what it does
+        // not print. Without a claim, an edition files are filed under, then the
+        // one the files are nearest to — the shortest holding what they hold, so
+        // a deluxe's bonus tracks follow the album and a vinyl-and-CD box does
+        // not set the order for a download, official where there is one — then
+        // official, longest first.
+        var official = editions.Where(edition => edition.Status == "Official").Select(edition => slotsOf[edition.Id]).ToList();
+        var nearest = Editions.Nearest(official.Count > 0 ? official : [.. slotsOf.Values], holding)?.Id;
+        var order = editions
+            .OrderByDescending(edition => edition.Id == claimed)
+            .ThenByDescending(edition => edition.HasFiles)
+            .ThenByDescending(edition => edition.Id == nearest)
+            .ThenByDescending(edition => edition.Status == "Official")
+            .ThenByDescending(edition => edition.TrackCount)
+            .ThenBy(edition => edition.Id.Value)
+            .Select(edition => edition.Id)
+            .ToList();
+
+        var combined = Editions.Combine(
+            [.. order.Select(edition => slotsOf[edition])], holding, firstIsClaimed: claimed is not null);
+
+        // What each recording says about itself, whichever edition it came from.
+        var recordings = tracks
+            .GroupBy(track => track.RecordingId)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        // A file sits under the row printing its recording — two rips of one
+        // album, in two folders, are two files under one row — except under a
+        // claimed pressing, where each file sits on its own slot, a recording
+        // the pressing prints twice included. A file that has lost its slot (a
+        // re-read track list moved it) goes back to its recording's first row
+        // rather than off the page.
+        var placed = combined
+            .Select(row => row.Slot.Recording)
+            .ToHashSet();
+
+        var filesOf = files
+            .Where(file => file.RecordingId is { } recording && placed.Contains(recording))
+            .OrderBy(file => AlbumFolder.SortKey(file.Path), StringComparer.Ordinal)
+            .ThenBy(file => file.Path, StringComparer.Ordinal)
+            .ToLookup(file => file.RecordingId!.Value);
+
+        var seated = files
+            .Where(file => file.Disc is not null && file.Position is not null)
+            .OrderBy(file => AlbumFolder.SortKey(file.Path), StringComparer.Ordinal)
+            .ThenBy(file => file.Path, StringComparer.Ordinal)
+            .ToLookup(file => (Disc: file.Disc!.Value, Position: file.Position!.Value));
+
+        var credit = CreditLine(ArtistsOf(display, album.Facts).Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase)));
+        var firstRow = new HashSet<RecordingId>();
+
+        var rows = combined
+            .Select(row =>
+            {
+                var facts = recordings[row.Slot.Recording];
+                var own = CreditLine(facts.Billed.Select(billed => (billed.Name, billed.JoinPhrase)));
+                var first = firstRow.Add(row.Slot.Recording);
+                var mine = claimed is { } pressing
+                    ? seated[(row.Slot.Disc, row.Slot.Position)]
+                        .Where(_ => row.On[0] == pressing)
+                        .Concat(filesOf[row.Slot.Recording].Where(file => first && file.Position is null))
+                    : filesOf[row.Slot.Recording];
+
+                return new AlbumTrackRow(
+                    row.Slot.Disc,
+                    row.Slot.Position,
+                    row.Slot.Number,
+                    row.Slot.Title ?? string.Empty,
+                    facts.WorkTitle,
+                    Format(row.Slot.Length),
+                    row.Slot.Recording.Value,
+                    row.Held,
+                    [.. mine.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
                     // Only where it says something the album's line does not:
                     // a guest on one song, a compilation's own artist.
-                    own is not null && own != credit ? own : null);
+                    own is not null && own != credit ? own : null,
+                    [.. row.On.Select(edition => edition.Value)]);
+            })
+            .ToList();
+
+        // Files held to the album whose recording no stored edition prints — a
+        // file the folder says is this album and MusicBrainz does not.
+        var unplaced = files
+            .Where(file => file.RecordingId is not { } recording || !placed.Contains(recording))
+            .OrderBy(file => AlbumFolder.SortKey(file.Path), StringComparer.Ordinal)
+            .ThenBy(file => file.Path, StringComparer.Ordinal)
+            .Select(file => new AlbumFileRow(
+                FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity),
+                file.Recording,
+                null,
+                null,
+                file.TagDiscNumber,
+                file.TagTrackNumber))
+            .ToList();
+
+        // Each folder in its own order: the claimed pressing's where the folder
+        // is one, otherwise the order the pass settled on, otherwise the numbers
+        // its file names carry. A position is only given against a pressing the
+        // folder's files are known to be; the files' own numbers ride beside it.
+        var titles = editions.ToDictionary(edition => edition.Id, edition => edition.Title);
+        var folders = files
+            .GroupBy(file => AlbumFolder.Of(file.Path))
+            .OrderBy(folder => folder.Key, StringComparer.Ordinal)
+            .Select(folder =>
+            {
+                var pressings = folder.Select(file => file.ReleaseId).Distinct().ToList();
+                var edition = pressings is [{ } only] ? only : (ReleaseId?)null;
+
+                // One run decides a folder whole, so its files agree; a file
+                // added since has not been checked and does not outvote them.
+                var checkedOrder = folder
+                    .Select(file => file.OrderOutcome)
+                    .FirstOrDefault(outcome => outcome != FolderOrderOutcome.NotChecked);
+
+                return new AlbumFolderRow(
+                    folder.Key,
+                    edition?.Value,
+                    edition is { } e ? titles.GetValueOrDefault(e) : null,
+                    checkedOrder.ToString(),
+                    [.. folder
+                        .OrderBy(file => edition is null ? 0 : file.Disc ?? int.MaxValue)
+                        .ThenBy(file => edition is null ? 0 : file.Position ?? int.MaxValue)
+                        .ThenBy(file => file.FolderPosition ?? int.MaxValue)
+                        .ThenBy(file => AlbumFolder.SortKey(file.Path), StringComparer.Ordinal)
+                        .ThenBy(file => file.Path, StringComparer.Ordinal)
+                        .Select(file => new AlbumFileRow(
+                            FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity),
+                            file.Recording,
+                            edition is null ? null : file.Disc,
+                            edition is null ? null : file.Position,
+                            file.TagDiscNumber,
+                            file.TagTrackNumber))]);
             })
             .ToList();
 
@@ -1588,17 +1838,19 @@ public static partial class CatalogueEndpoints
         // take an Expression into a subquery inside a Select without reading it
         // as a closure over the row.
         var contributable = await db.MediaFiles
-            .Where(file => file.ReleaseId == releaseId)
+            .Where(file => file.ReleaseGroupId == groupId)
             .Where(Contributable)
             .CountAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        var albumArtists = ArtistsOf(display, album.Facts);
+
         // Everybody the credits name, read once, for the names the links do not
         // carry and the portraits the cards show.
-        var named = release.Artists.Select(a => a.ArtistId)
-            .Concat(tracks.SelectMany(track => track.Billed.Select(billed => billed.ArtistId)))
-            .Concat(tracks.SelectMany(track => track.Links.Select(link => link.ArtistId)))
-            .Concat(tracks.SelectMany(track => track.Writers?.Select(link => link.ArtistId) ?? []))
+        var named = albumArtists.Select(a => a.ArtistId)
+            .Concat(recordings.Values.SelectMany(track => track.Billed.Select(billed => billed.ArtistId)))
+            .Concat(recordings.Values.SelectMany(track => track.Links.Select(link => link.ArtistId)))
+            .Concat(recordings.Values.SelectMany(track => track.Writers?.Select(link => link.ArtistId) ?? []))
             .Distinct()
             .ToList();
 
@@ -1609,45 +1861,70 @@ public static partial class CatalogueEndpoints
             .ConfigureAwait(false))
             .ToDictionary(a => a.Id, a => Describe(a, 0));
 
+        // Rolled up over the claimed pressing's tracks, or over the tracks held
+        // where none is claimed — not over every edition's, which would credit a
+        // guest on a deluxe's bonus disc to a rip that has no bonus disc. Every
+        // row still takes its place, so a credit's track numbers are positions
+        // in the list the page shows.
         var credits = AlbumCredits(
-            release.Artists.Select(a => a.ArtistId).ToList(),
-            tracks.Select(track => new TrackCredits(
-                [.. track.Billed.Select(billed => billed.ArtistId)],
-                [.. track.Links.Select(link => (link.ArtistId, Role(link.Type, link.Attribute)))],
-                [.. (track.Writers ?? []).Select(link => (link.ArtistId, link.Type))]))
+            [.. albumArtists.Select(a => a.ArtistId)],
+            combined
+                .Select(row => (Row: row, Track: recordings[row.Slot.Recording]))
+                .Select(entry => (claimed is { } pressing ? entry.Row.On.Contains(pressing) : entry.Row.Held)
+                    ? new TrackCredits(
+                        [.. entry.Track.Billed.Select(billed => billed.ArtistId)],
+                        [.. entry.Track.Links.Select(link => (link.ArtistId, Role(link.Type, link.Attribute)))],
+                        [.. (entry.Track.Writers ?? []).Select(link => (link.ArtistId, link.Type))])
+                    : new TrackCredits([], [], []))
                 .ToList(),
             people);
 
-        var cover = await db.ReleaseCovers
-            .AsNoTracking()
-            .Where(row => row.ReleaseId == releaseId)
-            .Select(row => new
-            {
-                Held = row.Bytes != null,
-                row.ArchiveImageId,
-                row.QobuzAlbumId,
-                row.SavedUtc,
-            })
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var coverId = display?.Id;
+        var cover = coverId is not { } covered
+            ? null
+            : await db.ReleaseCovers
+                .AsNoTracking()
+                .Where(row => row.ReleaseId == covered)
+                .Select(row => new
+                {
+                    Held = row.Bytes != null,
+                    row.ArchiveImageId,
+                    row.QobuzAlbumId,
+                    row.SavedUtc,
+                })
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
 
         // Other albums the library holds under the first name on this one's
         // billing line — the "more by" shelf.
-        var lead = release.Artists.Select(a => (ArtistId?)a.ArtistId).FirstOrDefault();
+        var lead = albumArtists.Select(a => (ArtistId?)a.ArtistId).FirstOrDefault();
 
-        var moreBy = lead is not { } leadId
+        var others = lead is not { } leadId
             ? []
-            : await db.Releases
+            : await db.ReleaseGroups
                 .AsNoTracking()
-                .Where(r => r.Id != releaseId
-                    && r.Files.Any()
-                    && r.Credits.Any(c => c.ArtistId == leadId))
-                .OrderBy(r => r.ReleasedYear ?? int.MaxValue)
-                .ThenBy(r => r.Title)
+                .Where(g => g.Id != groupId
+                    && g.Files.Any()
+                    && (g.Credits.Any(c => c.ArtistId == leadId)
+                        || g.Releases.Any(r => r.Files.Count != 0 && r.Credits.Any(c => c.ArtistId == leadId))))
+                .OrderBy(g => g.FirstReleaseYear ?? int.MaxValue)
+                .ThenBy(g => g.Title)
                 .Take(12)
-                .Select(r => new ReleaseCard(r.Id.Value, r.Mbid == null ? null : r.Mbid.Value.Value, r.Title, r.ReleasedYear))
+                .Select(g => new { g.Id, g.Mbid, g.Title, g.FirstReleaseYear })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+        var otherEditions = await EditionFactsAsync(db, [.. others.Select(other => other.Id)], cancellationToken)
+            .ConfigureAwait(false);
+
+        var moreBy = others
+            .Select(other => new AlbumCard(
+                other.Id.Value,
+                other.Mbid?.Value,
+                DisplayEdition(otherEditions[other.Id])?.Id.Value,
+                other.Title,
+                other.FirstReleaseYear))
+            .ToList();
 
         // The hero is the lead artist's banner, with their own corrections laid
         // over it; no banner is a plain band, never a blown-up sleeve.
@@ -1660,61 +1937,254 @@ public static partial class CatalogueEndpoints
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        var edits = PersonEdits.Read(release.EditsJson);
+        // What only a pressing has — its label, its barcode, its day of release —
+        // is shown for the pressing the files are proven to be and for no other.
+        // A display edition's barcode on an album whose edition nobody knows
+        // would be the very claim this page exists not to make.
+        var pressing = claimed is not { } proven
+            ? null
+            : await db.Releases
+                .AsNoTracking()
+                .Where(r => r.Id == proven)
+                .Select(r => new
+                {
+                    r.Mbid,
+                    r.Disambiguation,
+                    r.ReleasedYear,
+                    r.ReleasedMonth,
+                    r.ReleasedDay,
+                    r.Label,
+                    r.CatalogNumber,
+                    r.Barcode,
+                })
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        var edits = PersonEdits.Read(display?.EditsJson);
         string? Field(string field, string? provider) => PersonEdits.Apply(edits, field, provider);
 
+        // A person's correction to a pressing's fact is still a fact about that
+        // pressing, so it is shown on the same terms: only where the files are
+        // known to be it.
+        string? Pressing(string field, string? provider) => pressing is null ? null : Field(field, provider);
+
         var about = new ReleaseAbout(
-            release.ReleaseGroupId?.Value,
-            release.GroupMbid?.Value,
+            groupId.Value,
+            album.Facts.Mbid?.Value,
             lead?.Value,
             leadRow is null
                 ? null
                 : PersonEdits.Apply(PersonEdits.Read(leadRow.EditsJson), "banner", leadRow.BannerUrl),
-            Field("disambiguation", release.Disambiguation),
-            Field("primaryType", release.PrimaryType),
-            Split(Field("secondaryTypes", release.SecondaryTypes)),
-            Integer(Field("firstReleaseYear", Number(release.FirstReleaseYear))),
-            Integer(Field("releasedMonth", Number(release.ReleasedMonth))),
-            Integer(Field("releasedDay", Number(release.ReleasedDay))),
-            Field("label", release.Label),
-            Field("catalogNumber", release.CatalogNumber),
-            Field("barcode", release.Barcode),
-            release.Monitored,
+            pressing?.Mbid?.Value,
+            Pressing("disambiguation", pressing?.Disambiguation),
+            Field("primaryType", album.PrimaryType),
+            Split(Field("secondaryTypes", album.SecondaryTypes)),
+            Integer(Field("firstReleaseYear", Number(album.Facts.FirstReleaseYear))),
+            Integer(Pressing("releasedYear", Number(pressing?.ReleasedYear))),
+            Integer(Pressing("releasedMonth", Number(pressing?.ReleasedMonth))),
+            Integer(Pressing("releasedDay", Number(pressing?.ReleasedDay))),
+            Pressing("label", pressing?.Label),
+            Pressing("catalogNumber", pressing?.CatalogNumber),
+            Pressing("barcode", pressing?.Barcode),
+            album.Monitored,
             cover is not { Held: true }
                 ? null
                 : cover.ArchiveImageId is not null ? "archive"
                 : cover.QobuzAlbumId is not null ? "qobuz"
                 : "upload",
             cover?.SavedUtc,
-            Written(edits, "review", release.ReviewText, release.ReviewUrl),
-            release.ReviewLookupUtc,
-            release.LookedUp,
-            release.Probed,
+            Written(edits, "review", album.ReviewText, album.ReviewUrl),
+            album.ReviewLookupUtc,
+            album.LookedUp,
+            album.Probed,
             [.. edits.Keys.Order(StringComparer.Ordinal)]);
 
-        return TypedResults.Ok(new ReleaseDetailResponse(
-            WithEdits(
-                new ReleaseSummary(
-                    release.Id.Value,
-                    release.Mbid?.Value,
-                    release.Title,
-                    credit,
-                    release.ReleasedYear,
-                    release.Country,
-                    release.Status,
-                    release.MediumFormats,
-                    release.DiscCount,
-                    release.TrackCount,
-                    release.Held,
-                    release.Files,
-                    ((ReleaseAttributionOutcome)release.Certainty).ToString(),
-                    release.Alternatives),
-                release.EditsJson),
+        var stored = editions.ToDictionary(edition => edition.Id);
+
+        return TypedResults.Ok(new AlbumDetailResponse(
+            summary,
             rows,
+            [.. order.Select(id => stored[id]).Select(edition => new AlbumEditionRow(
+                edition.Id.Value,
+                edition.Title,
+                edition.Year,
+                edition.Country,
+                edition.Formats,
+                edition.Status))],
+            unplaced,
+            folders,
             contributable,
             about,
             credits,
             moreBy));
+    }
+
+    /// <summary>What the album list and page read of one release group and its files.</summary>
+    /// <param name="Editions">
+    /// Distinct <c>ReleaseId</c> values among its files, null counted as one — so
+    /// one edition and no nulls is every file filed under the same pressing.
+    /// </param>
+    /// <param name="Held">Distinct tracks of that pressing the files sit on; read only when there is one.</param>
+    private sealed record AlbumFacts(
+        ReleaseGroupId Id,
+        Mbid? Mbid,
+        string Title,
+        int? FirstReleaseYear,
+        int Files,
+        int Editions,
+        ReleaseId? AnyEdition,
+        int Held,
+        List<ReleaseAttributionOutcome> Outcomes,
+        int Alternatives,
+        List<EditionCredit> Artists);
+
+    /// <summary>One stored edition of an album, as the album list and page read it.</summary>
+    internal sealed record EditionFacts(
+        ReleaseId Id,
+        ReleaseGroupId? GroupId,
+        Mbid? Mbid,
+        string Title,
+        int? Year,
+        string? Country,
+        string? Status,
+        string? Formats,
+        int? DiscCount,
+        int TrackCount,
+        bool HasFiles,
+        bool HasCover,
+        string? EditsJson,
+        List<EditionCredit> Artists);
+
+    internal sealed record EditionCredit(ArtistId ArtistId, string? CreditedAs, string? JoinPhrase, string Name);
+
+    /// <summary>Every stored edition of each album, by album; an album with none maps to an empty list.</summary>
+    internal static async Task<Dictionary<ReleaseGroupId, List<EditionFacts>>> EditionFactsAsync(
+        FonotecaDbContext db,
+        List<ReleaseGroupId> groups,
+        CancellationToken cancellationToken)
+    {
+        var keys = groups.Select(group => (ReleaseGroupId?)group).ToList();
+
+        var editions = await db.Releases
+            .AsNoTracking()
+            .Where(r => keys.Contains(r.ReleaseGroupId))
+            .Select(r => new EditionFacts(
+                r.Id,
+                r.ReleaseGroupId,
+                r.Mbid,
+                r.Title,
+                r.ReleasedYear,
+                r.Country,
+                r.Status,
+                r.MediumFormats,
+                r.DiscCount,
+                r.TrackCount ?? r.Tracks.Count,
+                r.Files.Any(),
+                db.ReleaseCovers.Any(c => c.ReleaseId == r.Id && c.Bytes != null),
+                r.EditsJson,
+                r.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new EditionCredit(
+                        credit.ArtistId,
+                        credit.CreditedAs,
+                        credit.JoinPhrase,
+                        credit.Artist!.LatinName ?? credit.Artist!.Name))
+                    .ToList()))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var byGroup = editions.ToLookup(edition => edition.GroupId);
+
+        return groups.Distinct().ToDictionary(group => group, group => byGroup[group].ToList());
+    }
+
+    /// <summary>
+    /// The edition an album borrows its billing line and its sleeve from.
+    /// </summary>
+    /// <remarks>
+    /// Not a claim about the files — only <see cref="AlbumSummary.EditionId"/> is
+    /// that. An album's name and picture have to come from somewhere, and the
+    /// edition the files were filed under is the best source; then one whose
+    /// sleeve is already stored, so a page keeps the picture a person may have
+    /// chosen; then the official one; then the earliest. The artist sort in
+    /// <see cref="GetAlbums"/> applies the same rungs in SQL.
+    /// </remarks>
+    internal static EditionFacts? DisplayEdition(IEnumerable<EditionFacts> editions) =>
+        editions
+            .OrderByDescending(edition => edition.HasFiles)
+            .ThenByDescending(edition => edition.HasCover)
+            .ThenByDescending(edition => edition.Status == "Official")
+            .ThenBy(edition => edition.Year ?? int.MaxValue)
+            .ThenBy(edition => edition.Id.Value)
+            .FirstOrDefault();
+
+    /// <summary>The outcomes an album's files can carry, strongest claim first.</summary>
+    /// <remarks>
+    /// Stated rather than read off the enum's numbers, which are storage and grow
+    /// by appending: a new outcome would otherwise rank by when it was added.
+    /// </remarks>
+    private static readonly ReleaseAttributionOutcome[] StrongestFirst =
+    [
+        ReleaseAttributionOutcome.Attributed,
+        ReleaseAttributionOutcome.AttributedAmbiguously,
+        ReleaseAttributionOutcome.GroupOnly,
+        ReleaseAttributionOutcome.AttributedByPerson,
+        ReleaseAttributionOutcome.AlbumByPerson,
+        ReleaseAttributionOutcome.AttributedByAgent,
+        ReleaseAttributionOutcome.AlbumByAgent,
+        ReleaseAttributionOutcome.OnNoEdition,
+    ];
+
+    /// <summary>The weakest claim among an album's files; an outcome not ranked counts as weaker than any that is.</summary>
+    private static ReleaseAttributionOutcome Weakest(IEnumerable<ReleaseAttributionOutcome> outcomes) =>
+        outcomes
+            .OrderByDescending(outcome => Array.IndexOf(StrongestFirst, outcome) is var rank and >= 0
+                ? rank
+                : StrongestFirst.Length + (int)outcome)
+            .FirstOrDefault();
+
+    /// <summary>
+    /// When an album was first released: MusicBrainz's own year for the group,
+    /// else the earliest official edition stored, else the earliest of any.
+    /// </summary>
+    /// <remarks>The year sort in <see cref="GetAlbums"/> applies the same rungs in SQL.</remarks>
+    internal static int? AlbumYear(int? firstReleaseYear, IEnumerable<EditionFacts> editions) =>
+        firstReleaseYear
+        ?? editions.Where(edition => edition.Status == "Official").Min(edition => edition.Year)
+        ?? editions.Min(edition => edition.Year);
+
+    /// <summary>The billing line: the display edition's, or the album's own where no edition is stored.</summary>
+    private static List<EditionCredit> ArtistsOf(EditionFacts? display, AlbumFacts album) =>
+        display is { Artists.Count: > 0 } ? display.Artists : album.Artists;
+
+    private static AlbumSummary AlbumSummaryOf(AlbumFacts album, List<EditionFacts> editions)
+    {
+        var display = DisplayEdition(editions);
+
+        // Every file under one pressing, and no file under none.
+        var claimed = album.Editions == 1 && album.AnyEdition is { } only
+            ? editions.FirstOrDefault(edition => edition.Id == only)
+            : null;
+
+        var summary = new AlbumSummary(
+            album.Id.Value,
+            album.Mbid?.Value,
+            album.Title,
+            CreditLine(ArtistsOf(display, album).Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
+            AlbumYear(album.FirstReleaseYear, editions),
+            claimed?.Id.Value,
+            display?.Id.Value,
+            claimed?.Country,
+            claimed?.Status,
+            claimed?.Formats,
+            claimed?.DiscCount,
+            claimed?.TrackCount,
+            claimed is null ? null : album.Held,
+            album.Files,
+            Weakest(album.Outcomes).ToString(),
+            album.Alternatives);
+
+        return WithEdits(summary, display?.EditsJson);
     }
 
     /// <summary>One track's credits, by artist, for <see cref="AlbumCredits"/>.</summary>
@@ -1840,14 +2310,15 @@ public static partial class CatalogueEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // Placed on an album, whether or not a pressing of it is claimed.
         var placed = await db.MediaFiles
             .AsNoTracking()
-            .Where(file => file.ReleaseId != null)
+            .Where(file => file.ReleaseGroupId != null)
             .Select(file => new
             {
                 file.Path,
-                ReleaseId = file.ReleaseId!.Value,
-                ReleaseTitle = file.Release!.Title,
+                AlbumId = file.ReleaseGroupId!.Value,
+                AlbumTitle = file.ReleaseGroup!.Title,
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1857,12 +2328,12 @@ public static partial class CatalogueEndpoints
             .Select(folder => new
             {
                 Folder = folder.Key,
-                Releases = folder
-                    .GroupBy(file => (file.ReleaseId, file.ReleaseTitle))
-                    .Select(release => new AttributionShare(
-                        release.Key.ReleaseId.Value,
-                        release.Key.ReleaseTitle,
-                        release.Count()))
+                Albums = folder
+                    .GroupBy(file => (file.AlbumId, file.AlbumTitle))
+                    .Select(album => new AttributionShare(
+                        album.Key.AlbumId.Value,
+                        album.Key.AlbumTitle,
+                        album.Count()))
                     .OrderByDescending(share => share.Files)
                     .ThenBy(share => share.Title, StringComparer.Ordinal)
                     .ToList(),
@@ -1870,33 +2341,33 @@ public static partial class CatalogueEndpoints
             .ToList();
 
         var split = byFolder
-            .Where(folder => folder.Releases.Count > 1)
-            .OrderByDescending(folder => folder.Releases.Count)
+            .Where(folder => folder.Albums.Count > 1)
+            .OrderByDescending(folder => folder.Albums.Count)
             .ThenBy(folder => folder.Folder, StringComparer.Ordinal)
-            .Select(folder => new FolderDisagreement(folder.Folder, folder.Releases))
+            .Select(folder => new FolderDisagreement(folder.Folder, folder.Albums))
             .ToList();
 
         var spanning = placed
-            .GroupBy(file => (file.ReleaseId, file.ReleaseTitle))
-            .Select(release => new
+            .GroupBy(file => (file.AlbumId, file.AlbumTitle))
+            .Select(album => new
             {
-                release.Key,
-                Folders = release
+                album.Key,
+                Folders = album
                     .GroupBy(file => FolderOf(file.Path))
                     .Select(folder => new AttributionShare(
-                        release.Key.ReleaseId.Value,
+                        album.Key.AlbumId.Value,
                         folder.Key,
                         folder.Count()))
                     .OrderByDescending(share => share.Files)
                     .ThenBy(share => share.Title, StringComparer.Ordinal)
                     .ToList(),
             })
-            .Where(release => release.Folders.Count > 1)
-            .OrderByDescending(release => release.Folders.Count)
-            .Select(release => new ReleaseDisagreement(
-                release.Key.ReleaseId.Value,
-                release.Key.ReleaseTitle,
-                release.Folders))
+            .Where(album => album.Folders.Count > 1)
+            .OrderByDescending(album => album.Folders.Count)
+            .Select(album => new AlbumDisagreement(
+                album.Key.AlbumId.Value,
+                album.Key.AlbumTitle,
+                album.Folders))
             .ToList();
 
         var incomplete = await db.Releases
@@ -1921,7 +2392,7 @@ public static partial class CatalogueEndpoints
             Folders: byFolder.Count,
             FoldersAgreeing: byFolder.Count - split.Count,
             FoldersSplit: split,
-            ReleasesSpanningFolders: spanning,
+            AlbumsSpanningFolders: spanning,
             Incomplete: incomplete));
     }
 
@@ -3100,7 +3571,7 @@ public static partial class CatalogueEndpoints
                 file.Path,
                 file.Recording!.Title,
                 file.Recording!.Mbid!.Value,
-                file.FingerprintDuration ?? file.Quality!.Duration,
+                file.Quality!.Duration ?? file.FingerprintDuration,
                 file.SizeBytes))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -3543,16 +4014,16 @@ public static partial class CatalogueEndpoints
                 statusCode: StatusCodes.Status404NotFound);
         }
 
-        // `FingerprintDuration ?? Quality.Duration`, which is what the candidate
-        // screen scored with — a third of this worklist has no fingerprint
-        // duration at all, and measuring one thing on screen and another on
-        // commit is how a person is shown drift figures the write did not use.
+        // `Quality.Duration ?? FingerprintDuration`, which is what the candidate
+        // screen and the pass scored with — measuring one thing on screen and
+        // another on commit is how a person is shown drift figures the write did
+        // not use.
         var files = rows
             .Where(row => row.Recording?.Mbid is not null)
             .Select(row => new AttributionFile(
                 row.Id,
                 row.Recording!.Mbid!.Value,
-                row.FingerprintDuration ?? row.Quality?.Duration))
+                row.Quality?.Duration ?? row.FingerprintDuration))
             .ToList();
 
         var fit = files.Count == 0 ? null : ReleaseFit.For(release, files);
@@ -3572,8 +4043,7 @@ public static partial class CatalogueEndpoints
 
         var writer = new ReleaseAttributionService.ReleaseWriter(db);
 
-        // Null formats: a release lookup does not carry the disc summaries a
-        // browse does, and the writer coalesces rather than blanks for that.
+        // Null formats: the writer reads them from the lookup's own media.
         var written = await writer.UpsertAsync(release, null, cancellationToken).ConfigureAwait(false);
 
         var byId = rows.ToDictionary(row => row.Id);
@@ -4009,10 +4479,12 @@ public static partial class CatalogueEndpoints
     /// incomplete:
     ///
     /// <list type="bullet">
-    /// <item><b>Billed on a release the library holds a file of.</b> The
-    /// ordinary case, and the whole chain has to exist: a release nothing is
-    /// held of is not an album anybody owns.</item>
-    /// <item><b>Credited on every recording the library holds of a release.</b>
+    /// <item><b>Billed on an album the library holds a file of</b> — on any
+    /// stored edition of it, or on the album itself. The ordinary case, and the
+    /// whole chain has to exist: an album nothing is held of is not one anybody
+    /// owns. Keyed on the album rather than the pressing, because most files are
+    /// held to an album without a proven pressing.</item>
+    /// <item><b>Credited on every recording the library holds of an album.</b>
     /// The classical case. MusicBrainz bills a Solti Ring to <i>Wagner</i>, so
     /// reading release credits alone puts the sleeve's composer on the shelf and
     /// leaves the conductor off it. <b>Every</b> track rather than any: on an
@@ -4021,7 +4493,7 @@ public static partial class CatalogueEndpoints
     /// count is the tracks the library <i>holds</i>, not the ones the release
     /// prints — a box set held one disc of is still an album to whoever is
     /// browsing it.</item>
-    /// <item><b>Credited on a recording in a file no release was attributed
+    /// <item><b>Credited on a recording in a file no album was attributed
     /// to.</b> Measured, 987 of 8,411 files are in that position — without this
     /// a refused album takes its artist off the page with nothing to say why.
     /// </item>
@@ -4043,8 +4515,11 @@ public static partial class CatalogueEndpoints
     {
         var billed = await db.ArtistCredits
             .AsNoTracking()
-            .Where(credit => credit.ReleaseId != null
-                && db.MediaFiles.Any(file => file.ReleaseId == credit.ReleaseId))
+            .Where(credit => (credit.ReleaseId != null
+                    && db.Releases.Any(release => release.Id == credit.ReleaseId
+                        && release.ReleaseGroup!.Files.Any()))
+                || (credit.ReleaseGroupId != null
+                    && db.MediaFiles.Any(file => file.ReleaseGroupId == credit.ReleaseGroupId)))
             .Select(credit => credit.ArtistId)
             .Distinct()
             .ToListAsync(cancellationToken)
@@ -4058,7 +4533,7 @@ public static partial class CatalogueEndpoints
         var held = await db.MediaFiles
             .AsNoTracking()
             .Where(file => file.RecordingId != null)
-            .Select(file => new { file.ReleaseId, Recording = file.RecordingId!.Value })
+            .Select(file => new { Album = file.ReleaseGroupId, Recording = file.RecordingId!.Value })
             .Distinct()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -4084,14 +4559,14 @@ public static partial class CatalogueEndpoints
             .GroupBy(credit => credit.Recording)
             .ToDictionary(group => group.Key, group => group.Select(c => c.ArtistId).ToHashSet());
 
-        foreach (var album in held.GroupBy(row => row.ReleaseId))
+        foreach (var album in held.GroupBy(row => row.Album))
         {
             var tracks = album.Select(row => row.Recording).Distinct().ToList();
 
             if (album.Key is null)
             {
-                // No release was attributed, so there is no album to be on every
-                // track of. Anybody billed on the recording counts.
+                // No album was attributed, so there is none to be on every track
+                // of. Anybody billed on the recording counts.
                 foreach (var track in tracks)
                 {
                     if (creditedOn.TryGetValue(track, out var everyone)) shelf.UnionWith(everyone);
@@ -4100,7 +4575,7 @@ public static partial class CatalogueEndpoints
                 continue;
             }
 
-            // On every track the library holds of this release, or a guest.
+            // On every track the library holds of this album, or a guest.
             var onAll = tracks
                 .Select(track => creditedOn.GetValueOrDefault(track) ?? [])
                 .Aggregate(
@@ -4598,13 +5073,22 @@ public sealed record TrackRow(
     string? Performers);
 
 /// <summary>The album a track was attributed to, as much of it as a row needs.</summary>
+/// <param name="AlbumId">The release group, which is what the artist page groups these rows into albums by.</param>
 /// <param name="Mbid">
-/// The MusicBrainz release id, which is also the Cover Art Archive's key — the
-/// artist page groups these rows into albums and draws a cover for each, and
-/// without it every one of them falls back to a monogram.
+/// The release group's MusicBrainz id — the Cover Art Archive's key for an album
+/// with no pressing claimed, so the page draws a cover for it rather than a
+/// monogram.
+/// </param>
+/// <param name="EditionId">The pressing the file is filed under; null when none is claimed.</param>
+/// <param name="CoverReleaseId">
+/// Whose stored sleeve the page draws: the claimed pressing's, else the album's
+/// display edition's, as on the album list. Null where the album has no stored
+/// edition at all.
 /// </param>
 /// <param name="Artist">
-/// The release's own billing line — "Joe Bonamassa" for a B.B. King tribute
+/// The pressing's own billing line, or the display edition's where no pressing
+/// is claimed, or the album's own where it has no stored edition
+/// — "Joe Bonamassa" for a B.B. King tribute
 /// album, whatever the tracks on it are credited to. A compilation's tracks do
 /// not share it, which is exactly why it is worth sending.
 /// </param>
@@ -4642,8 +5126,10 @@ public sealed record TrackRow(
 /// "The Robert Cray Band" and "Robert Cray Band" are two.
 /// </param>
 public sealed record TrackAlbum(
-    Guid ReleaseId,
+    Guid AlbumId,
     Guid? Mbid,
+    Guid? EditionId,
+    Guid? CoverReleaseId,
     string Title,
     int? Year,
     string? Artist,
@@ -4665,69 +5151,153 @@ public sealed record FileQuality(
     int SampleRateHz,
     int BitrateKbps);
 
-/// <summary>A page of releases, with the total the filter matched.</summary>
-public sealed record ReleaseListResponse(int Total, IReadOnlyList<ReleaseSummary> Items);
+/// <summary>A page of albums, with the total the filter matched.</summary>
+/// <param name="Total">Release groups the filter matched; what <paramref name="Items"/> pages through.</param>
+/// <param name="NoRelease">
+/// Album folders answered as coming from no release, matching the filter. Not
+/// paged and not in <paramref name="Total"/>: they have no release group to list.
+/// </param>
+public sealed record AlbumListResponse(
+    int Total,
+    IReadOnlyList<AlbumSummary> Items,
+    IReadOnlyList<NoReleaseAlbum> NoRelease);
 
-/// <param name="Mbid">
-/// The MusicBrainz release id, which is also the Cover Art Archive's key. Null
-/// only for a release the catalogue minted without one, which nothing does
-/// today. The client fetches the cover straight from the archive; the API
-/// neither proxies nor stores an image.
-/// </param>
-/// <param name="Artist">The release's own billing line, which a compilation's tracks do not share.</param>
+/// <summary>An album folder somebody said comes from no release.</summary>
+/// <param name="Folder">Library-relative, as the Files screen takes it.</param>
+/// <param name="Title">The folder's own name: there is no release to take one from.</param>
+/// <param name="Artist">The folder it sits in, which is a shelf and not a credit.</param>
+/// <param name="Files">Every file in the folder.</param>
+public sealed record NoReleaseAlbum(string Folder, string Title, string? Artist, int Files);
+
+/// <param name="Id">The release group: an album, whichever pressing the files are.</param>
+/// <param name="Mbid">The release group's MusicBrainz id.</param>
+/// <param name="Artist">The billing line, borrowed from the display edition.</param>
 /// <param name="Year">
-/// The release year alone. MusicBrainz knows no more than that for about half of
-/// a real library, and a full date was never available to invent.
+/// When the album was first released. The year alone: MusicBrainz knows no more
+/// than that for about half of a real library, and a full date was never
+/// available to invent.
 /// </param>
-/// <param name="Formats">CD, Digital Media, CD+DVD-Video. Why a rip may be legitimately partial.</param>
-/// <param name="TrackCount">Tracks MusicBrainz prints. The number a rip is measured against.</param>
+/// <param name="EditionId">
+/// The pressing the files are, where every file is filed under the same one.
+/// Null means the album is known and the pressing is not, which is a statement,
+/// not a gap to fill with a guess.
+/// </param>
+/// <param name="CoverReleaseId">
+/// The edition whose stored sleeve stands for the album. Not a claim about the
+/// files; null only when no edition of the album is stored.
+/// </param>
+/// <param name="Formats">CD, Digital Media, CD+DVD-Video, of the claimed pressing. Why a rip may be legitimately partial.</param>
+/// <param name="TrackCount">Tracks the claimed pressing prints. The number a rip is measured against.</param>
 /// <param name="Held">
-/// Distinct tracks of this release the library holds. Tracks, not files: five
-/// encodings of one song are one track of the album, and counting files makes a
-/// half-ripped album read as complete.
+/// Distinct tracks of the claimed pressing the library holds. Tracks, not files:
+/// five encodings of one song are one track of the album, and counting files
+/// makes a half-ripped album read as complete.
 /// </param>
-/// <param name="Files">Files filed under it, which exceeds <paramref name="Held"/> where a track is held twice.</param>
+/// <param name="Files">Files held to the album, which exceeds <paramref name="Held"/> where a track is held twice.</param>
 /// <param name="Certainty">
-/// The weakest claim any of its files carries — <c>Attributed</c>,
-/// <c>AttributedAmbiguously</c> or <c>GroupOnly</c>. Weakest rather than
-/// commonest, so one coin-flip in an album does not read as certainty.
+/// The weakest claim any of its files carries. Weakest rather than commonest, so
+/// one coin-flip in an album does not read as certainty.
 /// </param>
 /// <param name="EditionAlternatives">How many other pressings fitted exactly as well.</param>
-public sealed record ReleaseSummary(
+public sealed record AlbumSummary(
     Guid Id,
     Guid? Mbid,
     string Title,
     string? Artist,
     int? Year,
+    Guid? EditionId,
+    Guid? CoverReleaseId,
     string? Country,
     string? Status,
     string? Formats,
     int? DiscCount,
-    int TrackCount,
-    int Held,
+    int? TrackCount,
+    int? Held,
     int Files,
     string Certainty,
     int EditionAlternatives);
 
-/// <summary>One release and every track on it, held or not.</summary>
+/// <summary>One album: its stored editions' tracks at once, and the files held to it.</summary>
+/// <param name="Tracks">
+/// The claimed pressing's running order, whole; otherwise, one row per
+/// recording, that of an edition files are filed under, else of the edition the
+/// files are nearest to — official where there is one. Either way followed by
+/// whatever the album's other stored editions print that it does not.
+/// </param>
+/// <param name="Editions">
+/// The album's stored editions, in the order the track list was assembled —
+/// what a track's <c>On</c> refers to. Listing one is not a claim that the files
+/// are it; only <see cref="AlbumSummary.EditionId"/> is that.
+/// </param>
+/// <param name="Unplaced">Files held to the album whose recording no stored edition prints.</param>
+/// <param name="Folders">The album folders its files sit in, and the pressing each is filed under.</param>
 /// <param name="Contributable">
-/// Files on this release whose recording a person chose by hand and whose
+/// Files of this album whose recording a person chose by hand and whose
 /// fingerprint has not been offered to AcoustID yet. Zero on an ordinary album,
 /// because the pass took its answer from AcoustID in the first place. See
 /// <c>CatalogueEndpoints.Fingerprints.cs</c>.
 /// </param>
-public sealed record ReleaseDetailResponse(
-    ReleaseSummary Release,
-    IReadOnlyList<ReleaseTrackRow> Tracks,
+public sealed record AlbumDetailResponse(
+    AlbumSummary Album,
+    IReadOnlyList<AlbumTrackRow> Tracks,
+    IReadOnlyList<AlbumEditionRow> Editions,
+    IReadOnlyList<AlbumFileRow> Unplaced,
+    IReadOnlyList<AlbumFolderRow> Folders,
     int Contributable,
     ReleaseAbout About,
     IReadOnlyList<AlbumCredit> Credits,
-    IReadOnlyList<ReleaseCard> MoreBy);
+    IReadOnlyList<AlbumCard> MoreBy);
+
+/// <summary>One stored edition of an album, as much as naming it needs.</summary>
+public sealed record AlbumEditionRow(
+    Guid Id,
+    string Title,
+    int? Year,
+    string? Country,
+    string? Formats,
+    string? Status);
+
+/// <param name="Recording">The title of the recording the file was identified as, if any.</param>
+/// <param name="Disc">Where the folder's claimed pressing prints it; null where no pressing is claimed.</param>
+/// <param name="TaggedDisc">The disc number the file's own tags carry, as the attribution pass last read them.</param>
+/// <param name="TaggedTrack">
+/// The track number the file's own tags carry. What the file says about itself,
+/// not a position on any pressing — shown where no pressing is claimed.
+/// </param>
+public sealed record AlbumFileRow(
+    FileRow File,
+    string? Recording,
+    int? Disc,
+    int? Position,
+    int? TaggedDisc,
+    int? TaggedTrack);
+
+/// <param name="Path">The album folder, library-relative.</param>
+/// <param name="EditionId">The pressing every file in it is filed under, or null.</param>
+/// <param name="Order">
+/// <c>FolderOrderOutcome</c>'s own name: how the folder's own order compared
+/// with the order the album's editions print.
+/// </param>
+/// <param name="Files">
+/// Its files in the folder's own order: the pressing's, else the order the
+/// attribution pass settled on, else the numbers in their names.
+/// </param>
+public sealed record AlbumFolderRow(
+    string Path,
+    Guid? EditionId,
+    string? Edition,
+    string Order,
+    IReadOnlyList<AlbumFileRow> Files);
 
 /// <summary>Everything the album page shows that the list does not need.</summary>
 /// <param name="GroupId">The release group, which is what "Want" marks.</param>
 /// <param name="ArtistId">The first artist on the billing line, whose other albums "More by" lists.</param>
 /// <param name="ArtistBanner">That artist's banner, the page's hero; null draws a plain band.</param>
+/// <param name="EditionMbid">
+/// The claimed pressing's MusicBrainz id. This and every field only a pressing
+/// has — the edition note, its date, label, catalogue number and barcode — are
+/// null unless the files are known to be one pressing.
+/// </param>
 /// <param name="CoverSource">"archive", "qobuz" or "upload"; null when there is no picture.</param>
 /// <param name="CoverLookupUtc">When the stored picture or the "neither has one" stamp was written; null when nobody has looked.</param>
 /// <param name="ReleaseLookupUtc">The latest attribution stamp among its files.</param>
@@ -4738,10 +5308,12 @@ public sealed record ReleaseAbout(
     Guid? GroupMbid,
     Guid? ArtistId,
     string? ArtistBanner,
+    Guid? EditionMbid,
     string? Disambiguation,
     string? PrimaryType,
     IReadOnlyList<string> SecondaryTypes,
     int? FirstReleaseYear,
+    int? ReleasedYear,
     int? ReleasedMonth,
     int? ReleasedDay,
     string? Label,
@@ -4769,15 +5341,17 @@ public sealed record AlbumCredit(
     string? Portrait);
 
 /// <summary>Another album, as much as a card needs.</summary>
-public sealed record ReleaseCard(Guid Id, Guid? Mbid, string Title, int? Year);
+/// <param name="CoverReleaseId">The edition whose stored sleeve stands for it, or null.</param>
+public sealed record AlbumCard(Guid Id, Guid? Mbid, Guid? CoverReleaseId, string Title, int? Year);
 
 /// <param name="Number">The printed number, which is not always the position: "A1", "12a".</param>
 /// <param name="WorkTitle">
 /// The composition this track performs, when MusicBrainz links one — usually
 /// null outside classical, where it is the heading four movements sit under.
 /// </param>
-/// <param name="Held">Whether the library has a file filed under this track.</param>
-public sealed record ReleaseTrackRow(
+/// <param name="Held">Whether the album's files hold this recording.</param>
+/// <param name="On">The stored editions that print it.</param>
+public sealed record AlbumTrackRow(
     int DiscNumber,
     int Position,
     string? Number,
@@ -4789,7 +5363,8 @@ public sealed record ReleaseTrackRow(
     IReadOnlyList<FileRow> Files,
 
     /// <summary>The recording's own billing line, where it differs from the album's.</summary>
-    string? Artist);
+    string? Artist,
+    IReadOnlyList<Guid> On);
 
 /// <summary>
 /// What the folders make of the attribution.
@@ -4805,23 +5380,23 @@ public sealed record AttributionReportResponse(
     /// <summary>Folders holding at least one attributed file.</summary>
     int Folders,
 
-    /// <summary>Folders whose files all landed on one release.</summary>
+    /// <summary>Folders whose files all landed on one album.</summary>
     int FoldersAgreeing,
 
     IReadOnlyList<FolderDisagreement> FoldersSplit,
-    IReadOnlyList<ReleaseDisagreement> ReleasesSpanningFolders,
+    IReadOnlyList<AlbumDisagreement> AlbumsSpanningFolders,
     IReadOnlyList<IncompleteRelease> Incomplete);
 
 public sealed record OutcomeCount(string Outcome, int Files);
 
-/// <summary>One folder whose files were filed under more than one release.</summary>
-public sealed record FolderDisagreement(string Folder, IReadOnlyList<AttributionShare> Releases);
+/// <summary>One folder whose files were filed under more than one album.</summary>
+public sealed record FolderDisagreement(string Folder, IReadOnlyList<AttributionShare> Albums);
 
-/// <summary>One release whose files came from more than one folder.</summary>
-public sealed record ReleaseDisagreement(Guid ReleaseId, string Title, IReadOnlyList<AttributionShare> Folders);
+/// <summary>One album whose files came from more than one folder.</summary>
+public sealed record AlbumDisagreement(Guid AlbumId, string Title, IReadOnlyList<AttributionShare> Folders);
 
 /// <summary>How many files one side of a disagreement accounts for.</summary>
-public sealed record AttributionShare(Guid ReleaseId, string Title, int Files);
+public sealed record AttributionShare(Guid AlbumId, string Title, int Files);
 
 /// <param name="Formats">
 /// Read this before treating the gap as damage: a CD+DVD-Video release is

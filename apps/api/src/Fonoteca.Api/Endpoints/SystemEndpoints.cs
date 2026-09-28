@@ -76,7 +76,11 @@ public static class SystemEndpoints
             Counts: new CatalogueCounts(
                 Files: await db.MediaFiles.CountAsync(cancellationToken).ConfigureAwait(false),
                 Recordings: await db.Recordings.CountAsync(cancellationToken).ConfigureAwait(false),
-                Releases: await db.Releases.CountAsync(cancellationToken).ConfigureAwait(false),
+                // Albums held, not editions stored: the stored editions include
+                // every pressing of an album the attribution pass fetched. Plus the
+                // folders answered as no release, which are albums with no group.
+                Albums: await db.ReleaseGroups.CountAsync(g => g.Files.Any(), cancellationToken).ConfigureAwait(false)
+                    + (await CatalogueEndpoints.NoReleaseAlbumsAsync(db, cancellationToken).ConfigureAwait(false)).Count,
                 Artists: await db.Artists.CountAsync(cancellationToken).ConfigureAwait(false)));
     }
 }
@@ -88,7 +92,7 @@ public sealed record SystemInfoResponse(
     bool FileMutationAllowed,
     CatalogueCounts Counts);
 
-public sealed record CatalogueCounts(int Files, int Recordings, int Releases, int Artists);
+public sealed record CatalogueCounts(int Files, int Recordings, int Albums, int Artists);
 
 /// <param name="Server">The configured server, so the UI can say which one is in use.</param>
 /// <param name="IsOfficialServer">Whether that is musicbrainz.org, where the rate limit is theirs to enforce.</param>

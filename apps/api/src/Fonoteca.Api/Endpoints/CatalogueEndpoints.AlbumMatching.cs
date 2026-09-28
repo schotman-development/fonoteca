@@ -456,6 +456,8 @@ public static partial class CatalogueEndpoints
                 file.IdentityDecidedUtc,
                 file.ReleaseDecidedUtc,
                 Recording = file.Recording == null ? null : file.Recording.Title,
+                AlbumId = file.ReleaseGroup == null ? (Guid?)null : file.ReleaseGroup.Id.Value,
+                Album = file.ReleaseGroup == null ? null : file.ReleaseGroup.Title,
                 ReleaseId = file.Release == null ? (Guid?)null : file.Release.Id.Value,
                 Release = file.Release == null ? null : file.Release.Title,
                 Year = file.Release == null ? null : file.Release.ReleasedYear,
@@ -505,6 +507,8 @@ public static partial class CatalogueEndpoints
                                 ? row.EnrichmentOutcome.ToString()
                                 : row.AttributionOutcome.ToString(),
                     row.Recording,
+                    row.AlbumId,
+                    row.Album,
                     row.ReleaseId,
                     row.Release,
                     row.Year,
@@ -675,9 +679,7 @@ public static partial class CatalogueEndpoints
 
         var writer = new ReleaseAttributionService.ReleaseWriter(db);
 
-        // Null formats for the reason the component decision passes null: a
-        // release lookup carries no medium summaries, and the writer coalesces
-        // rather than blanking whatever a browse put there earlier.
+        // Null formats: the writer reads them from the lookup's own media.
         var written = await writer.UpsertAsync(release, null, cancellationToken).ConfigureAwait(false);
 
         var byId = rows.ToDictionary(row => row.Id);
@@ -1033,6 +1035,8 @@ public static partial class CatalogueEndpoints
             row.ReleaseId = null;
             row.ReleaseGroupId = null;
             row.EditionAlternatives = 0;
+            row.FolderPosition = null;
+            row.OrderOutcome = FolderOrderOutcome.NotChecked;
 
             row.IdentityDecidedUtc = null;
             row.ReleaseDecidedUtc = null;
@@ -1407,6 +1411,8 @@ public sealed record FolderContentsResponse(
 /// honest.
 /// </param>
 /// <param name="Reason">The refusal, when it is open. Null when it is not.</param>
+/// <param name="AlbumId">The album (release group) the file is held to, whether or not a pressing is claimed.</param>
+/// <param name="ReleaseId">The pressing, only where one is claimed; <c>Release</c>, <c>Year</c>, <c>Disc</c> and <c>Position</c> are its.</param>
 /// <param name="Certainty">
 /// <c>ReleaseAttributionOutcome</c>'s own name. <c>Attributed</c> and
 /// <c>AttributedByPerson</c> are both matched and only one of them was a rule's
@@ -1421,6 +1427,8 @@ public sealed record FolderFileRow(
     bool Open,
     string? Reason,
     string? Recording,
+    Guid? AlbumId,
+    string? Album,
     Guid? ReleaseId,
     string? Release,
     int? Year,

@@ -485,7 +485,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     {
         await FileAsync((_first, 1, 1), (_second, 1, 2), (_unlinked, 1, 3));
 
-        var release = await FiledReleaseAsync();
+        var release = await FiledAlbumAsync();
 
         // All three, including the one AcoustID has heard: it is the link that
         // is news, not the audio.
@@ -547,7 +547,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         using var client = _factory!.CreateClient();
 
         var again = await client.PostAsync(
-            new Uri($"/api/catalogue/releases/{release}/fingerprints", UriKind.Relative),
+            new Uri($"/api/catalogue/albums/{release}/fingerprints", UriKind.Relative),
             content: null,
             Token);
 
@@ -569,13 +569,13 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     {
         await FileAsync((_first, 1, 1));
 
-        var release = await FiledReleaseAsync();
+        var release = await FiledAlbumAsync();
         _submissions.Unavailable = true;
 
         using var client = _factory!.CreateClient();
 
         var response = await client.PostAsync(
-            new Uri($"/api/catalogue/releases/{release}/fingerprints", UriKind.Relative),
+            new Uri($"/api/catalogue/albums/{release}/fingerprints", UriKind.Relative),
             content: null,
             Token);
 
@@ -610,13 +610,13 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     {
         await FileAsync((_first, 1, 1));
 
-        var release = await FiledReleaseAsync();
+        var release = await FiledAlbumAsync();
         _submissions.Rejected = true;
 
         using var client = _factory!.CreateClient();
 
         var response = await client.PostAsync(
-            new Uri($"/api/catalogue/releases/{release}/fingerprints", UriKind.Relative),
+            new Uri($"/api/catalogue/albums/{release}/fingerprints", UriKind.Relative),
             content: null,
             Token);
 
@@ -637,24 +637,25 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         Guid.Parse($"33333333-3333-3333-3333-33333333333{position}");
 
     /// <summary>The catalogue id of the album the filing just minted.</summary>
-    private async Task<Guid> FiledReleaseAsync()
+    /// <summary>The album (release group) the filed release belongs to.</summary>
+    private async Task<Guid> FiledAlbumAsync()
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
         var release = await db.Releases.FirstAsync(row => row.Mbid == Album, Token);
-        return release.Id.Value;
+        return release.ReleaseGroupId!.Value.Value;
     }
 
-    private async Task<ReleaseDetailResponse> DetailAsync(Guid release)
+    private async Task<AlbumDetailResponse> DetailAsync(Guid album)
     {
         using var client = _factory!.CreateClient();
 
         var response = await client.GetAsync(
-            new Uri($"/api/catalogue/releases/{release}", UriKind.Relative), Token);
+            new Uri($"/api/catalogue/albums/{album}", UriKind.Relative), Token);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var detail = await response.Content.ReadFromJsonAsync<ReleaseDetailResponse>(Token);
+        var detail = await response.Content.ReadFromJsonAsync<AlbumDetailResponse>(Token);
 
         Assert.NotNull(detail);
         return detail;
@@ -665,7 +666,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         using var client = _factory!.CreateClient();
 
         var response = await client.PostAsync(
-            new Uri($"/api/catalogue/releases/{release}/fingerprints", UriKind.Relative),
+            new Uri($"/api/catalogue/albums/{release}/fingerprints", UriKind.Relative),
             content: null,
             Token);
 
@@ -920,6 +921,8 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(AcoustIdOutcome.ReopenedByPerson, settled.AcoustIdOutcome);
         Assert.Equal(EnrichmentOutcome.NotAttempted, settled.EnrichmentOutcome);
         Assert.Equal(ReleaseAttributionOutcome.NotAttempted, settled.AttributionOutcome);
+        Assert.Null(settled.FolderPosition);
+        Assert.Equal(FolderOrderOutcome.NotChecked, settled.OrderOutcome);
 
         // Open already, and on a leg this endpoint never reaches: nothing about
         // it was a pass's decision, so there is nothing to take back.
@@ -1114,6 +1117,8 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             AcoustIdOutcome = AcoustIdOutcome.Identified,
             EnrichmentOutcome = EnrichmentOutcome.Linked,
             AttributionOutcome = ReleaseAttributionOutcome.Attributed,
+            FolderPosition = 4,
+            OrderOutcome = FolderOrderOutcome.Corroborated,
         };
 
         _settled = settled.Id;

@@ -165,26 +165,32 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
             .GetArtist(id, Get<FonotecaDbContext>(), cancellationToken)
             .ConfigureAwait(false));
 
-    [McpServerTool(Name = "list_releases", ReadOnly = true)]
+    [McpServerTool(Name = "list_albums", ReadOnly = true)]
     [Description(
-        "Albums the library holds at least one track of, with held against track count and the "
-        + "weakest certainty any of their files carries. `query` matches the title. `sort`: omit for "
-        + "title, `year` (newest first), `artist` or `added`.")]
-    public async Task<string> ListReleases(
+        "Albums (release groups) the library holds at least one track of, with the weakest "
+        + "certainty any of their files carries. `editionId` names the pressing only where every "
+        + "file is filed under the same one, and only then is held set against track count. "
+        + "`query` matches the title. `sort`: omit for title, `year` (newest first), `artist` or "
+        + "`added`. `noRelease` lists the album folders answered as coming from no release, "
+        + "unpaged and outside `total`.")]
+    public async Task<string> ListAlbums(
         string? query = null,
         string? sort = null,
         int skip = 0,
         int take = 50,
         CancellationToken cancellationToken = default) =>
         Answer(await CatalogueEndpoints
-            .GetReleases(Get<FonotecaDbContext>(), cancellationToken, query, sort, skip, take)
+            .GetAlbums(Get<FonotecaDbContext>(), cancellationToken, query, sort, skip, take)
             .ConfigureAwait(false));
 
-    [McpServerTool(Name = "get_release", ReadOnly = true)]
-    [Description("One album, by catalogue id, and its whole track list with each track flagged held or not.")]
-    public async Task<string> GetRelease(Guid id, CancellationToken cancellationToken = default) =>
+    [McpServerTool(Name = "get_album", ReadOnly = true)]
+    [Description(
+        "One album, by catalogue id (the release group's): every stored edition's tracks at "
+        + "once, each flagged held or not with the editions that print it, the files no edition "
+        + "prints, and the album folders with the pressing each is filed under.")]
+    public async Task<string> GetAlbum(Guid id, CancellationToken cancellationToken = default) =>
         Answer(await CatalogueEndpoints
-            .GetRelease(id, Get<FonotecaDbContext>(), cancellationToken)
+            .GetAlbum(id, Get<FonotecaDbContext>(), cancellationToken)
             .ConfigureAwait(false));
 
     [McpServerTool(Name = "get_file", ReadOnly = true)]

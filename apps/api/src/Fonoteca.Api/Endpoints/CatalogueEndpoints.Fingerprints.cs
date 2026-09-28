@@ -127,7 +127,7 @@ public static partial class CatalogueEndpoints
 
     private static void MapFingerprintEndpoints(IEndpointRouteBuilder group)
     {
-        group.MapPost("/releases/{id:guid}/fingerprints", ContributeFingerprints)
+        group.MapPost("/albums/{id:guid}/fingerprints", ContributeFingerprints)
             .WithName("ContributeFingerprints")
             .WithSummary("Send this album's unknown fingerprints to AcoustID.")
             .WithDescription(
@@ -153,19 +153,19 @@ public static partial class CatalogueEndpoints
             IClock clock,
             CancellationToken cancellationToken)
     {
-        var releaseId = new ReleaseId(id);
+        var groupId = new ReleaseGroupId(id);
 
-        var title = await db.Releases
-            .Where(release => release.Id == releaseId)
-            .Select(release => release.Title)
+        var title = await db.ReleaseGroups
+            .Where(album => album.Id == groupId)
+            .Select(album => album.Title)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
         if (title is null)
         {
             return TypedResults.Problem(
-                title: "No such release",
-                detail: $"The catalogue has no release with id {id}.",
+                title: "No such album",
+                detail: $"The catalogue has no album with id {id}.",
                 statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -187,7 +187,7 @@ public static partial class CatalogueEndpoints
 
         var rows = await db.MediaFiles
             .Include(file => file.Recording)
-            .Where(file => file.ReleaseId == releaseId)
+            .Where(file => file.ReleaseGroupId == groupId)
             .Where(Contributable)
             .OrderBy(file => file.Path)
             .ToListAsync(cancellationToken)

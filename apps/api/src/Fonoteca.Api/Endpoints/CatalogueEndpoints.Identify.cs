@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq.Expressions;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
@@ -40,6 +41,19 @@ public static partial class CatalogueEndpoints
     /// </remarks>
     private static readonly TimeSpan TagCacheDuration = TimeSpan.FromHours(1);
 
+    /// <summary>A file the Identify queue lists: one a filing would accept.</summary>
+    /// <remarks>
+    /// The filing endpoint's own predicate, so every folder offered here is one
+    /// `matching/files/release` will actually accept files from. Shared with the
+    /// album list, which must not count a folder still on this queue.
+    /// </remarks>
+    private static readonly Expression<Func<MediaFile, bool>> OpenOnIdentify = file =>
+        (file.IdentityDecidedUtc == null
+            && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)))
+        || (file.ReleaseDecidedUtc == null
+            && UnattributedOutcomes.Contains(file.AttributionOutcome));
+
     private static void MapIdentifyEndpoints(IEndpointRouteBuilder group)
     {
         group.MapGet("/matching/folders/queue", GetIdentifyQueue)
@@ -76,15 +90,9 @@ public static partial class CatalogueEndpoints
         IMemoryCache cache,
         CancellationToken cancellationToken)
     {
-        // The filing endpoint's own predicate, so every folder offered here is one
-        // `matching/files/release` will actually accept files from.
         var rows = await db.MediaFiles
             .AsNoTracking()
-            .Where(file => (file.IdentityDecidedUtc == null
-                    && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
-                        || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)))
-                || (file.ReleaseDecidedUtc == null
-                    && UnattributedOutcomes.Contains(file.AttributionOutcome)))
+            .Where(OpenOnIdentify)
             .Select(file => new TagSource(file.Path, file.SizeBytes, file.LastModifiedUtc))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
