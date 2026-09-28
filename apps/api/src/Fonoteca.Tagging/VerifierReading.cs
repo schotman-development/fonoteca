@@ -20,7 +20,7 @@ namespace Fonoteca.Tagging;
 /// <c>ACOUSTID ID</c> would satisfy a generic lookup and satisfy nobody's tag
 /// reader.
 /// </remarks>
-internal static class VerifierReading
+internal static partial class VerifierReading
 {
     private const string ITunesMean = "com.apple.iTunes";
 
@@ -36,8 +36,70 @@ internal static class VerifierReading
             PictureDigests = [.. pictures.Select(p => TagSnapshot.Digest(p.Data.Data))],
             DurationSeconds = file.Properties?.Duration.TotalSeconds ?? 0,
             BitrateKbps = file.Properties?.AudioBitrate ?? 0,
+            RecordedDate = ReadDate(file),
         };
     }
+
+    /// <summary>
+    /// The date as stored, from whichever tag system this container uses: the
+    /// Vorbis <c>DATE</c>, ID3v2's <c>TDRC</c> (ID3v2.3's <c>TYER</c> and <c>TDAT</c>
+    /// as TagLib# folds them), MP4's <c>©day</c>, APE's <c>Year</c>. Cut to its
+    /// ISO prefix, so a timestamp's time or a spelling ATL merely reformats does
+    /// not read as a lost date; anything that is not ISO is compared whole.
+    /// </summary>
+    private static string? ReadDate(File file)
+    {
+        if (file.GetTag(TagTypes.Xiph, create: false) is XiphComment xiph)
+        {
+            var values = xiph.GetField("DATE");
+            if (values.Length > 0) return Dated(values[0]);
+        }
+
+        if (file.GetTag(TagTypes.Id3v2, create: false) is TagLib.Id3v2.Tag id3
+            && Text(id3, "TDRC") is { } recorded)
+        {
+            // TagLib# folds ID3v2.3's TYER and TDAT into one TDRC as it reads, and
+            // takes TDAT — DDMM by the specification — as month then day: a file
+            // dated 17 August reads "1959-17-08". Put back for 2.3 tags only. A
+            // 2.3 tag carrying a genuine TDRC is swapped too, which can only make
+            // a write refused that could have gone ahead, never the reverse.
+            return id3.Version == 3 && SwappedDay().Match(recorded) is { Success: true } swapped
+                ? $"{swapped.Groups[1].Value}-{swapped.Groups[3].Value}-{swapped.Groups[2].Value}"
+                : Dated(recorded);
+        }
+
+        if (file.GetTag(TagTypes.Apple, create: false) is AppleTag apple
+            && apple.GetText(ByteVector.FromString("\u00a9day", StringType.Latin1)) is { Length: > 0 } days)
+        {
+            return Dated(days[0]);
+        }
+
+        if (file.GetTag(TagTypes.Ape, create: false) is TagLib.Ape.Tag ape
+            && ape.GetItem("Year")?.ToString() is { Length: > 0 } apeYear)
+        {
+            return Dated(apeYear);
+        }
+
+        return null;
+    }
+
+    private static string? Text(TagLib.Id3v2.Tag tag, string frame) =>
+        TagLib.Id3v2.TextInformationFrame.Get(tag, ByteVector.FromString(frame, StringType.Latin1), false)?.Text
+            is { Length: > 0 } text && !string.IsNullOrWhiteSpace(text[0])
+            ? text[0]
+            : null;
+
+    private static string Dated(string value)
+    {
+        var iso = IsoPrefix().Match(value);
+        return iso.Success ? iso.Value : value.Trim();
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\d{4}(-\d{2}(-\d{2})?)?(?![\d-])")]
+    private static partial System.Text.RegularExpressions.Regex IsoPrefix();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(\d{4})-(\d{2})-(\d{2})")]
+    private static partial System.Text.RegularExpressions.Regex SwappedDay();
 
     /// <summary>The AcoustID, from whichever tag system this container actually uses.</summary>
     private static string? ReadAcoustId(File file)

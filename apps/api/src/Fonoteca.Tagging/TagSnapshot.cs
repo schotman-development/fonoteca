@@ -42,6 +42,13 @@ public sealed record TagSnapshot
     public required int BitrateKbps { get; init; }
 
     /// <summary>
+    /// The date as the file itself stores it, cut to its ISO prefix where it has
+    /// one. Only TagLib#'s reading carries it: ATL's is a parse, and a parse is
+    /// what loses a day — see <c>TagWriter</c>'s verification.
+    /// </summary>
+    public string? RecordedDate { get; init; }
+
+    /// <summary>
     /// Whether this reading and another agree about everything that matters.
     /// </summary>
     /// <remarks>

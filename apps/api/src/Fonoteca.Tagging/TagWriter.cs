@@ -365,6 +365,24 @@ public sealed class TagWriter(
             return "The two tag libraries disagree about the file they just read.";
         }
 
+        // ATL renders a date from its own parse on every save, so a date nothing
+        // asked to change can still come out different: ID3v2.3's day and month
+        // dropped on the upgrade to 2.4, "2008-10" given a first of the month,
+        // "12.10.2008" read the other way round. Its own reading cannot see that,
+        // and it is not in the plan, so the journal could not undo it. TagLib# reads
+        // the date as stored on both sides; a difference means this file is not
+        // written.
+        if (!plan.Changes.Any(change => change.Field == CatalogueTags.Year))
+        {
+            var stored = await _reader.ReadWithVerifierAsync(plan.Path, null, cancellationToken).ConfigureAwait(false);
+
+            if (!string.Equals(stored.RecordedDate, verified.RecordedDate, StringComparison.Ordinal))
+            {
+                return $"Writing these tags would have rewritten the date '{stored.RecordedDate ?? "none"}' "
+                    + $"as '{verified.RecordedDate ?? "none"}'.";
+            }
+        }
+
         var stagedFacts = await _files.StatAsync(stagedPath, cancellationToken).ConfigureAwait(false);
 
         if (stagedFacts is null)

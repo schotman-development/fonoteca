@@ -301,6 +301,39 @@ public sealed class CatalogueTagWriteTests : IDisposable
         Assert.Contains(Recording.ToString("D"), entry.PayloadJson, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// An ID3v2.3 date whose day ATL would drop is not written.
+    /// </summary>
+    /// <remarks>
+    /// ID3v2.3 keeps the year and the day apart, in <c>TYER</c> and <c>TDAT</c>;
+    /// ATL upgrades the tag to 2.4 on save and writes <c>TDRC</c> from its parse,
+    /// which keeps the year alone. The year is unchanged, so ATL's own reading
+    /// sees nothing — TagLib#'s reading of the stored frames does.
+    /// </remarks>
+    [Fact]
+    public async Task AnId3v23DateWhoseDayTheWriterWouldDropIsNotWritten()
+    {
+        SkipWithoutTools();
+
+        var dated = Path.Combine(_root, "dated.mp3");
+
+        using (var ffmpeg = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "ffmpeg",
+            ["-v", "error", "-y", "-i", Corpus.Mp3, "-c", "copy", "-id3v2_version", "3", "-metadata", "date=1959-08-17", dated])))
+        {
+            await ffmpeg!.WaitForExitAsync(Token);
+            Assert.Equal(0, ffmpeg.ExitCode);
+        }
+
+        var before = await File.ReadAllBytesAsync(dated, Token);
+
+        var result = await Write(Writer(allowMutation: true), new LibraryPath("dated.mp3"));
+
+        Assert.Equal(TagWriteStatus.VerificationFailed, result.Status);
+        Assert.Contains("1959-08-17", result.Detail, StringComparison.Ordinal);
+        Assert.Equal(before, await File.ReadAllBytesAsync(dated, Token));
+    }
+
     /// <summary>A container with nowhere to put these is reported, not failed.</summary>
     [Fact]
     public async Task AContainerThatCannotCarryTheTagsIsReportedRatherThanTreatedAsAFailure()
