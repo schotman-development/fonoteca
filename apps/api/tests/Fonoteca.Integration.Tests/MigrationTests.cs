@@ -1,5 +1,7 @@
 using Fonoteca.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Fonoteca.Integration.Tests;
 
@@ -151,6 +153,103 @@ public sealed class MigrationTests(PostgresFixture postgres)
 
         Assert.Equal("tagging.write.committed", stored.Type);
         Assert.Contains("So What", stored.PayloadJson, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The once-only re-check: every pressing link goes, every album stays, a
+    /// person's pick keeps its album and is asked only for its edition, and the
+    /// tag-write journal is gone.
+    /// </summary>
+    [Fact]
+    public async Task TheRecheckKeepsAPersonsAlbumAndAsksTheEditionAgain()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var connection = await postgres.CreateDatabaseAsync(token);
+        var asked = DateTimeOffset.Parse("2026-09-01T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var decided = asked.AddDays(1);
+
+        await using (var db = PostgresFixture.CreateContext(connection))
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20260923094134_AlbumFolderAttribution", token);
+
+            var group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Album" };
+            var release = new Release { Id = ReleaseId.New(), Title = "Album", ReleaseGroupId = group.Id };
+            var recording = new Recording { Id = RecordingId.New(), Title = "Song" };
+            var track = new Track { Id = TrackId.New(), ReleaseId = release.Id, RecordingId = recording.Id, Position = 1 };
+
+            db.AddRange(group, release, recording, track);
+
+            for (var outcome = 1; outcome <= 12; outcome++)
+            {
+                var file = NewFile($"a/{outcome:D2}.flac", recording.Id);
+                file.AttributionOutcome = (ReleaseAttributionOutcome)outcome;
+                file.ReleaseGroupId = group.Id;
+                file.ReleaseId = release.Id;
+                file.TrackId = track.Id;
+                file.EditionAlternatives = 1;
+                file.ReleaseLookupUtc = asked;
+                file.ReleaseDecidedUtc = outcome >= 7 ? decided : null;
+                db.MediaFiles.Add(file);
+            }
+
+            foreach (var type in new[] { "tagging.catalogue.written", "matching.folder.unreleased" })
+            {
+                db.DomainEvents.Add(Domain.Events.DomainEvent.Create(
+                    type, "file", Guid.CreateVersion7().ToString(), "owner", asked, "{}", "c"));
+            }
+
+            await db.SaveChangesAsync(token);
+        }
+
+        await using (var db = PostgresFixture.CreateContext(connection))
+        {
+            await db.Database.MigrateAsync(token);
+        }
+
+        await using var check = PostgresFixture.CreateContext(connection);
+
+        var files = (await check.MediaFiles.ToListAsync(token)).ToDictionary(file => int.Parse(file.Path[2..4], System.Globalization.CultureInfo.InvariantCulture));
+
+        // Every file keeps its album; no rule's or person's pressing survives.
+        Assert.All(files.Values, file => Assert.NotNull(file.ReleaseGroupId));
+
+        foreach (var (was, now) in new[] { (7, 15), (10, 16) })
+        {
+            var file = files[was];
+            Assert.Equal((ReleaseAttributionOutcome)now, file.AttributionOutcome);
+            Assert.Null(file.ReleaseId);
+            Assert.Null(file.TrackId);
+            Assert.Equal(0, file.EditionAlternatives);
+            Assert.Null(file.ReleaseLookupUtc);
+            Assert.Equal(decided, file.ReleaseDecidedUtc);
+        }
+
+        foreach (var was in new[] { 1, 2 })
+        {
+            var file = files[was];
+            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, file.AttributionOutcome);
+            Assert.Null(file.ReleaseId);
+            Assert.Null(file.TrackId);
+            Assert.Null(file.ReleaseLookupUtc);
+        }
+
+        foreach (var was in new[] { 3, 4, 5, 6 })
+        {
+            Assert.Equal((ReleaseAttributionOutcome)was, files[was].AttributionOutcome);
+            Assert.Null(files[was].ReleaseLookupUtc);
+        }
+
+        // "No album" and "not from a release" are not edition claims.
+        foreach (var was in new[] { 8, 9, 11, 12 })
+        {
+            Assert.Equal((ReleaseAttributionOutcome)was, files[was].AttributionOutcome);
+            Assert.Equal(asked, files[was].ReleaseLookupUtc);
+            Assert.NotNull(files[was].ReleaseId);
+        }
+
+        Assert.Equal(
+            ["matching.folder.unreleased"],
+            await check.DomainEvents.Select(entry => entry.Type).ToListAsync(token));
     }
 
     private static MediaFile NewFile(string path, RecordingId? recordingId = null, AudioQuality? quality = null) =>
