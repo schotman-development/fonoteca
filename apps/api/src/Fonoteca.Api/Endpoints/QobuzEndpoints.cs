@@ -163,31 +163,36 @@ public static class QobuzEndpoints
         // instant; it is a person-clicked endpoint, not a pass.
         var files = await db.MediaFiles
             .AsNoTracking()
-            .Select(file => new { file.ReleaseId, file.TrackId, file.Path, file.Quality })
+            .Select(file => new { file.ReleaseGroupId, file.ReleaseId, file.RecordingId, file.Path, file.Quality })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        // How many files each release holds across the whole library, so a
-        // folder can tell whether the release it is filed under is actually
-        // about it. See the majority test below.
-        var releaseSize = files
-            .Where(file => file.ReleaseId is not null)
-            .GroupBy(file => file.ReleaseId!.Value)
-            .ToDictionary(release => release.Key, release => release.Count());
+        // How much of each album the library holds, so a folder can tell whether
+        // the album it is filed under is actually about it. See the majority
+        // test below. In distinct recordings rather than files: two rips of one
+        // album each hold all of it, and counted in files they would split it
+        // between them and neither folder could be named after it. A file with no
+        // recording is only itself.
+        var albumSize = files
+            .Where(file => file.ReleaseGroupId is not null)
+            .GroupBy(file => file.ReleaseGroupId!.Value)
+            .ToDictionary(
+                album => album.Key,
+                album => album.Select(file => file.RecordingId?.Value.ToString() ?? file.Path).Distinct().Count());
 
         var folders = files
             .Select(file => new Assessed(
-                file.ReleaseId,
-                file.TrackId,
+                file.ReleaseGroupId,
+                file.RecordingId,
                 UpgradeScan.Assess(file.Path, file.Quality),
                 UpgradeScan.Format(file.Path, file.Quality),
                 file.Path))
 
-            // The album folder, always — never the release, and this was a bug
-            // rather than a preference. Keying attributed files on their release
-            // and the rest on their folder put a partly-attributed album on the
-            // list twice, 125 times over on the target library: eight files
-            // under "Don't Rock the Jukebox" and two more under
+            // The album folder, always — never the album's catalogue key, and
+            // this was a bug rather than a preference. Keying filed files on
+            // their release and the rest on their folder put a partly-filed album
+            // on the list twice, 125 times over on the target library: eight
+            // files under "Don't Rock the Jukebox" and two more under
             // "Alan Jackson/Don't Rock the Jukebox (1991)", one album, one
             // purchase, and neither row saying it holds ten files. A folder is
             // what a person is looking at and what they would replace.
@@ -195,28 +200,26 @@ public static class QobuzEndpoints
             .Select(group => new Grouped(
                 Folder: group.Key,
 
-                // The release most of the folder is filed under, for a real
-                // title and a real billing line. Most rather than any, so a
-                // compilation folder holding one stray track is named after the
-                // compilation; the id breaks a tie, so a rerun cannot change its
-                // mind.
-                ReleaseId: group
-                    .Where(file => file.ReleaseId is not null)
-                    .GroupBy(file => file.ReleaseId!.Value)
-                    .OrderByDescending(release => release.Count())
-                    .ThenBy(release => release.Key.Value)
+                // The album most of the folder is held to, for a real title and
+                // a real billing line. Most rather than any, so a compilation
+                // folder holding one stray track is named after the compilation;
+                // the id breaks a tie, so a rerun cannot change its mind.
+                AlbumId: group
+                    .Where(file => file.AlbumId is not null)
+                    .GroupBy(file => file.AlbumId!.Value)
+                    .OrderByDescending(album => album.Count())
+                    .ThenBy(album => album.Key.Value)
 
-                    // ...and only if the two are most of each other. The
-                    // attribution pass's documented weakness is anthologised
-                    // catalogue, and it shows up here from both sides. Brad
-                    // Paisley's albums are each filed under one 64-file reissue
-                    // box, so four folders name it and a row headed "Original
-                    // Album Classics" holding 21 files is really "Time Well
-                    // Wasted" — that is the release being mostly somewhere else.
-                    // The other way round, a 152-file compilation folder whose
-                    // largest release accounts for thirty of them would be named
-                    // after those thirty. Neither title is about the files being
-                    // counted, and the folder name at least is.
+                    // ...and only if the two are most of each other. Anthologised
+                    // catalogue shows up here from both sides. Brad Paisley's
+                    // albums were each filed under one 64-file reissue box, so
+                    // four folders named it and a row headed "Original Album
+                    // Classics" holding 21 files was really "Time Well Wasted" —
+                    // the album being mostly somewhere else. The other way round,
+                    // a 152-file compilation folder whose largest album accounts
+                    // for thirty of them would be named after those thirty.
+                    // Neither title is about the files being counted, and the
+                    // folder name at least is.
                     //
                     // Strictly more than half, both ways. "At least half" lets
                     // *both* halves of an even split qualify, which is the same
@@ -225,22 +228,18 @@ public static class QobuzEndpoints
                     // "Quitter (2023)" folder titled and searched for as
                     // "Don't Eat Pray Love". An exact tie is not evidence either
                     // way, so neither folder gets to claim it.
-                    .Where(release => release.Count() * 2 > releaseSize[release.Key]
-                        && release.Count() * 2 > group.Count())
-                    .Select(release => (ReleaseId?)release.Key)
+                    .Where(album => album.Select(file => file.Recording?.Value.ToString() ?? file.Path).Distinct().Count() * 2
+                            > albumSize[album.Key]
+                        && album.Count() * 2 > group.Count())
+                    .Select(album => (ReleaseGroupId?)album.Key)
                     .FirstOrDefault(),
 
                 // ponytail: files, not distinct tracks — so an album held as ten
                 // FLACs and ten MP3s of the same songs reads "10/20" with nothing
                 // actually to buy. Zero such files on the target library; count
-                // DISTINCT TrackId if duplicate rips turn up.
+                // distinct recordings if duplicate rips turn up.
                 Files: group.Count(),
 
-                // Files sitting in this folder that no pass has seated on a
-                // track. Nothing to do with an upgrade; it is the raw material
-                // for the subtraction that keeps the incomplete list below
-                // honest, which sums it over a release's folders.
-                Unfiled: group.Count(file => file.TrackId is null),
                 Reason: group.Max(file => file.Reason),
                 Upgradable: [.. group.Where(file => file.Reason != UpgradeReason.None)]))
             .ToList();
@@ -249,40 +248,25 @@ public static class QobuzEndpoints
             .Where(group => group.Reason != UpgradeReason.None)
             .ToList();
 
-        // Every folder that a release names, not just the upgradable ones: an
+        // Every folder that an album names, not just the upgradable ones: an
         // album held entirely in hi-res FLAC is nothing to re-buy and can still
         // be missing track 7.
         var ids = folders
-            .Where(group => group.ReleaseId is not null)
-            .Select(group => group.ReleaseId!.Value)
+            .Where(group => group.AlbumId is not null)
+            .Select(group => group.AlbumId!.Value)
             .Distinct()
             .ToList();
 
-        var releases = await db.Releases
+        var albums = await db.ReleaseGroups
             .AsNoTracking()
-            .Where(release => ids.Contains(release.Id))
-            .Select(release => new
+            .Where(album => ids.Contains(album.Id))
+            .Select(album => new
             {
-                release.Id,
-                release.Mbid,
-                release.Title,
-                release.ReleasedYear,
-                release.MediumFormats,
-
-                // MusicBrainz's printed count where it has one, the track list
-                // otherwise — the same denominator the album browse prints, so
-                // the two screens cannot disagree about whether a rip is whole.
-                TrackCount = release.TrackCount ?? release.Tracks.Count,
-
-                // Distinct tracks, never files: five encodings of one song are
-                // one track of the album, and counting files makes a
-                // half-ripped album read complete.
-                Held = release.Files
-                    .Where(file => file.TrackId != null)
-                    .Select(file => file.TrackId)
-                    .Distinct()
-                    .Count(),
-                Artists = release.Credits
+                album.Id,
+                album.Mbid,
+                album.Title,
+                album.FirstReleaseYear,
+                Artists = album.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new
                     {
@@ -295,7 +279,41 @@ public static class QobuzEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var byId = releases.ToDictionary(release => release.Id);
+        var editions = await CatalogueEndpoints.EditionFactsAsync(db, ids, cancellationToken)
+            .ConfigureAwait(false);
+
+        // One heading per album, whichever folder it ends up on: its title, the
+        // billing line of the edition that stands for it (the album's own where
+        // none is stored), the year it was first released, and the sleeve.
+        var byId = albums.ToDictionary(
+            album => album.Id,
+            album =>
+            {
+                var display = CatalogueEndpoints.DisplayEdition(editions[album.Id]);
+                var billed = display is { Artists.Count: > 0 }
+                    ? display.Artists.Select(a => (Name: a.CreditedAs ?? a.Name, First: a.Name, a.JoinPhrase)).ToList()
+                    : album.Artists.Select(a => (Name: a.CreditedAs ?? a.Name, First: a.Name, a.JoinPhrase)).ToList();
+
+                return new Heading(
+                    album.Id,
+                    album.Mbid?.Value,
+                    display?.Id.Value,
+                    album.Title,
+
+                    // The billing line as printed, join phrases and all. The same
+                    // rule the browse screens print, not a second copy of it: two
+                    // spellings of one artist across two screens is the sort of
+                    // drift nothing ever notices.
+                    CatalogueEndpoints.CreditLine(billed.Select(a => (a.Name, a.JoinPhrase))),
+                    CatalogueEndpoints.AlbumYear(album.FirstReleaseYear, editions[album.Id]),
+
+                    // The first billed artist and the title, and nothing else.
+                    // The line above it is the truth and this is a query: Qobuz
+                    // search is full-text, so "Frank Sinatra with Count Basie &
+                    // the Orchestra Sinatra at the Sands" is six words of noise
+                    // around the two that would have found it.
+                    Join(billed.FirstOrDefault().First, album.Title));
+            });
 
         var items = groups
             .Select(group =>
@@ -306,55 +324,32 @@ public static class QobuzEndpoints
                 var cut = group.Folder.LastIndexOf('/');
                 var title = cut >= 0 ? group.Folder[(cut + 1)..] : group.Folder;
                 var artist = cut >= 0 ? group.Folder[..cut] : null;
-                int? year = null;
-                Guid? mbid = null;
 
                 // Bracketed noise out of the query and left in the heading: the
                 // row has to match the directory somebody is looking at, and
                 // "(2023)" against an index of album titles does not help.
-                var query = Join(
-                    UpgradeScan.Searchable(artist ?? string.Empty),
-                    UpgradeScan.Searchable(title));
-
-                if (group.ReleaseId is { } id && byId.TryGetValue(id, out var release))
-                {
-                    title = release.Title;
-
-                    // The billing line as printed, join phrases and all. The same
-                    // rule the browse screens print, not a second copy of it: two
-                    // spellings of one artist across two screens is the sort of
-                    // drift nothing ever notices.
-                    artist = CatalogueEndpoints.CreditLine(
-                        release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase)));
-
-                    year = release.ReleasedYear;
-
-                    // Only so the screen can show a cover. It is MusicBrainz's
-                    // identifier and the Cover Art Archive is keyed on it, so a
-                    // folder no pass attributed has no picture to show and gets
-                    // the monogram — which is honest: nothing here knows what
-                    // that album is. 445 of 520 rows on the target library have
-                    // one.
-                    mbid = release.Mbid?.Value;
-
-                    // The first billed artist and the title, and nothing else.
-                    // The line above it is the truth and this is a query: Qobuz
-                    // search is full-text, so "Frank Sinatra with Count Basie &
-                    // the Orchestra Sinatra at the Sands" is six words of noise
-                    // around the two that would have found it.
-                    query = Join(release.Artists.FirstOrDefault()?.Name, release.Title);
-                }
+                var heading = group.AlbumId is { } id && byId.TryGetValue(id, out var named)
+                    ? named
+                    : new Heading(
+                        null,
+                        null,
+                        null,
+                        title,
+                        artist,
+                        null,
+                        Join(UpgradeScan.Searchable(artist ?? string.Empty), UpgradeScan.Searchable(title)));
 
                 return (
                     group.Reason,
                     Candidate: new UpgradeCandidate(
-                        group.ReleaseId?.Value,
-                        mbid,
+                        heading.AlbumId?.Value,
+                        heading.CoverReleaseId,
+                        heading.Mbid,
                         group.Folder,
-                        title,
-                        artist,
-                        year,
-                        query,
+                        heading.Title,
+                        heading.Artist,
+                        heading.Year,
+                        heading.Query,
                         group.Reason.ToString(),
                         group.Files,
                         group.Upgradable.Count,
@@ -378,112 +373,150 @@ public static class QobuzEndpoints
             .Select(row => row.Candidate)
             .ToList();
 
-        // The slots of every album a release names, so a gap can be named
-        // rather than only counted. One query for the whole screen — the
-        // alternative is a track list per row — and which of them are held is
-        // answered in memory, because every TrackId in the library is already
-        // in `files`.
-        var seated = files
-            .Where(file => file.TrackId is not null)
-            .Select(file => file.TrackId!.Value)
-            .ToHashSet();
+        // Every stored edition's track list for every album a folder names, so a
+        // gap can be named rather than only counted. One query for the whole
+        // screen — the alternative is a track list per row.
+        var keys = ids.Select(id => (ReleaseGroupId?)id).ToList();
 
         var slots = ids.Count == 0
             ? []
             : await db.Tracks
                 .AsNoTracking()
-                .Where(track => ids.Contains(track.ReleaseId))
+                .Where(track => keys.Contains(track.Release!.ReleaseGroupId))
                 .OrderBy(track => track.DiscNumber)
                 .ThenBy(track => track.Position)
                 .Select(track => new
                 {
-                    track.Id,
                     track.ReleaseId,
                     track.DiscNumber,
                     track.Position,
+                    track.Number,
                     track.Title,
+                    track.Length,
+                    track.RecordingId,
                 })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        var gaps = slots
-            .Where(track => !seated.Contains(track.Id))
-            .GroupBy(track => track.ReleaseId)
-            .ToDictionary(release => release.Key, release => release.ToList());
+        var slotsOf = slots.ToLookup(slot => slot.ReleaseId);
 
-        // Loose files in every folder a release's files sit in — the union, so
-        // that this and `Held` are counted over the same files. A folder counts
-        // once for each release in it, which is right: the same unmatched file
-        // could be a missing track of either.
-        var unfiledByFolder = folders.ToDictionary(
-            group => group.Folder,
-            group => group.Unfiled,
-            StringComparer.Ordinal);
-
-        var loose = files
-            .Where(file => file.ReleaseId is not null)
-            .Select(file => (Release: file.ReleaseId!.Value, Folder: UpgradeScan.AlbumFolder(file.Path)))
-            .Distinct()
-            .GroupBy(pair => pair.Release)
+        // What the album's files hold, wherever they sit, and which pressing they
+        // are filed under — one pressing for every file is the claimed edition.
+        var heldBy = files
+            .Where(file => file.ReleaseGroupId is not null)
+            .GroupBy(file => file.ReleaseGroupId!.Value)
             .ToDictionary(
-                release => release.Key,
-                release => release.Sum(pair => unfiledByFolder.GetValueOrDefault(pair.Folder)));
+                album => album.Key,
+                album => (
+                    Recordings: album
+                        .Where(file => file.RecordingId is not null)
+                        .Select(file => file.RecordingId!.Value)
+                        .ToHashSet(),
+                    Pressings: album.Select(file => file.ReleaseId).Distinct().ToList()));
+
+        // Every folder an album's files sit in, and every file in those folders —
+        // the union, so that the loose files and `Held` below are counted over
+        // the same files.
+        var inFolder = files.ToLookup(file => UpgradeScan.AlbumFolder(file.Path), StringComparer.Ordinal);
+
+        var foldersOf = files
+            .Where(file => file.ReleaseGroupId is not null)
+            .GroupBy(file => file.ReleaseGroupId!.Value)
+            .ToDictionary(
+                album => album.Key,
+                album => album.Select(file => UpgradeScan.AlbumFolder(file.Path)).Distinct(StringComparer.Ordinal).ToList());
 
         var incomplete = new List<IncompleteAlbum>();
         var unmatched = 0;
 
+        // One row per album: every count below is album-wide, so a second rip
+        // in another folder would be the same row again.
+        var measuredAlbums = new HashSet<ReleaseGroupId>();
+
         foreach (var group in folders)
         {
-            if (group.ReleaseId is not { } id || !byId.TryGetValue(id, out var release)) continue;
+            if (group.AlbumId is not { } id || !byId.TryGetValue(id, out var heading)) continue;
+            if (!measuredAlbums.Add(id)) continue;
 
-            if (release.TrackCount == 0 || release.Held >= release.TrackCount) continue;
+            var (held, pressings) = heldBy[id];
+            var stored = editions[id]
+                .Select(edition => new EditionTracks(
+                    edition.Id,
+                    [.. slotsOf[edition.Id].Select(slot => new EditionSlot(
+                        slot.DiscNumber,
+                        slot.Position,
+                        slot.Number,
+                        slot.Title,
+                        slot.Length,
+                        slot.RecordingId))]))
+                .ToList();
+
+            // The claimed pressing where every file is filed under one; otherwise
+            // the edition the files are most plausibly a rip of — never a longer
+            // edition they were not, which would report the deluxe's bonus disc as
+            // tracks to buy.
+            var measured = pressings is [{ } claimed]
+                ? stored.FirstOrDefault(edition => edition.Id == claimed)
+                : Editions.Nearest(stored, held);
+
+            if (measured is null) continue;
+
+            var facts = editions[id].First(edition => edition.Id == measured.Id);
+            var trackCount = facts.TrackCount;
+            var holding = measured.Slots.Count(slot => held.Contains(slot.Recording));
+
+            if (trackCount == 0 || holding >= trackCount) continue;
 
             // The subtraction, and it is the whole reason this list is worth
-            // reading. A gap that unmatched files already in the library could
-            // fill is a question for the Identify screen and not something to
-            // buy: measured on the target library, 128 of the 175 albums short
-            // of their track list are exactly that, so a list that skipped this
+            // reading. A gap that unfiled files already in the library could fill
+            // is a question for the Identify screen and not something to buy:
+            // measured on the target library, 128 of the 175 albums short of
+            // their track list were exactly that, so a list that skipped this
             // would be four fifths wrong in the expensive direction.
             //
-            // Both halves are release-wide, and they have to be. Counted from
-            // the one folder that names the release, the loose files are a
-            // different set from the one the gap was measured over — and on a
-            // release spanning folders that reads as tracks to buy while they
-            // sit on disk four folders away. Ray Charles' "The Birth of Soul"
-            // was 28/53 with twenty-one to buy and twenty-four unmatched
-            // siblings in four neighbouring folders.
-            var unfiled = loose.GetValueOrDefault(id);
+            // Both halves are album-wide, and they have to be. Counted from the
+            // one folder that names the album, the loose files are a different
+            // set from the one the gap was measured over — and on an album
+            // spanning folders that reads as tracks to buy while they sit on disk
+            // four folders away. Ray Charles' "The Birth of Soul" was 28/53 with
+            // twenty-one to buy and twenty-four unmatched siblings in four
+            // neighbouring folders.
+            // Loose: in one of the album's folders and on none of the measured
+            // edition's tracks — held to no album, or held to this one as a
+            // recording the edition does not print. A folder counts once for each
+            // album in it, which is right: the same loose file could be a missing
+            // track of either.
+            var printed = measured.Slots.Select(slot => slot.Recording).ToHashSet();
+            var unfiled = foldersOf[id]
+                .SelectMany(folder => inFolder[folder])
+                .Count(file => file.ReleaseGroupId is null
+                    || (file.ReleaseGroupId == id
+                        && (file.RecordingId is not { } recording || !printed.Contains(recording))));
 
-            if (release.TrackCount - release.Held - unfiled <= 0)
+            if (trackCount - holding - unfiled <= 0)
             {
                 unmatched++;
                 continue;
             }
 
-            var missing = gaps.TryGetValue(id, out var open) ? open : [];
-
             incomplete.Add(new IncompleteAlbum(
                 id.Value,
-                release.Mbid?.Value,
+                measured.Id.Value,
+                heading.CoverReleaseId,
+                heading.Mbid,
                 group.Folder,
-                release.Title,
-                CatalogueEndpoints.CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
-                release.ReleasedYear,
-
-                // The first billed artist and the title, for the reason the
-                // upgrade rows use it: the printed billing line is the truth and
-                // a poor query.
-                Join(release.Artists.FirstOrDefault()?.Name, release.Title),
-                release.MediumFormats,
-                release.TrackCount,
-                release.Held,
+                heading.Title,
+                heading.Artist,
+                heading.Year,
+                heading.Query,
+                facts.Formats,
+                trackCount,
+                holding,
                 unfiled,
-                [.. missing
+                [.. measured.Slots
+                    .Where(slot => !held.Contains(slot.Recording))
                     .Take(MissingShown)
-                    .Select(track => new MissingTrack(
-                        track.DiscNumber,
-                        track.Position,
-                        track.Title))]));
+                    .Select(slot => new MissingTrack(slot.Disc, slot.Position, slot.Title))]));
         }
 
         var (followed, unbrowsed, unmonitored, records) =
@@ -816,19 +849,28 @@ public static class QobuzEndpoints
 
     /// <summary>One file, once the rule has looked at it.</summary>
     private readonly record struct Assessed(
-        ReleaseId? ReleaseId,
-        TrackId? TrackId,
+        ReleaseGroupId? AlbumId,
+        RecordingId? Recording,
         UpgradeReason Reason,
         string Format,
         string Path);
 
     private sealed record Grouped(
         string Folder,
-        ReleaseId? ReleaseId,
+        ReleaseGroupId? AlbumId,
         int Files,
-        int Unfiled,
         UpgradeReason Reason,
         IReadOnlyList<Assessed> Upgradable);
+
+    /// <summary>What a row is headed with: the album's, or the folder's own name where no album is held.</summary>
+    private sealed record Heading(
+        ReleaseGroupId? AlbumId,
+        Guid? Mbid,
+        Guid? CoverReleaseId,
+        string Title,
+        string? Artist,
+        int? Year,
+        string Query);
 
     private static async Task<Results<Ok<QobuzAlbumSummary[]>, ProblemHttpResult>> SearchAlbums(
         [FromQuery] string query,
@@ -1222,7 +1264,14 @@ public sealed record MissingRecord(
     string? CoverUrl = null);
 
 /// <summary>An album held in part, with what is missing from it named.</summary>
-/// <param name="Mbid">MusicBrainz's identifier, for the cover. See <see cref="UpgradeCandidate"/>.</param>
+/// <param name="AlbumId">The album (release group) the folder's files are held to.</param>
+/// <param name="EditionId">
+/// The edition the gap is measured against: the claimed pressing where every file
+/// is filed under one, otherwise the stored edition the files are most plausibly
+/// a rip of. Not a claim that the files are it.
+/// </param>
+/// <param name="CoverReleaseId">The edition whose stored sleeve stands for the album.</param>
+/// <param name="Mbid">The release group's MusicBrainz identifier, for a cover where no sleeve is stored.</param>
 /// <param name="Folder">The album folder its files sit in, for a person to recognise it by.</param>
 /// <param name="Query">The first billed artist and the title, as on an upgrade row.</param>
 /// <param name="MediumFormats">
@@ -1230,10 +1279,10 @@ public sealed record MissingRecord(
 /// nobody can buy their way out of: a release with a video disc on it is missing
 /// half its track list on any library that holds only the audio.
 /// </param>
-/// <param name="TrackCount">What the release prints. The denominator.</param>
-/// <param name="Held">Distinct tracks of it the library holds, wherever they sit.</param>
+/// <param name="TrackCount">What that edition prints. The denominator.</param>
+/// <param name="Held">Its tracks the album's files hold, wherever they sit.</param>
 /// <param name="Unmatched">
-/// Files that no pass has seated on a track, in every folder this release's
+/// Files on none of the measured edition's tracks, in every folder this album's
 /// files sit in — not only <paramref name="Folder"/>, or it would be counted
 /// over a different set of files than <paramref name="Held"/>. Some of the gap
 /// may already be on disk; the row is on the list because these cannot account
@@ -1245,7 +1294,9 @@ public sealed record MissingRecord(
 /// or when nothing has written the release's track list.
 /// </param>
 public sealed record IncompleteAlbum(
-    Guid ReleaseId,
+    Guid AlbumId,
+    Guid EditionId,
+    Guid? CoverReleaseId,
     Guid? Mbid,
     string Folder,
     string Title,
@@ -1261,18 +1312,19 @@ public sealed record IncompleteAlbum(
 /// <param name="Title">As printed on this release, which can differ from the recording's. Null where MusicBrainz has none.</param>
 public sealed record MissingTrack(int Disc, int Position, string? Title);
 
-/// <param name="ReleaseId">
-/// The release most of the folder is filed under, or null when no pass
-/// attributed any of it. The <i>row</i> is the folder either way — see
-/// <c>ListUpgrades</c> — so this says where the title and the billing line came
-/// from rather than what is being counted.
+/// <param name="AlbumId">
+/// The album most of the folder is held to, or null when no pass placed any of
+/// it. The <i>row</i> is the folder either way — see <c>ListUpgrades</c> — so
+/// this says where the title and the billing line came from rather than what is
+/// being counted.
 /// </param>
-/// <param name="Mbid">
-/// MusicBrainz's identifier for that release, and the only reason it is here is
-/// the cover: the Cover Art Archive is keyed on it. Null wherever
-/// <paramref name="ReleaseId"/> is, so a folder no pass attributed shows a
-/// monogram — which is the honest picture of an album nothing has identified.
+/// <param name="CoverReleaseId">
+/// The edition whose stored sleeve stands for that album; null where it has none
+/// stored, and wherever <paramref name="AlbumId"/> is, so a folder no pass placed
+/// shows a monogram — which is the honest picture of an album nothing has
+/// identified.
 /// </param>
+/// <param name="Mbid">The album's release group id, the Cover Art Archive's key where no sleeve is stored.</param>
 /// <param name="Folder">The album folder every count on this row is about.</param>
 /// <param name="Query">
 /// What to search Qobuz for — the first billed artist and the title. Not
@@ -1288,7 +1340,8 @@ public sealed record MissingTrack(int Disc, int Position, string? Title);
 /// print, which the counts do not depend on.
 /// </param>
 public sealed record UpgradeCandidate(
-    Guid? ReleaseId,
+    Guid? AlbumId,
+    Guid? CoverReleaseId,
     Guid? Mbid,
     string Folder,
     string Title,

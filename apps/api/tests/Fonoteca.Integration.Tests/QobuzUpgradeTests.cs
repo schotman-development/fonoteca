@@ -30,6 +30,9 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
     private string _root = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
+    /// <summary>The shorter edition of the album seeded with two, which a folder of it is measured against.</summary>
+    private Guid _standard;
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     public async ValueTask InitializeAsync()
@@ -104,7 +107,7 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // row to be named after and used to be invisible here.
         Assert.Equal(
             ["Anthology Box", "All Lossy", "Half Filed", "Boxed Album", "Loose",
-             "Mostly Lossless", "Below Hi-Res"],
+             "Twice Ripped", "Twice Ripped", "Mostly Lossless", "Below Hi-Res"],
             body.Items.Select(item => item.Title));
 
         // Every file in the library, attributed or not. The completeness
@@ -112,8 +115,9 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // nothing else on the upgrade list.
         // 38 since the group-linked FLAC joined the seed: lossless, loose and on
         // no list, but it is still a file in the library and this is the count
-        // of every one of them.
-        Assert.Equal(38, body.Files);
+        // of every one of them. 44 since the two-edition album's folder and the
+        // album ripped twice joined it.
+        Assert.Equal(44, body.Files);
     }
 
     [Fact]
@@ -135,7 +139,7 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
 
         // No release, so the row is the folder — and both halves of it go into
         // the query, because neither is more trustworthy than the other.
-        Assert.Null(loose.ReleaseId);
+        Assert.Null(loose.AlbumId);
 
         // And therefore no cover: the Cover Art Archive is keyed on the
         // MusicBrainz release, so the shelf draws a monogram. 75 of the 520
@@ -195,7 +199,7 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // Named after the release the majority of it carries, not after the
         // folder — the folder is what is counted, the release is what it is
         // called.
-        Assert.NotNull(album.ReleaseId);
+        Assert.NotNull(album.AlbumId);
         Assert.Equal("Alan Half Filed", album.Query);
 
         Assert.DoesNotContain(body.Items, item => item.Title == "Half Filed (1991)");
@@ -212,14 +216,14 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // release that is mostly somewhere else is not what this folder is.
         var boxed = Assert.Single(body.Items, item => item.Folder == "Anth/Boxed Album");
 
-        Assert.Null(boxed.ReleaseId);
+        Assert.Null(boxed.AlbumId);
         Assert.Equal("Boxed Album", boxed.Title);
         Assert.Equal("Anth Boxed Album", boxed.Query);
 
         // The other half of the same box does name it, because that folder is
         // most of it.
         var majority = Assert.Single(body.Items, item => item.Folder == "Anth/The Box");
-        Assert.NotNull(majority.ReleaseId);
+        Assert.NotNull(majority.AlbumId);
         Assert.Equal("Anthology Box", majority.Title);
     }
 
@@ -288,8 +292,49 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // And the list is nearest-to-whole first: one missing track is an album
         // somebody can finish, nine is a decision about whether they want it.
         Assert.Equal(
-            ["Nearly There", "Half a Record"],
+            ["Nearly There", "Twice Ripped", "Unforgettable", "Half a Record"],
             body.Incomplete.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task TwoRipsOfOneAlbumAreBothNamedAfterIt()
+    {
+        var body = await ListAsync();
+
+        var rips = body.Items.Where(item => item.Folder.StartsWith("Rips/", StringComparison.Ordinal)).ToList();
+
+        Assert.Equal(2, rips.Count);
+        Assert.All(rips, rip =>
+        {
+            Assert.NotNull(rip.AlbumId);
+            Assert.Equal("Twice Ripped", rip.Title);
+        });
+
+        // Every count on the incomplete list is album-wide, so the album is one row.
+        var shortOfOne = Assert.Single(body.Incomplete, item => item.Title == "Twice Ripped");
+        Assert.Equal(["Third"], shortOfOne.Missing.Select(track => track.Title));
+    }
+
+    /// <summary>
+    /// An album whose pressing is not known is measured against the edition its
+    /// files are nearest to, never a longer one they were not.
+    /// </summary>
+    /// <remarks>
+    /// The folder holds two of the standard edition's three songs and is filed to
+    /// the album only. Measured against the deluxe it would be three tracks short
+    /// and the bonus disc would read as something to buy.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumWithNoEditionIsMeasuredAgainstItsNearestEdition()
+    {
+        var body = await ListAsync();
+
+        var album = Assert.Single(body.Incomplete, item => item.Title == "Unforgettable");
+
+        Assert.Equal(_standard, album.EditionId);
+        Assert.Equal(3, album.TrackCount);
+        Assert.Equal(2, album.Held);
+        Assert.Equal(["Too Young"], album.Missing.Select(track => track.Title));
     }
 
     [Fact]
@@ -388,6 +433,27 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
             File("Hart/All Lossy/02.mp3", lossy),
             File("Hart/All Lossy/03.m4a", lossy));
 
+        // One album ripped twice, into two folders, the second held to the album
+        // alone. Each holds the same two of its three songs, so each is named
+        // after it — measured in files the two would split it and neither would
+        // be most of it — and the album is short one song, once.
+        var twice = Release(db, "Twice Ripped", trackCount: 3);
+        Tracks(db, twice, ["First", "Second", "Third"]);
+        db.MediaFiles.AddRange(
+            Seated(db, "Rips/Twice Ripped/01.mp3", twice, 1),
+            Seated(db, "Rips/Twice Ripped/02.mp3", twice, 2));
+
+        foreach (var copy in new[]
+                 {
+                     Seated(db, "Rips/Twice Ripped (Again)/01.mp3", twice, 1),
+                     Seated(db, "Rips/Twice Ripped (Again)/02.mp3", twice, 2),
+                 })
+        {
+            copy.ReleaseId = null;
+            copy.TrackId = null;
+            db.MediaFiles.Add(copy);
+        }
+
         var mixed = Release(db, "Mostly Lossless");
         db.MediaFiles.AddRange(
             File("X/Mostly Lossless/01.flac", mixed),
@@ -462,6 +528,41 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         var partial = Release(db, "Half a Record", trackCount: 4);
         Tracks(db, partial, ["One", "Two", "Three", "Four"]);
         db.MediaFiles.Add(Seated(db, "Y/Half a Record/01.flac", partial, 1));
+
+        // One album, two editions, and a folder filed to the album alone.
+        var cole = Group(db, "Unforgettable", "Album");
+        var songs = new[] { "Mona Lisa", "Route 66", "Too Young", "Pretend", "Answer Me" }
+            .Select(title => new Recording { Id = RecordingId.New(), Title = title })
+            .ToList();
+        db.Recordings.AddRange(songs);
+
+        var standard = Release(db, "Unforgettable", album: cole);
+        _standard = standard.Id.Value;
+
+        foreach (var (edition, count) in new[] { (standard, 3), (Release(db, "Unforgettable (Deluxe)", album: cole), 5) })
+        {
+
+            for (var index = 0; index < count; index++)
+            {
+                db.Add(new Track
+                {
+                    Id = TrackId.New(),
+                    ReleaseId = edition.Id,
+                    RecordingId = songs[index].Id,
+                    Position = index + 1,
+                    DiscNumber = 1,
+                    Title = songs[index].Title,
+                });
+            }
+        }
+
+        foreach (var song in songs.Take(2))
+        {
+            var file = File($"Cole/Unforgettable/{song.Title}.flac", null);
+            file.RecordingId = song.Id;
+            file.ReleaseGroupId = cole.Id;
+            db.MediaFiles.Add(file);
+        }
 
         var present = Release(db, "All Present", trackCount: 2);
         Tracks(db, present, ["One", "Two"]);
@@ -608,13 +709,31 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
     private static Artist Artist(string name) =>
         new() { Id = ArtistId.New(), Name = name, SortName = name };
 
-    private static Release Release(FonotecaDbContext db, string title, int? trackCount = null)
+    /// <summary>A release, and the album it is an edition of — every release the pass writes has one.</summary>
+    private static Release Release(
+        FonotecaDbContext db,
+        string title,
+        int? trackCount = null,
+        ReleaseGroup? album = null)
     {
+        if (album is null)
+        {
+            album = new ReleaseGroup
+            {
+                Id = ReleaseGroupId.New(),
+                Title = title,
+                Mbid = new Mbid(Guid.CreateVersion7()),
+            };
+
+            db.ReleaseGroups.Add(album);
+        }
+
         var release = new Release
         {
             Id = ReleaseId.New(),
             Title = title,
             Mbid = new Mbid(Guid.CreateVersion7()),
+            ReleaseGroupId = album.Id,
             Released = new ReleaseDate(2013, null, null),
             Status = "Official",
             TrackCount = trackCount,
@@ -678,5 +797,6 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         SizeBytes = 42_000_000,
         LastModifiedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture),
         ReleaseId = release?.Id,
+        ReleaseGroupId = release?.ReleaseGroupId,
     };
 }
