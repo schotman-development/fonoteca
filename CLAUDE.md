@@ -21,7 +21,7 @@ dedupe, acquisition (Qobuz), *arr-style upgrade monitoring, tag editing.
 | scan | walks the root, reconciles `MediaFiles` with the disk | `Api/Library/LibraryScanService.cs` |
 | identify | `fpcalc` → AcoustID → writes the tag | `Api/Library/IdentificationService.cs` |
 | enrich | identities into a catalogue — five stages | `Api/Library/EnrichmentService.cs` |
-| attribute | which release each *folder* came from, from the audio | `Api/Library/ReleaseAttributionService.cs` |
+| attribute | which album each *folder* is, and its pressing only on proof | `Api/Library/ReleaseAttributionService.cs` |
 | probe | `ffprobe -count_frames` — quality and integrity in one decode | `Api/Library/ProbeService.cs` |
 | tag write | the whole catalogue back into the files | `Api/Library/TagWriteService.cs` |
 
@@ -64,7 +64,7 @@ the rest.
 
 4. **A rule's answer and a person's answer are different facts.** Folding them
    loses any ability to report on the rule. `IdentifiedByPerson`,
-   `RejectedByPerson`, `LinkedByPerson`, `AttributedByPerson`,
+   `RejectedByPerson`, `LinkedByPerson`, `AttributedByPerson`, `AlbumByPerson`,
    `NoReleaseByPerson`, `Unreleased`, `ReopenedByPerson` — each with an
    `…ByAgent` twin for `/mcp`, all listed in `ByCaller`. `IdentityDecidedUtc` and
    `ReleaseDecidedUtc` are separate *columns* from the outcome, because clearing
@@ -182,7 +182,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | identify | `Domain/Identification/AcoustIdSelection.cs` | `Ingest/FpcalcFingerprinter.cs`, `Tagging/AcoustIdTagField.cs` |
 | enrich | `Domain/Catalogue/PrimaryCredits.cs`, `LatinNames.cs` | `Providers/MusicBrainz/MusicBrainzCatalogue.cs` |
 | portraits | `Domain/Catalogue/ArtistNameMatch.cs`, `Abstractions/ArtistPortraitSources.cs` | `Providers/{Wikidata,Qobuz,AudioDb}/*Portraits.cs` |
-| attribute | `Domain/Identification/ReleaseFit.cs`, `ReleaseAttribution.cs`, `Catalogue/AlbumFolder.cs` (and its TS twin `ALBUM_FOLDER_DEPTH` in `seating.ts` — change both) | `Api/Matching/ComponentCandidates.cs` |
+| attribute | `Domain/Identification/ReleaseAttribution.cs`, `EditionProof.cs`, `FolderOrder.cs`, `ReleaseFit.cs`, `Catalogue/AlbumFolder.cs` (and its TS twin `ALBUM_FOLDER_DEPTH` in `seating.ts` — change both), `Catalogue/Editions.cs` | `Api/Matching/ComponentCandidates.cs` |
 | probe | `Domain/Abstractions/IAudioProbe.cs` | `Ingest/FfprobeAudioProbe.cs` |
 | tag write | `Domain/Catalogue/CatalogueTags.cs` | `Tagging/TagWriter.cs`, `Tagging/CatalogueTagFields.cs` |
 | by-hand matching | `web/src/pages/seating.ts`, `identify.ts` | `Api/Endpoints/CatalogueEndpoints.{AlbumMatching,Identify}.cs` |
@@ -261,30 +261,52 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   described. The fix is recomputing every credit on a rename, which is a pass of
   its own.
 
-**Attribution's unit is a folder, not a file.** *The folder's boundary is
-believed; its name never is* — a folder named for a 1979 album holds the audio of
-the 2015 remaster. But which files belong *together* is a different claim, and
-refusing both cost more than it bought: growing components outwards through
-shared candidates is how a compilation welds two albums into one set.
+**Attribution's unit is an album folder, and a folder is one album** (ADR 0013).
+*The folder's boundary is believed; its name never is* — a folder named for a
+1979 album holds the audio of the 2015 remaster. The album is a release group;
+the pressing is claimed only where nothing can contradict it, because a download
+filed as the CD it resembles is a lie every later screen repeats.
 
+- **The album needs more than half the folder**, counted over every file
+  including the unidentified. Files on no edition of it stay with the folder
+  (`OnNoEdition`); two albums fitting equally is a refusal.
+- **A pressing is proved, never chosen** (`EditionProof`): track count equals
+  the folder's file count, *every* track within 100 ms of its printed length, on a
+  track list whose lengths are known and not all whole seconds, and no lossless
+  file a CD could not hold on a medium that may be a CD. More than one proving is
+  album only, the tie counted in `EditionAlternatives`; pseudo-releases never
+  prove. The length is the probe's, else fpcalc's (hundredths of a second) —
+  **so an unprobed folder can prove a CD it cannot contradict**, a gap accepted
+  in the plan.
+- **Order is relative, never a number** (`FolderOrder`): the files' own tags if
+  every one is numbered, else numbered names, checked against every official
+  edition on shared recordings. Only a *tag* order every official edition
+  reverses, from an uncapped gather, is `Contradicted`; without a proven pressing
+  or a person's album that is a question (`OrderContradicted`). Tags are read
+  here and stored as `TagTrackNumber`/`TagDiscNumber` for every file in the
+  folder; any read failure means names instead. **The pass opens files, so it needs the volume.**
+- **The whole folder is re-decided when any file in it is pending** — a new file
+  changes the file count a pressing is proved against. Rows a person decided are
+  read and never decided again (their own tag numbers are still recorded),
+  except `AlbumByPerson`/`AlbumByAgent`, whose album is kept and whose pressing
+  the rule may prove. **A person's album names the folder's only where their
+  answers are most of it**; a minority pick keeps its own album untouched and the
+  rule decides the rest. `SetFolderAlbum` answers for every file, so it always
+  names the folder's; the pass never moves a named folder.
 - **Two MusicBrainz shapes are unusable and force a two-stage gather.**
   `inc=releases` on a recording lookup caps at 25 without saying so;
   `inc=recordings` on a *browse* silently drops releases (40 becomes 15 while
-  `release-count` still claims 40). Track lists come from `GetReleaseAsync`.
-- **Gates come before size.** The greedy "most files explained" let a 31-track
-  bootleg *Greatest Hits* claim seventeen files across four albums.
-- **Duration is the edition discriminator**, stored to 10ms — enough to separate
-  a remaster from three earlier pressings on identical track lists.
-- **A tie resolves three ways, by what the tie costs:** editions agreeing on
-  every position → a stated tie-break; disagreeing about disc or position → keep
-  only the release group, because a track number would be an invention; neither →
-  refuse. Asked of the whole set, or one rip splits and reports itself incomplete.
+  `release-count` still claims 40). Track lists come from `GetReleaseAsync`. The
+  browse is paged to its end, which is what makes "on no edition of this album"
+  a claim rather than a guess.
 - **EF queries the database, not the change tracker** — three unique-index
   collisions in live runs came from this, so everything the writer mints goes
   through a dictionary.
-- **Only chosen releases persist as catalogue, but their whole track list does**,
-  which is what makes "you are missing track 7" answerable. A *refused*
-  component's shortlist goes to `ReleaseCandidateSet`, keyed on the one
+- **The album's official editions persist as catalogue, whole track lists and
+  all**, plus the proven pressing, the best-fitting edition where it is of the
+  chosen album, and any edition a substituted recording is printed on — the album page's combined track list (`Editions.Combine`) is read
+  from them, which is what makes "the deluxe has two you do not" answerable. A
+  *refused* folder's shortlist goes to `ReleaseCandidateSet`, keyed on the one
   `ReleaseLookupUtc` its files share.
 - **Known failure, expected fixed by the folder cut and NOT re-measured.**
   Michael Jackson's albums attributed wrongly; the loss was in `GatherAsync`, not
@@ -302,7 +324,7 @@ claimed page with **deliberately no channel** — see the deadlock gotcha.
 elsewhere and none of it exists; this pass is what makes the answers portable.
 
 - **Three buttons and no fourth route.** One pass, three scopes (library /
-  release / artist) rather than three mechanisms — "quick" is a property of the
+  album / artist) rather than three mechanisms — "quick" is a property of the
   library, not of the endpoint. The artist scope reuses the same rule the artist
   page browses by, so what is written is what that page lists.
 - **There is no `TagsWrittenUtc`, because the diff is the worklist** — a file
@@ -316,9 +338,23 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   reports everything that moved, so the intended fields come out of it — and
   `DATE` with them, because ATL derives it from the same value as `YEAR`. Without
   that pairing every write correcting a year rolls itself back.
-- **All three links or none** (recording, track, release), **only the year, never
-  a date**, and **a fact the catalogue does not hold produces no entry** — over a
-  library at a time a blank is a deletion wearing an edit's clothes.
+- **ATL re-renders a date on every save, and its own reading cannot see it.**
+  ID3v2.3's `TDAT` day is dropped on the upgrade to 2.4, "2008-10" gains a first
+  of the month, "12.10.2008" is read the other way round. When the year is not
+  in the plan, TagLib#'s reading of the stored date (`RecordedDate`) must match
+  before and after, or the file is not written — the owner's choice over losing
+  the day. TagLib# itself folds 2.3's `TYER`+`TDAT` month-first; `VerifierReading`
+  puts it back.
+- **A pressing's tags only with a proven pressing.** A file held to its album
+  alone gets the album's facts — title, artist, album, album artist (the display
+  edition's billing), year (`AlbumYear`), recording and release-group MBIDs, and
+  its place in the folder's order as the track number — and no disc, track total
+  or release MBID. The track number and year go only where the file has none of
+  its own, or has the one this pass filled in (the journal says which), and no
+  track number beside a disc number. **Only the year, never a date**, and **a
+  fact the catalogue does not hold produces no entry** — over a library at a time
+  a blank is a deletion wearing an edit's clothes, so an older pressing's tags on
+  a file stay until something replaces them.
 - **No single file may end the run, and the catch is on `Exception`.** Because
   the diff is the worklist, nothing steps over a row that threw. Serial, because
   ATL renders the whole file into a staged sibling.
@@ -432,13 +468,22 @@ same raster allowlist with SVG refused.
   **Qobuz is the fallback** (`QobuzCovers`), reached only where that answered
   nothing — 105 of 612 albums here — and keyed on the barcode where there is
   one, on a matched title and artist otherwise. Measured on the first run: **63
-  of the 105 gained a cover**, 13 by barcode and 50 by title. A loose match is
+  of the 105 gained a cover**, 13 by barcode and 50 by title. The barcode is any
+  edition's of the album, with the check digit Qobuz drops from Universal's
+  dropped here too (`Barcodes`); the artist is the whole credit line or any one
+  name on it, because a classical box is billed composer, orchestra and
+  conductor here and the conductor alone there. A loose match is still
   refused: an ampersand written out as "and" does not fold, and that is a
   `QobuzCoversTests` case rather than an oversight.
 - **A row with no bytes is a stamp, not an answer**, and expires after
   `CatalogueEndpoints.CoverRetryAfter` (a week). Treated as final it would hide
   every sleeve that reached either source after the first view, forever, with no
   endpoint to clear it. **A row with bytes never expires**, from any source.
+- **Where neither source has one, the album's own files lend theirs** — the
+  album folder's cover image, else an embedded front, never a folder above the
+  album's — **served and never stored**: a
+  row with bytes is never re-asked, so storing it would keep out the sleeve the
+  archive gains later.
 - **An outage is not stored** — from either source, which is why `QobuzCovers`
   throws rather than returning null when it could not ask. A stored outage would
   be believed for a week.
@@ -453,7 +498,7 @@ write API cannot create a release at all, so the supported path is the one Picar
 uses. The action URL is deliberately not configurable: an edit against a mirror
 is refused or lost at the next replication. Lengths are measured, never declared.
 
-**`…/releases/{id}/fingerprints`** is the only *answer* this application gives a
+**`…/albums/{id}/fingerprints`** is the only *answer* this application gives a
 provider. A separate interface (`IAcoustIdSubmission`) so something can be given
 the ability to ask without the ability to assert; **nothing automatic may ever
 call it**, because a pass submitting conclusions drawn from AcoustID's own
@@ -512,10 +557,13 @@ as the next piece of work.
 **The three Acquire lists are answered out of the catalogue with no request to
 Qobuz.** `items` is quality and its unit is the **album folder**, never the
 release (keying attributed files on their release and the rest on their folder
-put one album on the list 125 times). `incomplete` is completeness and its unit
-*is* a release, because only a release has a track list to be short of — and
-subtracting unmatched files is the only reason it is worth reading, since 128 of
-175 looked short only because files in the folder had not been matched yet.
+put one album on the list 125 times). `incomplete` is completeness: one row per
+album, measured against the claimed pressing where every file is filed under
+one and otherwise against the stored edition the files are nearest to
+(`Editions.Nearest`) — never a longer one they were not, which would sell the
+deluxe's bonus disc as a gap. Subtracting unfiled files is the only reason it is
+worth reading, since 128 of 175 looked short only because files in the folder
+had not been matched yet.
 `missing` starts from a person: records credited to a **followed** artist that
 nothing here sits under, cut by `Discography.IsGap` — **an explicit placeholder,
 the only `TODO(you)` in the repo, with six tests prefixed `PlaceholderDecision_`
@@ -604,13 +652,13 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Twenty-one tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Twenty-two tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
-`list_releases`, `get_release`, `get_file`, `list_folder`, `folder_contents`,
+`list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
 `release_slots`, `start_pass`, `cancel_pass`, `decide_recording`,
 `decide_component`, `file_under_release`, `mark_folder_unreleased`,
-`reopen_folder`.
+`reopen_folder`, `set_folder_album`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every
@@ -672,8 +720,9 @@ query with `:root:not([data-theme='light'])`. Don't collapse these into a boolea
   `band` carries the band's **id**, not the printed credit, because this library
   prints both "The Robert Cray Band" and "Robert Cray Band".
 - **`certainty.ts`** — the one place attribution outcomes become English, as
-  `openQuestions.ts` is for refusals. `Attributed` renders as **nothing at all**:
-  a badge on every album trains the eye to skip the two that matter.
+  `openQuestions.ts` is for refusals. `Attributed` and `GroupOnly` render as
+  **nothing at all**: a badge on every album trains the eye to skip the ones
+  that matter.
 
 **Accessibility is enforced, not advised.** `pnpm test` runs **every story** as a
 test in real Chromium with axe at `test: 'error'` — the enforcement half of a
@@ -696,9 +745,10 @@ adding stories, because that is what tests it.**
 - **Two tag libraries on purpose** (ADR 0002): ATL.NET writes, TagLib# reads the
   file back to verify, disagreement aborts. ffmpeg must never write tags — it
   rewrites containers and drops non-standard frames. The implemented path adds
-  two steps the ADR lacks: a length sanity check, which catches the one failure
-  two agreeing readers cannot (perfect tags, no audio), and appending the undo
-  entry *before* the commit so a crash over-records rather than under-records.
+  three steps the ADR lacks: a length sanity check, which catches the one failure
+  two agreeing readers cannot (perfect tags, no audio); appending the undo entry
+  *before* the commit so a crash over-records rather than under-records; and a
+  date check through TagLib#, below.
 - **TypeScript 7 everywhere** except `tools/openapi-codegen`, pinned to 5.9
   because `openapi-typescript` drives a compiler API 7.0 doesn't ship (ADR 0005).
 - Relative TS imports carry an explicit `.ts`/`.tsx` extension, which is what lets

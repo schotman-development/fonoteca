@@ -37,22 +37,26 @@ Four pillars, none of them built yet:
 > come out: everyone credited on something you own, including the conductors,
 > orchestras and composers a credit line never mentions.
 >
-> **`POST /api/library/attribute`** decides which release each file actually came
-> from. It is the one pass that cannot work a file at a time: a recording of
-> *Sloe Gin* appears on the album, on two compilations, on a remaster and on six
-> regional pressings, and nothing about one file prefers any of them — eleven
-> files filling eleven of eleven tracks prefer exactly one. So it decides files
-> in *sets*, discovered by following shared candidate releases rather than by
-> reading directories.
+> **`POST /api/library/attribute`** decides which album each album folder is,
+> and which pressing only where the audio proves it. A recording of *Sloe Gin*
+> appears on the album, on two compilations, on a remaster and on six regional
+> pressings, and nothing about one file prefers any of them — so the folder is
+> the unit: the album is the one explaining more than half of it, and a pressing
+> is claimed only when its track count is the folder's file count, every track
+> is within a tenth of a second of its printed length, and nothing in the audio
+> contradicts its medium. A download filed as the CD it resembles is 99% right
+> and 1% a lie; where more than one edition fits, or none does, only the album is
+> named (ADR 0013).
 >
-> **The folders are deliberately not consulted.** They are used afterwards, at
-> `GET /api/catalogue/attribution`, as an independent second opinion: which
-> folders were split across albums, which albums drew from several folders. Both
-> sides are wrong sometimes — a folder named for a 1979 album can hold the audio
-> of its 2015 remaster, which is exactly the kind of thing comparing measured
-> durations against each edition's printed ones can tell.
+> **The folder's boundary is believed; its name never is.** A folder named for a
+> 1979 album can hold the audio of its 2015 remaster, which is exactly the kind
+> of thing comparing measured durations against each edition's printed ones can
+> tell. The files' own track numbers are checked against the album's editions for
+> relative order and shown as the file's own, never promoted to a position; a
+> file with no number of its own is given its place in the folder's order when
+> tags are written.
 >
-> `GET /api/catalogue/releases` and the `/library/releases` page are what come
+> `GET /api/catalogue/albums` and the `/library/albums` page are what come
 > out, including the tracks you are missing. Nothing hashes, probes or downloads.
 
 ## Layout

@@ -135,7 +135,7 @@ Per track, then, inside `DownloadTrackAsync` while the response is still in hand
 2. mint or find release, group, recording, track, artists, relationships
 3. insert the `MediaFile` row — links, `LinkedByProvider`, `AttributedByProvider`,
    `RecordingDecidedUtc`, `ReleaseDecidedUtc`
-4. tags, through `TagWriteService` with `TagWriteScope.ForRelease`
+4. tags, through `TagWriteService` with `TagWriteScope.ForAlbum`
 
 ## Why
 

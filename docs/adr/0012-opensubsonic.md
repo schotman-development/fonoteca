@@ -56,7 +56,7 @@ That is the file manager's own sentence — *what is there comes from the disk;
 what it means comes from the catalogue* — and the protocol happens to have a
 separate endpoint family for each. Implementing both is cheaper than
 implementing either one well, because neither then needs a fallback: the id3
-endpoints serve exactly the releases the passes have attributed, and every file
+endpoints serve exactly the albums the passes have attributed, and every file
 in the library, attributed or not, is reachable by folder. No synthetic album,
 no invented artist, no rule deciding where an unfiled file should appear.
 
@@ -71,12 +71,12 @@ repair is finished sees the work in progress, which is the truth.
 | Subsonic | here | note |
 | --- | --- | --- |
 | `artist` | `Artist` | `musicBrainzId` and `sortName` are OpenSubsonic fields the row already carries |
-| `album` | `Release`, not `ReleaseGroup` | `Track.Position` and `DiscNumber` hang off a release; an album with no track numbers is useless to a client |
+| `album` | `ReleaseGroup` | amended: first `Release`, because `Track.Position` and `DiscNumber` hang off a release — but a file whose pressing is not proven has no release and is still an album a client must be able to play. The name, billing line and sleeve are the display edition's, as on the album page |
 | `song` | `MediaFile` | it is what gets streamed; nothing else can be |
-| `song.track` / `discNumber` | `Track.Position` / `Track.DiscNumber` via `MediaFile.TrackId` | null until the file is attributed |
+| `song.track` / `discNumber` | `Track.Position` / `Track.DiscNumber` via `MediaFile.TrackId`, else `MediaFile.TagTrackNumber` / `TagDiscNumber` | the pressing's numbers where one is claimed, otherwise the file's own tags — never a number made up. Songs follow the folder's settled order (`FolderPosition`), then their file names in number order |
 | `song.duration` / `bitRate` / `samplingRate` / `channelCount` / `bitDepth` | `MediaFile.Quality` | see below |
 | `song.suffix` / `contentType` | derived from `MediaFile.Path` through `FilePreview.Of` | there is no format column, and adding one would duplicate the extension |
-| `album.year` | `Release.ReleasedYear` | only the year, as everywhere else — `ReleaseDate` stays partial |
+| `album.year` | `ReleaseGroup.FirstReleaseYear`, else the earliest official stored edition's, else the earliest stored edition's | only the year, as everywhere else — `ReleaseDate` stays partial |
 | `coverArt` | `ReleaseCover`, or embedded/folder art | two existing handlers behind one prefixed id; an artist carries `artistImageUrl` instead |
 | `getScanStatus` / `startScan` | `LibraryScanService` | free, and starting a scan from a phone is genuinely useful |
 
@@ -299,7 +299,8 @@ this before probing gets a library with no durations. That is worth saying on
 the setting and worth saying on the screen.
 
 **`getCoverArt` is one endpoint over two existing handlers** — the release cover
-(`ReleaseId`, with an ETag of `SavedUtc.UtcTicks`) and a path's own picture, the
+of the album's display edition (`ReleaseId`, with an ETag of `SavedUtc.UtcTicks`)
+and a path's own picture, the
 file's embedded art or the folder's `cover.jpg`. The prefixed id is what routes
 between them, and the one-week negative-cache window on `ReleaseCover` now
 expires under load from clients that request art per song rather than per album.
