@@ -179,9 +179,15 @@ internal static class MusicBrainzMapper
     public static MusicBrainzRelease ToRelease(IRelease source)
     {
         var tracks = new List<MusicBrainzTrack>();
+        var media = new List<MusicBrainzMediumSummary>(source.Media?.Count ?? 0);
 
         foreach (var medium in source.Media ?? [])
         {
+            media.Add(new MusicBrainzMediumSummary(
+                Position: medium.Position,
+                Format: NullIfBlank(medium.Format),
+                TrackCount: medium.TrackCount));
+
             foreach (var track in medium.Tracks ?? [])
             {
                 tracks.Add(new MusicBrainzTrack(
@@ -217,7 +223,8 @@ internal static class MusicBrainzMapper
             PrimaryType: NullIfBlank(group?.PrimaryType),
             SecondaryTypes: group?.SecondaryTypes ?? [],
             Credits: ToCredits(source.ArtistCredit),
-            Tracks: tracks);
+            Tracks: tracks,
+            Media: media);
     }
 
     /// <summary>A browse result: a release, counted but not listed.</summary>
@@ -277,6 +284,14 @@ internal static class MusicBrainzMapper
             SecondaryTypes: source.SecondaryTypes ?? [],
             FirstReleaseYear: ToYear(source.FirstReleaseDate));
     }
+
+    /// <summary>An album search hit: the browse shape, plus the billing line, the edition count and the score.</summary>
+    public static MusicBrainzReleaseGroupMatch ToReleaseGroupMatch(ISearchResult<IReleaseGroup> source) =>
+        new(
+            Group: ToReleaseGroup(source.Item),
+            Credits: ToCredits(source.Item.ArtistCredit),
+            Editions: source.Item.Releases?.Count ?? 0,
+            Score: source.Score);
 
     /// <summary>A search hit: the browse shape, plus the billing line and the score.</summary>
     public static MusicBrainzReleaseMatch ToReleaseMatch(ISearchResult<IRelease> source) =>

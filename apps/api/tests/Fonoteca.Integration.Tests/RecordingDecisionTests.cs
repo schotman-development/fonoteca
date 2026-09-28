@@ -1041,6 +1041,17 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MusicBrainzReleaseMatch>>([]);
 
+        public Task<IReadOnlyList<MusicBrainzReleaseGroupMatch>> SearchReleaseGroupsAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroupMatch>>([]);
+
+        public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForReleaseGroupAsync(
+            Mbid releaseGroup,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseCandidate>>([]);
+
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
             CancellationToken cancellationToken = default)

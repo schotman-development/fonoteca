@@ -97,6 +97,42 @@ public interface IMusicBrainzCatalogue
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Albums matching what somebody typed, most relevant first.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SearchReleasesAsync"/>'s twin one level up, and the one the
+    /// Identify screen asks: a release search spends its page on the editions of
+    /// whichever album is most reissued, so the album somebody meant can be
+    /// pushed off it by forty pressings of another. Same index, same syntax.
+    /// </remarks>
+    /// <param name="limit">Results wanted. MusicBrainz caps this at 100.</param>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">
+    /// The request was refused — which is also what a server with no search index
+    /// looks like from here.
+    /// </exception>
+    Task<IReadOnlyList<MusicBrainzReleaseGroupMatch>> SearchReleaseGroupsAsync(
+        string query,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every edition of one album, with track counts and no track lists.
+    /// </summary>
+    /// <remarks>
+    /// Paged to exhaustion like <see cref="BrowseReleasesForRecordingAsync"/>, and
+    /// for its reason without recordings: a browse that includes them silently
+    /// drops releases. Track lists are <see cref="GetReleaseAsync"/>, one edition
+    /// at a time.
+    /// </remarks>
+    /// <returns>Empty when MusicBrainz has no such album.</returns>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">The request was refused.</exception>
+    Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForReleaseGroupAsync(
+        Mbid releaseGroup,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// One release, with its full track list.
     /// </summary>
     /// <remarks>
@@ -599,6 +635,15 @@ public sealed record MusicBrainzReleaseCandidate(
     public int TrackCount => Media.Sum(medium => medium.TrackCount);
 }
 
+/// <summary>An album search hit: the group, its billing line, and how many editions it has.</summary>
+/// <param name="Editions">The releases MusicBrainz lists in the group, of any status.</param>
+/// <param name="Score">MusicBrainz's own relevance, 0-100. Printed, never ranked on.</param>
+public sealed record MusicBrainzReleaseGroupMatch(
+    MusicBrainzReleaseGroup Group,
+    IReadOnlyList<MusicBrainzCredit> Credits,
+    int Editions,
+    int? Score);
+
 /// <summary>
 /// A search hit: a release, plus the two things a browse result cannot carry.
 /// </summary>
@@ -646,7 +691,15 @@ public sealed record MusicBrainzRelease(
     IReadOnlyList<MusicBrainzCredit> Credits,
 
     /// <summary>Tracks across every disc, ordered by disc then position.</summary>
-    IReadOnlyList<MusicBrainzTrack> Tracks);
+    IReadOnlyList<MusicBrainzTrack> Tracks,
+
+    /// <summary>
+    /// Each disc's medium: its position and format — <c>CD</c>, <c>Digital
+    /// Media</c>, <c>12" Vinyl</c>. Per disc because a CD+DVD-Video set is two
+    /// answers, and which disc a file sits on decides which one it is held to.
+    /// Null where the caller built the release without them.
+    /// </summary>
+    IReadOnlyList<MusicBrainzMediumSummary>? Media = null);
 
 /// <summary>A label and the catalogue number it gave this release.</summary>
 public sealed record MusicBrainzLabel(Mbid? Id, string? Name, string? CatalogNumber);

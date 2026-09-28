@@ -663,6 +663,51 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     }
 
     /// <summary>
+    /// An album search comes back as albums: the group, its billing line, how
+    /// many editions it has, and the score.
+    /// </summary>
+    /// <remarks>
+    /// A verbatim WS/2 document for "water boy" by the Don Shirley Trio, the
+    /// album this screen was rebuilt for after its folder was filed under a 1999
+    /// compilation.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumSearchReturnsGroupsWithTheirBillingAndEditionCount()
+    {
+        var (catalogue, stub) = Build(Recorded("search-release-groups-water-boy.json"));
+
+        var matches = await catalogue.SearchReleaseGroupsAsync("water boy", 3, Token);
+
+        Assert.Contains("/ws/2/release-group", stub.Requests[0].Uri.AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal(3, matches.Count);
+
+        var album = matches[0];
+        Assert.Equal(new Mbid(Guid.Parse("a6fa83e6-d4ac-406e-905a-03f1a87a0ce3")), album.Group.Id);
+        Assert.Equal("Water Boy", album.Group.Title);
+        Assert.Equal("Album", album.Group.PrimaryType);
+        Assert.Equal(1965, album.Group.FirstReleaseYear);
+        Assert.Equal(2, album.Editions);
+        Assert.Equal(100, album.Score);
+        Assert.Equal("Don Shirley Trio", Assert.Single(album.Credits).Name);
+
+        Assert.Equal("Single", matches[2].Group.PrimaryType);
+    }
+
+    /// <summary>An album's editions are browsed by the album, and paged like a recording's.</summary>
+    [Fact]
+    public async Task AnAlbumsEditionsAreBrowsedByTheAlbum()
+    {
+        var album = new Mbid(Guid.Parse("a6fa83e6-d4ac-406e-905a-03f1a87a0ce3"));
+        var (catalogue, stub) = Build(Once(ReadFixture("browse-releases-page2.json")));
+
+        var candidates = await catalogue.BrowseReleasesForReleaseGroupAsync(album, Token);
+
+        Assert.NotEmpty(candidates);
+        Assert.Contains($"release-group={album.Value}", stub.Requests[0].Uri.Query, StringComparison.Ordinal);
+        Assert.EndsWith("/ws/2/release", stub.Requests[0].Uri.AbsolutePath.TrimEnd('/'), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Configuration that would get the address blocked is refused rather than
     /// obeyed. The public instance is the only server this applies to.
     /// </summary>

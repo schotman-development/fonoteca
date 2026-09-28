@@ -4,6 +4,8 @@ using Fonoteca.Domain.Catalogue;
 using Fonoteca.Providers.Logging;
 using MetaBrainz.Common;
 using MetaBrainz.MusicBrainz;
+using MetaBrainz.MusicBrainz.Interfaces.Browses;
+using MetaBrainz.MusicBrainz.Interfaces.Entities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -203,13 +205,43 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                     .ConfigureAwait(false)),
             cancellationToken);
 
-    public async Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
+    public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
         Mbid recording,
-        CancellationToken cancellationToken = default)
-    {
-        var candidates = await LookupAsync(
+        CancellationToken cancellationToken = default) =>
+        BrowseReleasesAsync(
             "recording releases",
             recording,
+            (offset, token) => _query.BrowseRecordingReleasesAsync(
+                recording.Value,
+                BrowsePageSize,
+                offset,
+                BrowseIncludes,
+                cancellationToken: token),
+            cancellationToken);
+
+    public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForReleaseGroupAsync(
+        Mbid releaseGroup,
+        CancellationToken cancellationToken = default) =>
+        BrowseReleasesAsync(
+            "release group releases",
+            releaseGroup,
+            (offset, token) => _query.BrowseReleaseGroupReleasesAsync(
+                releaseGroup.Value,
+                BrowsePageSize,
+                offset,
+                BrowseIncludes,
+                cancellationToken: token),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesAsync(
+        string entityType,
+        Mbid id,
+        Func<int, CancellationToken, Task<IBrowseResults<IRelease>>> browse,
+        CancellationToken cancellationToken)
+    {
+        var candidates = await LookupAsync(
+            entityType,
+            id,
             async token =>
             {
                 var collected = new List<MusicBrainzReleaseCandidate>();
@@ -217,13 +249,7 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
 
                 while (true)
                 {
-                    var page = await _query.BrowseRecordingReleasesAsync(
-                            recording.Value,
-                            BrowsePageSize,
-                            offset,
-                            BrowseIncludes,
-                            cancellationToken: token)
-                        .ConfigureAwait(false);
+                    var page = await browse(offset, token).ConfigureAwait(false);
 
                     var results = page.Results;
 
@@ -246,7 +272,7 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
             },
             cancellationToken).ConfigureAwait(false);
 
-        // Null is the 404 arm, which for a browse means the recording itself is
+        // Null is the 404 arm, which for a browse means the subject itself is
         // gone — indistinguishable from it being on nothing, and the caller
         // treats both the same way.
         return candidates ?? [];
@@ -280,6 +306,32 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
                 }
 
                 return collected;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        ProviderLog.MusicBrainzSearched(_logger, query, matches?.Count ?? 0);
+
+        return matches ?? [];
+    }
+
+    public async Task<IReadOnlyList<MusicBrainzReleaseGroupMatch>> SearchReleaseGroupsAsync(
+        string query,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+
+        // One page, for SearchReleasesAsync's reason.
+        var matches = await LookupAsync(
+            "release group search",
+            null,
+            async token =>
+            {
+                var results = await _query
+                    .FindReleaseGroupsAsync(query, Math.Clamp(limit, 1, SearchPageSize), simple: false, cancellationToken: token)
+                    .ConfigureAwait(false);
+
+                return results.Results.Select(MusicBrainzMapper.ToReleaseGroupMatch).ToList();
             },
             cancellationToken).ConfigureAwait(false);
 
