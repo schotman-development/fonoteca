@@ -142,6 +142,9 @@ public sealed class ReleaseGroup
 
     public ICollection<Release> Releases { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
+
+    /// <summary>Every file held to this album, whether or not an edition of it is claimed.</summary>
+    public ICollection<MediaFile> Files { get; init; } = [];
 }
 
 /// <summary>A specific published edition: this pressing, this remaster, this region.</summary>
@@ -521,14 +524,35 @@ public sealed class MediaFile
         ReleaseAttributionOutcome.NotAttempted;
 
     /// <summary>
-    /// How many other editions fitted this file exactly as well as the one chosen.
+    /// How many other editions proved exactly as well as the one that did.
     /// </summary>
     /// <remarks>
-    /// Zero when the answer was unambiguous. Non-zero is not an error — it is a
-    /// coin flip that has been recorded as one, which is the only way a reviewer
-    /// can tell a decided answer from a defaulted one after the fact.
+    /// Zero when one edition proved, or none. Non-zero means several did, so none
+    /// is claimed — recorded rather than dropped, because it is the only way a
+    /// reviewer can tell "no pressing fits" from "several fit and nothing
+    /// separates them" after the fact.
     /// </remarks>
     public int EditionAlternatives { get; set; }
+
+    /// <summary>The disc number the file's own tags carry, as the attribution pass last read it.</summary>
+    /// <remarks>
+    /// The file's claim, not the catalogue's: a position is only ever the
+    /// catalogue's through a proven pressing (<see cref="TrackId"/>). Read in the
+    /// same save as <see cref="ReleaseLookupUtc"/>, which is its "we asked"
+    /// stamp, and cleared with it when the scan sees the bytes change. Null when
+    /// the tag is absent or the file could not be read.
+    /// </remarks>
+    public int? TagDiscNumber { get; set; }
+
+    /// <summary>The track number the file's own tags carry. See <see cref="TagDiscNumber"/>.</summary>
+    public int? TagTrackNumber { get; set; }
+
+    /// <summary>Where the file stands in its folder's own order, from 1; null where the folder has none.</summary>
+    /// <remarks>See <c>FolderOrder</c>. A place in the running order, not a track number.</remarks>
+    public int? FolderPosition { get; set; }
+
+    /// <summary>What the folder's own order says against the album's editions.</summary>
+    public FolderOrderOutcome OrderOutcome { get; set; } = FolderOrderOutcome.NotChecked;
 
     /// <summary>
     /// When a person settled this file's album by hand, if one ever did.
@@ -796,18 +820,28 @@ public enum ReleaseAttributionOutcome
     /// <summary>Nothing has asked yet.</summary>
     NotAttempted = 0,
 
-    /// <summary>One release fitted, and nothing else fitted as well.</summary>
+    /// <summary>
+    /// The album is known and exactly one pressing of it is proven: every track
+    /// within 100 ms, the track count the folder's, and nothing in the audio
+    /// contradicting its medium. See <c>EditionProof</c>.
+    /// </summary>
     Attributed = 1,
 
     /// <summary>
     /// Several editions fitted identically and agreed on where this track sits,
     /// so one was chosen by the stated tie-break and the rest counted.
     /// </summary>
+    /// <remarks>
+    /// No longer written: an edition is claimed only on proof, and two editions
+    /// proving alike leave only the album (<see cref="GroupOnly"/>). Rows written
+    /// before that still carry it until they are decided again.
+    /// </remarks>
     AttributedAmbiguously = 2,
 
     /// <summary>
-    /// The album is known and the pressing is not, because the editions that
-    /// fitted disagree about this track's disc or position.
+    /// The album is known and the pressing is not — none of its editions is
+    /// proven, or more than one is, and naming one would be a claim the evidence
+    /// does not make. The ordinary outcome.
     /// </summary>
     GroupOnly = 3,
 
@@ -866,6 +900,53 @@ public enum ReleaseAttributionOutcome
 
     /// <summary>An agent said these files came from no release. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.</summary>
     UnreleasedByAgent = 12,
+
+    /// <summary>
+    /// In the folder of an album, and on no edition of it MusicBrainz lists.
+    /// </summary>
+    /// <remarks>
+    /// The folder is the album, so the file stays with it — a bonus track only a
+    /// shop sold, or a recording AcoustID linked to a compilation instead. Held to
+    /// the album (<c>ReleaseGroupId</c> is set) and not a question; kept apart
+    /// from <see cref="GroupOnly"/> because "the album's editions print this" and
+    /// "the folder says so" are different facts.
+    /// </remarks>
+    OnNoEdition = 13,
+
+    /// <summary>
+    /// The files' own track order contradicts an order every edition of the
+    /// album agrees on. A question for a person; nothing is filed.
+    /// </summary>
+    OrderContradicted = 14,
+
+    /// <summary>
+    /// A person named the folder's album. The rule still proves the pressing
+    /// inside it; the album itself is theirs and no pass replaces it.
+    /// </summary>
+    AlbumByPerson = 15,
+
+    /// <summary>An agent named the folder's album. See <see cref="AlbumByPerson"/>.</summary>
+    AlbumByAgent = 16,
+}
+
+/// <summary>What the files' own order says against the album's editions.</summary>
+/// <remarks>See <c>FolderOrder</c>, which decides it.</remarks>
+public enum FolderOrderOutcome
+{
+    /// <summary>Not looked at: decided before the order was checked, or no album to check against.</summary>
+    NotChecked = 0,
+
+    /// <summary>An official edition prints these recordings in the files' own order.</summary>
+    Corroborated = 1,
+
+    /// <summary>Neither shown right nor shown wrong: the editions disagree, or share too little with the files.</summary>
+    Uncorroborated = 2,
+
+    /// <summary>The files carry no order of their own, and the order every edition agrees on is used.</summary>
+    TakenFromEditions = 3,
+
+    /// <summary>The files' tagged order reverses a pair every official edition holding both prints the other way.</summary>
+    Contradicted = 4,
 }
 
 /// <summary>

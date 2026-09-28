@@ -148,6 +148,10 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
                 BitrateBps = 900_000,
                 IsLossless = true,
             };
+            row.TagDiscNumber = 1;
+            row.TagTrackNumber = 3;
+            row.FolderPosition = 3;
+            row.OrderOutcome = FolderOrderOutcome.Corroborated;
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
@@ -181,6 +185,12 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Null(updated.RecordingId);
         Assert.Null(updated.RecordingLookupUtc);
         Assert.Equal(EnrichmentOutcome.NotAttempted, updated.EnrichmentOutcome);
+
+        // The numbers read out of the old bytes, and the order they were placed in.
+        Assert.Null(updated.TagDiscNumber);
+        Assert.Null(updated.TagTrackNumber);
+        Assert.Null(updated.FolderPosition);
+        Assert.Equal(FolderOrderOutcome.NotChecked, updated.OrderOutcome);
 
         // The Recording row itself survives. It is a fact about MusicBrainz,
         // shared with every other file that resolved to it.

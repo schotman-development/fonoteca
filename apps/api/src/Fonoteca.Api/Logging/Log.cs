@@ -466,18 +466,20 @@ internal static partial class Log
     [LoggerMessage(
         EventId = 1261,
         Level = LogLevel.Information,
-        Message = "Release attribution finished ({JobId}): {Attributed} attributed, "
-            + "{Ambiguous} from tied editions, {GroupOnly} to an album but no pressing, "
-            + "{NoFit} with no confident fit, {NoCandidate} on no release at all, {Failed} failed; "
+        Message = "Release attribution finished ({JobId}): {Attributed} on a proven pressing, "
+            + "{GroupOnly} to an album but no pressing, {OnNoEdition} in an album's folder on none of its editions, "
+            + "{NoFit} with no confident fit, {NoCandidate} on no release at all, "
+            + "{OrderContradicted} in an order every edition contradicts, {Failed} failed; "
             + "{Releases} releases written, in {ElapsedMs}ms")]
     public static partial void AttributionCompleted(
         ILogger logger,
         string jobId,
         int attributed,
-        int ambiguous,
         int groupOnly,
+        int onNoEdition,
         int noFit,
         int noCandidate,
+        int orderContradicted,
         int failed,
         int releases,
         long elapsedMs);

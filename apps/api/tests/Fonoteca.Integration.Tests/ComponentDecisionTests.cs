@@ -199,10 +199,10 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
     [Fact]
     public async Task ThePassStoresTheCandidatesItWouldOtherwiseDiscard()
     {
-        // Drifted past the pass's tolerance, so it refuses the component rather
-        // than filing it — a confidently attributed component is not a question
-        // and deliberately gets no document.
-        await SeedComponentAsync(10, attributed: false, drift: TimeSpan.FromSeconds(5));
+        // Two files of a ten-track album, under the coverage floor, so the pass
+        // refuses the folder rather than claim the album — a claimed album is
+        // not a question and deliberately gets no document.
+        await SeedComponentAsync(2, attributed: false);
 
         var catalogue = new StubCatalogue();
         using var factory = Factory(catalogue);
@@ -582,8 +582,7 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
         bool stray = false,
         int from = 0,
         DateTimeOffset? refused = null,
-        bool attributed = true,
-        TimeSpan drift = default)
+        bool attributed = true)
     {
         var stamp = refused ?? Refused;
 
@@ -613,7 +612,7 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
                 EnrichmentOutcome = EnrichmentOutcome.Linked,
                 AcoustIdOutcome = AcoustIdOutcome.Identified,
                 AcoustIdCheckedUtc = stamp,
-                FingerprintDuration = Length(index) + drift,
+                FingerprintDuration = Length(index),
 
                 // `attributed: false` leaves the file on the attribution pass's
                 // own worklist, which is what a test of the pass needs. The

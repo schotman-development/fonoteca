@@ -4,6 +4,9 @@ using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Fixtures;
+using Fonoteca.Ingest;
+using Fonoteca.Tagging;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,14 +20,16 @@ namespace Fonoteca.Integration.Tests;
 /// </summary>
 /// <remarks>
 /// What is under test here is not the rule — <c>ReleaseAttributionTests</c> pins
-/// that with no database at all — but everything around it: that a component is
-/// discovered from a seed without anyone naming it, that only the releases
-/// something was filed under are written, that the track list persisted is the
-/// whole one rather than the part the library holds, and that a second pass
-/// changes nothing.
+/// that with no database at all — but everything around it: that an album
+/// folder is gathered from a seed without anyone naming it, that only the chosen
+/// album's editions are written, that the track list persisted is the whole one
+/// rather than the part the library holds, that a person's album is kept, and
+/// that a second pass changes nothing.
 ///
-/// Seeded paths are deliberately misleading in one test, because the pass must
-/// not read them.
+/// Seeded lengths are milliseconds off the whole second, as real ones are: a
+/// pressing is proved only against lengths that were measured, and a whole
+/// second is what a guess looks like. Seeded paths are deliberately misleading
+/// in one test, because the pass must not read the folder's name.
 /// </remarks>
 [Collection(nameof(PostgresCollection))]
 public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsyncLifetime
@@ -41,10 +46,13 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
     private string _connectionString = string.Empty;
 
+    private string _root = string.Empty;
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     public async ValueTask InitializeAsync()
     {
+        _root = Directory.CreateTempSubdirectory("fonoteca-attribution-").FullName;
         _connectionString = await postgres.CreateDatabaseAsync(Token);
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
@@ -54,6 +62,8 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     public async ValueTask DisposeAsync()
     {
         foreach (var provider in _providers) await provider.DisposeAsync();
+
+        if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 
     /// <summary>
@@ -111,6 +121,10 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         // Each file on its own track, none doubled up.
         Assert.Equal(3, files.Select(f => f.TrackId).Distinct().Count());
+
+        // The names' numbers run as the album does, which is all an order is.
+        Assert.Equal([1, 2, 3], files.Select(f => f.FolderPosition));
+        Assert.All(files, file => Assert.Equal(FolderOrderOutcome.Corroborated, file.OrderOutcome));
     }
 
     /// <summary>
@@ -351,10 +365,11 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             Tracks = [Track(1, Song(1), 180), Track(2, Song(2), 200), Track(3, bonus, 240)],
         };
 
+        // Official, so the album's combined track list keeps it and both are
+        // written in the one folder's save.
         var second = Album() with
         {
             Id = RemasterId,
-            Status = "Promotion",
             Tracks = [Track(1, Song(1), 181), Track(2, Song(3), 220), Track(3, bonus, 241)],
         };
 
@@ -519,15 +534,16 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
-    /// Two pressings of one album, both filed under, sharing a release group.
+    /// Two editions of one album, both written in one folder's save.
     /// </summary>
     /// <remarks>
     /// The third regression from the live runs and the most common of them: two
     /// editions of an album share a release group by definition, and EF queries
     /// the database rather than the change tracker — so the group added for the
-    /// first is invisible to the second, and the component dies on
+    /// first is invisible to the second, and the folder dies on
     /// IX_ReleaseGroups_Mbid taking every one of its files with it. 51
-    /// components in one run.
+    /// components in one run. Every official edition the gather fetched is kept
+    /// now, so this is the ordinary case rather than the rare one.
     /// </remarks>
     [Fact]
     public async Task TwoEditionsSharingAReleaseGroupDoNotCollide()
@@ -535,26 +551,21 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         await SeedAsync(
             ("a/1.flac", Song(1), 180),
             ("a/2.flac", Song(2), 200),
-            ("a/3.flac", Song(3), 220),
-            ("b/1.flac", Song(4), 300),
-            ("b/2.flac", Song(5), 320));
+            ("a/3.flac", Song(3), 220));
 
-        // Same release group, different track lists, so both are filed under.
         var deluxe = Album() with
         {
             Id = RemasterId,
             Title = "Album (deluxe)",
-            Tracks = [Track(1, Song(4), 300), Track(2, Song(5), 320)],
+            Tracks = [.. Album().Tracks, Track(4, Song(4), 300)],
         };
 
         var catalogue = new StubCatalogue()
             .With(Album())
             .With(deluxe)
-            .On(Song(1), AlbumId)
-            .On(Song(2), AlbumId)
-            .On(Song(3), AlbumId)
-            .On(Song(4), RemasterId)
-            .On(Song(5), RemasterId);
+            .On(Song(1), AlbumId, RemasterId)
+            .On(Song(2), AlbumId, RemasterId)
+            .On(Song(3), AlbumId, RemasterId);
 
         await RunAsync(catalogue);
 
@@ -567,7 +578,10 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         Assert.Equal(2, await db.Releases.CountAsync(Token));
         Assert.Equal(1, await db.ReleaseGroups.CountAsync(Token));
-        Assert.Equal(5, await db.MediaFiles.CountAsync(f => f.ReleaseId != null, Token));
+
+        // Three files, three tracks: the plain edition, not the deluxe.
+        var files = await db.MediaFiles.Include(f => f.Release).ToListAsync(Token);
+        Assert.All(files, file => Assert.Equal(AlbumId, file.Release!.Mbid));
     }
 
     /// <summary>
@@ -598,17 +612,26 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         // The third track's recording is created even though no file holds it.
         Assert.Equal(3, await db.Recordings.CountAsync(Token));
 
-        // And the per-release length is stored, which is the number the edition
-        // was chosen by and the one a track list should print.
-        Assert.Equal(TimeSpan.FromSeconds(220), tracks[2].Length);
+        // And the per-release length is stored, which is the number an edition
+        // is proved by and the one a track list should print.
+        Assert.Equal(Length(220), tracks[2].Length);
 
-        var owned = await db.MediaFiles.CountAsync(f => f.TrackId != null, Token);
-        Assert.Equal(2, owned);
+        // Two files cannot be a three-track pressing, so the album is claimed
+        // and no track: the missing one reads as missing from the album.
+        var files = await db.MediaFiles.ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, file.AttributionOutcome);
+            Assert.NotNull(file.ReleaseGroupId);
+            Assert.Null(file.ReleaseId);
+            Assert.Null(file.TrackId);
+        });
     }
 
     /// <summary>
     /// A compilation the files also appear on is not written at all, because
-    /// nothing was filed under it.
+    /// it is not the folder's album.
     /// </summary>
     /// <remarks>
     /// The candidate set for a real component runs to hundreds of releases.
@@ -616,7 +639,7 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     /// rather than of the library.
     /// </remarks>
     [Fact]
-    public async Task CandidateReleasesNothingWasFiledUnderAreNotWritten()
+    public async Task OnlyTheChosenAlbumsEditionsAreWritten()
     {
         await SeedAsync(
             ("a/1.flac", Song(1), 180),
@@ -639,11 +662,14 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
-    /// Editions that fit identically are chosen between, and the count of the
-    /// ones passed over is recorded on every file.
+    /// Three editions that all prove leave only the album, with the tie counted.
     /// </summary>
+    /// <remarks>
+    /// Choosing one would be a coin flip written down as a fact. Every one is
+    /// kept, because the album's track list is read from all of them.
+    /// </remarks>
     [Fact]
-    public async Task TiedEditionsAreRecordedAsTiedRatherThanAsCertain()
+    public async Task TwoEditionsThatBothProveLeaveOnlyTheAlbum()
     {
         await SeedAsync(
             ("a/1.flac", Song(1), 180),
@@ -652,8 +678,8 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         var catalogue = new StubCatalogue()
             .With(Album())
-            .With(Album() with { Id = VinylId, Status = "Official" })
-            .With(Album() with { Id = RemasterId, Status = "Official" })
+            .With(Album() with { Id = VinylId })
+            .With(Album() with { Id = RemasterId })
             .On(Song(1), AlbumId, VinylId, RemasterId)
             .On(Song(2), AlbumId, VinylId, RemasterId)
             .On(Song(3), AlbumId, VinylId, RemasterId);
@@ -666,13 +692,13 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         Assert.All(files, file =>
         {
-            Assert.Equal(ReleaseAttributionOutcome.AttributedAmbiguously, file.AttributionOutcome);
+            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, file.AttributionOutcome);
             Assert.Equal(2, file.EditionAlternatives);
-            Assert.NotNull(file.ReleaseId);
+            Assert.Null(file.ReleaseId);
+            Assert.NotNull(file.ReleaseGroupId);
         });
 
-        // One chosen, two passed over and never written.
-        Assert.Equal(1, await db.Releases.CountAsync(Token));
+        Assert.Equal(3, await db.Releases.CountAsync(Token));
     }
 
     /// <summary>
@@ -835,6 +861,365 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(1, clusters.Calls);
     }
 
+    /// <summary>
+    /// A file in the folder that no edition of its album prints stays with the
+    /// folder, and the album is still claimed for the rest.
+    /// </summary>
+    [Fact]
+    public async Task FilesOnNoEditionStayWithTheFolder()
+    {
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220),
+            ("Artist/Album/04 bonus.flac", Song(4), 240));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .With(SecondAlbum())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId)
+            .On(Song(4), SecondAlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.Include(f => f.ReleaseGroup).OrderBy(f => f.Path).ToListAsync(Token);
+
+        Assert.All(files, file => Assert.Equal(GroupId, file.ReleaseGroup!.Mbid));
+        Assert.Equal(
+            [
+                ReleaseAttributionOutcome.GroupOnly,
+                ReleaseAttributionOutcome.GroupOnly,
+                ReleaseAttributionOutcome.GroupOnly,
+                ReleaseAttributionOutcome.OnNoEdition,
+            ],
+            files.Select(file => file.AttributionOutcome));
+
+        // Four files are not a three-track pressing.
+        Assert.All(files, file => Assert.Null(file.ReleaseId));
+    }
+
+    /// <summary>
+    /// A file arriving in a decided folder hands the whole folder back.
+    /// </summary>
+    /// <remarks>
+    /// The folder is the album, so its file count is what a pressing is proved
+    /// against: three files were the three-track edition, and four are not.
+    /// </remarks>
+    [Fact]
+    public async Task ANewFileInADecidedFolderReopensTheWholeFolder()
+    {
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId)
+            .On(Song(4), AlbumId);
+
+        await RunAsync(catalogue);
+
+        await using (var first = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Equal(3, await first.MediaFiles.CountAsync(f => f.ReleaseId != null, Token));
+        }
+
+        await SeedAsync(("Artist/Album/04.flac", Song(4), 240));
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.ToListAsync(Token);
+
+        Assert.Equal(4, files.Count);
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, file.AttributionOutcome);
+            Assert.Null(file.ReleaseId);
+            Assert.Null(file.TrackId);
+        });
+
+        Assert.Single(files.Select(file => file.ReleaseLookupUtc).Distinct());
+    }
+
+    /// <summary>
+    /// A folder whose album a person named is asked only which edition it is.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumNamedByHandIsHandedBackForItsEditionOnly()
+    {
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220));
+
+        await NameAlbumAsync(GroupId, "Album");
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.Include(f => f.Release).ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.Equal(AlbumId, file.Release!.Mbid);
+            Assert.NotNull(file.TrackId);
+            Assert.NotNull(file.ReleaseLookupUtc);
+        });
+
+        // Answered, so off the worklist until somebody names it again.
+        Assert.Equal(0, await Build(catalogue).CountPendingAsync(Token));
+    }
+
+    /// <summary>
+    /// An outage while proving a person's album's pressing leaves their album theirs.
+    /// </summary>
+    /// <remarks>
+    /// The backstop stamps the seed so the pass cannot spin on it. On a row the
+    /// rule owns that stamp comes with <c>LookupFailed</c>; on a person's album it
+    /// must not, or one 503 during the re-check turns their answer into a
+    /// transient failure that no worklist will ever offer again.
+    /// </remarks>
+    [Fact]
+    public async Task AnOutageWhileProvingAPersonsAlbumLeavesTheAlbumTheirs()
+    {
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200));
+
+        await NameAlbumAsync(GroupId, "Album");
+
+        await RunAsync(new StubCatalogue { Unavailable = true });
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.Include(f => f.ReleaseGroup).ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.Equal(GroupId, file.ReleaseGroup!.Mbid);
+            Assert.NotNull(file.ReleaseDecidedUtc);
+            Assert.NotNull(file.ReleaseLookupUtc);
+        });
+    }
+
+    /// <summary>
+    /// The rule never moves a folder to another album than the one a person named.
+    /// </summary>
+    /// <remarks>
+    /// Here the audio fits the album better than the compilation the person
+    /// chose. The pass may prove an edition of the compilation — it cannot, three
+    /// files against twenty tracks — and nothing else.
+    /// </remarks>
+    [Fact]
+    public async Task TheRuleNeverMovesAFolderAPersonNamed()
+    {
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220));
+
+        var compilationGroup = Mb("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+        await NameAlbumAsync(compilationGroup, "Greatest Hits");
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .With(Compilation())
+            .On(Song(1), AlbumId, CompilationId)
+            .On(Song(2), AlbumId, CompilationId)
+            .On(Song(3), AlbumId, CompilationId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.Include(f => f.ReleaseGroup).ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.Equal(compilationGroup, file.ReleaseGroup!.Mbid);
+            Assert.Null(file.ReleaseId);
+        });
+    }
+
+    /// <summary>
+    /// One file a person filed under another album does not carry the folder with it.
+    /// </summary>
+    /// <remarks>
+    /// Their answer is the file's: it keeps its album, untouched. The folder's
+    /// album is still the rule's to find by majority, and a pressing proved of
+    /// the folder is not a pressing of that one file.
+    /// </remarks>
+    [Fact]
+    public async Task APersonsAlbumForOneFileDoesNotNameTheFolders()
+    {
+        await SeedAsync(
+            ("Artist/Album/01.flac", Song(1), 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220),
+            ("Artist/Album/04.flac", Song(4), 240));
+
+        var single = Mb("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Second Album", Mbid = single };
+            seed.ReleaseGroups.Add(group);
+
+            var file = await seed.MediaFiles.SingleAsync(f => f.Path == "Artist/Album/04.flac", Token);
+            file.ReleaseGroupId = group.Id;
+            file.AttributionOutcome = ReleaseAttributionOutcome.AlbumByPerson;
+            file.ReleaseDecidedUtc = StoreTime.ToStorePrecision(DateTimeOffset.UtcNow);
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .With(SecondAlbum())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId)
+            .On(Song(4), SecondAlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.Include(f => f.ReleaseGroup).OrderBy(f => f.Path).ToListAsync(Token);
+
+        Assert.All(files.Take(3), file =>
+        {
+            Assert.Equal(GroupId, file.ReleaseGroup!.Mbid);
+            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, file.AttributionOutcome);
+        });
+
+        var theirs = files[3];
+        Assert.Equal(single, theirs.ReleaseGroup!.Mbid);
+        Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, theirs.AttributionOutcome);
+        Assert.Null(theirs.ReleaseId);
+        Assert.NotNull(theirs.ReleaseLookupUtc);
+    }
+
+    /// <summary>
+    /// Track numbers every edition reverses make the album a question, not a claim.
+    /// </summary>
+    /// <remarks>
+    /// Unprobed, and fpcalc's lengths here are 437 ms off every printed one, so no
+    /// pressing proves: with one proved, the pressing stands and only the order
+    /// is recorded.
+    /// </remarks>
+    [Fact]
+    public async Task AContradictedOrderIsAnOpenQuestion()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var tracks = new (string Path, Mbid Recording, int Seconds, uint Track)[]
+        {
+            ("Artist/Album/a.flac", Song(1), 180, 2),
+            ("Artist/Album/b.flac", Song(2), 200, 1),
+            ("Artist/Album/c.flac", Song(3), 220, 3),
+        };
+
+        foreach (var (path, _, _, number) in tracks)
+        {
+            var full = Path.Combine(_root, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.Copy(Corpus.Flac, full);
+
+            using var file = TagLib.File.Create(full);
+            file.Tag.Track = number;
+            file.Save();
+        }
+
+        await SeedAsync([.. tracks.Select(track => (track.Path, track.Recording, track.Seconds))]);
+        await UnprobeAsync();
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.OrderBy(f => f.Path).ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.OrderContradicted, file.AttributionOutcome);
+            Assert.Equal(FolderOrderOutcome.Contradicted, file.OrderOutcome);
+            Assert.Null(file.ReleaseGroupId);
+            Assert.NotNull(file.ReleaseLookupUtc);
+        });
+
+        Assert.Equal([2, 1, 3], files.Select(f => f.TagTrackNumber));
+    }
+
+    /// <summary>
+    /// A file whose tags cannot be read has no number of its own, and the folder
+    /// is ordered by the names instead.
+    /// </summary>
+    [Fact]
+    public async Task AFileWhoseTagsCannotBeReadIsOrderedByItsName()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var paths = new[] { "Artist/Album/1 a.flac", "Artist/Album/2 b.flac", "Artist/Album/3 c.flac" };
+
+        foreach (var path in paths)
+        {
+            var full = Path.Combine(_root, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.Copy(Corpus.Id3PrefixedFlac, full);
+        }
+
+        await SeedAsync(
+            (paths[0], Song(1), 180),
+            (paths[1], Song(2), 200),
+            (paths[2], Song(3), 220));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId);
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.OrderBy(f => f.Path).ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.Attributed, file.AttributionOutcome);
+            Assert.Null(file.TagTrackNumber);
+            Assert.Equal(FolderOrderOutcome.Corroborated, file.OrderOutcome);
+        });
+
+        Assert.Equal([1, 2, 3], files.Select(f => f.FolderPosition));
+    }
+
     private async Task RunAsync(StubCatalogue catalogue, IAcoustIdLookup? clusters = null)
     {
         var attribution = Build(catalogue, clusters);
@@ -869,17 +1254,20 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IMusicBrainzCatalogue>(catalogue);
         services.AddSingleton<IAcoustIdLookup>(clusters ?? new StubClusters([]));
+        services.AddSingleton<IAudioFileStore>(new FileSystemAudioFileStore(_root));
+        services.AddSingleton<TagReader>();
         services.AddSingleton<LibraryWorkGate>();
         services.AddSingleton<ReleaseAttributionService>();
         services.AddSingleton<IHostApplicationLifetime, NeverStops>();
         services.AddSingleton<IOptions<FonotecaOptions>>(
-            new OptionsWrapper<FonotecaOptions>(new FonotecaOptions { LibraryPath = "/tmp" }));
+            new OptionsWrapper<FonotecaOptions>(new FonotecaOptions { LibraryPath = _root }));
 
         return services;
     }
 
     /// <summary>
-    /// Seeds files already linked to recordings, as enrichment leaves them.
+    /// Seeds files already linked to recordings, as enrichment leaves them, and
+    /// probed: the length a pressing is proved against is the probe's.
     /// </summary>
     private async Task SeedAsync(params (string Path, Mbid Recording, int Seconds)[] files)
     {
@@ -911,7 +1299,44 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
                 RecordingLookupUtc = DateTimeOffset.UtcNow,
                 EnrichmentOutcome = EnrichmentOutcome.Linked,
                 FingerprintDuration = TimeSpan.FromSeconds(seconds),
+                Quality = new AudioQuality
+                {
+                    Codec = "mp3",
+                    SampleRateHz = 44_100,
+                    Channels = 2,
+                    BitrateBps = 320_000,
+                    IsLossless = false,
+                    Duration = Length(seconds),
+                },
             });
+        }
+
+        await db.SaveChangesAsync(Token);
+    }
+
+    /// <summary>Takes the probe's answer away, leaving only fpcalc's whole seconds.</summary>
+    private async Task UnprobeAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        await db.MediaFiles.ExecuteUpdateAsync(set => set.SetProperty(f => f.Quality, (AudioQuality?)null), Token);
+    }
+
+    /// <summary>
+    /// Every file seeded so far, filed under an album by a person, as
+    /// <c>SetFolderAlbum</c> leaves them: no pressing, and the lookup stamp clear.
+    /// </summary>
+    private async Task NameAlbumAsync(Mbid album, string title)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = title, Mbid = album };
+        db.ReleaseGroups.Add(group);
+
+        foreach (var file in await db.MediaFiles.ToListAsync(Token))
+        {
+            file.ReleaseGroupId = group.Id;
+            file.AttributionOutcome = ReleaseAttributionOutcome.AlbumByPerson;
+            file.ReleaseDecidedUtc = StoreTime.ToStorePrecision(DateTimeOffset.UtcNow);
         }
 
         await db.SaveChangesAsync(Token);
@@ -1002,9 +1427,12 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             Position: position,
             Number: position.ToString(System.Globalization.CultureInfo.InvariantCulture),
             Title: $"Track {position}",
-            Length: TimeSpan.FromSeconds(seconds),
+            Length: Length(seconds),
             RecordingId: recording,
             Credits: []);
+
+    /// <summary>A length as measured: whole seconds and a remainder no guess would have.</summary>
+    private static TimeSpan Length(int seconds) => TimeSpan.FromMilliseconds(seconds * 1000 + 437);
 
     private static Mbid Song(int number) =>
         new(new Guid($"99999999-9999-4999-8999-{number:D12}"));
@@ -1029,6 +1457,9 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         public int Calls => Volatile.Read(ref _calls);
 
+        /// <summary>Set by a test that needs every browse to fail as an outage would.</summary>
+        public bool Unavailable { get; init; }
+
         public StubCatalogue With(MusicBrainzRelease release)
         {
             _releases[release.Id] = release;
@@ -1052,6 +1483,8 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _calls);
+
+            if (Unavailable) throw new ProviderUnavailableException("MusicBrainz", "MusicBrainz is down.");
 
             var candidates = _appearsOn.TryGetValue(recording, out var ids)
                 ? ids.Where(_releases.ContainsKey).Select(id => Summarise(_releases[id])).ToList()

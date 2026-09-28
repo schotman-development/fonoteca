@@ -191,15 +191,15 @@ public sealed class FonotecaOptions : IValidatableObject
     public double AcoustIdMinimumMargin { get; init; } = 0.05;
 
     /// <summary>
-    /// How much of a release's track list must be present before a file may be
-    /// filed under it.
+    /// How much of the best-fitting release's track list a folder must hold
+    /// before that release's album may be claimed for it.
     /// </summary>
     /// <remarks>
-    /// The loosest rung of <c>ReleaseAttribution</c>'s ladder; the strict rungs
-    /// above it are fixed, because loosening those is what lets a compilation
-    /// outbid the album it drew from. This is also the prune the attribution pass
-    /// uses to decide whether a candidate release is worth a request at all, so
-    /// lowering it costs wall-clock as well as precision.
+    /// A floor under <c>ReleaseAttribution</c>'s album choice, beside the fixed
+    /// rule that the album explain more than half of the folder. This is also the
+    /// prune the attribution pass uses to decide whether a candidate release is
+    /// worth a request at all, so lowering it costs wall-clock as well as
+    /// precision.
     ///
     /// 0.25 against a real library leaves anthologies of licensed catalogue
     /// unattributed, which is the intended answer: they genuinely cannot be told
@@ -211,14 +211,14 @@ public sealed class FonotecaOptions : IValidatableObject
     public double ReleaseMinimumCoverage { get; init; } = 0.25;
 
     /// <summary>
-    /// How far a file's measured length may sit from a release's printed one.
+    /// How far a file's measured length may sit from a release's printed one on
+    /// the by-hand album screen's candidate list.
     /// </summary>
     /// <remarks>
-    /// The other half of the same rung. Drift is what separates two editions with
-    /// identical track lists — a correctly attributed album in the author's
-    /// library sits under 100ms, and the compilations that cause trouble sit near
-    /// two seconds — so this is the setting that decides how much mastering
-    /// difference counts as the same release.
+    /// Only the screen reads it now (<c>ComponentCandidates</c>). The attribution
+    /// pass proves a pressing to a fixed 100ms on every track
+    /// (<c>EditionProof</c>, ADR 0013): how much mastering difference counts as
+    /// the same pressing is not a preference.
     ///
     /// Milliseconds rather than a <c>TimeSpan</c>, matching how
     /// <c>MusicBrainzRequestIntervalMs</c> is configured, because environment

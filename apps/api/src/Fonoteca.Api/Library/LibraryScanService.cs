@@ -347,6 +347,13 @@ public sealed class LibraryScanService(
                 row.AttributionOutcome = ReleaseAttributionOutcome.NotAttempted;
                 row.EditionAlternatives = 0;
 
+                // The file's own numbers and its place in the folder's order were
+                // read off the old bytes, under the stamp just cleared.
+                row.TagDiscNumber = null;
+                row.TagTrackNumber = null;
+                row.FolderPosition = null;
+                row.OrderOutcome = FolderOrderOutcome.NotChecked;
+
                 // Including a person's answer, for the reason the identity
                 // decision above is cleared: a file that kept the guard through a
                 // replacement would be excluded from the pass's worklist and

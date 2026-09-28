@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Fonoteca.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Fonoteca.Data.Migrations
 {
     [DbContext(typeof(FonotecaDbContext))]
-    partial class FonotecaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260923074752_AlbumFiles")]
+    partial class AlbumFiles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -313,9 +316,6 @@ namespace Fonoteca.Data.Migrations
                     b.Property<TimeSpan?>("FingerprintDuration")
                         .HasColumnType("interval");
 
-                    b.Property<int?>("FolderPosition")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset?>("IdentityDecidedUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -330,9 +330,6 @@ namespace Fonoteca.Data.Migrations
 
                     b.Property<DateTimeOffset?>("LastVerifiedUtc")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("OrderOutcome")
-                        .HasColumnType("integer");
 
                     b.Property<string>("Path")
                         .IsRequired()
@@ -365,12 +362,6 @@ namespace Fonoteca.Data.Migrations
 
                     b.Property<long>("SizeBytes")
                         .HasColumnType("bigint");
-
-                    b.Property<int?>("TagDiscNumber")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("TagTrackNumber")
-                        .HasColumnType("integer");
 
                     b.Property<Guid?>("TrackId")
                         .HasColumnType("uuid");
@@ -437,7 +428,7 @@ namespace Fonoteca.Data.Migrations
                         .HasFilter("\"AcoustId\" IS NOT NULL AND \"RecordingLookupUtc\" IS NULL AND \"IdentityDecidedUtc\" IS NULL");
 
                     b.HasIndex(new[] { "Id" }, "IX_MediaFiles_ReleasePending")
-                        .HasFilter("\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL AND (\"ReleaseDecidedUtc\" IS NULL OR \"AttributionOutcome\" IN (15, 16))");
+                        .HasFilter("\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL AND \"ReleaseDecidedUtc\" IS NULL");
 
                     b.ToTable("MediaFiles");
                 });

@@ -69,6 +69,7 @@ public sealed class ReleaseAttributionService(
     IServiceScopeFactory scopeFactory,
     IMusicBrainzCatalogue musicBrainz,
     IAcoustIdLookup acoustId,
+    Fonoteca.Tagging.TagReader tagReader,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
     IOptions<FonotecaOptions> options,
@@ -117,6 +118,13 @@ public sealed class ReleaseAttributionService(
     public AttributionSummary? LastCompleted => _lastCompleted;
 
     /// <summary>Identified files that have never been asked about an album.</summary>
+    /// <remarks>
+    /// A person's answer takes a file off the worklist, with one exception: an
+    /// album named by hand (<see cref="ReleaseAttributionOutcome.AlbumByPerson"/>
+    /// and its agent twin) is theirs, while which pressing of it the files are is
+    /// still the rule's to prove — so those stay on it until the stamp says the
+    /// rule has asked.
+    /// </remarks>
     public async Task<int> CountPendingAsync(CancellationToken cancellationToken = default)
     {
         var scope = scopeFactory.CreateAsyncScope();
@@ -128,7 +136,9 @@ public sealed class ReleaseAttributionService(
             return await db.MediaFiles
                 .Where(f => f.RecordingId != null
                     && f.ReleaseLookupUtc == null
-                    && f.ReleaseDecidedUtc == null)
+                    && (f.ReleaseDecidedUtc == null
+                        || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByPerson
+                        || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByAgent))
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -270,18 +280,19 @@ public sealed class ReleaseAttributionService(
             DurationMilliseconds: elapsed.ElapsedMilliseconds,
             Examined: counts.Examined,
             Attributed: counts.Attributed,
-            Ambiguous: counts.Ambiguous,
             GroupOnly: counts.GroupOnly,
+            OnNoEdition: counts.OnNoEdition,
             NoConfidentFit: counts.NoConfidentFit,
             NoCandidate: counts.NoCandidate,
+            OrderContradicted: counts.OrderContradicted,
             Failed: counts.Failed,
             Components: counts.Components,
             Releases: counts.Releases,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.AttributionCompleted(
-            logger, jobId, counts.Attributed, counts.Ambiguous, counts.GroupOnly,
-            counts.NoConfidentFit, counts.NoCandidate, counts.Failed, counts.Releases,
+            logger, jobId, counts.Attributed, counts.GroupOnly, counts.OnNoEdition,
+            counts.NoConfidentFit, counts.NoCandidate, counts.OrderContradicted, counts.Failed, counts.Releases,
             summary.DurationMilliseconds);
 
         await Report(jobId, counts.Examined, pending, null, "completed").ConfigureAwait(false);
@@ -309,29 +320,31 @@ public sealed class ReleaseAttributionService(
                 .AsNoTracking()
                 .Where(f => f.RecordingId != null
                     && f.ReleaseLookupUtc == null
-                    && f.ReleaseDecidedUtc == null
+                    && (f.ReleaseDecidedUtc == null
+                        || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByPerson
+                        || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByAgent)
                     && f.Recording!.Mbid != null)
                 .OrderBy(f => f.Id)
-                .Select(f => new PendingFile(
-                    f.Id,
-                    f.Path,
-                    f.Recording!.Title,
-                    f.Recording!.Mbid!.Value,
-                    f.FingerprintDuration ?? f.Quality!.Duration,
-                    f.SizeBytes))
+                .Select(f => new PendingFile(f.Id, f.Path))
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// Grows a component out from one file, decides it, and writes it.
+    /// Decides one album folder and writes the decision.
     /// </summary>
     /// <remarks>
     /// The network work happens entirely outside the database scope, as it does
     /// in the enrichment pass and for the same reason: holding a connection open
     /// across a remote call ties the pool to somebody else's latency. The scope
     /// opens once the answer is known and closes when it is committed.
+    ///
+    /// <b>Who owns each row decides what is written to it.</b> A file nobody has
+    /// answered for is the rule's, whole. A folder whose album a person named
+    /// keeps that album; the rule writes only which pressing it is proven to be,
+    /// and where each file stands in the folder's order. A file a person decided
+    /// any other way is read — it is part of the folder — and never written.
     /// </remarks>
     private async Task HandleComponentAsync(
         PendingFile seed,
@@ -341,35 +354,93 @@ public sealed class ReleaseAttributionService(
     {
         var component = await GatherAsync(seed, memo, cancellationToken).ConfigureAwait(false);
 
-        var files = component.Files.Select(file => file.ToAttributionFile()).ToList();
+        // The album a person or an agent put the folder under, whichever edition
+        // they chose within it — where their answers are most of the folder, the
+        // same majority the rule is held to. One file in twelve filed under a
+        // single names that file's album, not the folder's, and the other eleven
+        // are the rule's to decide. The commonest where two answers disagree.
+        var hand = component.Files
+            .Where(file => file.Outcome is ReleaseAttributionOutcome.AlbumByPerson
+                or ReleaseAttributionOutcome.AlbumByAgent
+                or ReleaseAttributionOutcome.AttributedByPerson
+                or ReleaseAttributionOutcome.AttributedByAgent)
+            .Where(file => file.AlbumMbid is not null)
+            .GroupBy(file => file.AlbumMbid!.Value)
+            .OrderByDescending(album => album.Count())
+            .ThenBy(album => album.Key.Value)
+            .FirstOrDefault();
 
-        var thresholds = new AttributionThresholds(
-            options.Value.ReleaseMinimumCoverage,
-            TimeSpan.FromMilliseconds(options.Value.ReleaseMaximumDriftMs));
+        var byHand = hand is not null && hand.Count() * 2 > component.Files.Count ? hand.Key : (Mbid?)null;
 
-        var assignments = ReleaseAttribution.Assign(files, component.Candidates, thresholds);
+        var files = component.Files.Select(file => file.ToFolderFile(component.Groups, null)).ToList();
 
-        // Only a folder that filed something and refused something has a gap a
-        // refused file could belong on, so only those spend an AcoustID turn.
-        var refusedHere = assignments
-            .Where(a => a.Release is null && Unanswered.Contains(a.Outcome))
-            .Select(a => a.File)
-            .ToList();
+        var decision = ReleaseAttribution.Decide(
+            files, component.Candidates, byHand, component.Complete, options.Value.ReleaseMinimumCoverage);
 
+        // A second look through the files' own AcoustID clusters, where an album
+        // was in view and some of the rule's files were on none of its editions:
+        // the commonest way one song misses its album is enrichment naming another
+        // take from the same cluster. Only those files spend an AcoustID turn.
         var asked = new Dictionary<MediaFileId, IReadOnlyList<AcoustIdMatch>>();
 
-        if (refusedHere.Count > 0 && assignments.Any(a => a.Release is not null))
+        if (decision.Proposed is { } proposed)
         {
-            var linked = await LinkedRecordingsAsync(refusedHere, asked, memo, cancellationToken)
-                .ConfigureAwait(false);
+            var printed = component.Candidates
+                .Where(release => release.ReleaseGroupId == proposed)
+                .SelectMany(release => release.Tracks)
+                .Select(track => track.RecordingId)
+                .OfType<Mbid>()
+                .ToHashSet();
 
-            assignments = ReleaseAttribution.Reseat(
-                assignments, files, component.Candidates, linked, thresholds);
+            var strays = component.Files
+                .Where(file => file.RuleOwned
+                    && file.Recording is { } recording
+                    && !printed.Contains(recording)
+                    && !(component.Groups.TryGetValue(recording, out var groups) && groups.Contains(proposed)))
+                .Select(file => file.Id)
+                .ToList();
+
+            if (strays.Count > 0)
+            {
+                var linked = await LinkedRecordingsAsync(strays, asked, memo, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (linked.Count > 0)
+                {
+                    files = [.. component.Files.Select(file => file.ToFolderFile(component.Groups, linked.GetValueOrDefault(file.Id)))];
+
+                    decision = ReleaseAttribution.Decide(
+                        files, component.Candidates, byHand, component.Complete, options.Value.ReleaseMinimumCoverage);
+                }
+            }
         }
 
-        var chosen = component.Candidates
-            .Where(release => assignments.Any(a => a.Release == release.Id))
-            .ToList();
+        var decisions = decision.Files.ToDictionary(file => file.File);
+
+        // What is kept as catalogue: the album's official editions the gather
+        // fetched, which is what its combined track list is read from; the proven
+        // pressing and the best-fitting edition, whatever their status, so an
+        // album with no official edition still has a track list; and any edition
+        // a substituted recording is printed on, so the recording it now holds is
+        // one the catalogue has.
+        var original = component.Files
+            .Where(file => file.Recording is not null)
+            .ToDictionary(file => file.Id, file => file.Recording!.Value);
+
+        var substituted = decision.Files
+            .Where(file => file.Recording is { } recording && original.GetValueOrDefault(file.File) != recording)
+            .Select(file => file.Recording!.Value)
+            .ToHashSet();
+
+        var kept = decision.Album is not { } albumMbid
+            ? []
+            : component.Candidates
+                .Where(release => release.ReleaseGroupId == albumMbid
+                    && (string.Equals(release.Status, "Official", StringComparison.OrdinalIgnoreCase)
+                        || release.Id == decision.Edition?.Id
+                    || release.Id == decision.Best?.Id
+                        || release.Tracks.Any(track => track.RecordingId is { } printed && substituted.Contains(printed))))
+                .ToList();
 
         var scope = scopeFactory.CreateAsyncScope();
 
@@ -378,13 +449,9 @@ public sealed class ReleaseAttributionService(
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
             var writer = new ReleaseWriter(db);
 
-            // Only the releases something was actually filed under. The candidate
-            // set for one component runs to hundreds, and persisting all of them
-            // would fill the catalogue with albums nobody owns — then a release
-            // list would be a browse of MusicBrainz rather than of the library.
             var releases = new Dictionary<Mbid, (ReleaseId Release, ReleaseGroupId? Group)>();
 
-            foreach (var release in chosen)
+            foreach (var release in kept)
             {
                 releases[release.Id] = await writer
                     .UpsertAsync(release, component.Formats.GetValueOrDefault(release.Id), cancellationToken)
@@ -393,69 +460,88 @@ public sealed class ReleaseAttributionService(
                 counts.Releases++;
             }
 
+            // The album's own row: through an edition where one was kept, the one
+            // a person's answer already points at where it was not, and minted
+            // from the candidates' title only as a last resort.
+            ReleaseGroupId? album = null;
+
+            if (decision.Album is { } chosen)
+            {
+                album = releases.Values.Select(written => written.Group).FirstOrDefault(group => group is not null)
+                    ?? component.Files.FirstOrDefault(file => file.AlbumMbid == chosen)?.AlbumId
+                    ?? await writer
+                        .UpsertGroupAsync(chosen, component.GroupTitle(chosen), cancellationToken)
+                        .ConfigureAwait(false);
+            }
+
+            var proven = decision.Edition is { } edition && releases.TryGetValue(edition.Id, out var provenRow)
+                ? provenRow.Release
+                : (ReleaseId?)null;
+
             // Floored, and that is load-bearing rather than tidy. This one value
-            // is stamped on every file the component decides, which makes it the
-            // component's identity — the id the worklist prints and the key the
+            // is stamped on every file the folder decides, which makes it the
+            // folder's identity — the id the worklist prints and the key the
             // candidate document is stored under. PostgreSQL keeps microseconds
             // and .NET keeps 100ns ticks, so an unfloored stamp is a key that
             // never matches what comes back out of the column.
             var now = StoreTime.ToStorePrecision(clock.UtcNow);
-            var recordings = component.Files.ToDictionary(file => file.Id, file => file.Recording);
+            var alternatives = decision.Edition is null && decision.EditionsProven > 1 ? decision.EditionsProven - 1 : 0;
 
-            // The files this component is about to leave open, collected as the
-            // outcomes are written rather than read off the rule: the outcome on
-            // the row is not always the one `Assign` returned — a `NoCandidate`
-            // whose only candidates the prune discarded is rewritten to
-            // `NoConfidentFit` a few lines below.
             var refused = new List<MediaFileId>();
 
-            foreach (var assignment in assignments)
+            foreach (var member in component.Files)
             {
                 var row = await db.MediaFiles
-                    .FirstOrDefaultAsync(f => f.Id == assignment.File, cancellationToken)
+                    .FirstOrDefaultAsync(f => f.Id == member.Id, cancellationToken)
                     .ConfigureAwait(false);
 
                 // Absent means a scan removed it while the lookups were running.
                 if (row is null) continue;
 
-                row.ReleaseLookupUtc = now;
+                // The file's own claim, read for every file in the folder.
+                row.TagDiscNumber = member.TagDisc;
+                row.TagTrackNumber = member.TagTrack;
 
-                // The prune discarded releases the rule never saw, so a bare
-                // "no candidate" from the rule may only mean "none survived".
-                row.AttributionOutcome =
-                    assignment.Outcome == ReleaseAttributionOutcome.NoCandidate
-                    && component.Placed.Contains(recordings[assignment.File])
-                        ? ReleaseAttributionOutcome.NoConfidentFit
-                        : assignment.Outcome;
-                row.EditionAlternatives = assignment.EditionAlternatives;
+                // Unidentified: counted in the folder, decided by nobody yet.
+                if (!decisions.TryGetValue(member.Id, out var file)) continue;
+
+                // A person's album that is not the folder's keeps everything it
+                // had — a pressing of this folder is not a pressing of it — and
+                // is only marked asked.
+                if (member.AlbumByHand && member.AlbumMbid != decision.Album)
+                {
+                    row.ReleaseLookupUtc = now;
+                    continue;
+                }
+
+                // A person's other answers are read, and never written.
+                if (!member.RuleOwned && !member.AlbumByHand) continue;
+
+                row.ReleaseLookupUtc = now;
+                row.EditionAlternatives = alternatives;
+                row.FolderPosition = file.Position;
+                row.OrderOutcome = decision.Order;
                 row.ReleaseId = null;
                 row.TrackId = null;
-                row.ReleaseGroupId = null;
 
-                if (assignment.Release is { } releaseMbid && releases.TryGetValue(releaseMbid, out var written))
+                if (member.RuleOwned)
                 {
-                    row.ReleaseId = written.Release;
-                    row.ReleaseGroupId = written.Group;
-                    row.TrackId = writer.TrackIdAt(
-                        written.Release,
-                        assignment.DiscNumber ?? 1,
-                        assignment.Position ?? 0);
-
-                    // The same recording for a file the rule matched by MBID; for
-                    // one `Reseat` placed, the one of its cluster's recordings the
-                    // album actually prints, rather than the one enrichment guessed.
-                    row.RecordingId = writer.RecordingIdAt(
-                        written.Release,
-                        assignment.DiscNumber ?? 1,
-                        assignment.Position ?? 0) ?? row.RecordingId;
+                    row.AttributionOutcome = file.Outcome;
+                    row.ReleaseGroupId = decision.Album is null ? null : album;
                 }
-                else if (assignment.ReleaseGroup is { } groupMbid)
+
+                if (proven is { } pressing && file.Slot is { } slot)
                 {
-                    // The album without the pressing. The group row is written on
-                    // its own here, because no release was chosen to carry it.
-                    row.ReleaseGroupId = await writer
-                        .UpsertGroupAsync(groupMbid, component.GroupTitle(groupMbid), cancellationToken)
-                        .ConfigureAwait(false);
+                    row.ReleaseId = pressing;
+                    row.TrackId = writer.TrackIdAt(pressing, slot.DiscNumber, slot.Position);
+                }
+
+                // The recording a substitution chose, as the catalogue holds it.
+                if (member.RuleOwned
+                    && file.Recording is { } recording
+                    && original.GetValueOrDefault(member.Id) != recording)
+                {
+                    row.RecordingId = RecordingOf(writer, kept, releases, recording) ?? row.RecordingId;
                 }
 
                 if (asked.TryGetValue(row.Id, out var matches))
@@ -464,10 +550,10 @@ public sealed class ReleaseAttributionService(
                     row.AcoustIdMatchesUtc = now;
                 }
 
-                counts.Record(row.AttributionOutcome);
+                counts.Record(row.AttributionOutcome, row.ReleaseId is not null);
                 counts.Examined++;
 
-                if (Unanswered.Contains(row.AttributionOutcome)) refused.Add(assignment.File);
+                if (Unanswered.Contains(row.AttributionOutcome)) refused.Add(member.Id);
             }
 
             counts.Components++;
@@ -477,6 +563,18 @@ public sealed class ReleaseAttributionService(
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>The catalogue's row for a recording one of the kept editions prints.</summary>
+    private static RecordingId? RecordingOf(
+        ReleaseWriter writer,
+        List<MusicBrainzRelease> kept,
+        Dictionary<Mbid, (ReleaseId Release, ReleaseGroupId? Group)> releases,
+        Mbid recording) =>
+        kept
+            .SelectMany(release => release.Tracks
+                .Where(track => track.RecordingId == recording)
+                .Select(track => writer.RecordingIdAt(releases[release.Id].Release, track.DiscNumber, track.Position)))
+            .FirstOrDefault(found => found is not null);
 
     /// <summary>
     /// Every recording each file's own AcoustID cluster is linked to.
@@ -594,7 +692,11 @@ public sealed class ReleaseAttributionService(
     /// table stays the size of the worklist rather than the size of the library.
     /// </remarks>
     private static readonly ReleaseAttributionOutcome[] Unanswered =
-        [ReleaseAttributionOutcome.NoConfidentFit, ReleaseAttributionOutcome.NoCandidate];
+    [
+        ReleaseAttributionOutcome.NoConfidentFit,
+        ReleaseAttributionOutcome.NoCandidate,
+        ReleaseAttributionOutcome.OrderContradicted,
+    ];
 
     /// <summary>
     /// Keeps the candidate set this component was refused against.
@@ -660,7 +762,7 @@ public sealed class ReleaseAttributionService(
             component.Candidates,
             component.Formats,
             recordings.Count,
-            recordings.Count(component.Browsed.Contains),
+            recordings.Count(component.Groups.ContainsKey),
             component.Candidates.Count,
             options.Value.ReleaseMinimumCoverage,
             options.Value.ReleaseMaximumDriftMs);
@@ -708,30 +810,31 @@ public sealed class ReleaseAttributionService(
             if (row is null) return;
 
             row.ReleaseLookupUtc = clock.UtcNow;
-            row.AttributionOutcome = ReleaseAttributionOutcome.LookupFailed;
+
+            // A person's album is theirs whatever went wrong asking about its
+            // pressing; only a row the rule owns takes the failure.
+            if (row.AttributionOutcome is not (ReleaseAttributionOutcome.AlbumByPerson
+                or ReleaseAttributionOutcome.AlbumByAgent))
+            {
+                row.AttributionOutcome = ReleaseAttributionOutcome.LookupFailed;
+            }
 
             await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// Everything still open in the seed's album folder, and the releases that
-    /// might explain it.
+    /// The seed's album folder, and every release its recordings reach.
     /// </summary>
     /// <remarks>
-    /// <b>One round, and the absence of a second one is the whole change.</b>
-    /// The folder fixes the file set before the first request, so there is no
-    /// frontier, nothing to admit, and no way for one album's candidate releases
-    /// to reach into another album's files.
-    ///
-    /// Files the folder holds that are already answered are left out, by the same
-    /// predicate the seed was chosen with. A person who has filed part of a
-    /// folder by hand has narrowed the question rather than reopened it, and
-    /// re-deciding their answer is not this pass's to do.
-    ///
-    /// The seed is always a member even if the query somehow does not return it.
-    /// A component that came back empty would leave the seed unstamped and the
-    /// pass would choose it again forever.
+    /// Two stages, because two MusicBrainz shapes are unusable: a recording
+    /// lookup with releases included caps at 25 without saying so, and a browse
+    /// with recordings included silently drops releases. So each recording is
+    /// browsed — paged to its end, which is what makes the group map complete
+    /// enough to say a file is on no edition of an album — and the releases worth
+    /// a track list are then looked up one by one, best-supported first, up to
+    /// <see cref="MaximumComponentCandidates"/>. Past the cap the gather is
+    /// incomplete, and <see cref="FolderOrder"/> is told so.
     /// </remarks>
     private async Task<Component> GatherAsync(
         PendingFile seed,
@@ -740,22 +843,19 @@ public sealed class ReleaseAttributionService(
     {
         var files = await FolderFilesAsync(seed, cancellationToken).ConfigureAwait(false);
 
-        // Which of *our* recordings each candidate release holds. Final once the
-        // browses finish, which is what <see cref="WorthFetching"/> now relies on.
+        // Which of *our* recordings each candidate release holds, and which albums
+        // each of our recordings is on.
         var hits = new Dictionary<Mbid, HashSet<Mbid>>();
         var summaries = new Dictionary<Mbid, MusicBrainzReleaseCandidate>();
-        var browsed = new HashSet<Mbid>();
-        var placed = new HashSet<Mbid>();
+        var groups = new Dictionary<Mbid, HashSet<Mbid>>();
 
-        foreach (var file in files)
+        foreach (var recording in files.Select(file => file.Recording).OfType<Mbid>().Distinct())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!browsed.Add(file.Recording)) continue;
+            var candidates = await BrowseAsync(recording, memo, cancellationToken).ConfigureAwait(false);
 
-            var candidates = await BrowseAsync(file.Recording, memo, cancellationToken).ConfigureAwait(false);
-
-            if (candidates.Count > 0) placed.Add(file.Recording);
+            groups[recording] = candidates.Select(candidate => candidate.ReleaseGroupId).OfType<Mbid>().ToHashSet();
 
             foreach (var candidate in candidates)
             {
@@ -767,7 +867,7 @@ public sealed class ReleaseAttributionService(
                     hits[candidate.Id] = holding;
                 }
 
-                holding.Add(file.Recording);
+                holding.Add(recording);
             }
         }
 
@@ -800,70 +900,112 @@ public sealed class ReleaseAttributionService(
 
         if (capped) Log.AttributionComponentCapped(logger, seed.Path, files.Count, worth.Count);
 
-        return new Component(files, confirmed, formats, browsed, placed);
+        return new Component(files, confirmed, formats, groups, !capped);
     }
 
     /// <summary>
-    /// The seed's album folder, as files still waiting on an album.
+    /// Every file in the seed's album folder, whatever its state, with the track
+    /// and disc numbers its own tags carry.
     /// </summary>
     /// <remarks>
+    /// <b>The whole folder, not only what is waiting.</b> The folder is the album,
+    /// so a file arriving in a decided folder reopens all of it: the count the
+    /// majority is taken over, the track count a pressing is proved against and
+    /// the order are all the folder's. Rows a person answered are read as part of
+    /// it and written only as far as they are the rule's.
+    ///
     /// <b>The prefix narrows and <see cref="AlbumFolder"/> decides.</b> A
     /// <c>StartsWith</c> alone is wrong in a way that would be very hard to see:
     /// the one file in the target library sitting loose under its artist has
     /// <c>Prince</c> for a folder, and <c>Prince/</c> as a prefix matches that
-    /// artist's every album — one component for a whole discography, which is the
-    /// exact failure this rewrite exists to remove. So the query is a coarse cut
-    /// and the rule is applied again in memory, where it is the same rule the
-    /// worklist and the matching screen group by.
+    /// artist's every album. So the query is a coarse cut and the rule is applied
+    /// again in memory. The trailing slash is not optional: without it
+    /// <c>Artist/Album</c> also matches <c>Artist/Album Live</c>. EF Core's
+    /// <c>StartsWith</c> over a parameter does not treat <c>%</c> or <c>_</c> as
+    /// wildcards, which was measured rather than assumed.
     ///
-    /// The trailing slash is not optional. Without it <c>Artist/Album</c> also
-    /// matches <c>Artist/Album Live</c> — a lesson the by-hand album screen
-    /// already paid for. EF Core's <c>StartsWith</c> over a parameter does not
-    /// treat <c>%</c> or <c>_</c> as wildcards, which was measured rather than
-    /// assumed, and matters here because <c>_</c> is not exotic in this library.
+    /// <b>Tags are read here, and only here.</b> A file whose tags cannot be read
+    /// — forty FLACs here make ATL throw — simply has no number of its own, and
+    /// the folder is ordered by its names instead. That fallback cannot lie, so
+    /// the catch is on anything but cancellation.
     /// </remarks>
-    private async Task<List<PendingFile>> FolderFilesAsync(
+    private async Task<List<FolderMember>> FolderFilesAsync(
         PendingFile seed,
         CancellationToken cancellationToken)
     {
         var folder = AlbumFolder.Of(seed.Path);
-
-        // A file at the library root has no folder to group by, so it is its own
-        // component. Grouping every such file together would be a claim that
-        // "loose at the root" is an album.
-        if (folder.Length == 0) return [seed];
-
         var prefix = folder + "/";
 
+        List<FolderMember> members;
         var scope = scopeFactory.CreateAsyncScope();
 
         await using (scope.ConfigureAwait(false))
         {
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
-            var rows = await db.MediaFiles
-                .AsNoTracking()
-                .Where(f => f.RecordingId != null
-                    && f.ReleaseLookupUtc == null
-                    && f.ReleaseDecidedUtc == null
-                    && f.Recording!.Mbid != null
-                    && f.Path.StartsWith(prefix))
-                .OrderBy(f => f.Path)
-                .Select(f => new PendingFile(
-                    f.Id,
-                    f.Path,
-                    f.Recording!.Title,
-                    f.Recording!.Mbid!.Value,
-                    f.FingerprintDuration ?? f.Quality!.Duration,
-                    f.SizeBytes))
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
+            // A file at the library root has no folder to group by, so it is its
+            // own. Grouping every such file together would be a claim that "loose
+            // at the root" is an album.
+            var rows = folder.Length == 0
+                ? db.MediaFiles.AsNoTracking().Where(f => f.Id == seed.Id)
+                : db.MediaFiles.AsNoTracking().Where(f => f.Path.StartsWith(prefix));
 
-            var members = rows.Where(row => AlbumFolder.Of(row.Path) == folder).ToList();
-
-            return members.Exists(row => row.Id == seed.Id) ? members : [seed, .. members];
+            members = (await rows
+                    .OrderBy(f => f.Path)
+                    .Select(f => new FolderMember(
+                        f.Id,
+                        f.Path,
+                        f.Recording == null ? null : f.Recording.Title,
+                        f.Recording == null ? null : f.Recording.Mbid,
+                        f.Quality!.Duration ?? f.FingerprintDuration,
+                        f.SizeBytes,
+                        f.Quality,
+                        f.AttributionOutcome,
+                        f.ReleaseDecidedUtc,
+                        f.ReleaseGroupId,
+                        f.ReleaseGroup == null ? null : f.ReleaseGroup.Mbid,
+                        null,
+                        null))
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .Where(row => AlbumFolder.Of(row.Path) == folder)
+                .ToList();
         }
+
+        for (var index = 0; index < members.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var tags = await tagReader
+                    .ReadAsync(new LibraryPath(members[index].Path), cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+
+                members[index] = members[index] with
+                {
+                    TagDisc = WholeNumber(tags.Find("DISCNUMBER")),
+                    TagTrack = WholeNumber(tags.Find("TRACKNUMBER")),
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // A file that cannot be read has no number of its own, and that is all.
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+            }
+        }
+
+        return members;
     }
+
+    private static int? WholeNumber(string? value) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) && number > 0
+            ? number
+            : null;
 
     /// <summary>
     /// Is this release worth a track list, now that the whole folder is known?
@@ -897,9 +1039,11 @@ public sealed class ReleaseAttributionService(
     }
 
     /// <summary>"CD", "Digital Media", "CD+DVD-Video" — the honest reason a rip is partial.</summary>
-    internal static string? Formats(MusicBrainzReleaseCandidate candidate)
+    internal static string? Formats(MusicBrainzReleaseCandidate candidate) => Formats(candidate.Media);
+
+    internal static string? Formats(IReadOnlyList<MusicBrainzMediumSummary> media)
     {
-        var named = candidate.Media
+        var named = media
             .Select(medium => medium.Format)
             .OfType<string>()
             .Distinct(StringComparer.Ordinal)
@@ -953,37 +1097,21 @@ public sealed class ReleaseAttributionService(
         public Dictionary<AcoustId, IReadOnlyList<AcoustIdMatch>> Clusters { get; } = [];
     }
 
-    /// <summary>A set of files decided together, with the releases they were decided against.</summary>
+    /// <summary>One album folder, with the releases it was decided against.</summary>
     private sealed record Component(
-        IReadOnlyList<PendingFile> Files,
+        IReadOnlyList<FolderMember> Files,
         IReadOnlyList<MusicBrainzRelease> Candidates,
         IReadOnlyDictionary<Mbid, string?> Formats,
 
         /// <summary>
-        /// Recordings a browse was actually sent for.
+        /// For each of the folder's recordings, every release group its browse
+        /// placed it on — complete, because the browse is paged to its end, and
+        /// empty for a recording MusicBrainz lists on no release at all.
         /// </summary>
-        /// <remarks>
-        /// Every distinct recording in the folder, since the browses are what
-        /// the gather now consists of. Carried because the stored candidate
-        /// document reports it against the recording count: the two agreeing is
-        /// what tells a person the shortlist was drawn from the whole album
-        /// rather than from part of it.
-        /// </remarks>
-        IReadOnlySet<Mbid> Browsed,
+        IReadOnlyDictionary<Mbid, HashSet<Mbid>> Groups,
 
-        /// <summary>
-        /// Recordings a browse returned at least one release for, whether or not
-        /// that release survived the prune or the cap.
-        /// </summary>
-        /// <remarks>
-        /// Kept because the prune destroys the difference between the two refusal
-        /// outcomes. A recording on nothing but a 150-track anthology has its
-        /// only candidate discarded before the lookup, so the rule sees an empty
-        /// candidate set and reports <c>NoCandidate</c> — "MusicBrainz has this on
-        /// no release", which is false and points at the wrong fix. This restores
-        /// the honest answer: releases existed, none was worth believing.
-        /// </remarks>
-        IReadOnlySet<Mbid> Placed)
+        /// <summary>False when the gather stopped at its cap, and some releases were never looked up.</summary>
+        bool Complete)
     {
         /// <summary>A title for a release group nothing was filed under directly.</summary>
         public string GroupTitle(Mbid group) =>
@@ -992,53 +1120,86 @@ public sealed class ReleaseAttributionService(
             ?? "Unknown album";
     }
 
+    /// <summary>The file a folder is started from.</summary>
+    private sealed record PendingFile(MediaFileId Id, string Path);
+
     /// <summary>
-    /// One file waiting on an album.
+    /// One file of an album folder, as it stands.
     /// </summary>
     /// <remarks>
     /// <see cref="Title"/> and <see cref="SizeBytes"/> are along for the ride
-    /// rather than for the decision: the rule reads the recording and the
-    /// duration, and these two are what the candidate document this pass now
-    /// stores has to print. Selected here because they are on the row already —
-    /// fetching them later would be a second query per refused component.
-    ///
-    /// <see cref="Duration"/> is <c>FingerprintDuration ?? Quality.Duration</c>,
-    /// which is also what the endpoint scores with. A third of this worklist has
-    /// no fingerprint duration at all.
+    /// rather than for the decision: they are what the stored candidate document
+    /// prints. <see cref="Duration"/> is the probe's decoded length where there is
+    /// one and fpcalc's otherwise — the probe's is exact to the sample, which is
+    /// what proving a pressing to within 100 ms needs.
     /// </remarks>
-    private sealed record PendingFile(
+    private sealed record FolderMember(
         MediaFileId Id,
         string Path,
         string? Title,
-        Mbid Recording,
+        Mbid? Recording,
         TimeSpan? Duration,
-        long SizeBytes)
+        long SizeBytes,
+        AudioQuality? Quality,
+        ReleaseAttributionOutcome Outcome,
+        DateTimeOffset? DecidedUtc,
+        ReleaseGroupId? AlbumId,
+        Mbid? AlbumMbid,
+        int? TagDisc,
+        int? TagTrack)
     {
-        public AttributionFile ToAttributionFile() => new(Id, Recording, Duration);
+        /// <summary>Nobody has answered for it: the rule's to decide, whole.</summary>
+        public bool RuleOwned => DecidedUtc is null;
 
-        public ComponentMember ToMember() => new(Id, Path, Title, Recording, Duration, SizeBytes);
+        /// <summary>A person or agent named its album; which pressing it is stays the rule's.</summary>
+        public bool AlbumByHand => Outcome is ReleaseAttributionOutcome.AlbumByPerson or ReleaseAttributionOutcome.AlbumByAgent;
+
+        public FolderFile ToFolderFile(IReadOnlyDictionary<Mbid, HashSet<Mbid>> groups, IReadOnlySet<Mbid>? linked) =>
+            new(
+                Id,
+                Path,
+                Recording,
+                Recording is { } recording && groups.TryGetValue(recording, out var on) ? on : new HashSet<Mbid>(),
+                linked ?? new HashSet<Mbid>(),
+                Duration,
+                Quality,
+                TagDisc,
+                TagTrack);
+
+        public ComponentMember ToMember() => new(Id, Path, Title, Recording!.Value, Duration, SizeBytes);
     }
 
     private sealed class Tally
     {
         public int Examined { get; set; }
         public int Attributed { get; set; }
-        public int Ambiguous { get; set; }
         public int GroupOnly { get; set; }
+        public int OnNoEdition { get; set; }
         public int NoConfidentFit { get; set; }
         public int NoCandidate { get; set; }
+        public int OrderContradicted { get; set; }
         public int Failed { get; set; }
         public int Components { get; set; }
         public int Releases { get; set; }
 
-        public void Record(ReleaseAttributionOutcome outcome)
+        /// <summary>
+        /// Counted by what the row says after the write, so a file whose album a
+        /// person named counts under that album's pressing — or under the album
+        /// alone where none is proven.
+        /// </summary>
+        public void Record(ReleaseAttributionOutcome outcome, bool pressing)
         {
             switch (outcome)
             {
                 case ReleaseAttributionOutcome.Attributed: Attributed++; break;
-                case ReleaseAttributionOutcome.AttributedAmbiguously: Ambiguous++; break;
-                case ReleaseAttributionOutcome.GroupOnly: GroupOnly++; break;
+                case ReleaseAttributionOutcome.AlbumByPerson
+                    or ReleaseAttributionOutcome.AlbumByAgent when pressing: Attributed++; break;
+                case ReleaseAttributionOutcome.GroupOnly
+                    or ReleaseAttributionOutcome.AlbumByPerson
+                    or ReleaseAttributionOutcome.AlbumByAgent: GroupOnly++; break;
+                case ReleaseAttributionOutcome.OnNoEdition: OnNoEdition++; break;
                 case ReleaseAttributionOutcome.NoCandidate: NoCandidate++; break;
+                case ReleaseAttributionOutcome.OrderContradicted: OrderContradicted++; break;
                 default: NoConfidentFit++; break;
             }
         }
@@ -1154,11 +1315,13 @@ public sealed class ReleaseAttributionService(
             release.CatalogNumber = label?.CatalogNumber;
             release.TrackCount = source.Tracks.Count;
             release.DiscCount = source.Tracks.Select(track => track.DiscNumber).Distinct().Count();
-            // Coalesced rather than assigned. The pass knows the disc formats
-            // because a browse told it; a person's decision comes from a release
-            // lookup, which does not carry them, and blanking "CD" on the way
-            // past would lose a fact nothing else can restore.
-            release.MediumFormats = mediumFormats ?? release.MediumFormats;
+            // The browse's summary where the caller has one, the lookup's own
+            // media otherwise — which is what a release filed by hand, never
+            // browsed, has to go on. Coalesced rather than assigned: blanking
+            // "CD" on the way past would lose a fact nothing else can restore.
+            release.MediumFormats = mediumFormats
+                ?? (source.Media is { Count: > 0 } media ? Formats(media) : null)
+                ?? release.MediumFormats;
 
             await ApplyTracksAsync(release, source, cancellationToken).ConfigureAwait(false);
             await ApplyRecordingCreditsAsync(source, cancellationToken).ConfigureAwait(false);
@@ -1520,12 +1683,14 @@ public sealed record AttributionProgress(string JobId, int Processed, int Total,
 /// <c>NumberHandling.Strict</c> types a <c>long</c> as <c>string | number</c> in
 /// the generated client and arithmetic on one fails to compile.
 ///
-/// The four refusal counts are separate on purpose. A large
+/// The refusal counts are separate on purpose. A large
 /// <see cref="NoConfidentFit"/> is the strict gate working — compilations of
 /// licensed catalogue land there — while a large <see cref="NoCandidate"/> means
-/// MusicBrainz has recordings on no release at all, and a large
-/// <see cref="Failed"/> means the mirror is unwell. Summed into one "unresolved"
-/// they would be indistinguishable, and only one of the three is worth acting on.
+/// MusicBrainz has recordings on no release at all, a large
+/// <see cref="OrderContradicted"/> means tags numbered against the album, and a
+/// large <see cref="Failed"/> means the mirror is unwell. Summed into one
+/// "unresolved" they would be indistinguishable. <see cref="Releases"/> counts
+/// editions written, not albums.
 /// </remarks>
 public sealed record AttributionSummary(
     string JobId,
@@ -1534,10 +1699,11 @@ public sealed record AttributionSummary(
     long DurationMilliseconds,
     int Examined,
     int Attributed,
-    int Ambiguous,
     int GroupOnly,
+    int OnNoEdition,
     int NoConfidentFit,
     int NoCandidate,
+    int OrderContradicted,
     int Failed,
     int Components,
     int Releases,

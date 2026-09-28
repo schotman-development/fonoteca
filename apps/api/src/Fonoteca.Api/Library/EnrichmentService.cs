@@ -1515,7 +1515,7 @@ public sealed class EnrichmentService(
     private static readonly System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UnreadAlbum =
         group => group.ReviewLookupUtc == null
             && group.Mbid != null
-            && group.Releases.Any(release => release.Files.Count != 0);
+            && group.Files.Any();
 
     /// <summary>
     /// Artists a release is billed to that nobody has looked for a banner of.

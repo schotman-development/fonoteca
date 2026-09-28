@@ -213,10 +213,12 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
 
             // The attribution worklist. Fourth named partial index on Id, and the
             // naming matters here for the same reason it did for the other three.
+            // An album named by hand (15, 16) stays on it: the album is the
+            // person's, which pressing it is remains the rule's to prove.
             e.HasIndex(x => x.Id, "IX_MediaFiles_ReleasePending")
                 .HasFilter(
                     "\"RecordingId\" IS NOT NULL AND \"ReleaseLookupUtc\" IS NULL "
-                    + "AND \"ReleaseDecidedUtc\" IS NULL");
+                    + "AND (\"ReleaseDecidedUtc\" IS NULL OR \"AttributionOutcome\" IN (15, 16))");
 
             // "Everything on this album" has to be one indexed read whether or
             // not the pressing was decided, so both links are indexed.
@@ -238,7 +240,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.SetNull);
 
             e.HasOne(x => x.ReleaseGroup)
-                .WithMany()
+                .WithMany(g => g.Files)
                 .HasForeignKey(x => x.ReleaseGroupId)
                 .OnDelete(DeleteBehavior.SetNull);
 

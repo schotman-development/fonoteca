@@ -159,7 +159,8 @@ public sealed class CandidateWarmService(
                 .AsNoTracking()
                 .Where(file => file.ReleaseLookupUtc != null
                     && file.ReleaseDecidedUtc == null
-                    && file.AttributionOutcome == ReleaseAttributionOutcome.NoConfidentFit
+                    && (file.AttributionOutcome == ReleaseAttributionOutcome.NoConfidentFit
+                        || file.AttributionOutcome == ReleaseAttributionOutcome.OrderContradicted)
 
                     // The endpoint's own condition: a component is recovered
                     // from files whose recording MusicBrainz can be asked about,

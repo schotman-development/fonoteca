@@ -1,586 +1,526 @@
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Identification;
+using static Fonoteca.Domain.Tests.AlbumFolderFixtures;
 
 namespace Fonoteca.Domain.Tests;
 
 /// <summary>
-/// The rule that decides which album a file came from.
+/// The rule that decides which album a folder is, and whether a pressing of it is
+/// proven.
 /// </summary>
 /// <remarks>
-/// The shapes here are the ones a real library produced. Two of them are
-/// failures the first working prototype had, measured against 389 real files
-/// before this rule existed, and they are the reason it is shaped the way it is:
-/// a bootleg compilation that outbid four albums at once, and a pair of editions
-/// that fitted identically while disagreeing about where the music sat.
-///
-/// No folder appears anywhere in this file, and that is the invariant under
-/// test as much as any assertion is.
+/// The shapes here are the ones a real library produced: a compilation, a box set
+/// and a single each reaching into an album's folder; two pressings of one album
+/// a second apart; a remaster whose lengths match and an original whose do not;
+/// a song identified as another take of itself. The folder is the unit, so every
+/// case is one folder's files.
 /// </remarks>
 public sealed class ReleaseAttributionTests
 {
-    private static readonly Mbid AlbumId = Mb("11111111-1111-4111-8111-111111111111");
-    private static readonly Mbid RemasterId = Mb("22222222-2222-4222-8222-222222222222");
-    private static readonly Mbid CompilationId = Mb("33333333-3333-4333-8333-333333333333");
-    private static readonly Mbid VinylId = Mb("44444444-4444-4444-8444-444444444444");
-    private static readonly Mbid SingleDiscId = Mb("55555555-5555-4555-8555-555555555555");
-    private static readonly Mbid GroupId = Mb("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    private static readonly Mbid OtherGroupId = Mb("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    private const double Coverage = 0.25;
 
-    /// <summary>
-    /// The ordinary case: every track of an album present, nothing else close.
-    /// </summary>
+    private static FolderDecision Decide(
+        IReadOnlyList<FolderFile> files,
+        IReadOnlyCollection<MusicBrainzRelease> candidates,
+        Mbid? byHand = null,
+        bool complete = true) =>
+        ReleaseAttribution.Decide(files, candidates, byHand, complete, Coverage);
+
+    private static readonly (string Name, int? Ms)[] Album =
+        Tracks(("a", 180_437), ("b", 240_120), ("c", 200_880));
+
     [Fact]
-    public void AnAlbumWhoseTracksAreAllPresentIsAttributedOutright()
+    public void AnAlbumWhoseTracksAreAllPresentAndMatchIsProvenAndSeated()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220));
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_440, candidates),
+            File("b", 240_110, candidates),
+            File("c", 200_900, candidates),
+        ];
 
-        var result = ReleaseAttribution.Assign(
-            files,
-            [Release(AlbumId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220)])]);
+        var decision = Decide(files, candidates);
 
-        Assert.All(result, assignment =>
-        {
-            Assert.Equal(ReleaseAttributionOutcome.Attributed, assignment.Outcome);
-            Assert.Equal(AlbumId, assignment.Release);
-            Assert.Equal(0, assignment.EditionAlternatives);
-        });
-
-        Assert.Equal([1, 2, 3], result.Select(a => a.Position).ToArray());
-        Assert.All(result, assignment => Assert.Equal(1, assignment.DiscNumber));
+        Assert.Equal(Group, decision.Album);
+        Assert.Equal(Id("album"), decision.Edition?.Id);
+        Assert.All(decision.Files, file => Assert.Equal(ReleaseAttributionOutcome.Attributed, file.Outcome));
+        Assert.Equal([1, 2, 3], decision.Files.Select(file => file.Slot?.Position));
     }
 
-    /// <summary>
-    /// The failure that shaped the ladder.
-    /// </summary>
-    /// <remarks>
-    /// A greedy that maximises files explained picks the compilation first — it
-    /// covers four files against the album's three — and having taken them,
-    /// leaves the album holding a third of itself. Measured on real data, one
-    /// thirty-one-track bootleg took seventeen files out of four albums this way.
-    ///
-    /// The compilation is a perfectly real release and the files really do appear
-    /// on it. What makes it the wrong answer is that it explains almost none of
-    /// itself, and the album explains all of itself.
-    /// </remarks>
     [Fact]
-    public void ACompilationDoesNotOutbidTheAlbumItPlundered()
+    public void AFileTheAlbumDoesNotPrintStaysWithTheFolder()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220), ("d", 240));
+        // The folder is the album. A compilation printing the album's three songs
+        // and a fourth does not take the fourth away, and the compilation does not
+        // win the folder either: it explains four files at a third of itself.
+        MusicBrainzRelease[] candidates =
+        [
+            Release("album", Album),
+            Release("compilation", [.. Album, ("d", 190_000), .. Filler("comp", 8)], group: OtherGroup),
+        ];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+            File("d", 190_000, candidates),
+        ];
 
-        var result = ReleaseAttribution.Assign(
-            files,
-            [
-                Release(AlbumId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220)]),
+        var decision = Decide(files, candidates);
 
-                // Twenty tracks, four of which we hold: coverage 0.20, and it
-                // reaches one file the album cannot explain.
-                Release(
-                    CompilationId,
-                    "Greatest Hits",
-                    tracks: [("a", 182), ("b", 202), ("c", 222), ("d", 242), .. Filler(16)]),
-            ]);
+        Assert.Equal(Group, decision.Album);
+        Assert.Equal(
+            [ReleaseAttributionOutcome.GroupOnly, ReleaseAttributionOutcome.GroupOnly,
+             ReleaseAttributionOutcome.GroupOnly, ReleaseAttributionOutcome.OnNoEdition],
+            decision.Files.Select(file => file.Outcome));
 
-        var album = result.Where(a => a.Release == AlbumId).ToList();
-        Assert.Equal(3, album.Count);
-        Assert.All(album, a => Assert.Equal(ReleaseAttributionOutcome.Attributed, a.Outcome));
-
-        // And the fourth file, which really is only on the compilation, is still
-        // refused: one track of twenty is not evidence of owning that release.
-        // Filing it there would be the lenient answer, and the lenient answer is
-        // what scattered a real compilation across seven albums.
-        var orphan = Assert.Single(result, a => a.File == File("d"));
-        Assert.Equal(ReleaseAttributionOutcome.NoConfidentFit, orphan.Outcome);
-        Assert.Null(orphan.Release);
+        // Four files against a three-track pressing proves nothing.
+        Assert.Null(decision.Edition);
     }
 
-    /// <summary>
-    /// A box set explaining more files does not beat an album explaining itself.
-    /// </summary>
-    /// <remarks>
-    /// Measured on real data, and the reason the ranking is a product rather than
-    /// a count. Michael Jackson's <i>The Collection</i> is five discs and 76
-    /// tracks; a library holding <i>Off the Wall</i> and <i>Bad</i> whole gives it
-    /// twenty files at coverage 0.26, against ten files at coverage 1.00 for
-    /// <i>Off the Wall</i> itself. Both clear the loosest rung, so on a
-    /// files-first ranking the box set takes them and two albums disappear into a
-    /// compilation nobody owns — which is exactly what a live run produced.
-    /// </remarks>
     [Fact]
-    public void ABoxSetDoesNotSwallowTheAlbumsItReprints()
+    public void ABoxSetDoesNotSwallowTheAlbumItReprints()
     {
-        // Two albums of five, held whole; the box set reprints both among its
-        // twenty tracks and its printed lengths are a shade out, as a remaster's
-        // are — enough to keep it off the strict rungs but not out of the last.
-        var files = Library(
-            ("a1", 180), ("a2", 200), ("a3", 220), ("a4", 240), ("a5", 260),
-            ("b1", 300), ("b2", 320), ("b3", 340), ("b4", 360), ("b5", 380));
+        var album = Tracks([.. Enumerable.Range(0, 10).Select(n => ($"t{n}", 200_437 + n))]);
+        MusicBrainzRelease[] candidates =
+        [
+            Release("album", album),
+            Release("box", [.. album, .. Filler("box", 66)], group: OtherGroup),
+        ];
+        var files = album.Select(track => File(track.Name, track.Ms!.Value, candidates)).ToList();
 
-        var boxSet = Release(
-            CompilationId,
-            "The Collection",
-            tracks:
-            [
-                ("a1", 182), ("a2", 202), ("a3", 222), ("a4", 242), ("a5", 262),
-                ("b1", 302), ("b2", 322), ("b3", 342), ("b4", 362), ("b5", 382),
-                .. Filler(10),
-            ],
-            group: OtherGroupId);
+        var decision = Decide(files, candidates);
 
-        var result = ReleaseAttribution.Assign(
-            files,
-            [
-                Release(AlbumId, "One", tracks: [("a1", 180), ("a2", 200), ("a3", 220), ("a4", 240), ("a5", 260)]),
-                Release(VinylId, "Two", tracks: [("b1", 300), ("b2", 320), ("b3", 340), ("b4", 360), ("b5", 380)],
-                    group: OtherGroupId),
-                boxSet,
-            ]);
-
-        Assert.All(result, assignment => Assert.NotEqual(CompilationId, assignment.Release));
-
-        Assert.Equal(5, result.Count(a => a.Release == AlbumId));
-        Assert.Equal(5, result.Count(a => a.Release == VinylId));
+        Assert.Equal(Group, decision.Album);
+        Assert.Equal(Id("album"), decision.Edition?.Id);
     }
 
-    /// <summary>
-    /// And the mirror image: a small release covering itself perfectly does not
-    /// outrank the album it was lifted from.
-    /// </summary>
     [Fact]
     public void ASingleDoesNotOutrankTheAlbumItWasLiftedFrom()
     {
-        // Eleven of a twelve-track album, so the album cannot reach 1.00 — which
-        // is what a coverage-first ranking would need to survive this.
-        var files = Library(
-            ("t1", 180), ("t2", 190), ("t3", 200), ("t4", 210), ("t5", 220), ("t6", 230),
-            ("t7", 240), ("t8", 250), ("t9", 260), ("t10", 270), ("t11", 280));
+        var album = Tracks([.. Enumerable.Range(0, 10).Select(n => ($"t{n}", 200_437 + n))]);
+        MusicBrainzRelease[] candidates =
+        [
+            Release("album", album),
+            Release("single", [album[2], album[3]], group: OtherGroup),
+        ];
+        var files = album.Select(track => File(track.Name, track.Ms!.Value, candidates)).ToList();
 
-        var album = Release(
-            AlbumId,
-            "Album",
-            tracks:
-            [
-                ("t1", 180), ("t2", 190), ("t3", 200), ("t4", 210), ("t5", 220), ("t6", 230),
-                ("t7", 240), ("t8", 250), ("t9", 260), ("t10", 270), ("t11", 280), ("t12", 290),
-            ]);
-
-        var single = Release(VinylId, "Single", tracks: [("t3", 200), ("t4", 210)], group: OtherGroupId);
-
-        var result = ReleaseAttribution.Assign(files, [album, single]);
-
-        Assert.All(result, assignment => Assert.Equal(AlbumId, assignment.Release));
+        Assert.Equal(Group, Decide(files, candidates).Album);
     }
 
-    /// <summary>
-    /// Duration is what separates two editions that a track list cannot.
-    /// </summary>
-    /// <remarks>
-    /// The <i>Off the Wall</i> case, reduced. The album and its remaster carry
-    /// the same songs in the same order, so coverage is 1.00 for both and only
-    /// the running times differ. The files here last exactly what the remaster
-    /// prints, which is the answer even though the original is older and would
-    /// win any tie-break — because it never reaches the tie-break.
-    /// </remarks>
     [Fact]
-    public void TheEditionWhoseRunningTimesMatchWinsOverTheOlderPressing()
+    public void OnlyTheEditionWithinAHundredMillisecondsOnEveryTrackIsProven()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220));
+        // The remaster matches; the original pressing is two seconds out on every
+        // track. Both are the album, and only one is the pressing.
+        MusicBrainzRelease[] candidates =
+        [
+            Release("remaster", Album, year: 2015),
+            Release("original", Tracks(("a", 182_437), ("b", 242_120), ("c", 202_880)), year: 1979),
+        ];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
 
-        var result = ReleaseAttribution.Assign(
-            files,
-            [
-                Release(AlbumId, "Album", tracks: [("a", 178), ("b", 198), ("c", 218)], year: 1979),
-                Release(RemasterId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220)], year: 2015),
-            ]);
+        var decision = Decide(files, candidates);
 
-        Assert.All(result, a => Assert.Equal(RemasterId, a.Release));
-        Assert.All(result, a => Assert.Equal(ReleaseAttributionOutcome.Attributed, a.Outcome));
+        Assert.Equal(Id("remaster"), decision.Edition?.Id);
+        Assert.Equal(1, decision.EditionsProven);
     }
 
-    /// <summary>
-    /// Editions that agree about the music are chosen between, and the choosing
-    /// is recorded.
-    /// </summary>
-    /// <remarks>
-    /// Three pressings of <i>Sloe Gin</i> fitted identically in the real run.
-    /// Nothing this catalogue stores about the file differs between them, so
-    /// refusing to file it would cost the user an album to gain nothing. The
-    /// count of alternatives is what makes the coin-flip reviewable afterwards.
-    /// </remarks>
     [Fact]
-    public void EditionsThatAgreeAboutThePositionsAreChosenBetweenAndCounted()
+    public void TwoEditionsThatBothProveLeaveOnlyTheAlbum()
     {
-        var tracks = new[] { ("a", 180), ("b", 200), ("c", 220) };
-        var files = Library(tracks);
+        // Two pressings of one master, a CD from two countries: the audio cannot
+        // tell them apart, and naming one would claim its barcode and label.
+        MusicBrainzRelease[] candidates = [Release("uk", Album), Release("us", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
 
-        var result = ReleaseAttribution.Assign(
-            files,
-            [
-                Release(VinylId, "Album", tracks, year: 2009, status: "Official"),
-                Release(AlbumId, "Album", tracks, year: 2007, status: "Official"),
-                Release(RemasterId, "Album", tracks, year: 2007, status: "Promotion"),
-            ]);
+        var decision = Decide(files, candidates);
 
-        Assert.All(result, assignment =>
+        Assert.Equal(Group, decision.Album);
+        Assert.Null(decision.Edition);
+        Assert.Equal(2, decision.EditionsProven);
+        Assert.All(decision.Files, file =>
         {
-            Assert.Equal(ReleaseAttributionOutcome.AttributedAmbiguously, assignment.Outcome);
-
-            // Official first, then the earliest — so the 2007 official pressing,
-            // not the 2007 promo and not the 2009 reissue.
-            Assert.Equal(AlbumId, assignment.Release);
-            Assert.Equal(2, assignment.EditionAlternatives);
+            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, file.Outcome);
+            Assert.Null(file.Slot);
         });
     }
 
-    /// <summary>
-    /// The other prototype failure: a tie that cannot be chosen between without
-    /// inventing a track number.
-    /// </summary>
-    /// <remarks>
-    /// A two-disc original against a single-disc reissue holding the same music.
-    /// Both explain every file, both to the same accuracy, and they contradict
-    /// each other about which disc the music is on. Picking one would write a
-    /// disc and a position into the catalogue that the evidence does not support,
-    /// so only the album survives — which is a real answer and a smaller one.
-    /// </remarks>
     [Fact]
-    public void EditionsThatDisagreeAboutThePositionsKeepOnlyTheAlbum()
+    public void APseudoReleaseCopyingAPressingsLengthsDoesNotTieIt()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220), ("d", 240));
+        // A transliterated track list prints the original's lengths; it is not a
+        // second pressing, and counting it would leave every such album unproven.
+        MusicBrainzRelease[] candidates = [Release("cd", Album), Release("latin", Album, status: "Pseudo-Release")];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
 
-        var twoDisc = Release(
-            AlbumId,
-            "Album",
-            tracks: [("a", 180), ("b", 200)],
-            group: GroupId);
+        var decision = Decide(files, candidates);
 
-        twoDisc = twoDisc with
-        {
-            Tracks = [.. twoDisc.Tracks, Track(2, 1, "c", 220), Track(2, 2, "d", 240)],
-        };
-
-        var result = ReleaseAttribution.Assign(
-            files,
-            [
-                twoDisc,
-                Release(
-                    SingleDiscId,
-                    "Album",
-                    tracks: [("a", 180), ("b", 200), ("c", 220), ("d", 240)],
-                    group: GroupId),
-            ]);
-
-        Assert.All(result, assignment =>
-        {
-            Assert.Equal(ReleaseAttributionOutcome.GroupOnly, assignment.Outcome);
-            Assert.Equal(GroupId, assignment.ReleaseGroup);
-
-            // The whole point of the outcome: no position is asserted.
-            Assert.Null(assignment.Release);
-            Assert.Null(assignment.DiscNumber);
-            Assert.Null(assignment.Position);
-        });
+        Assert.Equal(Id("cd"), decision.Edition?.Id);
+        Assert.Equal(1, decision.EditionsProven);
     }
 
-    /// <summary>
-    /// When even the album is ambiguous, nothing survives and the file is refused.
-    /// </summary>
+    [Fact]
+    public void OneTrackFifteenSecondsOutLeavesOnlyTheAlbum()
+    {
+        // Eleven tracks exact and one fifteen seconds out averages 1.25s, which a
+        // mean would pass. Every track has to agree.
+        var album = Tracks([.. Enumerable.Range(0, 12).Select(n => ($"t{n}", 200_437 + n))]);
+        MusicBrainzRelease[] candidates = [Release("album", album)];
+        var files = album
+            .Select((track, n) => File(track.Name, track.Ms!.Value + (n == 5 ? 15_000 : 0), candidates))
+            .ToList();
+
+        var decision = Decide(files, candidates);
+
+        Assert.Equal(Group, decision.Album);
+        Assert.Null(decision.Edition);
+    }
+
+    [Fact]
+    public void ATrackCountThatIsNotTheFoldersFileCountProvesNothing()
+    {
+        MusicBrainzRelease[] candidates = [Release("album", [.. Album, ("d", 150_111)])];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
+
+        var decision = Decide(files, candidates);
+
+        Assert.Equal(Group, decision.Album);
+        Assert.Null(decision.Edition);
+    }
+
+    [Fact]
+    public void LengthsKnownOnlyToTheSecondOrNotAtAllProveNothing()
+    {
+        MusicBrainzRelease[] whole = [Release("album", Tracks(("a", 180_000), ("b", 240_000), ("c", 201_000)))];
+        FolderFile[] exact =
+        [
+            File("a", 180_000, whole),
+            File("b", 240_000, whole),
+            File("c", 201_000, whole),
+        ];
+
+        Assert.Null(Decide(exact, whole).Edition);
+
+        MusicBrainzRelease[] unknown = [Release("album", [("a", null), ("b", 240_120), ("c", 200_880)])];
+        FolderFile[] files =
+        [
+            File("a", 180_437, unknown),
+            File("b", 240_120, unknown),
+            File("c", 200_880, unknown),
+        ];
+
+        Assert.Null(Decide(files, unknown).Edition);
+    }
+
+    [Fact]
+    public void AFolderMostlySomethingElseIsAQuestionAndOneMostlyTheAlbumIsTheAlbum()
+    {
+        // Eleven files, six of them the album's: the album. Ten files, five of
+        // them: a compilation or a mix, and a person's to answer.
+        var album = Tracks([.. Enumerable.Range(0, 6).Select(n => ($"t{n}", 200_437 + n))]);
+        MusicBrainzRelease[] candidates = [Release("album", album)];
+
+        List<FolderFile> Folder(int onAlbum, int others) =>
+        [
+            .. album.Take(onAlbum).Select(track => File(track.Name, track.Ms!.Value, candidates)),
+            .. Enumerable.Range(0, others).Select(n => File($"stray{n}", 100_000, candidates)),
+        ];
+
+        Assert.Equal(Group, Decide(Folder(6, 5), candidates).Album);
+
+        var refused = Decide(Folder(5, 5), candidates);
+        Assert.Null(refused.Album);
+        Assert.Equal(Group, refused.Proposed);
+    }
+
+    [Fact]
+    public void AnUnidentifiedFileCountsTowardsTheFolderButGetsNoDecision()
+    {
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            Unidentified("Artist/Album/03 ?.flac"),
+            Unidentified("Artist/Album/04 ?.flac"),
+        ];
+
+        var decision = Decide(files, candidates);
+
+        // Two of four is not more than half.
+        Assert.Null(decision.Album);
+        Assert.Equal(2, decision.Files.Count);
+    }
+
     [Fact]
     public void ATieAcrossTwoDifferentAlbumsIsRefusedRatherThanSplitTheDifference()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220), ("d", 240));
+        MusicBrainzRelease[] candidates =
+        [
+            Release("one", Album),
+            Release("other", Album, group: OtherGroup),
+        ];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
 
-        var left = Release(AlbumId, "One", tracks: [("a", 180), ("b", 200)], group: GroupId);
+        var decision = Decide(files, candidates);
 
-        left = left with { Tracks = [.. left.Tracks, Track(2, 1, "c", 220), Track(2, 2, "d", 240)] };
-
-        var result = ReleaseAttribution.Assign(
-            files,
-            [
-                left,
-                Release(
-                    SingleDiscId,
-                    "Two",
-                    tracks: [("a", 180), ("b", 200), ("c", 220), ("d", 240)],
-                    group: OtherGroupId),
-            ]);
-
-        Assert.All(result, assignment =>
-        {
-            Assert.Equal(ReleaseAttributionOutcome.NoConfidentFit, assignment.Outcome);
-            Assert.Null(assignment.Release);
-            Assert.Null(assignment.ReleaseGroup);
-        });
+        Assert.Null(decision.Album);
+        Assert.All(decision.Files, file => Assert.Equal(ReleaseAttributionOutcome.NoConfidentFit, file.Outcome));
     }
 
-    /// <summary>
-    /// A file that fits nothing well is refused rather than filed badly.
-    /// </summary>
-    /// <remarks>
-    /// The strict end of the design. A licensed recording appearing on a
-    /// forty-track anthology and nowhere else is exactly the case that scattered
-    /// a compilation across seven releases in the prototype; leaving it
-    /// unattributed puts it in a review queue instead of in the wrong album.
-    /// </remarks>
-    [Fact]
-    public void AFileNoReleaseExplainsWellIsLeftUnattributed()
-    {
-        var files = Library(("a", 180));
-
-        var result = ReleaseAttribution.Assign(
-            files,
-            [Release(CompilationId, "Anthology", tracks: [("a", 180), .. Filler(39)])]);
-
-        var only = Assert.Single(result);
-        Assert.Equal(ReleaseAttributionOutcome.NoConfidentFit, only.Outcome);
-        Assert.Null(only.Release);
-    }
-
-    /// <summary>
-    /// "No release holds this recording" and "no release holds it well enough"
-    /// are different facts and lead to different follow-ups.
-    /// </summary>
     [Fact]
     public void ARecordingOnNoReleaseAtAllIsDistinguishedFromAPoorFit()
     {
-        var files = Library(("a", 180), ("z", 300));
+        MusicBrainzRelease[] candidates = [Release("anthology", [("a", 180_437), .. Filler("anth", 39)])];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("nowhere", 200_000, candidates),
+        ];
 
-        var result = ReleaseAttribution.Assign(
-            files,
-            [Release(CompilationId, "Anthology", tracks: [("a", 180), .. Filler(39)])]);
+        var decision = Decide(files, candidates);
 
+        Assert.Null(decision.Album);
         Assert.Equal(
-            ReleaseAttributionOutcome.NoConfidentFit,
-            Assert.Single(result, a => a.File == File("a")).Outcome);
-
-        Assert.Equal(
-            ReleaseAttributionOutcome.NoCandidate,
-            Assert.Single(result, a => a.File == File("z")).Outcome);
+            [ReleaseAttributionOutcome.NoConfidentFit, ReleaseAttributionOutcome.NoCandidate],
+            decision.Files.Select(file => file.Outcome));
     }
 
-    /// <summary>
-    /// A standalone single is a release with one track, which no rung that
-    /// demands two files could ever reach.
-    /// </summary>
     [Fact]
-    public void AStandaloneSingleIsAttributedDespiteBeingOneFile()
+    public void AStandaloneSingleIsProvenDespiteBeingOneFile()
     {
-        var files = Library(("a", 180));
+        MusicBrainzRelease[] candidates = [Release("single", Tracks(("a", 180_437)))];
 
-        var result = ReleaseAttribution.Assign(files, [Release(AlbumId, "Single", tracks: [("a", 180)])]);
+        var decision = Decide([File("a", 180_437, candidates)], candidates);
 
-        Assert.Equal(ReleaseAttributionOutcome.Attributed, Assert.Single(result).Outcome);
+        Assert.Equal(Id("single"), decision.Edition?.Id);
     }
 
-    /// <summary>
-    /// Five encodings of one song are five files, not a five-track album.
-    /// </summary>
-    /// <remarks>
-    /// A slot takes one file. Without that, a folder of duplicate rips would fill
-    /// a release to full coverage on the strength of one song and win outright.
-    /// </remarks>
-    [Fact]
-    public void DuplicateEncodingsCannotFillOneTrackListSeveralTimesOver()
-    {
-        var files = new List<AttributionFile>
-        {
-            new(File("a1"), Recording("a"), TimeSpan.FromSeconds(180)),
-            new(File("a2"), Recording("a"), TimeSpan.FromSeconds(180)),
-            new(File("a3"), Recording("a"), TimeSpan.FromSeconds(180)),
-        };
-
-        var result = ReleaseAttribution.Assign(
-            files,
-            [Release(AlbumId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220)])]);
-
-        // Coverage is one slot of three, which no rung admits at two files.
-        Assert.All(result, a => Assert.Equal(ReleaseAttributionOutcome.NoConfidentFit, a.Outcome));
-    }
-
-    /// <summary>
-    /// The same inputs must always produce the same answer, whatever order they
-    /// arrive in — a rerun that changes its mind is worse than one that is wrong.
-    /// </summary>
     [Fact]
     public void TheAnswerDoesNotDependOnTheOrderTheCandidatesArriveIn()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220));
-
-        var tracks = new[] { ("a", 180), ("b", 200), ("c", 220) };
-
         MusicBrainzRelease[] candidates =
         [
-            Release(VinylId, "Album", tracks),
-            Release(AlbumId, "Album", tracks),
-            Release(RemasterId, "Album", tracks),
+            Release("uk", Album),
+            Release("us", Album),
+            Release("compilation", [.. Album, .. Filler("comp", 8)], group: OtherGroup),
+        ];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
         ];
 
-        var forwards = ReleaseAttribution.Assign(files, candidates);
-        var backwards = ReleaseAttribution.Assign(files, [.. candidates.Reverse()]);
-
-        Assert.Equal(
-            forwards.Select(a => (a.File, a.Release, a.Outcome)),
-            backwards.Select(a => (a.File, a.Release, a.Outcome)));
+        Assert.Equal(Decide(files, candidates), Decide(files, [.. candidates.Reverse()]), Same);
     }
 
-    /// <summary>
-    /// A release MusicBrainz gives no track lengths for is judged on coverage
-    /// alone rather than treated as a perfect match.
-    /// </summary>
     [Fact]
-    public void AReleaseWithNoPrintedLengthsIsNotCreditedWithPerfectAgreement()
+    public void AnAlbumChosenByHandIsKeptAndOnlyTheEditionIsProved()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220));
+        // The rule would pick the other album; the person named this one, and it
+        // stands — held to no majority — while the pressing is still proved.
+        MusicBrainzRelease[] candidates =
+        [
+            Release("album", Album),
+            Release("theirs", Album, group: OtherGroup),
+        ];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
 
-        var undated = Release(AlbumId, "Album", tracks: [("a", null), ("b", null), ("c", null)]);
-        var exact = Release(RemasterId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220)]);
+        var decision = Decide(files, candidates, byHand: OtherGroup);
 
-        var result = ReleaseAttribution.Assign(files, [undated, exact]);
-
-        // Both cover everything; only one of them has shown any evidence.
-        Assert.All(result, a => Assert.Equal(RemasterId, a.Release));
-        Assert.All(result, a => Assert.Equal(ReleaseAttributionOutcome.Attributed, a.Outcome));
+        Assert.Equal(OtherGroup, decision.Album);
+        Assert.Equal(Id("theirs"), decision.Edition?.Id);
     }
 
-    /// <summary>
-    /// <i>Kind of Blue</i>: eight tracks filed, and "Blue in Green" refused beside
-    /// its own empty slot because enrichment named the alternate take.
-    /// </summary>
     [Fact]
-    public void ARefusedFileWhoseClusterNamesTheOneGapIsSeatedOnIt()
+    public void AFileIdentifiedAsAnotherTakeTakesTheAlbumsRecordingItsClusterNames()
     {
-        var files = Library(("a", 180), ("b", 200), ("c", 220), ("take-1", 240));
-        var album = Release(AlbumId, "Album", tracks: [("a", 180), ("b", 200), ("c", 220), ("d", 240)]);
+        // "Blue in Green (Take 1)": the cluster is linked to the album's own
+        // recording too, and the album is what says which one is meant.
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("take", 200_880, candidates, linked: new HashSet<Mbid> { Recording("c"), Recording("elsewhere") }),
+        ];
 
-        var assigned = ReleaseAttribution.Assign(files, [album]);
-        Assert.Equal(ReleaseAttributionOutcome.NoCandidate, assigned[3].Outcome);
+        var decision = Decide(files, candidates);
 
-        var result = ReleaseAttribution.Reseat(
-            assigned,
-            files,
-            [album],
-            new Dictionary<MediaFileId, IReadOnlySet<Mbid>>
-            {
-                [File("take-1")] = new HashSet<Mbid> { Recording("take-1"), Recording("d") },
-            });
-
-        Assert.Equal(AlbumId, result[3].Release);
-        Assert.Equal(4, result[3].Position);
-        Assert.Equal(ReleaseAttributionOutcome.Attributed, result[3].Outcome);
-        Assert.Equal(assigned.Take(3), result.Take(3));
+        var take = decision.Files.Single(file => file.File == FileId("take"));
+        Assert.Equal(Recording("c"), take.Recording);
+        Assert.Equal(ReleaseAttributionOutcome.Attributed, take.Outcome);
     }
 
-    /// <summary>
-    /// A cluster naming two gaps, or a gap two files want, is a question rather
-    /// than an answer — and so is a gap whose length the file does not match.
-    /// </summary>
     [Fact]
-    public void AGapIsNotFilledUnlessTheAnswerIsSingleAndTheLengthsAgree()
+    public void ATakeIsNotSubstitutedOntoATrackAnotherFileHolds()
     {
-        var files = Library(("a", 180), ("b", 200), ("x", 220), ("y", 260), ("w", 260), ("z", 300));
-        var album = Release(
-            AlbumId,
-            "Album",
-            tracks: [("a", 180), ("b", 200), ("one", 220), ("two", 220), ("solo", 260), ("far", 240)]);
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+            File("take", 200_880, candidates, linked: new HashSet<Mbid> { Recording("c") }),
+        ];
 
-        var assigned = ReleaseAttribution.Assign(files, [album]);
+        var decision = Decide(files, candidates);
 
-        var result = ReleaseAttribution.Reseat(
-            assigned,
-            files,
-            [album],
-            new Dictionary<MediaFileId, IReadOnlySet<Mbid>>
-            {
-                // Two gaps for one file.
-                [File("x")] = new HashSet<Mbid> { Recording("one"), Recording("two") },
-
-                // Two files for one gap.
-                [File("y")] = new HashSet<Mbid> { Recording("solo") },
-                [File("w")] = new HashSet<Mbid> { Recording("solo") },
-
-                // One gap, one file, sixty seconds out.
-                [File("z")] = new HashSet<Mbid> { Recording("far") },
-            });
-
-        Assert.Equal(AlbumId, result[0].Release);
-        Assert.All(result.Skip(2), a => Assert.Null(a.Release));
+        var take = decision.Files.Single(file => file.File == FileId("take"));
+        Assert.Equal(Recording("take"), take.Recording);
+        Assert.Equal(ReleaseAttributionOutcome.OnNoEdition, take.Outcome);
     }
 
-    private static List<AttributionFile> Library(params (string Name, int Seconds)[] files) =>
-        [.. files.Select(file => new AttributionFile(
-            File(file.Name),
-            Recording(file.Name),
-            TimeSpan.FromSeconds(file.Seconds)))];
-
-    private static MusicBrainzRelease Release(
-        Mbid id,
-        string title,
-        (string Name, int? Seconds)[] tracks,
-        int? year = null,
-        string status = "Official",
-        Mbid? group = null) =>
-        new(
-            Id: id,
-            Title: title,
-            ReleasedOn: year is { } known ? new ReleaseDate(known, null, null) : null,
-            Country: null,
-            Status: status,
-            Barcode: null,
-            Labels: [],
-            ReleaseGroupId: group ?? GroupId,
-            ReleaseGroupTitle: title,
-            PrimaryType: "Album",
-            SecondaryTypes: [],
-            Credits: [],
-            Tracks: [.. tracks.Select((track, index) =>
-                Track(1, index + 1, track.Name, track.Seconds))]);
-
-    private static MusicBrainzRelease Release(
-        Mbid id,
-        string title,
-        (string Name, int Seconds)[] tracks,
-        int? year = null,
-        string status = "Official",
-        Mbid? group = null) =>
-        Release(
-            id,
-            title,
-            [.. tracks.Select(track => (track.Name, (int?)track.Seconds))],
-            year,
-            status,
-            group);
-
-    private static MusicBrainzTrack Track(int disc, int position, string name, int? seconds) =>
-        new(
-            DiscNumber: disc,
-            Position: position,
-            Number: position.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            Title: name,
-            Length: seconds is { } known ? TimeSpan.FromSeconds(known) : null,
-            RecordingId: Recording(name),
-            Credits: []);
-
-    /// <summary>Tracks the library does not hold, to dilute a candidate's coverage.</summary>
-    private static (string Name, int? Seconds)[] Filler(int count) =>
-        [.. Enumerable.Range(0, count).Select(index => ($"filler-{index}", (int?)200))];
-
-    /// <summary>A stable id per name, so a test can name a file and find it again.</summary>
-    private static MediaFileId File(string name) => new(Deterministic(name, 0xF1));
-
-    private static Mbid Recording(string name) => new(Deterministic(name, 0x2E));
-
-    private static Guid Deterministic(string name, byte salt)
+    [Theory]
+    [InlineData(203_881)]
+    [InlineData(197_879)]
+    public void ATakeMoreThanThreeSecondsFromTheGapIsNotSubstituted(int ms)
     {
-        var bytes = new byte[16];
-        bytes[0] = salt;
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("take", ms, candidates, linked: new HashSet<Mbid> { Recording("c") }),
+        ];
 
-        for (var index = 0; index < name.Length && index < 15; index++)
-        {
-            bytes[index + 1] = (byte)name[index];
-        }
+        var take = Decide(files, candidates).Files.Single(file => file.File == FileId("take"));
 
-        return new Guid(bytes);
+        Assert.Equal(Recording("take"), take.Recording);
+        Assert.Equal(ReleaseAttributionOutcome.OnNoEdition, take.Outcome);
     }
 
-    private static Mbid Mb(string value) => new(Guid.Parse(value));
+    [Fact]
+    public void ATakeWhoseClusterNamesTwoOfTheAlbumsGapsTakesNeither()
+    {
+        var album = Tracks(("a", 180_437), ("b", 240_120), ("c", 200_880), ("d", 201_120));
+        MusicBrainzRelease[] candidates = [Release("album", album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("take", 200_990, candidates, linked: new HashSet<Mbid> { Recording("c"), Recording("d") }),
+        ];
+
+        var take = Decide(files, candidates).Files.Single(file => file.File == FileId("take"));
+
+        Assert.Equal(Recording("take"), take.Recording);
+    }
+
+    [Fact]
+    public void TwoTakesWantingOneGapAreNeitherSubstituted()
+    {
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("take1", 200_880, candidates, linked: new HashSet<Mbid> { Recording("c") }),
+            File("take2", 200_881, candidates, linked: new HashSet<Mbid> { Recording("c") }),
+        ];
+
+        var decision = Decide(files, candidates);
+
+        Assert.DoesNotContain(decision.Files, file => file.Recording == Recording("c"));
+    }
+
+    [Fact]
+    public void ACompilationDoesNotOutbidTheAlbumItPlundered()
+    {
+        // The compilation holds every file the folder does, and seventeen more
+        // songs: the album covers itself whole and the compilation a sixth.
+        var compilation = Release("hits", [.. Album, .. Filler("hits", 17)], group: OtherGroup);
+        MusicBrainzRelease[] candidates = [compilation, Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates),
+            File("b", 240_120, candidates),
+            File("c", 200_880, candidates),
+        ];
+
+        var decision = Decide(files, candidates);
+
+        Assert.Equal(Group, decision.Album);
+        Assert.Equal(Id("album"), decision.Edition?.Id);
+    }
+
+    [Fact]
+    public void ATaggedOrderEveryEditionContradictsIsAQuestionWithoutAProvenPressing()
+    {
+        // Tagged c, b, a against an album every edition prints a, b, c — and no
+        // pressing proven (the lengths are a second out), so nothing stands
+        // between the question and the files.
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 181_437, candidates, track: 3),
+            File("b", 241_120, candidates, track: 2),
+            File("c", 201_880, candidates, track: 1),
+        ];
+
+        var decision = Decide(files, candidates);
+
+        Assert.Null(decision.Album);
+        Assert.Equal(FolderOrderOutcome.Contradicted, decision.Order);
+        Assert.All(decision.Files, file => Assert.Equal(ReleaseAttributionOutcome.OrderContradicted, file.Outcome));
+    }
+
+    [Fact]
+    public void AProvenPressingStandsAgainstTagsThatContradictIt()
+    {
+        MusicBrainzRelease[] candidates = [Release("album", Album)];
+        FolderFile[] files =
+        [
+            File("a", 180_437, candidates, track: 3),
+            File("b", 240_120, candidates, track: 2),
+            File("c", 200_880, candidates, track: 1),
+        ];
+
+        var decision = Decide(files, candidates);
+
+        Assert.Equal(Id("album"), decision.Edition?.Id);
+        Assert.Equal(FolderOrderOutcome.Contradicted, decision.Order);
+    }
+
+    private static readonly IEqualityComparer<FolderDecision> Same = EqualityComparer<FolderDecision>.Create(
+        (left, right) => left!.Album == right!.Album
+            && left.Edition?.Id == right.Edition?.Id
+            && left.EditionsProven == right.EditionsProven
+            && left.Files.SequenceEqual(right.Files),
+        decision => decision.Album.GetHashCode());
 }

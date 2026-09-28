@@ -497,7 +497,7 @@ public sealed class FileManagerService(
                 // RecordingId here would name the second failure after the
                 // first and send a person to the wrong screen.
                 Identified = file.AcoustId != null,
-                Attributed = file.ReleaseId != null,
+                Attributed = file.ReleaseGroupId != null,
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -698,7 +698,8 @@ public sealed record FolderListing(
 /// Of those, how many carry an AcoustID — what the identification pass decided.
 /// </param>
 /// <param name="Attributed">
-/// Of those, how many are filed under a release — what attribution decided.
+/// Of those, how many are held to an album — what attribution decided, whether
+/// or not it could say which pressing.
 /// </param>
 public sealed record FolderEntry(
     string Name,

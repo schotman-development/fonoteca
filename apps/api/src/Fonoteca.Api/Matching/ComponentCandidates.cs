@@ -263,9 +263,9 @@ internal static class ComponentCandidates
 
 /// <summary>One file of a component, as the candidate document needs it.</summary>
 /// <remarks>
-/// <see cref="Duration"/> is <c>FingerprintDuration ?? Quality.Duration</c> and
-/// must stay that on both paths: a third of this worklist has no fingerprint
-/// duration at all, and measuring one thing on the screen and another on the
+/// <see cref="Duration"/> is <c>Quality.Duration ?? FingerprintDuration</c> —
+/// the probe's measurement first, as the attribution pass reads it — and must
+/// stay that on every path: measuring one thing on the screen and another on the
 /// commit is how a person is shown drift figures the write did not use.
 /// </remarks>
 internal sealed record ComponentMember(
