@@ -26,9 +26,14 @@ export type QueryState<T> =
  *
  * The cancellation flag is not optional. React 19 in StrictMode mounts effects
  * twice, and a slow response arriving after a navigation would otherwise write
- * the previous page's data into the current one.
+ * the previous page's data into the current one. `load` is also handed a signal
+ * that aborts then, for a request whose server side is worth stopping — an
+ * album's track list is a MusicBrainz lookup per edition.
  */
-export function useApiQuery<T>(load: () => Promise<T>, deps: readonly unknown[]): QueryState<T> {
+export function useApiQuery<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  deps: readonly unknown[],
+): QueryState<T> {
   const [state, setState] = useState<QueryState<T>>({ status: 'loading' })
 
   // `load` is a fresh closure on every render, so it cannot be a dependency
@@ -36,10 +41,11 @@ export function useApiQuery<T>(load: () => Promise<T>, deps: readonly unknown[])
   // identifies the request.
   useEffect(() => {
     let cancelled = false
+    const aborter = new AbortController()
 
     setState({ status: 'loading' })
 
-    load()
+    load(aborter.signal)
       .then((data) => {
         if (!cancelled) setState({ status: 'ready', data })
       })
@@ -49,6 +55,7 @@ export function useApiQuery<T>(load: () => Promise<T>, deps: readonly unknown[])
 
     return () => {
       cancelled = true
+      aborter.abort()
     }
     // The rule wants a literal array so it can check the closure against it.
     // A hook whose dependencies are its argument cannot give it one, which is
