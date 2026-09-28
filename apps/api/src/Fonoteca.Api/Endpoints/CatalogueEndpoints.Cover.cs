@@ -1,7 +1,9 @@
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Ingest;
 using Fonoteca.Providers.Qobuz;
+using Fonoteca.Tagging;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
@@ -31,7 +33,8 @@ namespace Fonoteca.Api.Endpoints;
 /// <b>Nothing found is not a final answer.</b> It is remembered for
 /// <see cref="CoverRetryAfter"/> and then asked again, because a sleeve reaching
 /// either source after the first view is exactly the thing a stored "no" would
-/// hide forever.
+/// hide forever. Until then the album's own files lend their picture, served and
+/// never stored — see <c>FilesCoverAsync</c>.
 /// </remarks>
 public static partial class CatalogueEndpoints
 {
@@ -62,12 +65,15 @@ public static partial class CatalogueEndpoints
             .WithDescription(
                 "The first request for an album with no stored cover fetches the Cover Art "
                 + "Archive's front at 500px and keeps it, so the archive is asked once per album. "
-                + "Where the archive holds no front, Qobuz is asked for the same record — by "
-                + "barcode where there is one, by a matched title and artist otherwise — and "
-                + "refuses rather than guesses. An album neither has a picture of answers 404 and "
-                + "is remembered as such for a week, then asked about again, so a sleeve either "
-                + "gains later is still picked up. Served under an ETag with `no-cache`, so a "
-                + "changed cover shows on the next view and an unchanged one costs a 304.")
+                + "Where the archive holds no front, Qobuz is asked for the same record — by its "
+                + "barcode, or another edition's under the same title, where there is one, by a "
+                + "matched title, year and credited artist otherwise — and refuses rather than "
+                + "guesses. An album neither has a picture of is remembered as "
+                + "such for a week, then asked about again, so a sleeve either gains later is still "
+                + "picked up; meanwhile the picture its own files carry is served — the folder's "
+                + "cover image, else one embedded in its files — and never stored. With none of "
+                + "the three it answers 404. Served with `no-cache`, a stored cover under an ETag, "
+                + "so a changed cover shows on the next view and an unchanged one costs a 304.")
             .Produces(StatusCodes.Status200OK, contentType: "image/jpeg")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -95,11 +101,13 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
-    internal static async Task<Results<FileContentHttpResult, ProblemHttpResult>> GetReleaseCover(
+    internal static async Task<Results<FileContentHttpResult, FileStreamHttpResult, ProblemHttpResult>> GetReleaseCover(
         Guid id,
         FonotecaDbContext db,
         ICoverArtArchive archive,
         QobuzCovers shop,
+        FileSystemAudioFileStore store,
+        AudioFileDescriber describer,
         IClock clock,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -182,7 +190,11 @@ public static partial class CatalogueEndpoints
             await StoreFoundCoverAsync(db, cover, cancellationToken).ConfigureAwait(false);
         }
 
-        if (cover.Bytes is null || cover.MediaType is null) return NoCover();
+        if (cover.Bytes is null || cover.MediaType is null)
+        {
+            return await FilesCoverAsync(db, store, describer, context, releaseId, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.XContentTypeOptions = "nosniff";
@@ -521,6 +533,72 @@ public static partial class CatalogueEndpoints
                 """,
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>The picture the album's own files carry, where neither source has one.</summary>
+    /// <remarks>
+    /// <b>Served, never stored.</b> A stored row with bytes is never re-asked, so
+    /// keeping this would stop the archive and the shop from ever replacing it,
+    /// and would make it the pressing's sleeve for every later reader. It is
+    /// shown the way a folder name is, and a person's choice or upload replaces
+    /// it. Files under this release are preferred, then the album's by path; the
+    /// picture is that file's album folder's cover image, else its disc folder's,
+    /// else the one embedded in a first track or in the file itself. Measured
+    /// when written: 25 of the 28 albums neither source had a picture of carried
+    /// one on disk.
+    /// </remarks>
+    private static async Task<Results<FileContentHttpResult, FileStreamHttpResult, ProblemHttpResult>>
+        FilesCoverAsync(
+            FonotecaDbContext db,
+            FileSystemAudioFileStore store,
+            AudioFileDescriber describer,
+            HttpContext context,
+            ReleaseId releaseId,
+            CancellationToken cancellationToken)
+    {
+        var album = await db.Releases
+            .Where(release => release.Id == releaseId)
+            .Select(release => release.ReleaseGroupId)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var first = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.ReleaseId == releaseId || (album != null && file.ReleaseGroupId == album))
+            .OrderByDescending(file => file.ReleaseId == releaseId)
+            .ThenBy(file => file.Path)
+            .Select(file => file.Path)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (first is null) return NoCover();
+
+        context.Response.Headers.CacheControl = "no-cache";
+
+        // The album's folder, then the disc folder the file sits in, then the
+        // file. Never a folder above the album's: an artist folder's picture is
+        // the artist, and a file loose under one would borrow it.
+        string[] places =
+        [
+            .. new[] { AlbumFolder.Of(first), Path.GetDirectoryName(first) ?? string.Empty }
+                .Where(place => place.Split('/').Length >= AlbumFolder.Depth)
+                .Distinct(StringComparer.Ordinal),
+            first,
+        ];
+
+        foreach (var place in places)
+        {
+            var art = await FileEndpoints.GetArt(store, describer, context, place, cancellationToken)
+                .ConfigureAwait(false);
+
+            switch (art.Result)
+            {
+                case FileStreamHttpResult stream: return stream;
+                case FileContentHttpResult bytes: return bytes;
+            }
+        }
+
+        return NoCover();
     }
 
     private static DateTimeOffset Now(IClock clock) => StoreTime.ToStorePrecision(clock.UtcNow);

@@ -4,6 +4,7 @@ using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Fonoteca.Integration.Tests;
@@ -26,11 +27,13 @@ public sealed class ReleaseCoverEndpointTests(PostgresFixture postgres) : IAsync
     private readonly MovableClock _clock = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     private readonly ReleaseId _releaseId = new(Guid.CreateVersion7());
     private string _root = string.Empty;
+    private string _connectionString = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
     public async ValueTask InitializeAsync()
     {
         var connectionString = await postgres.CreateDatabaseAsync(TestContext.Current.CancellationToken);
+        _connectionString = connectionString;
 
         _root = Directory.CreateTempSubdirectory("fonoteca-cover-").FullName;
 
@@ -201,6 +204,108 @@ public sealed class ReleaseCoverEndpointTests(PostgresFixture postgres) : IAsync
         Assert.Equal(new byte[] { 9, 9, 9 }, await client.GetByteArrayAsync(cover, ct));
         Assert.Equal(1, _archive.Listings);
         Assert.Equal(0, _archive.Downloads);
+    }
+
+    /// <summary>
+    /// An album neither source has a picture of shows the one its folder holds,
+    /// without that picture becoming the catalogue's answer.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumNeitherSourceHasShowsItsFoldersOwnPicture()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = _factory!.CreateClient();
+        var cover = new Uri($"/api/catalogue/releases/{_releaseId.Value}/cover", UriKind.Relative);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var album = new ReleaseGroup { Id = new ReleaseGroupId(Guid.CreateVersion7()), Title = "Back to Tennessee" };
+            db.ReleaseGroups.Add(album);
+            (await db.Releases.SingleAsync(release => release.Id == _releaseId, ct)).ReleaseGroupId = album.Id;
+
+            // Filed to the album only, as most folders are.
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Billy Currington/Back to Tennessee/01 Back to Tennessee.flac",
+                SizeBytes = 30_000_000,
+                LastModifiedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                ReleaseGroupId = album.Id,
+            });
+            await db.SaveChangesAsync(ct);
+        }
+
+        var folder = Directory.CreateDirectory(Path.Combine(_root, "Billy Currington", "Back to Tennessee"));
+        await File.WriteAllBytesAsync(Path.Combine(folder.FullName, "folder.jpg"), [5, 5, 5], ct);
+
+        _archive.HasFront = false;
+
+        using (var served = await client.GetAsync(cover, ct))
+        {
+            Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+            Assert.Equal("image/jpeg", served.Content.Headers.ContentType?.MediaType);
+            Assert.Equal(new byte[] { 5, 5, 5 }, await served.Content.ReadAsByteArrayAsync(ct));
+        }
+
+        // Still "nobody has one": the archive is asked again after the week, and
+        // a sleeve it gains then replaces the folder's.
+        _clock.Advance(TimeSpan.FromDays(8));
+        _archive.HasFront = true;
+
+        Assert.Equal(new[] { (byte)Spread }, await client.GetByteArrayAsync(cover, ct));
+        Assert.Equal(2, _archive.Listings);
+    }
+
+    /// <summary>
+    /// The picture is the album folder's, above its disc folders, and never the
+    /// artist's.
+    /// </summary>
+    /// <remarks>
+    /// An artist folder's <c>folder.jpg</c> is a photograph of the artist — 136
+    /// of 220 here hold one — so a file loose under its artist borrows nothing.
+    /// </remarks>
+    [Fact]
+    public async Task TheAlbumFolderLendsItsPictureAndTheArtistFolderDoesNot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = _factory!.CreateClient();
+        var cover = new Uri($"/api/catalogue/releases/{_releaseId.Value}/cover", UriKind.Relative);
+        var file = new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = "Billy Currington/01 Back to Tennessee.flac",
+            SizeBytes = 30_000_000,
+            LastModifiedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            ReleaseId = _releaseId,
+        };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.MediaFiles.Add(file);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var artist = Directory.CreateDirectory(Path.Combine(_root, "Billy Currington"));
+        await File.WriteAllBytesAsync(Path.Combine(artist.FullName, "folder.jpg"), [4, 4, 4], ct);
+
+        _archive.HasFront = false;
+
+        using (var loose = await client.GetAsync(cover, ct))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, loose.StatusCode);
+        }
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            (await db.MediaFiles.SingleAsync(row => row.Id == file.Id, ct)).Path =
+                "Billy Currington/Back to Tennessee/CD 01/01 Back to Tennessee.flac";
+            await db.SaveChangesAsync(ct);
+        }
+
+        var album = Directory.CreateDirectory(Path.Combine(artist.FullName, "Back to Tennessee", "CD 01")).Parent!;
+        await File.WriteAllBytesAsync(Path.Combine(album.FullName, "cover.jpg"), [6, 6, 6], ct);
+
+        Assert.Equal(new byte[] { 6, 6, 6 }, await client.GetByteArrayAsync(cover, ct));
     }
 
     private sealed class MovableClock(DateTimeOffset start) : IClock

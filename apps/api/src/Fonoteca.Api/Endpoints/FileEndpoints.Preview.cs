@@ -242,9 +242,9 @@ public static partial class FileEndpoints
             // every FLAC in it holds the sleeve. Without this the commonest
             // album folder on the screen draws a monogram.
             //
-            // One file opened, on a click, for the folder somebody selected. It
-            // is not on the listing path: a row does not ask for a picture until
-            // it is the row being looked at.
+            // One file opened per request. Here that is a click on one folder;
+            // an album tile neither source has a sleeve for asks on every view
+            // (CatalogueEndpoints.FilesCoverAsync).
             var first = FirstAudioIn(absolute);
 
             if (first is null) return TypedResults.NotFound();

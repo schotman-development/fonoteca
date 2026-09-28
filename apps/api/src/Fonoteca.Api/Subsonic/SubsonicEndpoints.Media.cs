@@ -102,7 +102,7 @@ public static partial class SubsonicEndpoints
         if (release is { } album)
         {
             return await CatalogueEndpoints
-                .GetReleaseCover(album.Value, db, archive, shop, clock, http, cancellationToken)
+                .GetReleaseCover(album.Value, db, archive, shop, store, describer, clock, http, cancellationToken)
                 .ConfigureAwait(false);
         }
 
