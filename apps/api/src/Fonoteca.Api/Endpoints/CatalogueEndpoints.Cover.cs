@@ -125,6 +125,17 @@ public static partial class CatalogueEndpoints
                     row.ReleasedYear,
                     row.Barcode,
 
+                    // The album's other editions, whose barcodes the shop may
+                    // know it by where this one has none or another.
+                    Siblings = db.Releases
+                        .Where(other => other.ReleaseGroupId != null
+                            && other.ReleaseGroupId == row.ReleaseGroupId
+                            && other.Id != row.Id
+                            && other.Barcode != null)
+                        .OrderBy(other => other.Id)
+                        .Select(other => other.Barcode)
+                        .ToList(),
+
                     // The billed line, as every other screen renders it — the
                     // name a shop prints on the same record.
                     Artists = row.Credits
@@ -152,8 +163,10 @@ public static partial class CatalogueEndpoints
                             releaseId,
                             release.Title,
                             CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
+                            [.. release.Artists.Select(a => a.CreditedAs ?? a.Name)],
                             release.ReleasedYear,
                             release.Barcode,
+                            release.Siblings,
                             clock,
                             cancellationToken)
                         .ConfigureAwait(false)
@@ -398,12 +411,14 @@ public static partial class CatalogueEndpoints
         ReleaseId releaseId,
         string title,
         string? artist,
+        IReadOnlyCollection<string> credited,
         int? year,
         string? barcode,
+        IReadOnlyCollection<string?> editions,
         IClock clock,
         CancellationToken cancellationToken)
     {
-        var found = await shop.FindAsync(title, artist, year, barcode, cancellationToken)
+        var found = await shop.FindAsync(title, artist, year, barcode, editions, credited, cancellationToken)
             .ConfigureAwait(false);
 
         return found is null

@@ -47,7 +47,7 @@ public sealed class QobuzCoversTests : IDisposable
             ("Peach", "Larkin Poe", "2017-06-09", "0700261464312", "remaster.jpg"),
             ("Peach", "Larkin Poe", "2017-06-09", "0888295563550", "the-pressing.jpg")));
 
-        var found = await covers.FindAsync("Peach", "Larkin Poe", 2017, "888295563550", Token);
+        var found = await covers.FindAsync("Peach", "Larkin Poe", 2017, "888295563550", [], [], Token);
 
         Assert.Equal("the-pressing.jpg", Assert.IsType<QobuzCover>(found).AlbumId);
     }
@@ -73,9 +73,82 @@ public sealed class QobuzCoversTests : IDisposable
         var (covers, _) = Build(Albums(
             ("Something Else Entirely", "Another Band", "1999-01-01", shop, "same-record.jpg")));
 
-        var found = await covers.FindAsync("Peach", "Larkin Poe", 2017, held, Token);
+        var found = await covers.FindAsync("Peach", "Larkin Poe", 2017, held, [], [], Token);
 
         Assert.Equal("same-record.jpg", Assert.IsType<QobuzCover>(found).AlbumId);
+    }
+
+    /// <summary>
+    /// The three albums the shop sold here and the matcher once refused.
+    /// </summary>
+    /// <remarks>
+    /// Each as Qobuz answers for it. <i>Vivaldi</i>: Universal's barcode with the
+    /// check digit dropped. <i>Sixteen Tons</i>: the page's edition is the 1960
+    /// LP, with no barcode, and the shop sells the 2017 digital edition. The
+    /// Mahler box: billed to the conductor alone there, and to composer,
+    /// orchestra and conductor here.
+    /// </remarks>
+    [Fact]
+    public async Task TheAlbumsTheShopSoldAreFound()
+    {
+        var (vivaldi, _) = Build(Albums(
+            ("Vivaldi: Recorder Concertos", "Lucie Horsch", "2016-10-07", "0002894830900", "vivaldi.jpg")));
+
+        Assert.Equal(
+            "vivaldi.jpg",
+            (await vivaldi.FindAsync("Vivaldi", "Vivaldi; Lucie Horsch, Amsterdam Vivaldi Players", 2016,
+                "0028948309009", [], ["Vivaldi", "Lucie Horsch", "Amsterdam Vivaldi Players"], Token))?.AlbumId);
+
+        var (tons, _) = Build(Albums(
+            ("Sixteen Tons", "Tennessee Ernie Ford", "1956-01-01", "3610158311797", "single.jpg"),
+            ("Sixteen Tons", "Tennessee Ernie Ford", "1955-04-10", "0602567173908", "album.jpg")));
+
+        Assert.Equal(
+            "album.jpg",
+            (await tons.FindAsync("Sixteen Tons", "Tennessee Ernie Ford", 1960,
+                null, ["0208311406224", "00602567173908"], ["Tennessee Ernie Ford"], Token))?.AlbumId);
+
+        var (mahler, _) = Build(Albums(
+            ("Mahler: The Symphonies & Song Cycles", "Bernard Haitink", "2019-03-01", null, "mahler.jpg")));
+
+        Assert.Equal(
+            "mahler.jpg",
+            (await mahler.FindAsync("Mahler: The Symphonies & Song Cycles",
+                "Gustav Mahler; Royal Concertgebouw Orchestra. Bernard Haitink", 2019, null, [],
+                ["Gustav Mahler", "Royal Concertgebouw Orchestra", "Bernard Haitink"], Token))?.AlbumId);
+    }
+
+    /// <summary>
+    /// Only a check digit that checks out is dropped.
+    /// </summary>
+    /// <remarks>
+    /// Ours ends in its valid check digit, 9; theirs ends in 8. Dropping the last
+    /// digit regardless would make the two one barcode.
+    /// </remarks>
+    [Fact]
+    public async Task AWrongCheckDigitIsNotDropped()
+    {
+        var (covers, _) = Build(Albums(
+            ("Something Else Entirely", "Another Band", "2016-10-07", "0028948309008", "stranger.jpg")));
+
+        Assert.Null(await covers.FindAsync("Vivaldi", "Lucie Horsch", 2016, "0028948309009", [], [], Token));
+    }
+
+    /// <summary>
+    /// Another edition's barcode names that edition, so it counts only under our title.
+    /// </summary>
+    /// <remarks>
+    /// MusicBrainz lists <i>Bad 25</i> in the same album as <i>Bad</i>, and its
+    /// sleeve is not the one on the record held here.
+    /// </remarks>
+    [Fact]
+    public async Task AnotherEditionUnderAnotherTitleLendsNothing()
+    {
+        var (covers, _) = Build(Albums(
+            ("Bad 25th Anniversary", "Michael Jackson", "2012-09-18", "0886443546240", "bad25.jpg")));
+
+        Assert.Null(await covers.FindAsync(
+            "Bad", "Michael Jackson", 2009, "0886976387310", ["886443546240"], ["Michael Jackson"], Token));
     }
 
     /// <summary>
@@ -96,7 +169,7 @@ public sealed class QobuzCoversTests : IDisposable
     {
         var (covers, _) = Build(Albums(("The Band", shop, null, "sleeve.jpg")));
 
-        Assert.NotNull(await covers.FindAsync(held, "The Band", null, null, Token));
+        Assert.NotNull(await covers.FindAsync(held, "The Band", null, null, [], [], Token));
     }
 
     /// <summary>
@@ -117,7 +190,7 @@ public sealed class QobuzCoversTests : IDisposable
     {
         var (covers, _) = Build(Albums(("Larkin Poe", "Venom and Faith", null, "sleeve.jpg")));
 
-        Assert.Null(await covers.FindAsync("Venom & Faith", "Larkin Poe", null, null, Token));
+        Assert.Null(await covers.FindAsync("Venom & Faith", "Larkin Poe", null, null, [], [], Token));
     }
 
     /// <summary>
@@ -142,7 +215,7 @@ public sealed class QobuzCoversTests : IDisposable
         var (covers, _) = Build(Albums(
             ("The Band", shop, $"{shopYear}-05-01", "stranger.jpg")));
 
-        Assert.Null(await covers.FindAsync(held, "The Band", heldYear, null, Token));
+        Assert.Null(await covers.FindAsync(held, "The Band", heldYear, null, [], [], Token));
     }
 
     /// <summary>
@@ -159,7 +232,7 @@ public sealed class QobuzCoversTests : IDisposable
     {
         var (covers, _) = Build(Albums(("Some Other Band", "Peach", "2017-01-01", "theirs.jpg")));
 
-        Assert.Null(await covers.FindAsync("Peach", "Larkin Poe", 2017, null, Token));
+        Assert.Null(await covers.FindAsync("Peach", "Larkin Poe", 2017, null, [], [], Token));
     }
 
     /// <summary>
@@ -178,12 +251,12 @@ public sealed class QobuzCoversTests : IDisposable
         var (covers, _) = Build(Albums(
             ("Peach", "Larkin Poe", "2017-06-09", "0888295563550", "found.jpg")));
 
-        Assert.Null(await covers.FindAsync("Peach", artist: null, 2017, barcode: null, Token));
+        Assert.Null(await covers.FindAsync("Peach", artist: null, 2017, barcode: null, [], [], Token));
 
         var (again, _) = Build(Albums(
             ("Peach", "Larkin Poe", "2017-06-09", "0888295563550", "found.jpg")));
 
-        Assert.NotNull(await again.FindAsync("Peach", artist: null, 2017, "888295563550", Token));
+        Assert.NotNull(await again.FindAsync("Peach", artist: null, 2017, "888295563550", [], [], Token));
     }
 
     /// <summary>
@@ -204,7 +277,7 @@ public sealed class QobuzCoversTests : IDisposable
     {
         var (covers, stub) = Build(Albums(("The Band", "An Album", null, url)));
 
-        Assert.Null(await covers.FindAsync("An Album", "The Band", null, null, Token));
+        Assert.Null(await covers.FindAsync("An Album", "The Band", null, null, [], [], Token));
         Assert.Single(stub.Requests);
     }
 
@@ -228,7 +301,7 @@ public sealed class QobuzCoversTests : IDisposable
                 Content = new StringContent("<html>not here</html>", Encoding.UTF8, "text/html"),
             });
 
-        Assert.Null(await covers.FindAsync("An Album", "The Band", null, null, Token));
+        Assert.Null(await covers.FindAsync("An Album", "The Band", null, null, [], [], Token));
     }
 
     /// <summary>
@@ -246,7 +319,7 @@ public sealed class QobuzCoversTests : IDisposable
             Albums(("The Band", "An Album", null, "sleeve.jpg")),
             configure: options => options.UserAuthToken = string.Empty);
 
-        Assert.Null(await covers.FindAsync("An Album", "The Band", null, null, Token));
+        Assert.Null(await covers.FindAsync("An Album", "The Band", null, null, [], [], Token));
         Assert.Empty(stub.Requests);
     }
 
@@ -256,7 +329,7 @@ public sealed class QobuzCoversTests : IDisposable
     {
         var (covers, stub) = Build(Albums(("The Band", "An Album", null, "sleeve.jpg")));
 
-        await covers.FindAsync("An Album", "The Band", null, null, Token);
+        await covers.FindAsync("An Album", "The Band", null, null, [], [], Token);
 
         Assert.Equal(2, stub.Requests.Count);
         Assert.Contains("album/search", stub.Requests[0].Uri.ToString(), StringComparison.Ordinal);

@@ -20,6 +20,14 @@ namespace Fonoteca.Domain.Catalogue;
 /// is how one of them stops folding a 13-digit EAN a release later. It lives in
 /// the domain rather than beside either caller because a barcode is a fact about
 /// a record, not about a provider.
+///
+/// <b>A check digit goes too, where it checks out.</b> Qobuz files Universal's
+/// releases under the barcode without it: Lucie Horsch's <i>Vivaldi</i> is
+/// <c>0002894830900</c> there and <c>0028948309009</c> on MusicBrainz. Only a
+/// valid GS1 check digit is dropped, so two different barcodes stay different —
+/// two codes differing in nothing but a valid check digit cannot both be valid.
+/// A shortened code whose own last digit happens to check out, one in ten, is
+/// cut again and missed.
 /// </remarks>
 public static class Barcodes
 {
@@ -30,6 +38,23 @@ public static class Barcodes
 
         var digits = new string([.. value.Where(char.IsAsciiDigit)]).TrimStart('0');
 
-        return digits.Length == 0 ? null : digits;
+        if (digits.Length == 0) return null;
+
+        return digits.Length > 1 && CheckDigit(digits.AsSpan(0, digits.Length - 1)) == digits[^1] - '0'
+            ? digits[..^1]
+            : digits;
+    }
+
+    /// <summary>GS1's check digit: weights 3 and 1 alternating leftwards from the last digit.</summary>
+    private static int CheckDigit(ReadOnlySpan<char> digits)
+    {
+        var sum = 0;
+
+        for (var index = 0; index < digits.Length; index++)
+        {
+            sum += (digits[digits.Length - 1 - index] - '0') * (index % 2 == 0 ? 3 : 1);
+        }
+
+        return (10 - (sum % 10)) % 10;
     }
 }

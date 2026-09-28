@@ -60,6 +60,8 @@ public sealed class QobuzCovers(
     /// <param name="artist">Its credit line, or null where nothing is credited.</param>
     /// <param name="year">Its first release year, which narrows a title match.</param>
     /// <param name="barcode">Its barcode — the key, where there is one.</param>
+    /// <param name="editions">The barcodes of its album's other editions.</param>
+    /// <param name="credited">Each name on its credit line, as the catalogue bills it.</param>
     /// <returns>Null when Qobuz is unconfigured or carries nothing that matches.</returns>
     /// <exception cref="ProviderException">The shop could not be asked.</exception>
     /// <remarks>
@@ -74,6 +76,8 @@ public sealed class QobuzCovers(
         string? artist,
         int? year,
         string? barcode,
+        IReadOnlyCollection<string?> editions,
+        IReadOnlyCollection<string> credited,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
@@ -87,7 +91,7 @@ public sealed class QobuzCovers(
                 cancellationToken)
             .ConfigureAwait(false);
 
-        var match = Match(albums, title, artist, year, barcode, out var how);
+        var match = Match(albums, title, artist, credited, year, barcode, editions, out var how);
 
         if (match?.CoverUrl is not { } url)
         {
@@ -125,13 +129,29 @@ public sealed class QobuzCovers(
     /// not per-album, because the first row whose title happens to fold to ours
     /// is routinely a different pressing of it — and where a barcode agrees
     /// anywhere in the list, that row is the pressing, not merely the album.
+    ///
+    /// <b>Another edition's barcode names that edition, so it is the last resort
+    /// and counts only under the same title.</b> The page shows
+    /// <i>Sixteen Tons</i> as its 1960 LP, which has none, while the shop sells
+    /// the 2017 digital edition MusicBrainz lists beside it; the year is not
+    /// asked, since the barcode already says which record. Without the title,
+    /// <i>Bad</i> takes the sleeve of <i>Bad 25th Anniversary</i>, an edition of
+    /// the same album.
+    ///
+    /// <b>The billing is the whole credit line or any one name on it.</b>
+    /// MusicBrainz bills Haitink's Mahler box "Gustav Mahler; Royal Concertgebouw
+    /// Orchestra. Bernard Haitink" and the shop bills Bernard Haitink alone. A
+    /// name that is only on the line still has to come with the title and the
+    /// year.
     /// </remarks>
     private static QobuzAlbum? Match(
         IReadOnlyList<QobuzAlbum> albums,
         string title,
         string? artist,
+        IReadOnlyCollection<string> credited,
         int? year,
         string? barcode,
+        IReadOnlyCollection<string?> editions,
         out string how)
     {
         if (Barcode(barcode) is { } wanted)
@@ -151,28 +171,35 @@ public sealed class QobuzCovers(
         // No credit line is nothing to check a title against. A search for a
         // bare title matches a compilation by somebody else as readily as the
         // record, and there is nothing here able to tell them apart.
-        if (string.IsNullOrWhiteSpace(artist)) return null;
-
-        var credited = ArtistNameMatch.Normalise(artist);
-
-        if (credited.Length == 0) return null;
-
-        foreach (var album in albums)
+        if (!string.IsNullOrWhiteSpace(artist))
         {
-            if (album.Artist is not { } billed) continue;
+            var names = credited
+                .Prepend(artist)
+                .Select(ArtistNameMatch.Normalise)
+                .Where(name => name.Length > 0)
+                .ToHashSet(StringComparer.Ordinal);
 
-            if (!string.Equals(ArtistNameMatch.Normalise(billed), credited, StringComparison.Ordinal))
+            foreach (var album in albums)
             {
-                continue;
-            }
+                if (album.Artist is not { } billed) continue;
 
-            if (ReleaseTitleMatch.IsSameRecord(album.Title, Year(album.ReleaseDate), title, year))
-            {
-                return album;
+                if (!names.Contains(ArtistNameMatch.Normalise(billed))) continue;
+
+                if (ReleaseTitleMatch.IsSameRecord(album.Title, Year(album.ReleaseDate), title, year))
+                {
+                    return album;
+                }
             }
         }
 
-        return null;
+        how = "another edition's barcode";
+
+        var others = editions.Select(Barcode).OfType<string>().ToHashSet(StringComparer.Ordinal);
+
+        return albums.FirstOrDefault(album =>
+            Barcode(album.Upc) is { } upc
+            && others.Contains(upc)
+            && ReleaseTitleMatch.IsSameRecord(album.Title, null, title, null));
     }
 
     /// <summary>A barcode in the one form two catalogues can be compared in.</summary>
