@@ -16,8 +16,9 @@ export type CatalogueGridProps = HTMLAttributes<HTMLUListElement> & {
   /**
    * `shelf` lays the same tiles out in one row that scrolls sideways.
    *
-   * **Only three screens wrap: the artist list, the album list and an artist's
-   * Discography tab.** Those are where a person came to browse everything.
+   * **Only four places wrap: the artist list, the album list, an artist's
+   * Discography tab and Acquire's search results.** Those are where a person
+   * came to browse everything.
    * Anywhere else a collection of tiles is a shelf, because it is one part of
    * the page, and a wrapped one can push the rest of the page off the screen.
    */
