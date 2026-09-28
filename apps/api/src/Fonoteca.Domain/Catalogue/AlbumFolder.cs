@@ -112,4 +112,40 @@ public static class AlbumFolder
 
         return cut <= 0 ? string.Empty : album[..cut];
     }
+
+    /// <summary>A key that orders paths the way a person numbers files: <c>2</c> before <c>10</c>.</summary>
+    /// <remarks>
+    /// Ordinal order puts <c>109 - …</c> before <c>11 - …</c>, which is how
+    /// a box set numbered without leading zeros reads out of order. Every run of
+    /// digits is padded to one width, so comparing keys ordinally compares the
+    /// numbers. By hand because <c>CompareOptions.NumericOrdering</c> needs ICU
+    /// and this build runs with invariant globalization.
+    ///
+    /// Ties (<c>01</c> and <c>1</c>) are the caller's to break, by the path.
+    /// </remarks>
+    public static string SortKey(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var key = new System.Text.StringBuilder(path.Length + 16);
+
+        for (var i = 0; i < path.Length;)
+        {
+            if (!char.IsAsciiDigit(path[i]))
+            {
+                key.Append(path[i++]);
+                continue;
+            }
+
+            var start = i;
+            while (i < path.Length && char.IsAsciiDigit(path[i])) i++;
+
+            var digits = path.AsSpan(start, i - start).TrimStart('0');
+            key.Append('0', Math.Max(0, NumberWidth - digits.Length)).Append(digits);
+        }
+
+        return key.ToString();
+    }
+
+    private const int NumberWidth = 20;
 }

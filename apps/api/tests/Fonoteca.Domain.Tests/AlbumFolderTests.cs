@@ -22,6 +22,33 @@ public sealed class AlbumFolderTests
         Assert.Equal(expected, AlbumFolder.Of(path));
 
     [Fact]
+    public void NumberedFilesSortByTheirNumbersNotTheirCharacters()
+    {
+        // Two real shapes: a box set numbered without padding, where ordinal
+        // order read 109 before 11, and disc folders numbered the same way.
+        string[] paths =
+        [
+            "Gustav Mahler/Symphonies/109 Finale.flac",
+            "Gustav Mahler/Symphonies/11 Finale.flac",
+            "Gustav Mahler/Symphonies/2 Scherzo.flac",
+            "Nat King Cole/Unforgettable/CD 10/01 Mona Lisa.flac",
+            "Nat King Cole/Unforgettable/CD 2/01 Route 66.flac",
+        ];
+
+        var sorted = paths.OrderBy(AlbumFolder.SortKey, StringComparer.Ordinal).ToList();
+
+        Assert.Equal(
+            [
+                "Gustav Mahler/Symphonies/2 Scherzo.flac",
+                "Gustav Mahler/Symphonies/11 Finale.flac",
+                "Gustav Mahler/Symphonies/109 Finale.flac",
+                "Nat King Cole/Unforgettable/CD 2/01 Route 66.flac",
+                "Nat King Cole/Unforgettable/CD 10/01 Mona Lisa.flac",
+            ],
+            sorted);
+    }
+
+    [Fact]
     public void ADiscFolderNamedAfterItsMediumFormatCollapsesLikeAnyOther()
     {
         // 453 files across nine albums are foldered "Digital Media 01" .. "05"
