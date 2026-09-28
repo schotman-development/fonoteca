@@ -73,11 +73,19 @@ namespace Fonoteca.Api.Library;
 /// tags and a row with a stale size, which the next scan notices and repairs.
 /// The reverse leaves a row claiming bytes that were never written.</item>
 ///
-/// <item><b>A file that is not fully identified is not on the worklist.</b>
-/// Recording, track and release, all three — writing an album name with no track
-/// number, or a title with no album, produces a file that reads as a half-tagged
-/// rip in every player. The narrower question is also the honest one: these are
-/// the files the catalogue actually has an answer for.</item>
+/// <item><b>A file is on the worklist once its recording and its album are
+/// known.</b> With a proven pressing it gets everything, the track number and the
+/// release included. Held to its album alone (ADR 0013) it gets what is true of
+/// the album — title, artist, album, album artist, year, the recording, artist,
+/// album-artist, work and release-group MBIDs and the AcoustID — and no disc,
+/// track total or release MBID, because
+/// those belong to a pressing nobody proved. Its track number is its place in
+/// the folder's settled order (<c>FolderPosition</c>) and its year the album's,
+/// each only where the file carries none of its own — or carries the one this
+/// pass filled in, which the journal says — and no track number beside a disc
+/// number: a rip tagged disc 2 track 1 keeps that rather than becoming disc 2
+/// track 14, and a 2008 reissue keeps its date rather than taking the album's
+/// 1977.</item>
 ///
 /// <item><b>The chosen sleeve goes out as a file beside the album, and its unit
 /// is the folder rather than the file.</b> Everything else here is a tag, and a
@@ -161,14 +169,18 @@ public sealed class TagWriteService(
     /// Files whose catalogue answer is complete enough to write.
     /// </summary>
     /// <remarks>
-    /// All three links, for the reason in the class remarks. One expression,
-    /// used by the counts the buttons show and by the pass itself, because two
-    /// copies of it would drift and the visible symptom is a button offering a
-    /// number it then does not write.
+    /// A recording and a proven pressing's track, or a recording and an album
+    /// with no pressing, for the reason in the class remarks — a file filed under
+    /// a pressing whose track it has lost is neither, and waits. One
+    /// expression, used by the counts the buttons show and by the pass itself,
+    /// because two copies of it would drift and the visible symptom is a button
+    /// offering a number it then does not write.
     /// </remarks>
     public static IQueryable<MediaFile> Writable(IQueryable<MediaFile> files) =>
         files.Where(file =>
-            file.RecordingId != null && file.ReleaseId != null && file.TrackId != null);
+            file.RecordingId != null
+            && ((file.ReleaseId != null && file.TrackId != null)
+                || (file.ReleaseId == null && file.ReleaseGroupId != null)));
 
     /// <summary>How many files one scope would consider.</summary>
     public async Task<int> CountAsync(TagWriteScope scope, CancellationToken cancellationToken = default)
@@ -304,9 +316,9 @@ public sealed class TagWriteService(
     {
         var files = Writable(db.MediaFiles.AsNoTracking());
 
-        if (scope.Release is { } release)
+        if (scope.Album is { } album)
         {
-            return files.Where(file => file.ReleaseId == release);
+            return files.Where(file => file.ReleaseGroupId == album);
         }
 
         if (scope.Artist is { } artist)
@@ -473,7 +485,9 @@ public sealed class TagWriteService(
 
             var files = await NarrowAsync(db, scope, cancellationToken).ConfigureAwait(false);
 
-            return await files
+            // A pressing's facts where one is filed, the album's where not: its
+            // title and first-release year here, its billing line below.
+            var page = await files
                 .OrderBy(file => file.Id)
                 .Skip(offset)
                 .Take(PageSize)
@@ -481,18 +495,19 @@ public sealed class TagWriteService(
                     file.Id,
                     file.Path,
                     file.ReleaseId,
+                    file.ReleaseGroupId,
                     file.AcoustId,
                     file.Track!.Title,
                     file.Recording!.Title,
                     file.Recording.Mbid,
-                    file.Track.Position,
+                    file.Track != null ? (int?)file.Track.Position : file.FolderPosition,
                     file.Release!.TrackCount,
-                    file.Track.DiscNumber,
+                    (int?)file.Track!.DiscNumber,
                     file.Release.DiscCount,
-                    file.Release.Title,
-                    file.Release.Mbid,
-                    file.Release.ReleaseGroup!.Mbid,
-                    file.Release.ReleasedYear,
+                    file.Release != null ? file.Release.Title : file.ReleaseGroup!.Title,
+                    file.Release!.Mbid,
+                    file.ReleaseGroup!.Mbid,
+                    file.Release != null ? file.Release.ReleasedYear : file.ReleaseGroup!.FirstReleaseYear,
                     file.Recording.Work!.Mbid,
                     file.Recording.Credits
                         .OrderBy(credit => credit.Position)
@@ -501,7 +516,7 @@ public sealed class TagWriteService(
                             credit.JoinPhrase,
                             credit.Artist!.Mbid))
                         .ToList(),
-                    file.Release.Credits
+                    file.Release!.Credits
                         .OrderBy(credit => credit.Position)
                         .Select(credit => new PendingCredit(
                             credit.CreditedAs ?? credit.Artist!.Name,
@@ -510,7 +525,114 @@ public sealed class TagWriteService(
                         .ToList()))
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            return await AlbumOnlyAsync(db, page, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The values this pass put into a file's fields that are still its own, by
+    /// field: a fill of an empty field, and each later write that replaced
+    /// nothing but the value before it.
+    /// </summary>
+    private static async Task<Dictionary<string, string?>> FilledAsync(
+        FonotecaDbContext db,
+        MediaFileId file,
+        CancellationToken cancellationToken)
+    {
+        var subject = file.ToString();
+        var type = EventPrefix + ".written";
+
+        var payloads = await db.DomainEvents
+            .AsNoTracking()
+            .Where(entry => entry.SubjectId == subject && entry.Type == type)
+            .OrderBy(entry => entry.OccurredAtUtc)
+            .Select(entry => entry.PayloadJson)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var ours = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        foreach (var payload in payloads)
+        {
+            foreach (var change in JsonSerializer.Deserialize(payload, TaggingJson.Default.TagWritePayload)?.Changes ?? [])
+            {
+                if (change.Previous is null
+                    || (ours.TryGetValue(change.Field, out var before) && before == change.Previous))
+                {
+                    ours[change.Field] = change.Written;
+                }
+                else
+                {
+                    ours.Remove(change.Field);
+                }
+            }
+        }
+
+        return ours;
+    }
+
+    /// <summary>
+    /// A page's album-only files, given what the album page shows for their album.
+    /// </summary>
+    /// <remarks>
+    /// The album artist is the display edition's billing line, the album's own
+    /// where no edition is stored, and the year is <c>AlbumYear</c> — both the
+    /// album page's rules, called rather than copied. The names are the tag writer's own
+    /// (credited, else the artist's name, never the Latin alias), which is why
+    /// only the display edition's id is taken from the page's rule. A person's
+    /// edits to the album are not applied, as they are not for a pressing.
+    /// </remarks>
+    private static async Task<List<PendingTagWrite>> AlbumOnlyAsync(
+        FonotecaDbContext db,
+        List<PendingTagWrite> page,
+        CancellationToken cancellationToken)
+    {
+        var albums = page
+            .Where(row => row.ReleaseId is null && row.AlbumId is not null)
+            .Select(row => row.AlbumId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (albums.Count == 0) return page;
+
+        var editions = await CatalogueEndpoints.EditionFactsAsync(db, albums, cancellationToken).ConfigureAwait(false);
+        var shown = editions.ToDictionary(album => album.Key, album => CatalogueEndpoints.DisplayEdition(album.Value)?.Id);
+
+        var releaseKeys = shown.Values.Where(id => id is not null).ToList();
+        var groupKeys = albums.Select(album => (ReleaseGroupId?)album).ToList();
+
+        var billed = (await db.ArtistCredits
+                .AsNoTracking()
+                .Where(credit => releaseKeys.Contains(credit.ReleaseId) || groupKeys.Contains(credit.ReleaseGroupId))
+                .OrderBy(credit => credit.Position)
+                .Select(credit => new
+                {
+                    credit.ReleaseId,
+                    credit.ReleaseGroupId,
+                    Credit = new PendingCredit(credit.CreditedAs ?? credit.Artist!.Name, credit.JoinPhrase, credit.Artist!.Mbid),
+                })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false));
+
+        var byRelease = billed.Where(row => row.ReleaseId is not null).ToLookup(row => row.ReleaseId, row => row.Credit);
+        var byGroup = billed.Where(row => row.ReleaseGroupId is not null).ToLookup(row => row.ReleaseGroupId, row => row.Credit);
+
+        return [.. page.Select(row =>
+        {
+            if (row.ReleaseId is not null || row.AlbumId is not { } album) return row;
+
+            var line = shown[album] is { } display && byRelease[display].Any()
+                ? byRelease[display].ToList()
+                : byGroup[album].ToList();
+
+            return row with
+            {
+                Year = CatalogueEndpoints.AlbumYear(row.Year, editions[album]),
+                ReleaseCredits = line,
+                CoverReleaseId = shown[album],
+            };
+        })];
     }
 
     /// <summary>One file: plan it, write it, and record what the bytes became.</summary>
@@ -548,6 +670,45 @@ public sealed class TagWriteService(
             var plan = await writer
                 .PlanAsync(path, CatalogueTags.For(file.Describe()), cancellationToken)
                 .ConfigureAwait(false);
+
+            // Held to its album alone, a file keeps the track number and the date
+            // it already carries — both are its pressing's facts, and nothing here
+            // knows that pressing — and is given ours only where it has none. Read
+            // off the file itself, since a tag the pass could not read is still
+            // there. A value this pass filled into an empty field is ours, not the
+            // file's, and is updated when the folder's order or the album's year
+            // moves; the journal is what tells the two apart. No track number is
+            // written beside a disc number, or "disc 2" reads "track 14". A date
+            // only TagLib# can read ("17/08/1959") is still the file's own.
+            if (file.ReleaseId is null && plan is not null)
+            {
+                var track = CatalogueTagFields.Spell(path, CatalogueTags.TrackNumber);
+                var year = CatalogueTagFields.Spell(path, CatalogueTags.Year);
+                var disc = CatalogueTagFields.Spell(path, CatalogueTags.DiscNumber);
+                var sided = disc is not null && !string.IsNullOrWhiteSpace(plan.Before.Find(disc));
+
+                var dated = plan.Changes.Any(change => change.Field == year && string.IsNullOrWhiteSpace(change.From))
+                    && (await provider.GetRequiredService<TagReader>()
+                        .ReadWithVerifierAsync(path, cancellationToken: cancellationToken)
+                        .ConfigureAwait(false)).RecordedDate is not null;
+
+                var owned = plan.Changes.Any(change =>
+                    (change.Field == track || change.Field == year) && !string.IsNullOrWhiteSpace(change.From));
+                var filled = owned
+                    ? await FilledAsync(db, file.Id, cancellationToken).ConfigureAwait(false)
+                    : new Dictionary<string, string?>();
+
+                bool Theirs(TagFieldChange change) =>
+                    !string.IsNullOrWhiteSpace(change.From)
+                    && !(filled.TryGetValue(change.Field, out var ours) && ours == change.From);
+
+                plan = plan with
+                {
+                    Changes = [.. plan.Changes.Where(change =>
+                        !((change.Field == year && (dated || Theirs(change)))
+                            || (change.Field == track && (sided || Theirs(change)))))],
+                };
+            }
 
             var write = await writer
                 .ApplyAsync(
@@ -682,10 +843,13 @@ public sealed class TagWriteService(
         // and a sleeve written into one is found by nothing.
         var folder = AlbumFolder.Of(file.Path);
 
+        // The pressing's sleeve, else the one the album page draws. Before the
+        // folder is claimed: a file with neither has no sleeve to write, and one
+        // further down the folder still may.
+        if ((file.ReleaseId ?? file.CoverReleaseId) is not { } releaseId) return;
+
         // The whole album behind the first file is answered by this line.
         if (!covers.Folders.Add(folder)) return;
-
-        if (file.ReleaseId is not { } releaseId) return;
 
         // Named for the log until the sleeve's own type names the file.
         var target = folder;
@@ -1401,13 +1565,14 @@ public sealed class TagWriteService(
         MediaFileId Id,
         string Path,
         ReleaseId? ReleaseId,
+        ReleaseGroupId? AlbumId,
         AcoustId? AcoustId,
         string? TrackTitle,
         string RecordingTitle,
         Mbid? RecordingMbid,
-        int TrackNumber,
+        int? TrackNumber,
         int? TrackTotal,
-        int DiscNumber,
+        int? DiscNumber,
         int? DiscCount,
         string AlbumTitle,
         Mbid? ReleaseMbid,
@@ -1417,6 +1582,12 @@ public sealed class TagWriteService(
         List<PendingCredit> RecordingCredits,
         List<PendingCredit> ReleaseCredits)
     {
+        /// <summary>
+        /// Where no pressing is filed, the album's display edition: the one whose
+        /// sleeve the album page draws, and so the one written beside the folder.
+        /// </summary>
+        public ReleaseId? CoverReleaseId { get; init; }
+
         public CatalogueTagSource Describe() => new()
         {
             TrackTitle = TrackTitle,
@@ -1463,12 +1634,12 @@ public sealed class TagWriteService(
 /// on eight thousand. The same background pass, the same gate, the same progress
 /// frames and the same status endpoint serve all three.
 /// </remarks>
-public sealed record TagWriteScope(ReleaseId? Release, ArtistId? Artist, string Label)
+public sealed record TagWriteScope(ReleaseGroupId? Album, ArtistId? Artist, string Label)
 {
     public static TagWriteScope Library => new(null, null, "the whole library");
 
-    public static TagWriteScope ForRelease(ReleaseId release, string title) =>
-        new(release, null, title);
+    public static TagWriteScope ForAlbum(ReleaseGroupId album, string title) =>
+        new(album, null, title);
 
     public static TagWriteScope ForArtist(ArtistId artist, string name) =>
         new(null, artist, name);

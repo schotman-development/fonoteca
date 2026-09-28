@@ -32,14 +32,15 @@ public static partial class CatalogueEndpoints
 {
     private static void MapTaggingEndpoints(IEndpointRouteBuilder group)
     {
-        group.MapPost("/releases/{id:guid}/tags", WriteReleaseTags)
-            .WithName("WriteReleaseTags")
+        group.MapPost("/albums/{id:guid}/tags", WriteAlbumTags)
+            .WithName("WriteAlbumTags")
             .WithSummary("Write what the catalogue knows about this album into its files.")
             .WithDescription(
                 "Returns immediately with a job id; progress arrives on the jobs hub. Writes "
                 + "title, artist, album, album artist, track and disc numbers, the year and every "
-                + "MusicBrainz identifier into each file that has a recording, a track and a "
-                + "release. Never automatic. Each file is rendered to a staged sibling, read back "
+                + "MusicBrainz identifier into each file with a proven pressing; a file held to "
+                + "its album alone gets the album's facts and no disc, track total or release "
+                + "MBID, and keeps any track number and date of its own. Never automatic. Each file is rendered to a staged sibling, read back "
                 + "by two independent tag libraries and length-checked before the swap, and the "
                 + "previous values are journalled. With Fonoteca:AllowFileMutation off the whole "
                 + "run happens except the write.")
@@ -59,30 +60,30 @@ public static partial class CatalogueEndpoints
     }
 
     private static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
-        WriteReleaseTags(
+        WriteAlbumTags(
             Guid id,
             FonotecaDbContext db,
             TagWriteService tags,
             CancellationToken cancellationToken)
     {
-        var releaseId = new ReleaseId(id);
+        var groupId = new ReleaseGroupId(id);
 
-        var title = await db.Releases
-            .Where(release => release.Id == releaseId)
-            .Select(release => release.Title)
+        var title = await db.ReleaseGroups
+            .Where(album => album.Id == groupId)
+            .Select(album => album.Title)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
         if (title is null)
         {
             return TypedResults.Problem(
-                title: "No such release",
-                detail: $"The catalogue has no release with id {id}.",
+                title: "No such album",
+                detail: $"The catalogue has no album with id {id}.",
                 statusCode: StatusCodes.Status404NotFound);
         }
 
         return await StartAsync(
-            tags, TagWriteScope.ForRelease(releaseId, title), cancellationToken).ConfigureAwait(false);
+            tags, TagWriteScope.ForAlbum(groupId, title), cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>

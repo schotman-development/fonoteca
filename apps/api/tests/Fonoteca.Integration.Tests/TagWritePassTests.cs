@@ -202,24 +202,24 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     /// An album's button writes that album and leaves everything else alone.
     /// </summary>
     [Fact]
-    public async Task AReleaseScopedRunTouchesNoOtherAlbum()
+    public async Task AnAlbumScopedRunTouchesNoOtherAlbum()
     {
         SkipWithoutTools();
 
         await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
         var other = await SeedOtherAlbumAsync("Someone Else/Another Record/01 track.flac");
 
-        ReleaseId chosen;
+        ReleaseGroupId chosen;
 
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
             chosen = await db.Releases
                 .Where(release => release.Mbid == ReleaseMbid)
-                .Select(release => release.Id)
+                .Select(release => release.ReleaseGroupId!.Value)
                 .SingleAsync(Token);
         }
 
-        var summary = await RunAsync(TagWriteScope.ForRelease(chosen, "Kind of Blue"));
+        var summary = await RunAsync(TagWriteScope.ForAlbum(chosen, "Kind of Blue"));
 
         Assert.Equal(1, summary.Examined);
         Assert.Equal(1, summary.Written);
@@ -362,12 +362,11 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>
-    /// A file the catalogue has not fully answered is not on the worklist.
+    /// A file with no album is not on the worklist.
     /// </summary>
     /// <remarks>
-    /// All three links or none. Writing an album name with no track number, or a
-    /// title with no album, produces a file that reads as a half-tagged rip in
-    /// every player — and the narrower question is the honest one.
+    /// A title with no album produces a file that reads as a half-tagged rip in
+    /// every player, and the catalogue has no answer worth writing for it.
     /// </remarks>
     [Fact]
     public async Task AFileWithNoAlbumIsLeftAlone()
@@ -384,6 +383,326 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
             .ReadAsync(new LibraryPath(lonely), cancellationToken: Token);
 
         Assert.False(reading.Fields.ContainsKey("ALBUM"));
+    }
+
+    /// <summary>
+    /// A file held to its album with no pressing proven gets the album's facts
+    /// and nothing only a pressing has.
+    /// </summary>
+    /// <remarks>
+    /// ADR 0013 leaves most of a library in this state, every new download
+    /// included. The album artist is the display edition's billing line and the
+    /// year the album page's — no track number, no disc, no release MBID.
+    /// </remarks>
+    [Fact]
+    public async Task AFileWithOnlyItsAlbumGetsTheAlbumsFactsAndNoPressings()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.ReleaseId = null;
+            file.TrackId = null;
+            file.FolderPosition = 4;
+
+            // The album's own title and year, which the pressing's are not.
+            var album = await db.ReleaseGroups.SingleAsync(Token);
+            album.Title = "Kind of Blue (the album)";
+            album.FirstReleaseYear = 1958;
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.Written);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Equal("So What", reading.Fields["TITLE"]);
+        Assert.Equal("Miles Davis", reading.Fields["ARTIST"]);
+        Assert.Equal("Kind of Blue (the album)", reading.Fields["ALBUM"]);
+        Assert.Equal("Miles Davis", reading.Find(CatalogueTags.AlbumArtist));
+        Assert.Equal("1958", reading.Fields["YEAR"]);
+        Assert.Equal(RecordingMbid.ToString(), reading.Find(CatalogueTags.RecordingId));
+        Assert.Equal(GroupMbid.ToString(), reading.Find(CatalogueTags.ReleaseGroupId));
+        Assert.Null(reading.Find(CatalogueTags.ReleaseId));
+        Assert.False(reading.Fields.ContainsKey("DISCNUMBER"));
+
+        // Its place in the folder, the file having no number of its own.
+        Assert.Equal("4", reading.Fields["TRACKNUMBER"]);
+
+        // And a number this pass filled in is ours to move when the folder's
+        // order does — a track added before it, say — not the file's own.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.FolderPosition = 5;
+            await db.SaveChangesAsync(Token);
+        }
+
+        await RunAsync(TagWriteScope.Library);
+
+        var moved = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Equal("5", moved.Fields["TRACKNUMBER"]);
+
+        // Still ours after being moved once: the journal follows the chain.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.FolderPosition = 6;
+            await db.SaveChangesAsync(Token);
+        }
+
+        await RunAsync(TagWriteScope.Library);
+
+        var again = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Equal("6", again.Fields["TRACKNUMBER"]);
+    }
+
+    /// <summary>
+    /// A date ATL cannot parse is still the file's own, and no year replaces it.
+    /// </summary>
+    [Fact]
+    public async Task AFileWithOnlyItsAlbumKeepsADateOnlyTagLibCanRead()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.ReleaseId = null;
+            file.TrackId = null;
+            file.FolderPosition = 1;
+            (await db.ReleaseGroups.SingleAsync(Token)).FirstReleaseYear = 1958;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var full = Path.Combine(_root, "Miles Davis/Kind of Blue/01 track.flac");
+
+        using (var tagged = TagLib.File.Create(full))
+        {
+            ((TagLib.Ogg.XiphComment)tagged.GetTag(TagLib.TagTypes.Xiph, true)).SetField("DATE", "17/08/1959");
+            tagged.Save();
+        }
+
+        await RunAsync(TagWriteScope.Library);
+
+        using var written = TagLib.File.Create(full);
+        Assert.Equal(
+            ["17/08/1959"],
+            ((TagLib.Ogg.XiphComment)written.GetTag(TagLib.TagTypes.Xiph, false)).GetField("DATE"));
+    }
+
+    /// <summary>
+    /// A track number a pressing filled in stays beside its disc number when the
+    /// pressing is lost.
+    /// </summary>
+    /// <remarks>
+    /// Ours by the journal, so it would otherwise move to the folder's order and
+    /// read "disc 1, track 14".
+    /// </remarks>
+    [Fact]
+    public async Task ATrackNumberBesideADiscNumberIsNeverMoved()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await RunAsync(TagWriteScope.Library);
+
+        var pressed = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.False(string.IsNullOrWhiteSpace(pressed.Find("DISCNUMBER")));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.ReleaseId = null;
+            file.TrackId = null;
+            file.FolderPosition = 14;
+            await db.SaveChangesAsync(Token);
+        }
+
+        await RunAsync(TagWriteScope.Library);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Equal(pressed.Find("TRACKNUMBER"), reading.Find("TRACKNUMBER"));
+    }
+
+    /// <summary>
+    /// A file whose date the writer would re-render is not written at all.
+    /// </summary>
+    /// <remarks>
+    /// ATL rebuilds a date from its own parse on every save, so "2008-10" comes
+    /// out "2008-10-01" — a day nobody recorded — without the year ever being in
+    /// the plan. The owner chose refusal, counted under failed: the file is left
+    /// exactly as it was.
+    /// </remarks>
+    [Fact]
+    public async Task AFileWhoseDateTheWriterWouldChangeIsLeftAlone()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        var full = Path.Combine(_root, "Miles Davis/Kind of Blue/01 track.flac");
+
+        using (var tagged = TagLib.File.Create(full))
+        {
+            ((TagLib.Ogg.XiphComment)tagged.GetTag(TagLib.TagTypes.Xiph, true)).SetField("DATE", "1959-08");
+            tagged.Save();
+        }
+
+        var before = await System.IO.File.ReadAllBytesAsync(full, Token);
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(0, summary.Written);
+        Assert.Equal(1, summary.Failed);
+        Assert.Equal(before, await System.IO.File.ReadAllBytesAsync(full, Token));
+    }
+
+    /// <summary>
+    /// A full ISO date survives the writer, so a file carrying one is written and keeps it.
+    /// </summary>
+    [Fact]
+    public async Task AFileWithAFullDateIsWrittenAndKeepsIt()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        var full = Path.Combine(_root, "Miles Davis/Kind of Blue/01 track.flac");
+
+        using (var tagged = TagLib.File.Create(full))
+        {
+            ((TagLib.Ogg.XiphComment)tagged.GetTag(TagLib.TagTypes.Xiph, true)).SetField("DATE", "1959-08-17");
+            tagged.Save();
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.Written);
+
+        using var written = TagLib.File.Create(full);
+        Assert.Equal(
+            ["1959-08-17"],
+            ((TagLib.Ogg.XiphComment)written.GetTag(TagLib.TagTypes.Xiph, false)).GetField("DATE"));
+    }
+
+    /// <summary>
+    /// A file with a disc number and no track number is not given the folder's.
+    /// </summary>
+    /// <remarks>
+    /// The folder's order runs across every disc, so "disc 2, track 14".
+    /// </remarks>
+    [Fact]
+    public async Task AFileWithOnlyItsAlbumAndADiscNumberGetsNoTrackNumber()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.ReleaseId = null;
+            file.TrackId = null;
+            file.FolderPosition = 14;
+            await db.SaveChangesAsync(Token);
+        }
+
+        using (var tagged = TagLib.File.Create(Path.Combine(_root, "Miles Davis/Kind of Blue/01 track.flac")))
+        {
+            tagged.Tag.Disc = 2;
+            tagged.Save();
+        }
+
+        await RunAsync(TagWriteScope.Library);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Null(reading.Find("TRACKNUMBER"));
+        Assert.Equal("Kind of Blue", reading.Fields["ALBUM"]);
+    }
+
+    /// <summary>
+    /// A file filed under a pressing whose track it has lost is not written.
+    /// </summary>
+    /// <remarks>
+    /// It would carry the pressing's release MBID and track total with a folder
+    /// position for a number. It waits for attribution to seat it again.
+    /// </remarks>
+    [Fact]
+    public async Task AFileThatLostItsTrackOnAPressingIsNotWritten()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.TrackId = null;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(0, summary.Examined);
+    }
+
+    /// <summary>
+    /// A file held to its album alone keeps the track number and the date it
+    /// already carries, and still gets everything else.
+    /// </summary>
+    /// <remarks>
+    /// Both are its pressing's facts. No disc number is written without a
+    /// pressing, so a rip's own "disc 2, track 1" replaced with its place in the
+    /// folder would read "disc 2, track 14"; a 2008 reissue given the album's year
+    /// would claim a pressing it is not. Read off the file, not the catalogue: a
+    /// tag the attribution pass could not read is still there.
+    /// </remarks>
+    [Fact]
+    public async Task AFileWithOnlyItsAlbumKeepsItsOwnTrackNumberAndDate()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.ReleaseId = null;
+            file.TrackId = null;
+            file.FolderPosition = 14;
+            await db.SaveChangesAsync(Token);
+        }
+
+        using (var tagged = TagLib.File.Create(Path.Combine(_root, "Miles Davis/Kind of Blue/01 track.flac")))
+        {
+            tagged.Tag.Track = 1;
+            tagged.Tag.Year = 2008;
+            tagged.Save();
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.Written);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Equal("1", reading.Find("TRACKNUMBER"));
+        Assert.Equal("2008", reading.Find("YEAR"));
+        Assert.Equal("Kind of Blue", reading.Fields["ALBUM"]);
     }
 
     /// <summary>
@@ -597,6 +916,62 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
 
         Assert.Equal(0, summary.CoversWritten);
         Assert.False(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg")));
+    }
+
+    /// <summary>
+    /// A folder held to its album alone gets the sleeve the album page shows.
+    /// </summary>
+    /// <remarks>
+    /// Most of a library has no proven pressing. The album page still draws its
+    /// display edition's sleeve for it, so a player reading the same disk has to
+    /// find that one beside the files, or it shows nothing where this shows a cover.
+    /// Two editions with a sleeve each, so it has to be the display edition's
+    /// — the official one — and not merely any.
+    /// </remarks>
+    [Fact]
+    public async Task AFolderWithOnlyItsAlbumGetsTheAlbumsSleeve()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(ChosenCover);
+
+        var official = new byte[] { 0xFF, 0xD8, 0xFF, 0xE1, 7, 7, 7 };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.ReleaseId = null;
+            file.TrackId = null;
+
+            var edition = new Release
+            {
+                Id = ReleaseId.New(),
+                Title = "Kind of Blue",
+                Mbid = Mb("55555555-5555-4555-8555-555555555555"),
+                ReleaseGroupId = file.ReleaseGroupId,
+                Status = "Official",
+            };
+
+            db.Releases.Add(edition);
+            db.ReleaseCovers.Add(new ReleaseCover
+            {
+                ReleaseId = edition.Id,
+                Bytes = official,
+                MediaType = "image/jpeg",
+                ArchiveImageId = 5678,
+                SavedUtc = DateTimeOffset.UtcNow,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library)).CoversWritten);
+
+        Assert.Equal(
+            official,
+            await File.ReadAllBytesAsync(
+                Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg"), Token));
     }
 
     /// <summary>Only one piece of library-wide work at a time.</summary>
