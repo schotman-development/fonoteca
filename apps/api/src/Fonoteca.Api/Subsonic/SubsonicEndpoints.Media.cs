@@ -95,18 +95,28 @@ public static partial class SubsonicEndpoints
     {
         var id = Text(http, "id");
 
-        var release = SubsonicIds.AsAlbum(id)
-            ?? await ReleaseOfAsync(db, SubsonicIds.AsSong(id), cancellationToken)
+        var album = SubsonicIds.AsAlbum(id)
+            ?? await AlbumOfAsync(db, SubsonicIds.AsSong(id), cancellationToken)
                 .ConfigureAwait(false);
 
-        if (release is { } album)
+        // The sleeve of the edition that stands for the album, as on the album
+        // page; an album with no edition stored falls through to its own files.
+        if (album is { } group)
         {
-            return await CatalogueEndpoints
-                .GetReleaseCover(album.Value, db, archive, shop, store, describer, clock, http, cancellationToken)
+            var editions = await CatalogueEndpoints
+                .EditionFactsAsync(db, [group], cancellationToken)
                 .ConfigureAwait(false);
+
+            if (CatalogueEndpoints.DisplayEdition(editions[group]) is { } display)
+            {
+                return await CatalogueEndpoints
+                    .GetReleaseCover(display.Id.Value, db, archive, shop, store, describer, clock, http, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
-        var path = await PathOfAsync(db, id, cancellationToken).ConfigureAwait(false);
+        var path = await PathOfAsync(db, id, cancellationToken).ConfigureAwait(false)
+            ?? (album is { } held ? await FirstFileOfAsync(db, held, cancellationToken).ConfigureAwait(false) : null);
 
         if (path is null) return SubsonicResult.Error(70, "No such cover art.");
 
@@ -142,7 +152,7 @@ public static partial class SubsonicEndpoints
         return SubsonicIds.AsPath(id);
     }
 
-    private static async Task<Domain.Catalogue.ReleaseId?> ReleaseOfAsync(
+    private static async Task<Domain.Catalogue.ReleaseGroupId?> AlbumOfAsync(
         FonotecaDbContext db,
         Domain.Catalogue.MediaFileId? file,
         CancellationToken cancellationToken)
@@ -152,8 +162,21 @@ public static partial class SubsonicEndpoints
         return await db.MediaFiles
             .AsNoTracking()
             .Where(row => row.Id == fileId)
-            .Select(row => row.ReleaseId)
+            .Select(row => row.ReleaseGroupId)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>The album's first file by path, whose own embedded picture stands in for a sleeve.</summary>
+    private static async Task<string?> FirstFileOfAsync(
+        FonotecaDbContext db,
+        Domain.Catalogue.ReleaseGroupId album,
+        CancellationToken cancellationToken) =>
+        await db.MediaFiles
+            .AsNoTracking()
+            .Where(row => row.ReleaseGroupId == album)
+            .OrderBy(row => row.Path)
+            .Select(row => row.Path)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
 }

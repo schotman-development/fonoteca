@@ -36,7 +36,7 @@ internal static class SubsonicIds
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
-    internal static string Album(ReleaseId id) => AlbumPrefix + id.Value.ToString("N");
+    internal static string Album(ReleaseGroupId id) => AlbumPrefix + id.Value.ToString("N");
 
     internal static string Song(MediaFileId id) => SongPrefix + id.Value.ToString("N");
 
@@ -47,8 +47,8 @@ internal static class SubsonicIds
     internal static ArtistId? AsArtist(string? id) =>
         Guid(id, ArtistPrefix) is { } value ? new ArtistId(value) : null;
 
-    internal static ReleaseId? AsAlbum(string? id) =>
-        Guid(id, AlbumPrefix) is { } value ? new ReleaseId(value) : null;
+    internal static ReleaseGroupId? AsAlbum(string? id) =>
+        Guid(id, AlbumPrefix) is { } value ? new ReleaseGroupId(value) : null;
 
     internal static MediaFileId? AsSong(string? id) =>
         Guid(id, SongPrefix) is { } value ? new MediaFileId(value) : null;

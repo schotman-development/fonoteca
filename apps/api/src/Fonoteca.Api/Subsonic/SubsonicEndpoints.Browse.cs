@@ -9,12 +9,12 @@ namespace Fonoteca.Api.Subsonic;
 /// Browsing what the catalogue knows: artists, albums and the songs on them.
 /// </summary>
 /// <remarks>
-/// The id3 half of the protocol. Everything here is keyed on a
-/// <see cref="Release"/> rather than a <see cref="ReleaseGroup"/>, because
-/// <c>Track.Position</c> and <c>Track.DiscNumber</c> hang off a release and an
-/// album with no track numbers is of no use to a client.
+/// The id3 half of the protocol. An album is a <see cref="ReleaseGroup"/>, as
+/// everywhere else here: a pressing is claimed only on proof, so most albums
+/// have none, and a song's numbers are the pressing's where one is claimed and
+/// the file's own tags otherwise.
 ///
-/// <b>Only releases the library actually holds files for appear.</b> A release
+/// <b>Only albums the library actually holds files for appear.</b> An album
 /// the catalogue knows about but owns nothing of is a gap on the Acquire screen,
 /// not an album a client should offer to play.
 ///
@@ -101,18 +101,18 @@ public static partial class SubsonicEndpoints
         FonotecaDbContext db,
         CancellationToken cancellationToken)
     {
-        if (SubsonicIds.AsAlbum(Text(http, "id")) is not { } releaseId)
+        if (SubsonicIds.AsAlbum(Text(http, "id")) is not { } albumId)
         {
             return SubsonicResult.Error(70, "No such album.");
         }
 
-        var albums = await AlbumsAsync(db, artist: null, cancellationToken, releaseId)
+        var albums = await AlbumsAsync(db, artist: null, cancellationToken, albumId)
             .ConfigureAwait(false);
 
         if (albums.Count == 0) return SubsonicResult.Error(70, "No such album.");
 
         var album = albums[0];
-        var songs = await SongsAsync(db, releaseId, cancellationToken).ConfigureAwait(false);
+        var songs = await SongsAsync(db, albumId, cancellationToken).ConfigureAwait(false);
 
         return SubsonicResult.Ok("album", root =>
         {
@@ -157,7 +157,7 @@ public static partial class SubsonicEndpoints
 
             // Newest by when the library gained it, which is what the album list
             // sorts "added" by: the media file ids are UUIDv7 and time-ordered,
-            // so the largest one under a release is when its first file arrived.
+            // so the largest one under an album is when its first file arrived.
             "newest" => albums.OrderByDescending(album => album.Added),
 
             "byYear" => ByYear(http, albums),
@@ -184,7 +184,7 @@ public static partial class SubsonicEndpoints
             return SubsonicResult.Error(70, "No such song.");
         }
 
-        var songs = await SongsAsync(db, release: null, cancellationToken, fileId)
+        var songs = await SongsAsync(db, album: null, cancellationToken, fileId)
             .ConfigureAwait(false);
 
         return songs.Count == 0
@@ -383,14 +383,14 @@ internal sealed record SubsonicArtist(
     string? Portrait,
     int AlbumCount);
 
-/// <summary>A release, as an album.</summary>
+/// <summary>A release group, as an album.</summary>
 /// <param name="Added">
 /// When the library gained its first file, taken from the media file ids rather
 /// than from a column: they are UUIDv7 and time-ordered, which is the same thing
 /// the album list already sorts "added" by.
 /// </param>
 internal sealed record Album(
-    ReleaseId Id,
+    ReleaseGroupId Id,
     string Name,
     string? Artist,
     ArtistId? ArtistId,
@@ -407,7 +407,7 @@ internal sealed record Song(
     string Title,
     string Path,
     string? Album,
-    ReleaseId? AlbumId,
+    ReleaseGroupId? AlbumId,
     string? Artist,
     ArtistId? ArtistId,
     int? Track,

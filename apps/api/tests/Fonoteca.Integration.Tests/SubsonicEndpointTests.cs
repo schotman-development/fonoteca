@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Fonoteca.Integration.Tests;
@@ -423,6 +424,68 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// An album whose pressing is not known is still an album a client can open
+    /// and play, in the order its file names give.
+    /// </summary>
+    /// <remarks>
+    /// Removes what it adds, because the class shares one database and the test
+    /// above counts the album shelf.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumWithNoPressingIsStillAnAlbumWithItsSongsInOrder()
+    {
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Higher" };
+        var songs = new[] { "10 The Bottom.flac", "2 South Dakota.flac" }
+            .Select(name => (Name: name, Recording: new Recording { Id = RecordingId.New(), Title = name[(name.IndexOf(' ', StringComparison.Ordinal) + 1)..^5] }))
+            .ToList();
+        var files = songs
+            .Select(song => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"Chris Stapleton/Higher/{song.Name}",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = song.Recording.Id,
+                ReleaseGroupId = album.Id,
+                AttributionOutcome = ReleaseAttributionOutcome.GroupOnly,
+            })
+            .ToList();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(album);
+            db.Recordings.AddRange(songs.Select(song => song.Recording));
+            db.MediaFiles.AddRange(files);
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            using var client = _factory!.CreateClient();
+
+            var body = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{album.Id.Value:N}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album");
+
+            Assert.Equal("Higher", body.GetProperty("name").GetString());
+
+            // 2 before 10: the numbers in the names, not their characters.
+            Assert.Equal(
+                ["South Dakota", "The Bottom"],
+                body.GetProperty("song").EnumerateArray().Select(song => song.GetProperty("title").GetString()));
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
+            db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
+            var recordings = songs.Select(song => song.Recording.Id).ToList();
+            db.Recordings.RemoveRange(await db.Recordings.Where(row => recordings.Contains(row.Id)).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
     /// Every method this server claims answers, and nothing 500s.
     /// </summary>
     /// <remarks>
@@ -627,13 +690,14 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
 
     private const string Credentials = "u=me&p=" + Password + "&v=1.16.1&c=test";
 
+    /// <summary>The album's Subsonic id, which is its release group's.</summary>
     private async Task<string> AlbumIdAsync()
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
-        var release = db.Releases.Single();
+        var album = db.ReleaseGroups.Single();
 
-        return $"al-{release.Id.Value:N}";
+        return $"al-{album.Id.Value:N}";
     }
 
     private static string FolderId(string path) =>

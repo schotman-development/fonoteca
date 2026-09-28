@@ -85,10 +85,15 @@ public static partial class SubsonicEndpoints
     }
 
     /// <summary>
-    /// Every release the library holds files for.
+    /// Every album the library holds files for.
     /// </summary>
     /// <remarks>
-    /// <b>Files, not tracks.</b> A release the catalogue knows about but owns
+    /// <b>An album is a release group</b>, whether or not the pressing its files
+    /// are is known, so an album known only as an album is still an album a
+    /// client can browse and play. Its name and billing line come from the
+    /// edition that stands for it, as on the album page.
+    ///
+    /// <b>Files, not tracks.</b> An album the catalogue knows about but owns
     /// nothing of is a gap on the Acquire screen; offering it to a client that
     /// would try to play it is the wrong answer to a different question.
     /// </remarks>
@@ -96,11 +101,11 @@ public static partial class SubsonicEndpoints
         FonotecaDbContext db,
         ArtistId? artist,
         CancellationToken cancellationToken,
-        ReleaseId? release = null)
+        ReleaseGroupId? group = null)
     {
-        var query = db.Releases.AsNoTracking().Where(row => row.Files.Any());
+        var query = db.ReleaseGroups.AsNoTracking().Where(row => row.Files.Any());
 
-        if (release is { } only) query = query.Where(row => row.Id == only);
+        if (group is { } only) query = query.Where(row => row.Id == only);
 
         var rows = await query
             .Select(row => new
@@ -108,8 +113,7 @@ public static partial class SubsonicEndpoints
                 row.Id,
                 row.Title,
                 row.Mbid,
-                row.ReleasedYear,
-                row.EditsJson,
+                row.FirstReleaseYear,
                 SongCount = row.Files.Count,
 
                 // Ordered rather than aggregated: PostgreSQL has comparison
@@ -136,20 +140,28 @@ public static partial class SubsonicEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        var editions = await CatalogueEndpoints
+            .EditionFactsAsync(db, [.. rows.Select(row => row.Id)], cancellationToken)
+            .ConfigureAwait(false);
+
         var albums = rows
             .Select(row =>
             {
-                var edits = PersonEdits.Read(row.EditsJson);
+                var display = CatalogueEndpoints.DisplayEdition(editions[row.Id]);
+                var edits = PersonEdits.Read(display?.EditsJson);
 
-                var line = CatalogueEndpoints.CreditLine(
-                    row.Credits.Select(credit => (credit.CreditedAs ?? credit.Name, credit.JoinPhrase)));
+                var billed = display is { Artists.Count: > 0 }
+                    ? display.Artists.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.Name, credit.JoinPhrase)).ToList()
+                    : row.Credits.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.Name, credit.JoinPhrase)).ToList();
+
+                var line = CatalogueEndpoints.CreditLine(billed.Select(credit => (credit.Name, credit.JoinPhrase)));
 
                 return new Album(
                     row.Id,
                     PersonEdits.Apply(edits, "title", row.Title) ?? row.Title,
                     PersonEdits.Apply(edits, "credit", line),
-                    row.Credits.Count == 0 ? null : row.Credits[0].ArtistId,
-                    Year(edits, row.ReleasedYear),
+                    billed.Count == 0 ? null : billed[0].ArtistId,
+                    Year(edits, "firstReleaseYear", CatalogueEndpoints.AlbumYear(row.FirstReleaseYear, editions[row.Id])),
                     row.Mbid,
                     row.SongCount,
                     row.Added.Value,
@@ -157,16 +169,16 @@ public static partial class SubsonicEndpoints
             })
             .ToList();
 
-        return artist is { } billed
-            ? albums.Where(album => album.ArtistId == billed).ToList()
+        return artist is { } billedTo
+            ? albums.Where(album => album.ArtistId == billedTo).ToList()
             : albums;
     }
 
-    private static int? Year(IReadOnlyDictionary<string, string?> edits, int? stated)
+    private static int? Year(IReadOnlyDictionary<string, string?> edits, string field, int? stated)
     {
         var edited = PersonEdits.Apply(
             edits,
-            "releasedYear",
+            field,
             stated?.ToString(CultureInfo.InvariantCulture));
 
         return int.TryParse(edited, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year)
@@ -176,13 +188,13 @@ public static partial class SubsonicEndpoints
 
     private static Task<IReadOnlyList<Song>> SongsAsync(
         FonotecaDbContext db,
-        ReleaseId? release,
+        ReleaseGroupId? album,
         CancellationToken cancellationToken,
         MediaFileId? file = null)
     {
         var query = db.MediaFiles.AsNoTracking();
 
-        if (release is { } album) query = query.Where(row => row.ReleaseId == album);
+        if (album is { } group) query = query.Where(row => row.ReleaseGroupId == group);
         if (file is { } one) query = query.Where(row => row.Id == one);
 
         return SongsAsync(query, cancellationToken);
@@ -221,7 +233,7 @@ public static partial class SubsonicEndpoints
                 file.SizeBytes,
                 file.LastModifiedUtc,
                 file.Quality,
-                file.ReleaseId,
+                file.ReleaseGroupId,
                 file.Recording != null ? file.Recording.Title : null,
                 file.Recording != null ? file.Recording.Duration : null,
                 file.Recording != null ? file.Recording.Mbid : null,
@@ -229,13 +241,24 @@ public static partial class SubsonicEndpoints
                 file.Track != null ? (int?)file.Track.Position : null,
                 file.Track != null ? (int?)file.Track.DiscNumber : null,
                 file.Track != null ? file.Track.Length : null,
-                file.Release != null ? file.Release.Title : null,
+                file.FolderPosition,
+                file.TagDiscNumber,
+                file.TagTrackNumber,
+                file.ReleaseGroup != null ? file.ReleaseGroup.Title : null,
+                file.ReleaseGroup != null ? file.ReleaseGroup.FirstReleaseYear : null,
                 file.Release != null ? file.Release.ReleasedYear : null,
                 file.Release != null ? file.Release.EditsJson : null,
                 // No ternary on the navigation: a null one yields an empty
                 // collection through the join EF writes, where `new List<>()`
                 // is not something it can translate at all.
                 file.Release!.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new CreditRow(
+                        credit.ArtistId,
+                        credit.CreditedAs ?? (credit.Artist!.LatinName ?? credit.Artist!.Name),
+                        credit.JoinPhrase))
+                    .ToList(),
+                file.ReleaseGroup!.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new CreditRow(
                         credit.ArtistId,
@@ -252,9 +275,14 @@ public static partial class SubsonicEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // The album folder first: two rips of one album are one album here, and
+        // interleaving them would play every track twice in a row.
         return rows
-            .OrderBy(row => row.DiscNumber ?? 1)
+            .OrderBy(row => AlbumFolder.Of(row.Path), StringComparer.Ordinal)
+            .ThenBy(row => row.DiscNumber ?? 1)
             .ThenBy(row => row.Position ?? int.MaxValue)
+            .ThenBy(row => row.FolderPosition ?? int.MaxValue)
+            .ThenBy(row => AlbumFolder.SortKey(row.Path), StringComparer.Ordinal)
             .ThenBy(row => row.Path, StringComparer.Ordinal)
             .Select(Describe)
             .ToList();
@@ -278,8 +306,12 @@ public static partial class SubsonicEndpoints
     {
         var edits = PersonEdits.Read(row.AlbumEdits);
 
+        // The pressing's billing line where one is claimed, the album's own
+        // otherwise.
+        var albumCredits = row.AlbumCredits.Count > 0 ? row.AlbumCredits : row.GroupCredits;
+
         var albumLine = CatalogueEndpoints.CreditLine(
-            row.AlbumCredits.Select(credit => (credit.Name, credit.JoinPhrase)));
+            albumCredits.Select(credit => (credit.Name, credit.JoinPhrase)));
 
         var ownLine = CatalogueEndpoints.CreditLine(
             row.RecordingCredits.Select(credit => (credit.Name, credit.JoinPhrase)));
@@ -294,14 +326,18 @@ public static partial class SubsonicEndpoints
             row.AlbumTitle is null
                 ? null
                 : PersonEdits.Apply(edits, "title", row.AlbumTitle) ?? row.AlbumTitle,
-            row.ReleaseId,
+            row.AlbumId,
             ownLine ?? PersonEdits.Apply(edits, "credit", albumLine),
-            (row.RecordingCredits.Count > 0 ? row.RecordingCredits : row.AlbumCredits)
+            (row.RecordingCredits.Count > 0 ? row.RecordingCredits : albumCredits)
                 .Select(credit => (ArtistId?)credit.ArtistId)
                 .FirstOrDefault(),
-            row.Position,
-            row.DiscNumber,
-            Year(edits, row.AlbumYear),
+            // The pressing's numbers where one is claimed, otherwise the file's
+            // own: what the file says about itself, never a number made up.
+            row.Position ?? row.TagTrack,
+            row.DiscNumber ?? row.TagDisc,
+            row.AlbumYear is { } first
+                ? Year(edits, "firstReleaseYear", first)
+                : Year(edits, "releasedYear", row.PressingYear),
             row.RecordingMbid,
             row.SizeBytes,
             preview.MediaType,
@@ -321,7 +357,7 @@ public static partial class SubsonicEndpoints
         long SizeBytes,
         DateTimeOffset LastModifiedUtc,
         AudioQuality? Quality,
-        ReleaseId? ReleaseId,
+        ReleaseGroupId? AlbumId,
         string? RecordingTitle,
         TimeSpan? RecordingDuration,
         Mbid? RecordingMbid,
@@ -329,10 +365,15 @@ public static partial class SubsonicEndpoints
         int? Position,
         int? DiscNumber,
         TimeSpan? TrackLength,
+        int? FolderPosition,
+        int? TagDisc,
+        int? TagTrack,
         string? AlbumTitle,
         int? AlbumYear,
+        int? PressingYear,
         string? AlbumEdits,
         List<CreditRow> AlbumCredits,
+        List<CreditRow> GroupCredits,
         List<CreditRow> RecordingCredits);
 
     /// <summary>One line of a billing, already resolved to what it prints.</summary>
