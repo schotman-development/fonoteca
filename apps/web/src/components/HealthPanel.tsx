@@ -9,7 +9,7 @@ type SystemInfo = {
   serverTimeUtc: string
   libraryPath: string
   fileMutationAllowed: boolean
-  counts: { files: number; recordings: number; releases: number; artists: number }
+  counts: { files: number; recordings: number; albums: number; artists: number }
 }
 
 type LoadState =
@@ -111,7 +111,7 @@ export function HealthPanel({ refreshKey = 0 }: { readonly refreshKey?: number }
       <Stack gap={24} wrap>
         <Count label="Files" value={info.counts.files} />
         <Count label="Recordings" value={info.counts.recordings} />
-        <Count label="Releases" value={info.counts.releases} />
+        <Count label="Albums" value={info.counts.albums} />
         <Count label="Artists" value={info.counts.artists} />
       </Stack>
     </Stack>

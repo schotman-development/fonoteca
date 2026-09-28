@@ -157,8 +157,8 @@ export function AttributionPanel({ onAttributed }: { readonly onAttributed?: () 
       </Stack>
 
       <Text size="xs" tone="tertiary">
-        Decides files in sets, because one file cannot name its album. The folders on disk are not
-        consulted — they are used afterwards to check the answer.
+        Decides one album folder at a time: the folder is the album, and a pressing is named only
+        where the audio proves it.
       </Text>
     </Stack>
   )
@@ -167,35 +167,45 @@ export function AttributionPanel({ onAttributed }: { readonly onAttributed?: () 
 /**
  * What the last pass did, refusals included.
  *
- * The four shortfalls mean four different things and are shown apart. A file
- * with no confident fit is the strict gate working and belongs in a review
- * queue; a recording on no release at all is a gap in MusicBrainz; a failure is
+ * The shortfalls mean different things and are shown apart. A file with no
+ * confident fit is the strict gate working and belongs in a review queue; a
+ * recording on no release at all is a gap in MusicBrainz; an order every
+ * edition reverses is a question about the files' numbers; a failure is
  * transient and retries on the next run. Summed into one number they would be
  * indistinguishable, and only some of them are worth acting on.
  */
 function Result({ summary }: { readonly summary: Summary }) {
-  const filed = summary.attributed + summary.ambiguous + summary.groupOnly
+  const filed = summary.attributed + summary.groupOnly + summary.onNoEdition
 
   return (
     <Stack direction="column" gap={8}>
       <Stack gap={20} wrap>
         <Stat label="Filed" value={filed} />
-        <Stat label="Albums" value={summary.releases} />
-        <Stat label="Unresolved" value={summary.noConfidentFit + summary.noCandidate} />
+        <Stat label="Editions" value={summary.releases} />
+        <Stat
+          label="Unresolved"
+          value={summary.noConfidentFit + summary.noCandidate + summary.orderContradicted}
+        />
       </Stack>
-
-      {summary.ambiguous > 0 ? (
-        <Text size="xs" tone="tertiary">
-          {summary.ambiguous.toLocaleString()} landed on a pressing chosen from several that fitted
-          exactly as well. The track list is the same on all of them, so nothing was lost by
-          choosing — but the choice was a coin flip and is recorded as one.
-        </Text>
-      ) : null}
 
       {summary.groupOnly > 0 ? (
         <Text size="xs" tone="tertiary">
-          {summary.groupOnly.toLocaleString()} know their album but not their pressing, because the
-          editions that fitted disagree about which disc and track the music is on.
+          {summary.groupOnly.toLocaleString()} know their album but not their pressing: no single
+          edition could be proved from the audio, so none is named.
+        </Text>
+      ) : null}
+
+      {summary.onNoEdition > 0 ? (
+        <Text size="xs" tone="tertiary">
+          {summary.onNoEdition.toLocaleString()} sit in their album's folder on no edition of it,
+          and stay with the folder.
+        </Text>
+      ) : null}
+
+      {summary.orderContradicted > 0 ? (
+        <Text size="xs" tone="tertiary">
+          {summary.orderContradicted.toLocaleString()} carry track numbers every edition of their
+          album reverses, so the album was left as a question.
         </Text>
       ) : null}
 

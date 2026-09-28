@@ -1,6 +1,10 @@
 /**
- * The pure half of the Identify screen: which file goes on which track, and what
- * is wrong with that.
+ * The pure half of the Identify screen: which file goes on which track of an
+ * album, and what is wrong with that.
+ *
+ * The track list is the album's editions merged (`GET …/albums/{id}/slots`): the
+ * lead edition's tracks in its own order, then what other editions add. Only the
+ * lead's positions are numbers a file's track tag can be compared with.
  *
  * Nothing here imports React, a stylesheet or the API client at runtime, so it
  * runs under `node --test` — the rule `seating.ts` and `files.ts` state.
@@ -12,7 +16,7 @@ import { queryFor } from './seating.ts'
 
 type FileRow = components['schemas']['IdentifyFileRow']
 type FolderTags = components['schemas']['IdentifyFolderTags']
-type Slot = components['schemas']['ReleaseSlotRow']
+type Slot = components['schemas']['AlbumSlotRow']
 
 /** More than this many seconds off the track and a seated file is worth a notice. */
 export const DRIFT_WARNING_S = 8
@@ -42,13 +46,14 @@ export type TitleMatch = 'same' | 'partial' | 'differs'
  */
 export type Picks = ReadonlyMap<string, string | null>
 
+/** The recording: one row per recording, and positions repeat across editions. */
 export function slotKey(slot: Slot): string {
-  return `${slot.discNumber}-${slot.position}`
+  return slot.recording
 }
 
 export type Seating = {
   readonly rows: readonly Row[]
-  /** Open files the release has no track for. They stay open. */
+  /** Open files the album has no track for. They stay open. */
   readonly unseated: readonly FileRow[]
 }
 
@@ -102,13 +107,16 @@ export function discOf(file: FileRow): number {
 }
 
 /**
- * Seats open files on a release's tracks, in three passes:
+ * Seats open files on an album's tracks, in three passes:
  *
  * 1. title, disc and track tag all agree;
  * 2. the title alone, but only where it is unambiguous — one open file and one
  *    free track carry it. "Intro", "Allegro" and a song played on two discs of a
  *    live set are not, and seating them by title alone swaps files silently;
  * 3. the disc and track the file's tags state.
+ *
+ * Passes 1 and 3 read only the lead edition's rows: another edition's track 4
+ * is not what a file tagged 4 means.
  *
  * A person's `picks` come first and take the file out of every pass, so a file
  * left open stays open and a file put on a track bumps whatever a rule put there.
@@ -124,6 +132,7 @@ export function seat(
   const used = new Set<FileRow>()
   const seated = new Map<Slot, FileRow>()
   const open = slots.filter((slot) => slot.heldBy == null)
+  const numbered = open.filter((slot) => slot.onLead)
 
   for (const file of files) {
     if (!picks.has(file.mediaFileId)) continue
@@ -134,8 +143,8 @@ export function seat(
   const chosen = new Set(seated.values())
 
   // A file whose disc nobody states can only be placed by number on a one-disc
-  // release. On a two-disc live set "Encore #3" is track 3 of either disc.
-  const discs = new Set(slots.map((slot) => slot.discNumber)).size
+  // lead edition. On a two-disc live set "Encore #3" is track 3 of either disc.
+  const discs = new Set(slots.filter((slot) => slot.onLead).map((slot) => slot.discNumber)).size
   const onDisc = (file: FileRow, slot: Slot) =>
     file.disc == null ? discs === 1 : file.disc === slot.discNumber
 
@@ -148,7 +157,7 @@ export function seat(
   const titled = (title: string) =>
     title === '' ? [] : files.filter((file) => normalise(file.title) === title)
 
-  for (const slot of open) {
+  for (const slot of numbered) {
     take(
       slot,
       titled(normalise(slot.title)).find(
@@ -173,6 +182,7 @@ export function seat(
       slots.some(
         (other) =>
           other !== slot &&
+          other.onLead &&
           other.position === only.track &&
           onDisc(only, other) &&
           normalise(other.title) === title,
@@ -189,7 +199,7 @@ export function seat(
     }
   }
 
-  for (const slot of open) {
+  for (const slot of numbered) {
     take(
       slot,
       files.find((file) => !used.has(file) && file.track === slot.position && onDisc(file, slot)),
@@ -213,6 +223,7 @@ export function seat(
       title: titleMatch(file.title, slot.title),
       chosen: chosen.has(file),
       numberDiffers:
+        slot.onLead &&
         file.track != null &&
         (file.track !== slot.position || (file.disc != null && file.disc !== slot.discNumber)),
     }
@@ -225,7 +236,7 @@ export function seat(
 export type Line = Row | { readonly kind: 'unseated'; readonly file: FileRow }
 
 /**
- * The release's rows in the release's order, with each file that has no track
+ * The album's rows in the album's order, with each file that has no track
  * placed where it sits in the folder: before the first row whose file — or, for
  * a track without one, whose own position — comes after it.
  *
@@ -267,12 +278,23 @@ export function filed(row: Row): boolean {
   return row.kind === 'seated' && (row.chosen || row.title !== 'differs')
 }
 
-export function pairsOf(
-  seating: Seating,
-): readonly { readonly file: string; readonly disc: number; readonly position: number }[] {
+/** The seating as `POST …/files/album` takes it: each file on one edition's position. */
+export function pairsOf(seating: Seating): readonly {
+  readonly file: string
+  readonly release: string
+  readonly disc: number
+  readonly position: number
+}[] {
   return seating.rows.flatMap((row) =>
     row.kind === 'seated' && filed(row)
-      ? [{ file: row.file.mediaFileId, disc: row.slot.discNumber, position: row.slot.position }]
+      ? [
+          {
+            file: row.file.mediaFileId,
+            release: row.slot.release,
+            disc: row.slot.discNumber,
+            position: row.slot.position,
+          },
+        ]
       : [],
   )
 }
@@ -295,7 +317,11 @@ export type Notice = {
   readonly text: string
 }
 
-/** What would go wrong if this release were filed, one notice each. */
+/**
+ * What would go wrong if this album were filed, one notice each. A track only
+ * other editions carry having no file is what a rip of the lead edition looks
+ * like, so only the lead's empty tracks are a notice.
+ */
 export function noticesOf(
   seating: Seating,
   discs = 1,
@@ -307,7 +333,7 @@ export function noticesOf(
   const drifting = seated.filter(
     (row) => filed(row) && row.drift !== null && Math.abs(row.drift) > DRIFT_WARNING_S,
   )
-  const empty = seating.rows.filter((row) => row.kind === 'empty')
+  const empty = seating.rows.filter((row) => row.kind === 'empty' && row.slot.onLead)
 
   // A file somebody chose to leave open needs no telling.
   const notices: Notice[] = seating.unseated
@@ -316,7 +342,7 @@ export function noticesOf(
       key: `unseated:${file.mediaFileId}`,
       tone: 'danger',
       file: file.name,
-      text: 'is not on this release. It stays open.',
+      text: 'is on no edition of this album that was read. It stays open.',
     }))
 
   if (renamed.length > 0) {
@@ -347,7 +373,7 @@ export function noticesOf(
     notices.push({
       key: 'empty',
       tone: 'warning',
-      text: `Track${empty.length === 1 ? '' : 's'} ${empty.map((row) => label(row.slot, discs)).join(', ')} on this release ${empty.length === 1 ? 'has' : 'have'} no file.`,
+      text: `Track${empty.length === 1 ? '' : 's'} ${empty.map((row) => label(row.slot, discs)).join(', ')} of this album ${empty.length === 1 ? 'has' : 'have'} no file.`,
     })
   }
 
@@ -355,36 +381,42 @@ export function noticesOf(
     notices.push({
       key: 'clean',
       tone: 'success',
-      text: 'Every file has a track on this release.',
+      text: 'Every file has a track on this album.',
     })
   }
 
   return notices
 }
 
-/** `#7`, or `2-7` on a release with more than one disc. */
+/**
+ * `#7`, or `2-7` when the lead edition has more than one disc; `+` for a track
+ * only other editions carry, whose position is theirs and not the album's.
+ */
 export function label(slot: Slot, discs: number): string {
+  if (!slot.onLead) return '+'
   return discs > 1 ? `${slot.discNumber}-${slot.position}` : `#${slot.position}`
 }
 
 export type Fact = {
   readonly label: string
   readonly tags: string
-  readonly release: string
+  readonly album: string
   readonly state: 'same' | 'differs' | 'unknown'
 }
 
-/** The folder's tags beside the release's own facts. */
+/**
+ * The folder's tags beside the album's own facts. Tracks are the lead edition's,
+ * with the merged count beside them where other editions add some.
+ */
 export function factsOf(
   tags: FolderTags,
   files: number,
-  release: {
+  album: {
     readonly title: string
     readonly artist?: string | null
     readonly year?: number | null
-    readonly discCount: number
-    readonly label?: string | null
     readonly tracks: number
+    readonly merged: number
   },
 ): readonly Fact[] {
   const text = (
@@ -394,7 +426,7 @@ export function factsOf(
   ): Fact => ({
     label: name,
     tags: mine ?? 'none',
-    release: theirs ?? 'not listed',
+    album: theirs ?? 'not listed',
     state:
       mine == null || theirs == null
         ? 'unknown'
@@ -403,29 +435,18 @@ export function factsOf(
           : 'differs',
   })
 
-  const number = (
-    name: string,
-    mine: number | null | undefined,
-    theirs: number,
-    unit = '',
-  ): Fact => ({
-    label: name,
-    tags: mine == null ? 'none' : `${mine}${unit}`,
-    release: `${theirs}`,
-    state: mine == null ? 'unknown' : mine === theirs ? 'same' : 'differs',
-  })
-
   return [
-    text('Album', tags.album, release.title),
-    text('Artist', tags.artist, release.artist),
-    text('Year', tags.year?.toString(), release.year?.toString()),
+    text('Album', tags.album, album.title),
+    text('Artist', tags.artist, album.artist),
+    text('Year', tags.year?.toString(), album.year?.toString()),
     {
-      ...number('Tracks', files, release.tracks),
+      label: 'Tracks',
       tags: `${files} file${files === 1 ? '' : 's'}`,
-      release: `${release.tracks} track${release.tracks === 1 ? '' : 's'}`,
+      album:
+        `${album.tracks} track${album.tracks === 1 ? '' : 's'}` +
+        (album.merged > album.tracks ? `, ${album.merged} across editions` : ''),
+      state: files === album.tracks ? 'same' : 'differs',
     },
-    number('Discs', tags.discs, release.discCount),
-    text('Label', tags.label, release.label),
   ]
 }
 

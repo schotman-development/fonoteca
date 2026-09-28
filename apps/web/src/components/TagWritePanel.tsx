@@ -24,7 +24,7 @@ const POLL_MS = 5000
  * one status endpoint whichever button started the work.
  */
 export type TagWriteScope =
-  | { readonly kind: 'release'; readonly id: string }
+  | { readonly kind: 'album'; readonly id: string }
   | { readonly kind: 'artist'; readonly id: string }
 
 /**
@@ -106,8 +106,8 @@ export function TagWritePanel({
       const result =
         scope === undefined
           ? await api.post('/api/library/tags')
-          : scope.kind === 'release'
-            ? await api.post('/api/catalogue/releases/{id}/tags', {
+          : scope.kind === 'album'
+            ? await api.post('/api/catalogue/albums/{id}/tags', {
                 params: { path: { id: scope.id } },
               })
             : await api.post('/api/catalogue/artists/{id}/tags', {
@@ -116,7 +116,7 @@ export function TagWritePanel({
 
       setStarted(
         result.files === 0
-          ? `Nothing in ${result.scope} has an album, a track and a recording yet, so there was nothing to write.`
+          ? `Nothing in ${result.scope} has an album and a recording yet, so there was nothing to write.`
           : `Writing ${result.files.toLocaleString()} file${result.files === 1 ? '' : 's'} in ${result.scope}.`,
       )
 
@@ -240,7 +240,7 @@ export function TagWritePanel({
         ) : scope === undefined ? (
           <Text size="sm" tone={status.files === 0 ? 'tertiary' : 'primary'}>
             {status.files === 0
-              ? 'No file has an album, a track and a recording yet, so there is nothing to write.'
+              ? 'No file has an album and a recording yet, so there is nothing to write.'
               : `${status.files.toLocaleString()} file${status.files === 1 ? '' : 's'} hold an answer the file itself does not carry.`}
           </Text>
         ) : null}

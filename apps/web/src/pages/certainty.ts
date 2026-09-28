@@ -2,14 +2,16 @@
  * How the attribution outcomes read on screen.
  *
  * Shared between the album list, the album page and the matching screens so that
- * one answer never carries two names. The first three are what can appear on a
- * filed album; the four below them are the ones that file nothing, and they were
- * added when the matching screens arrived — a refused file has no release page,
- * but it does have a question, and the question has to say what it is answering.
+ * one answer never carries two names. The rule's first four are what can appear
+ * on a filed album; the ones below the people's answers file nothing, and they
+ * were added when the matching screens arrived — a refused file has no album
+ * page, but it does have a question, and the question has to say what it is
+ * answering.
  *
- * `Attributed` deliberately renders as nothing at all. It is the ordinary case
- * and a badge on every album would be noise that trains the eye to skip the two
- * badges that matter.
+ * `Attributed` and `GroupOnly` deliberately render as nothing at all. They are
+ * the ordinary cases — most albums are known and their pressing is not — and a
+ * badge on every album would be noise that trains the eye to skip the badges
+ * that matter.
  *
  * `short` is the same answer at tile width, and it lives here rather than in the
  * album grid for the reason the whole file exists: a second name invented at the
@@ -32,7 +34,10 @@ export const CERTAINTY: Readonly<
     label: 'Certain',
     short: 'Certain',
     tone: 'ok',
-    note: 'One release fitted these files, and nothing else fitted as well.',
+    note:
+      'Exactly one edition of this album proved to be these files: the same number of tracks, every ' +
+      'one within a tenth of a second of its printed length, and nothing in the audio contradicting ' +
+      'its medium.',
   },
   AttributedAmbiguously: {
     label: 'One of several pressings',
@@ -46,10 +51,20 @@ export const CERTAINTY: Readonly<
   GroupOnly: {
     label: 'Album known, pressing not',
     short: 'Pressing unknown',
+    tone: 'ok',
+    note:
+      'The folder is this album, and no single edition of it could be proved from the audio — or ' +
+      'more than one could. No pressing is named, because naming the nearest would be a small lie; ' +
+      'the files keep their own track numbers.',
+  },
+  OnNoEdition: {
+    label: 'In the folder, on no edition',
+    short: 'Not on album',
     tone: 'warning',
     note:
-      'The editions that fitted disagree about which disc and track this music sits on, so no ' +
-      'pressing was named — a track number here would be an invention.',
+      "This file sits in the album's folder, but no edition of the album prints its recording — a " +
+      'bonus track from elsewhere, or a take MusicBrainz files under another album. It stays with ' +
+      'the folder.',
   },
 
   /*
@@ -67,6 +82,14 @@ export const CERTAINTY: Readonly<
     note:
       'No rule placed these files. Somebody found the album, checked the pairing track by track ' +
       'and filed them, which is the strongest evidence available for music AcoustID cannot place.',
+  },
+  AlbumByPerson: {
+    label: 'Album named by you',
+    short: 'By you',
+    tone: 'neutral',
+    note:
+      'Somebody said which album this folder is. The pass keeps that album and may only prove which ' +
+      'of its editions the files are.',
   },
   NoReleaseByPerson: {
     label: 'No album, said by you',
@@ -97,6 +120,14 @@ export const CERTAINTY: Readonly<
     note:
       'No rule placed these files. An agent chose the album and the pairing and you approved the ' +
       'call, but nobody listened to check it — worth a look before trusting it.',
+  },
+  AlbumByAgent: {
+    label: 'Album named by an agent',
+    short: 'By agent',
+    tone: 'warning',
+    note:
+      'An agent said which album this folder is and you approved the call. Nobody listened to the ' +
+      'files; the pass may only prove which edition they are.',
   },
   NoReleaseByAgent: {
     label: 'No album, said by an agent',
@@ -129,6 +160,14 @@ export const CERTAINTY: Readonly<
       'Releases existed and none of them explained these files well enough to file them. A wrong ' +
       'album is worse than a missing one and far harder to notice, so nothing was written.',
   },
+  OrderContradicted: {
+    label: 'Out of order',
+    short: 'Out of order',
+    tone: 'warning',
+    note:
+      "The files' own track numbers put two songs the other way round from every edition of the " +
+      'album, so the album was not claimed. Either the numbers are wrong or the album is.',
+  },
   NoCandidate: {
     label: 'Nothing to compare against',
     short: 'No candidates',
@@ -151,4 +190,17 @@ export const CERTAINTY: Readonly<
     tone: 'neutral',
     note: 'The attribution pass has not reached these files.',
   },
+}
+
+/**
+ * How an album folder's own order compared with the order its album's editions
+ * print — `FolderOrderOutcome`'s names. `NotChecked` is absent: a folder no run
+ * has reached says nothing, and a phrase for that would be a badge on every
+ * album until the first run.
+ */
+export const FOLDER_ORDER: Readonly<Record<string, string>> = {
+  Corroborated: 'in the album’s order',
+  Uncorroborated: 'order not confirmed',
+  TakenFromEditions: 'ordered as the album',
+  Contradicted: 'order disagrees with every edition',
 }

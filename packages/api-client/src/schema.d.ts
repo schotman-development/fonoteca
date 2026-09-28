@@ -159,7 +159,7 @@ export interface paths {
         put?: never;
         /**
          * Write everything the catalogue knows back into the library's files.
-         * @description Returns immediately with a job id; progress arrives on the jobs hub. The last step of the chain and the only one that is never automatic: scan, identify, enrich and attribute all write to a database, and this is what makes their answers portable. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file that has a recording, a track and a release. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write. Same pass as the per-album and per-artist buttons, with no scope.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. The last step of the chain and the only one that is never automatic: scan, identify, enrich and attribute all write to a database, and this is what makes their answers portable. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file with a proven pressing; a file held to its album alone gets the album's facts and no disc, track total or release MBID, and keeps any track number and date of its own. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write. Same pass as the per-album and per-artist buttons, with no scope.
          */
         post: operations["StartLibraryTagWrite"];
         /** Ask the running tag write to stop after the file it is on. */
@@ -444,7 +444,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalogue/releases": {
+    "/api/catalogue/albums": {
         parameters: {
             query?: never;
             header?: never;
@@ -453,9 +453,11 @@ export interface paths {
         };
         /**
          * Albums the library holds at least one track of.
-         * @description Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the release title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
+         * @description An album is a release group; `editionId` names the pressing only where every file is filed under the same one. Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the album title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like, and is only given against a claimed pressing — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
+         *
+         *     `noRelease` lists the album folders answered as coming from no release, which have no release group: unpaged, outside `total`, filtered on the folder name.
          */
-        get: operations["GetReleases"];
+        get: operations["GetAlbums"];
         put?: never;
         post?: never;
         delete?: never;
@@ -464,7 +466,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalogue/releases/{id}": {
+    "/api/catalogue/albums/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -472,10 +474,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * One release and its whole track list, held or not.
-         * @description The entire track list as MusicBrainz prints it, with each track flagged for whether the library holds it — so a missing track is visible as a gap rather than as an absence.
+         * One album: every stored edition's tracks at once, held or not.
+         * @description The claimed pressing's track list when there is one, with what the album's other stored editions print beside it, each track flagged for whether the library holds it — so a missing track is visible as a gap rather than as an absence. Files held to the album whose recording no edition prints are listed apart, as are the album folders they sit in.
          */
-        get: operations["GetRelease"];
+        get: operations["GetAlbum"];
         put?: never;
         post?: never;
         delete?: never;
@@ -493,7 +495,7 @@ export interface paths {
         };
         /**
          * How the attributed albums compare with the folders on disk.
-         * @description The folder's boundary decides which files are considered together; its name plays no part in deciding which release they came from. This is where the two are compared. A release spanning folders is the disagreement worth a person's attention now that a folder can no longer be split across releases by the pass — and either side may be the wrong one.
+         * @description The folder's boundary decides which files are considered together; its name plays no part in deciding which album they came from. This is where the two are compared, album by album (release group), whether or not a pressing is claimed. An album spanning folders is the disagreement worth a person's attention — the same album ripped twice, or one of the two filed wrongly — and either side may be the wrong one.
          */
         get: operations["GetAttributionReport"];
         put?: never;
@@ -804,7 +806,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalogue/releases/{id}/fingerprints": {
+    "/api/catalogue/matching/folders/album": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say which album a folder is, whatever the passes decided.
+         * @description An album folder is one album, and this names it. `release` is any release of that album — the one a search or a pasted MBID found — and only its release group is claimed: every file in the folder is filed under the album with no pressing and the outcome `AlbumByPerson`, answered or not, because the folder is the unit and a person naming its album outranks every earlier answer.
+         *
+         *     The pressing is left to the attribution pass, which is handed the folder back for it: it may claim an edition of *this* album only where the audio proves one, and it can never move the folder to another album. Naming the album again is the only way to do that.
+         *
+         *     `folder` is an album folder exactly as the album page prints it, not a prefix. Nothing on disk is touched.
+         */
+        post: operations["SetFolderAlbum"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/albums/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Albums (release groups) matching what somebody typed.
+         * @description `matching/releases/search` one level up: one row per album, so a page is 25 albums rather than 25 pressings of the most reissued one. A release or release group MBID or URL pasted into `q` is looked up instead of searched for, and comes back as the album it names. Needs MusicBrainz's search index for text, as the release search does.
+         */
+        get: operations["SearchAlbums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/albums/{id}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One album's editions merged into one track list.
+         * @description Every recording on the album's official editions, one row each at its first place, the lead edition's first: `release` when it is one of the album's, else the one the folder's settled files already hold most of, else the one nearest the folder in length. One MusicBrainz lookup per edition, at most 40; `editionsRead` below `editionsFound` says the list was cut there.
+         *
+         *     `folder` names the album folder: a recording a settled file in it already holds under this album comes back naming that file in `heldBy`.
+         */
+        get: operations["GetAlbumSlots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/matching/files/album": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * File chosen files under an album, each as the recording of a chosen track.
+         * @description The commit half of `matching/albums/{id}/slots`. Each pair names a file and a position on one edition of `album`; the file takes that position's recording and the album, and **no pressing**: the outcome is `AlbumByPerson` and the release lookup stamp is cleared, so the attribution pass may prove an edition of this album from the audio and can never move the files to another album.
+         *
+         *     Identification and enrichment are answered too, as the release filing answers them, or the files would stay on the worklist. Only open files are written. Nothing on disk is touched.
+         */
+        post: operations["FileFilesUnderAlbum"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/albums/{id}/fingerprints": {
         parameters: {
             query?: never;
             header?: never;
@@ -824,7 +914,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalogue/releases/{id}/tags": {
+    "/api/catalogue/albums/{id}/tags": {
         parameters: {
             query?: never;
             header?: never;
@@ -835,9 +925,9 @@ export interface paths {
         put?: never;
         /**
          * Write what the catalogue knows about this album into its files.
-         * @description Returns immediately with a job id; progress arrives on the jobs hub. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file that has a recording, a track and a release. Never automatic. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. Writes title, artist, album, album artist, track and disc numbers, the year and every MusicBrainz identifier into each file with a proven pressing; a file held to its album alone gets the album's facts and no disc, track total or release MBID, and keeps any track number and date of its own. Never automatic. Each file is rendered to a staged sibling, read back by two independent tag libraries and length-checked before the swap, and the previous values are journalled. With Fonoteca:AllowFileMutation off the whole run happens except the write.
          */
-        post: operations["WriteReleaseTags"];
+        post: operations["WriteAlbumTags"];
         delete?: never;
         options?: never;
         head?: never;
@@ -941,7 +1031,7 @@ export interface paths {
         };
         /**
          * The album's cover, as stored in the catalogue.
-         * @description The first request for an album with no stored cover fetches the Cover Art Archive's front at 500px and keeps it, so the archive is asked once per album. Where the archive holds no front, Qobuz is asked for the same record — by barcode where there is one, by a matched title and artist otherwise — and refuses rather than guesses. An album neither has a picture of answers 404 and is remembered as such for a week, then asked about again, so a sleeve either gains later is still picked up. Served under an ETag with `no-cache`, so a changed cover shows on the next view and an unchanged one costs a 304.
+         * @description The first request for an album with no stored cover fetches the Cover Art Archive's front at 500px and keeps it, so the archive is asked once per album. Where the archive holds no front, Qobuz is asked for the same record — by its barcode, or another edition's under the same title, where there is one, by a matched title, year and credited artist otherwise — and refuses rather than guesses. An album neither has a picture of is remembered as such for a week, then asked about again, so a sleeve either gains later is still picked up; meanwhile the picture its own files carry is served — the folder's cover image, else one embedded in its files — and never stored. With none of the three it answers 404. Served with `no-cache`, a stored cover under an ETag, so a changed cover shows on the next view and an unchanged one costs a 304.
          */
         get: operations["GetReleaseCover"];
         put?: never;
@@ -1206,6 +1296,17 @@ export interface components {
             /** Format: int32 */
             recordings: number;
         };
+        AlbumCard: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            mbid: null | string;
+            /** Format: uuid */
+            coverReleaseId: null | string;
+            title: string;
+            /** Format: int32 */
+            year: null | number;
+        };
         AlbumCredit: {
             /** Format: uuid */
             artistId: string;
@@ -1214,6 +1315,24 @@ export interface components {
             group: string;
             tracks: null | number[];
             portrait: null | string;
+        };
+        AlbumDetailResponse: {
+            album: components["schemas"]["AlbumSummary"];
+            tracks: components["schemas"]["AlbumTrackRow"][];
+            editions: components["schemas"]["AlbumEditionRow"][];
+            unplaced: components["schemas"]["AlbumFileRow"][];
+            folders: components["schemas"]["AlbumFolderRow"][];
+            /** Format: int32 */
+            contributable: number;
+            about: components["schemas"]["ReleaseAbout"];
+            credits: components["schemas"]["AlbumCredit"][];
+            moreBy: components["schemas"]["AlbumCard"][];
+        };
+        AlbumDisagreement: {
+            /** Format: uuid */
+            albumId: string;
+            title: string;
+            folders: components["schemas"]["AttributionShare"][];
         };
         AlbumDownload: {
             albumId: string;
@@ -1227,6 +1346,53 @@ export interface components {
             /** Format: date-time */
             finishedUtc: string;
             tracks: components["schemas"]["TrackDownload"][];
+        };
+        AlbumEditionRow: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            /** Format: int32 */
+            year: null | number;
+            country: null | string;
+            formats: null | string;
+            status: null | string;
+        };
+        AlbumFileRow: {
+            file: components["schemas"]["FileRow"];
+            recording: null | string;
+            /** Format: int32 */
+            disc: null | number;
+            /** Format: int32 */
+            position: null | number;
+            /** Format: int32 */
+            taggedDisc: null | number;
+            /** Format: int32 */
+            taggedTrack: null | number;
+        };
+        AlbumFilesPair: {
+            /** Format: uuid */
+            file: string;
+            /** Format: uuid */
+            release: string;
+            /** Format: int32 */
+            disc: number;
+            /** Format: int32 */
+            position: number;
+        };
+        AlbumFilesRequest: {
+            /** Format: uuid */
+            album: string;
+            pairs: components["schemas"]["AlbumFilesPair"][];
+        };
+        AlbumFilesResponse: {
+            /** Format: uuid */
+            album: string;
+            title: string;
+            /** Format: int32 */
+            filed: number;
+            /** Format: int32 */
+            skipped: number;
+            detail: string;
         };
         AlbumFilingPair: {
             /** Format: uuid */
@@ -1251,6 +1417,20 @@ export interface components {
             skipped: number;
             detail: string;
         };
+        AlbumFolderRow: {
+            path: string;
+            /** Format: uuid */
+            editionId: null | string;
+            edition: null | string;
+            order: string;
+            files: components["schemas"]["AlbumFileRow"][];
+        };
+        AlbumListResponse: {
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["AlbumSummary"][];
+            noRelease: components["schemas"]["NoReleaseAlbum"][];
+        };
         AlbumReplacement: {
             folder: string;
             downloadedTo: string;
@@ -1259,6 +1439,111 @@ export interface components {
             archived: number;
             archivedTo: null | string;
             detail: null | string;
+        };
+        AlbumSearchResponse: {
+            query: string;
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["AlbumSearchRow"][];
+        };
+        AlbumSearchRow: {
+            /** Format: uuid */
+            mbid: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            /** Format: int32 */
+            editions: number;
+            /** Format: int32 */
+            score: null | number;
+        };
+        AlbumSlotRow: {
+            /** Format: uuid */
+            recording: string;
+            /** Format: uuid */
+            release: string;
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            position: number;
+            number: null | string;
+            title: string;
+            artist: null | string;
+            duration: null | string;
+            /** Format: int32 */
+            durationMs: null | number;
+            /** Format: int32 */
+            editions: number;
+            onLead: boolean;
+            heldBy: null | string;
+        };
+        AlbumSlotsResponse: {
+            /** Format: uuid */
+            mbid: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            primaryType: null | string;
+            secondaryTypes: string[];
+            /** Format: uuid */
+            lead: string;
+            /** Format: int32 */
+            leadDiscs: number;
+            /** Format: int32 */
+            leadTracks: number;
+            /** Format: int32 */
+            editionsRead: number;
+            /** Format: int32 */
+            editionsFound: number;
+            tracks: components["schemas"]["AlbumSlotRow"][];
+        };
+        AlbumSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            mbid: null | string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            year: null | number;
+            /** Format: uuid */
+            editionId: null | string;
+            /** Format: uuid */
+            coverReleaseId: null | string;
+            country: null | string;
+            status: null | string;
+            formats: null | string;
+            /** Format: int32 */
+            discCount: null | number;
+            /** Format: int32 */
+            trackCount: null | number;
+            /** Format: int32 */
+            held: null | number;
+            /** Format: int32 */
+            files: number;
+            certainty: string;
+            /** Format: int32 */
+            editionAlternatives: number;
+        };
+        AlbumTrackRow: {
+            /** Format: int32 */
+            discNumber: number;
+            /** Format: int32 */
+            position: number;
+            number: null | string;
+            title: string;
+            workTitle: null | string;
+            duration: null | string;
+            /** Format: uuid */
+            recordingId: string;
+            held: boolean;
+            files: components["schemas"]["FileRow"][];
+            artist: null | string;
+            on: string[];
         };
         AlbumUpgrade: {
             download: components["schemas"]["AlbumDownload"];
@@ -1363,12 +1648,12 @@ export interface components {
             /** Format: int32 */
             foldersAgreeing: number;
             foldersSplit: components["schemas"]["FolderDisagreement"][];
-            releasesSpanningFolders: components["schemas"]["ReleaseDisagreement"][];
+            albumsSpanningFolders: components["schemas"]["AlbumDisagreement"][];
             incomplete: components["schemas"]["IncompleteRelease"][];
         };
         AttributionShare: {
             /** Format: uuid */
-            releaseId: string;
+            albumId: string;
             title: string;
             /** Format: int32 */
             files: number;
@@ -1403,13 +1688,15 @@ export interface components {
             /** Format: int32 */
             attributed: number;
             /** Format: int32 */
-            ambiguous: number;
-            /** Format: int32 */
             groupOnly: number;
+            /** Format: int32 */
+            onNoEdition: number;
             /** Format: int32 */
             noConfidentFit: number;
             /** Format: int32 */
             noCandidate: number;
+            /** Format: int32 */
+            orderContradicted: number;
             /** Format: int32 */
             failed: number;
             /** Format: int32 */
@@ -1458,7 +1745,7 @@ export interface components {
             /** Format: int32 */
             recordings: number;
             /** Format: int32 */
-            releases: number;
+            albums: number;
             /** Format: int32 */
             artists: number;
         };
@@ -1677,6 +1964,20 @@ export interface components {
             accepted: number;
             detail: string;
         };
+        FolderAlbumRequest: {
+            folder: string;
+            /** Format: uuid */
+            release: string;
+        };
+        FolderAlbumResponse: {
+            folder: string;
+            /** Format: uuid */
+            album: string;
+            title: string;
+            /** Format: int32 */
+            files: number;
+            detail: string;
+        };
         FolderContentsResponse: {
             folder: string;
             /** Format: int32 */
@@ -1687,7 +1988,7 @@ export interface components {
         };
         FolderDisagreement: {
             folder: string;
-            releases: components["schemas"]["AttributionShare"][];
+            albums: components["schemas"]["AttributionShare"][];
         };
         FolderEntry: {
             name: string;
@@ -1715,6 +2016,9 @@ export interface components {
             open: boolean;
             reason: null | string;
             recording: null | string;
+            /** Format: uuid */
+            albumId: null | string;
+            album: null | string;
             /** Format: uuid */
             releaseId: null | string;
             release: null | string;
@@ -1860,7 +2164,11 @@ export interface components {
         };
         IncompleteAlbum: {
             /** Format: uuid */
-            releaseId: string;
+            albumId: string;
+            /** Format: uuid */
+            editionId: string;
+            /** Format: uuid */
+            coverReleaseId: null | string;
             /** Format: uuid */
             mbid: null | string;
             folder: string;
@@ -1961,6 +2269,13 @@ export interface components {
         };
         /** @enum {unknown} */
         MusicBrainzReachability: "NotConfigured" | "Reachable" | "Unreachable" | "Rejected";
+        NoReleaseAlbum: {
+            folder: string;
+            title: string;
+            artist: null | string;
+            /** Format: int32 */
+            files: number;
+        };
         OpenQuestion: {
             id: string;
             kind: string;
@@ -2156,11 +2471,15 @@ export interface components {
             /** Format: uuid */
             artistId: null | string;
             artistBanner: null | string;
+            /** Format: uuid */
+            editionMbid: null | string;
             disambiguation: null | string;
             primaryType: null | string;
             secondaryTypes: string[];
             /** Format: int32 */
             firstReleaseYear: null | number;
+            /** Format: int32 */
+            releasedYear: null | number;
             /** Format: int32 */
             releasedMonth: null | number;
             /** Format: int32 */
@@ -2181,15 +2500,6 @@ export interface components {
             probedUtc: null | string;
             edited: string[];
         };
-        ReleaseCard: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            mbid: null | string;
-            title: string;
-            /** Format: int32 */
-            year: null | number;
-        };
         ReleaseCoverOption: {
             /** Format: int64 */
             id: number;
@@ -2205,21 +2515,6 @@ export interface components {
             uploaded: boolean;
             qobuzAlbum: null | string;
             images: components["schemas"]["ReleaseCoverOption"][];
-        };
-        ReleaseDetailResponse: {
-            release: components["schemas"]["ReleaseSummary"];
-            tracks: components["schemas"]["ReleaseTrackRow"][];
-            /** Format: int32 */
-            contributable: number;
-            about: components["schemas"]["ReleaseAbout"];
-            credits: components["schemas"]["AlbumCredit"][];
-            moreBy: components["schemas"]["ReleaseCard"][];
-        };
-        ReleaseDisagreement: {
-            /** Format: uuid */
-            releaseId: string;
-            title: string;
-            folders: components["schemas"]["AttributionShare"][];
         };
         ReleaseEditRequest: {
             title: string;
@@ -2250,11 +2545,6 @@ export interface components {
             /** Format: uuid */
             id: string;
             monitored: boolean;
-        };
-        ReleaseListResponse: {
-            /** Format: int32 */
-            total: number;
-            items: components["schemas"]["ReleaseSummary"][];
         };
         ReleaseSearchResponse: {
             query: string;
@@ -2330,45 +2620,6 @@ export interface components {
             catalogNumber: null | string;
             barcode: null | string;
             slots: components["schemas"]["ReleaseSlotRow"][];
-        };
-        ReleaseSummary: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            mbid: null | string;
-            title: string;
-            artist: null | string;
-            /** Format: int32 */
-            year: null | number;
-            country: null | string;
-            status: null | string;
-            formats: null | string;
-            /** Format: int32 */
-            discCount: null | number;
-            /** Format: int32 */
-            trackCount: number;
-            /** Format: int32 */
-            held: number;
-            /** Format: int32 */
-            files: number;
-            certainty: string;
-            /** Format: int32 */
-            editionAlternatives: number;
-        };
-        ReleaseTrackRow: {
-            /** Format: int32 */
-            discNumber: number;
-            /** Format: int32 */
-            position: number;
-            number: null | string;
-            title: string;
-            workTitle: null | string;
-            duration: null | string;
-            /** Format: uuid */
-            recordingId: string;
-            held: boolean;
-            files: components["schemas"]["FileRow"][];
-            artist: null | string;
         };
         /** @enum {unknown} */
         ReplacementVerdict: "Replace" | "NothingArrived" | "Incomplete" | "NotBetter" | "NotMeasured" | "ArrivalNotMeasured" | "LandedInside" | "NotHeld";
@@ -2467,9 +2718,13 @@ export interface components {
         };
         TrackAlbum: {
             /** Format: uuid */
-            releaseId: string;
+            albumId: string;
             /** Format: uuid */
             mbid: null | string;
+            /** Format: uuid */
+            editionId: null | string;
+            /** Format: uuid */
+            coverReleaseId: null | string;
             title: string;
             /** Format: int32 */
             year: null | number;
@@ -2521,7 +2776,9 @@ export interface components {
         };
         UpgradeCandidate: {
             /** Format: uuid */
-            releaseId: null | string;
+            albumId: null | string;
+            /** Format: uuid */
+            coverReleaseId: null | string;
             /** Format: uuid */
             mbid: null | string;
             folder: string;
@@ -3532,7 +3789,7 @@ export interface operations {
             };
         };
     };
-    GetReleases: {
+    GetAlbums: {
         parameters: {
             query?: {
                 query?: string;
@@ -3552,12 +3809,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReleaseListResponse"];
+                    "application/json": components["schemas"]["AlbumListResponse"];
                 };
             };
         };
     };
-    GetRelease: {
+    GetAlbum: {
         parameters: {
             query?: never;
             header?: never;
@@ -3574,7 +3831,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReleaseDetailResponse"];
+                    "application/json": components["schemas"]["AlbumDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4193,6 +4450,210 @@ export interface operations {
             };
         };
     };
+    SetFolderAlbum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderAlbumRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderAlbumResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SearchAlbums: {
+        parameters: {
+            query?: {
+                q?: string;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumSearchResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetAlbumSlots: {
+        parameters: {
+            query?: {
+                folder?: string;
+                release?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumSlotsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    FileFilesUnderAlbum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlbumFilesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumFilesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     ContributeFingerprints: {
         parameters: {
             query?: never;
@@ -4251,7 +4712,7 @@ export interface operations {
             };
         };
     };
-    WriteReleaseTags: {
+    WriteAlbumTags: {
         parameters: {
             query?: never;
             header?: never;

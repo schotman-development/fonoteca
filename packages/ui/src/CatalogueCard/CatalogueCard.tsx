@@ -43,8 +43,8 @@ export type CatalogueCardProps = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
    *
    *   <CatalogueCard
    *     variant="album"
-   *     title={release.title}
-   *     render={(props) => <Link {...props} to="/library/releases/$releaseId" … />}
+   *     title={album.title}
+   *     render={(props) => <Link {...props} to="/library/albums/$albumId" … />}
    *   />
    *
    * The design system has no router and will not grow one, and `render` is

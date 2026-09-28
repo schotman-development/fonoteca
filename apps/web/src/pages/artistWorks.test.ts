@@ -14,7 +14,7 @@ const MRAVINSKY = 'Leningrad Philharmonic, Yevgeny Mravinsky'
 function track(
   workTitle: string | null,
   performers: string | null,
-  album: { releaseId: string; title: string; year: number | null } | null,
+  album: { albumId: string; title: string; year: number | null } | null,
   roles: string[] = ['composer'],
 ) {
   return {
@@ -23,16 +23,27 @@ function track(
     workTitle,
     duration: null,
     roles,
-    album: album == null ? null : { ...album, mbid: null, artist: null, billed: null, band: null },
+    album:
+      album == null
+        ? null
+        : {
+            ...album,
+            mbid: null,
+            editionId: null,
+            coverReleaseId: null,
+            artist: null,
+            billed: null,
+            band: null,
+          },
     folder: 'Tchaikovsky/Loose',
     files: [],
     performers,
   }
 }
 
-const SYMPHONIES = { releaseId: 'r1', title: 'Symphonies Nos. 4, 5 & 6', year: 1961 }
-const ARGERICH = { releaseId: 'r2', title: 'Piano Concerto No. 1', year: 1994 }
-const HOROWITZ = { releaseId: 'r3', title: 'Piano Concerto No. 1', year: 1941 }
+const SYMPHONIES = { albumId: 'r1', title: 'Symphonies Nos. 4, 5 & 6', year: 1961 }
+const ARGERICH = { albumId: 'r2', title: 'Piano Concerto No. 1', year: 1994 }
+const HOROWITZ = { albumId: 'r3', title: 'Piano Concerto No. 1', year: 1941 }
 
 test('movements of one piece on one album are one recording', () => {
   const works = worksOf([
@@ -43,7 +54,7 @@ test('movements of one piece on one album are one recording', () => {
   assert.equal(works.length, 1)
   assert.equal(works[0]?.title, 'Symphony No. 4 in F minor, op. 36')
   assert.deepEqual(works[0]?.performances, [
-    { performers: MRAVINSKY, album: SYMPHONIES.title, releaseId: 'r1', year: 1961, tracks: 2 },
+    { performers: MRAVINSKY, album: SYMPHONIES.title, albumId: 'r1', year: 1961, tracks: 2 },
   ])
 })
 

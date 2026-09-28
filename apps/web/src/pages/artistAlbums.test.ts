@@ -19,7 +19,9 @@ const track = (over: Partial<Parameters<typeof albumsOf>[0][number]>) => ({
 })
 
 const album = (over: Record<string, unknown> = {}) => ({
-  releaseId: 'r-1',
+  albumId: 'r-1',
+  editionId: 'e-1',
+  coverReleaseId: 'e-1',
   mbid: 'm-1',
   title: 'Rumours',
   year: 1977,
@@ -58,13 +60,13 @@ test('tracks of one release become one album, files and roles summed', () => {
   assert.deepEqual(albums[0]?.roles, ['billed', 'conductor'])
   assert.equal(albums[0]?.trackCount, 2)
   assert.equal(albums[0]?.fileCount, 3)
-  assert.equal(albums[0]?.releaseId, 'r-1')
+  assert.equal(albums[0]?.albumId, 'r-1')
 })
 
 test('an unattributed track groups by its folder and says the year came from there', () => {
   const albums = albumsOf([track({ album: null, folder: 'An Artist/Tusk (1979)' })])
 
-  assert.equal(albums[0]?.releaseId, null)
+  assert.equal(albums[0]?.albumId, null)
   assert.equal(albums[0]?.title, 'Tusk')
   assert.equal(albums[0]?.year, 1979)
   assert.equal(albums[0]?.yearFromFolder, true)
@@ -106,9 +108,9 @@ test('genuinely different folders under one release are both kept', () => {
 
 test('the discography is ordered by year, undated last', () => {
   const albums = albumsOf([
-    track({ album: album({ releaseId: 'c', title: 'C', year: null }) }),
-    track({ album: album({ releaseId: 'b', title: 'B', year: 1979 }) }),
-    track({ album: album({ releaseId: 'a', title: 'A', year: 1977 }) }),
+    track({ album: album({ albumId: 'c', title: 'C', year: null }) }),
+    track({ album: album({ albumId: 'b', title: 'B', year: 1979 }) }),
+    track({ album: album({ albumId: 'a', title: 'A', year: 1977 }) }),
   ])
 
   assert.deepEqual(
@@ -125,7 +127,7 @@ test('leftovers fold into the album they are missing from', () => {
   ])
 
   assert.equal(albums.length, 1)
-  assert.equal(albums[0]?.releaseId, 'r-1')
+  assert.equal(albums[0]?.albumId, 'r-1')
   assert.equal(albums[0]?.trackCount, 3)
   assert.equal(albums[0]?.unplaced, 1)
   // The roles came with them.
@@ -137,42 +139,42 @@ test('a release that only reprints one of the folder does not swallow it', () =>
     // A compilation with one track in somebody else's album folder, and the
     // twenty the passes could not place. The compilation is the folder's only
     // claimant and is emphatically not its album.
-    track({ album: album({ releaseId: 'comp', title: 'Free Album 2017' }), folder: 'X/Vienna' }),
+    track({ album: album({ albumId: 'comp', title: 'Free Album 2017' }), folder: 'X/Vienna' }),
     ...Array.from({ length: 20 }, () => track({ album: null, folder: 'X/Vienna' })),
   ])
 
   assert.equal(albums.length, 2)
-  assert.equal(albums.find((a) => a.releaseId === 'comp')?.trackCount, 1)
-  assert.equal(albums.find((a) => a.releaseId === null)?.trackCount, 20)
+  assert.equal(albums.find((a) => a.albumId === 'comp')?.trackCount, 1)
+  assert.equal(albums.find((a) => a.albumId === null)?.trackCount, 20)
 })
 
 test('the bigger of two claimants takes the leftovers', () => {
   const albums = albumsOf([
     ...Array.from({ length: 9 }, () =>
-      track({ album: album({ releaseId: 'lp', title: 'The LP' }), folder: 'X/The LP' }),
+      track({ album: album({ albumId: 'lp', title: 'The LP' }), folder: 'X/The LP' }),
     ),
-    track({ album: album({ releaseId: 'comp', title: 'Hits' }), folder: 'X/The LP' }),
+    track({ album: album({ albumId: 'comp', title: 'Hits' }), folder: 'X/The LP' }),
     track({ album: null, folder: 'X/The LP' }),
   ])
 
-  assert.equal(albums.find((a) => a.releaseId === 'lp')?.unplaced, 1)
+  assert.equal(albums.find((a) => a.albumId === 'lp')?.unplaced, 1)
   assert.equal(
-    albums.find((a) => a.releaseId === null),
+    albums.find((a) => a.albumId === null),
     undefined,
   )
 })
 
 test('a folder two releases claim equally is left standing on its own', () => {
   const albums = albumsOf([
-    track({ album: album({ releaseId: 'a', title: 'A' }), folder: 'X/Deluxe (1977)' }),
-    track({ album: album({ releaseId: 'a', title: 'A' }), folder: 'X/Deluxe (1977)' }),
-    track({ album: album({ releaseId: 'b', title: 'B' }), folder: 'X/Deluxe (1977)' }),
-    track({ album: album({ releaseId: 'b', title: 'B' }), folder: 'X/Deluxe (1977)' }),
+    track({ album: album({ albumId: 'a', title: 'A' }), folder: 'X/Deluxe (1977)' }),
+    track({ album: album({ albumId: 'a', title: 'A' }), folder: 'X/Deluxe (1977)' }),
+    track({ album: album({ albumId: 'b', title: 'B' }), folder: 'X/Deluxe (1977)' }),
+    track({ album: album({ albumId: 'b', title: 'B' }), folder: 'X/Deluxe (1977)' }),
     track({ album: null, folder: 'X/Deluxe (1977)' }),
   ])
 
   assert.equal(albums.length, 3)
-  assert.equal(albums.filter((a) => a.releaseId === null).length, 1)
+  assert.equal(albums.filter((a) => a.albumId === null).length, 1)
 })
 
 test('a folder nothing was placed from stays an album of its own', () => {
@@ -294,7 +296,7 @@ test('the shelves come back in order, and an empty one is dropped', () => {
   const sections = sectionsOf(
     albumsOf([
       track({
-        album: album({ releaseId: 'r-2', title: 'A Cover', artist: 'Someone', billed: false }),
+        album: album({ albumId: 'r-2', title: 'A Cover', artist: 'Someone', billed: false }),
         roles: ['composer'],
       }),
       track({ album: album(), roles: ['billed'] }),
@@ -315,7 +317,7 @@ test('the shelves come back in order, and an empty one is dropped', () => {
 test('one album lands on one shelf, so the shelves total the discography', () => {
   const albums = albumsOf([
     track({ album: album(), roles: ['billed', 'conductor', 'composer'] }),
-    track({ album: album({ releaseId: 'r-2' }), roles: ['ensemble'] }),
+    track({ album: album({ albumId: 'r-2' }), roles: ['ensemble'] }),
   ])
 
   const filed = sectionsOf(albums, 'An Artist').reduce(
@@ -334,7 +336,7 @@ test("a track billed on somebody else's album is an appearance, not their own re
       title: 'Three O\u2019Clock Blues',
       roles: ['billed'],
       album: album({
-        releaseId: 'r-bb',
+        albumId: 'r-bb',
         title: 'B.B. King\u2019s Blues Summit 100',
         artist: 'Joe Bonamassa',
         billed: false,
@@ -510,12 +512,12 @@ test('the band shelf sits between the discography and the guest spots', () => {
   const sections = sectionsOf(
     albumsOf([
       track({
-        album: album({ releaseId: 'x', artist: 'Someone', billed: false }),
+        album: album({ albumId: 'x', artist: 'Someone', billed: false }),
         roles: ['composer'],
       }),
       track({
         album: album({
-          releaseId: 'b',
+          albumId: 'b',
           artist: 'A Band',
           billed: false,
           band: { id: 'b-1', name: 'A Band' },
@@ -523,7 +525,7 @@ test('the band shelf sits between the discography and the guest spots', () => {
         roles: ['composer'],
       }),
       track({
-        album: album({ releaseId: 'g', artist: 'Another', billed: false }),
+        album: album({ albumId: 'g', artist: 'Another', billed: false }),
         roles: ['billed'],
       }),
       track({ album: album(), roles: ['billed'] }),
@@ -546,14 +548,14 @@ test('the band shelf is one section per band, named after it', () => {
   const sections = sectionsOf(
     albumsOf([
       track({
-        album: album({ releaseId: 'ds1', artist: 'Dire Straits', billed: false, band: ds }),
+        album: album({ albumId: 'ds1', artist: 'Dire Straits', billed: false, band: ds }),
       }),
       track({
-        album: album({ releaseId: 'ds2', artist: 'Dire Straits', billed: false, band: ds }),
+        album: album({ albumId: 'ds2', artist: 'Dire Straits', billed: false, band: ds }),
       }),
       track({
         album: album({
-          releaseId: 'nh1',
+          albumId: 'nh1',
           artist: 'The Notting Hillbillies',
           billed: false,
           band: nh,
@@ -588,14 +590,14 @@ test('one band spelled two ways on two sleeves is one shelf', () => {
     albumsOf([
       track({
         album: album({
-          releaseId: 'r1',
+          albumId: 'r1',
           artist: 'The Robert Cray Band',
           billed: false,
           band: cray,
         }),
       }),
       track({
-        album: album({ releaseId: 'r2', artist: 'Robert Cray Band', billed: false, band: cray }),
+        album: album({ albumId: 'r2', artist: 'Robert Cray Band', billed: false, band: cray }),
       }),
     ]),
     'Robert Cray',
@@ -612,7 +614,7 @@ test('splitting the band shelf loses no album and invents none', () => {
   const albums = albumsOf([
     track({
       album: album({
-        releaseId: 'a',
+        albumId: 'a',
         artist: 'A Band',
         billed: false,
         band: { id: 'ba', name: 'A Band' },
@@ -620,13 +622,13 @@ test('splitting the band shelf loses no album and invents none', () => {
     }),
     track({
       album: album({
-        releaseId: 'b',
+        albumId: 'b',
         artist: 'B Band',
         billed: false,
         band: { id: 'bb', name: 'B Band' },
       }),
     }),
-    track({ album: album({ releaseId: 'c' }), roles: ['billed'] }),
+    track({ album: album({ albumId: 'c' }), roles: ['billed'] }),
   ])
 
   const filed = sectionsOf(albums, 'An Artist').reduce((sum, s) => sum + s.albums.length, 0)

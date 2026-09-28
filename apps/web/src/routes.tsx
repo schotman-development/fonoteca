@@ -79,14 +79,14 @@ const artistRoute = createRoute({
 
 const releasesRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/library/releases',
+  path: '/library/albums',
   component: ReleasesPage,
   validateSearch: releaseListSearch,
 })
 
 const releaseRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/library/releases/$releaseId',
+  path: '/library/albums/$albumId',
   component: ReleasePage,
   validateSearch: releaseListSearch,
 })

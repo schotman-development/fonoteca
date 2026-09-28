@@ -24,11 +24,13 @@ import { albumFolderOf } from './seating.ts'
 type TrackRow = components['schemas']['TrackRow']
 
 export type ArtistAlbum = {
-  /** Stable across renders: the release, or the folder standing in for one. */
+  /** Stable across renders: the album, or the folder standing in for one. */
   readonly key: string
-  /** Null when no release was attributed — then this is a folder, and says so. */
-  readonly releaseId: string | null
-  /** The Cover Art Archive's key. Null for a folder, and for a minted release. */
+  /** The album (release group). Null when none was attributed — then this is a folder, and says so. */
+  readonly albumId: string | null
+  /** The pressing whose stored sleeve the card draws; null where no pressing is claimed. */
+  readonly coverReleaseId: string | null
+  /** The album's Cover Art Archive key. Null for a folder, and for a minted group. */
   readonly mbid: string | null
   readonly title: string
   readonly year: number | null
@@ -178,7 +180,7 @@ export function albumsOf(tracks: readonly TrackRow[]): ArtistAlbum[] {
     // "CD 01" and "CD 02", and a placed one would report a disagreement between
     // two folders that are the same album.
     const folder = albumFolderOf(track.folder)
-    const key = track.album == null ? `folder:${folder}` : `release:${track.album.releaseId}`
+    const key = track.album == null ? `folder:${folder}` : `album:${track.album.albumId}`
     const guess = fromFolder(folder)
 
     let album = albums.get(key)
@@ -186,7 +188,8 @@ export function albumsOf(tracks: readonly TrackRow[]): ArtistAlbum[] {
     if (album === undefined) {
       album = {
         key,
-        releaseId: track.album?.releaseId ?? null,
+        albumId: track.album?.albumId ?? null,
+        coverReleaseId: track.album?.coverReleaseId ?? null,
         mbid: track.album?.mbid ?? null,
         title: track.album?.title ?? guess.title,
         // The folder fills the gap and never overrules: MusicBrainz knows no
@@ -242,13 +245,13 @@ export function albumsOf(tracks: readonly TrackRow[]): ArtistAlbum[] {
   // singer's page and stay two cards on the composer's. Closing that needs the
   // API to answer about folders, which nothing asks it for yet.
   for (const [key, orphan] of albums) {
-    if (orphan.releaseId !== null) continue
+    if (orphan.albumId !== null) continue
 
     const folder = orphan.folders[0]
     if (folder === undefined) continue
 
     const [best, runnerUp] = [...(claims.get(folder) ?? [])]
-      .filter(([held]) => held !== key && albums.get(held)?.releaseId != null)
+      .filter(([held]) => held !== key && albums.get(held)?.albumId != null)
       .sort(([, a], [, b]) => b - a)
 
     if (best === undefined || best[1] <= orphan.trackCount) continue

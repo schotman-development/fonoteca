@@ -7,11 +7,12 @@ import { api } from '../api.ts'
 import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { CERTAINTY } from './certainty.ts'
-import { releaseCover } from './coverArt.ts'
+import { releaseCover, releaseGroupArt } from './coverArt.ts'
 import { RELEASE_DEFAULT_SORT, RELEASE_SORTS, type ReleaseListSearch } from './listSearch.ts'
 import styles from './ReleasesPage.module.css'
 
-type ReleaseSummary = components['schemas']['ReleaseSummary']
+type AlbumSummary = components['schemas']['AlbumSummary']
+type NoReleaseAlbum = components['schemas']['NoReleaseAlbum']
 
 /**
  * The library, by album.
@@ -25,16 +26,17 @@ export function ReleasesPage() {
   // In the address bar rather than in the component, so opening an album and
   // coming back keeps the order. See `routes.tsx` and the artist list.
   const { query: filter = '', sort = RELEASE_DEFAULT_SORT } = useSearch({
-    from: '/library/releases',
+    from: '/library/albums',
   })
 
-  const navigate = useNavigate({ from: '/library/releases' })
+  const navigate = useNavigate({ from: '/library/albums' })
 
   const update = (next: ReleaseListSearch) => {
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true })
   }
 
   const searchId = useId()
+  const noReleaseId = useId()
 
   const query = useDeferredValue(filter.trim())
 
@@ -42,7 +44,7 @@ export function ReleasesPage() {
   // only what somebody actually chose. See the artist list for the whole note.
   const state = useApiQuery(
     () =>
-      api.get('/api/catalogue/releases', {
+      api.get('/api/catalogue/albums', {
         params: { query: { ...(query ? { query } : {}), ...(sort === 'title' ? {} : { sort }) } },
       }),
     [query, sort],
@@ -106,24 +108,69 @@ export function ReleasesPage() {
             tone={state.data.items.length === state.data.total ? 'tertiary' : 'warning'}
           >
             {state.data.items.length === state.data.total
-              ? `${state.data.total.toLocaleString()} album${state.data.total === 1 ? '' : 's'}`
+              ? albumCount(state.data.total + state.data.noRelease.length)
               : `Showing the first ${state.data.items.length.toLocaleString()} of ${state.data.total.toLocaleString()} — narrow the filter to reach the rest.`}
           </Text>
         ) : null}
       </div>
 
       {state.status === 'ready' ? (
-        state.data.items.length === 0 ? (
+        state.data.items.length === 0 && state.data.noRelease.length === 0 ? (
           <Empty filtered={query.length > 0} />
         ) : (
-          <CatalogueGrid aria-label="Albums">
-            {state.data.items.map((release) => (
-              <ReleaseCard key={release.id} release={release} />
-            ))}
-          </CatalogueGrid>
+          <>
+            {state.data.items.length > 0 ? (
+              <CatalogueGrid aria-label="Albums">
+                {state.data.items.map((album) => (
+                  <AlbumCard key={album.id} album={album} />
+                ))}
+              </CatalogueGrid>
+            ) : null}
+
+            {state.data.noRelease.length > 0 ? (
+              <section aria-labelledby={noReleaseId}>
+                <Stack direction="column" gap={8}>
+                  <h2 id={noReleaseId} className={styles.title}>
+                    <Text size="lg" weight="semibold" block>
+                      No release
+                    </Text>
+                  </h2>
+                  <Text size="sm" tone="tertiary" block>
+                    Folders answered as nobody's release. No album stands for them, so they open in
+                    Files.
+                  </Text>
+                  <CatalogueGrid aria-label="No release">
+                    {state.data.noRelease.map((album) => (
+                      <NoReleaseCard key={album.folder} album={album} />
+                    ))}
+                  </CatalogueGrid>
+                </Stack>
+              </section>
+            ) : null}
+          </>
         )
       ) : null}
     </Stack>
+  )
+}
+
+function albumCount(count: number) {
+  return `${count.toLocaleString()} album${count === 1 ? '' : 's'}`
+}
+
+function NoReleaseCard({ album }: { readonly album: NoReleaseAlbum }) {
+  return (
+    <CatalogueCard
+      variant="album"
+      title={album.title}
+      subtitle={album.artist ?? 'No artist folder'}
+      meta={
+        <Badge tone="neutral" size="sm" mono>
+          {album.files} {album.files === 1 ? 'file' : 'files'}
+        </Badge>
+      }
+      render={(props) => <Link {...props} to="/files" search={{ path: album.folder }} />}
+    />
   )
 }
 
@@ -140,8 +187,8 @@ function Validation() {
 
   if (state.status !== 'ready') return null
 
-  const { folders, foldersAgreeing, foldersSplit, releasesSpanningFolders, incomplete } = state.data
-  const disagreements = foldersSplit.length + releasesSpanningFolders.length
+  const { folders, foldersAgreeing, foldersSplit, albumsSpanningFolders, incomplete } = state.data
+  const disagreements = foldersSplit.length + albumsSpanningFolders.length
 
   return (
     <div className={styles.validation}>
@@ -165,11 +212,11 @@ function Validation() {
                 often right, since a deluxe edition really is two releases in one directory.
               </Text>
             ) : null}
-            {releasesSpanningFolders.length > 0 ? (
+            {albumsSpanningFolders.length > 0 ? (
               <Text size="xs" tone="tertiary">
-                {releasesSpanningFolders.length.toLocaleString()} album
-                {releasesSpanningFolders.length === 1 ? '' : 's'} drew from more than one folder —
-                the same album ripped twice, or a folder holding two.
+                {albumsSpanningFolders.length.toLocaleString()} album
+                {albumsSpanningFolders.length === 1 ? '' : 's'} drew from more than one folder — the
+                same album ripped twice, or a folder holding two.
               </Text>
             ) : null}
             <Text size="xs" tone="tertiary">
@@ -211,39 +258,53 @@ function Empty({ filtered }: { readonly filtered: boolean }) {
   )
 }
 
-function ReleaseCard({ release }: { readonly release: ReleaseSummary }) {
-  const certainty = CERTAINTY[release.certainty]
-  const partial = release.held < release.trackCount
+function AlbumCard({ album }: { readonly album: AlbumSummary }) {
+  const certainty = CERTAINTY[album.certainty]
 
   return (
     <CatalogueCard
       variant="album"
-      title={release.title}
-      image={releaseCover(release.id)}
+      title={album.title}
+      /*
+        The stored sleeve of the edition that stands for the album; where none
+        is stored, the archive's picture for the album as a whole.
+      */
+      {...(album.coverReleaseId != null
+        ? { image: releaseCover(album.coverReleaseId) }
+        : album.mbid != null
+          ? { image: releaseGroupArt(album.mbid) }
+          : {})}
       /*
         The artist alone on this line. The row this replaced ran artist, year
         and format together, and at tile width that sentence truncates in the
         middle of the year — so the two facts that are short enough to always
         fit have moved down to the meta row, where they do.
       */
-      subtitle={release.artist ?? 'No credited artist'}
+      subtitle={album.artist ?? 'No credited artist'}
       meta={
         <>
           <Text size="xs" tone="tertiary" family="mono">
-            {[release.year?.toString(), release.formats].filter(Boolean).join(' · ')}
+            {[album.year?.toString(), album.formats].filter(Boolean).join(' · ')}
           </Text>
 
           {/*
             Held against printed, so a part-ripped album reads as one at a glance.
             Tracks rather than files — an album held twice over in two encodings is
-            still the same half of an album.
+            still the same half of an album. Only against a pressing the files are
+            known to be: measured against any other, the number would be a claim.
 
             A badge rather than the bare text the row used: next to the year it
             would otherwise read as a second number in the same sentence.
           */}
-          <Badge tone={partial ? 'warning' : 'neutral'} size="sm" mono>
-            {release.held}/{release.trackCount}
-          </Badge>
+          {album.held != null && album.trackCount != null ? (
+            <Badge tone={album.held < album.trackCount ? 'warning' : 'neutral'} size="sm" mono>
+              {album.held}/{album.trackCount}
+            </Badge>
+          ) : (
+            <Badge tone="neutral" size="sm" mono>
+              {album.files} {album.files === 1 ? 'file' : 'files'}
+            </Badge>
+          )}
 
           {/* Last, so that when the row wraps it is the badge that moves. */}
           {certainty !== undefined && certainty.tone !== 'ok' ? (
@@ -257,9 +318,9 @@ function ReleaseCard({ release }: { readonly release: ReleaseSummary }) {
       render={(props) => (
         <Link
           {...props}
-          to="/library/releases/$releaseId"
-          from="/library/releases"
-          params={{ releaseId: release.id }}
+          to="/library/albums/$albumId"
+          from="/library/albums"
+          params={{ albumId: album.id }}
           search={(prev) => prev}
         />
       )}

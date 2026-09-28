@@ -8,7 +8,7 @@ type TrackRow = components['schemas']['TrackRow']
 export type Performance = {
   readonly performers: string | null
   readonly album: string
-  readonly releaseId: string | null
+  readonly albumId: string | null
   readonly year: number | null
   readonly tracks: number
 }
@@ -53,7 +53,7 @@ export function worksOf(tracks: readonly TrackRow[]): Composition[] {
     const title = pieceOf(track.workTitle)
     if (title.length === 0) continue
 
-    const key = JSON.stringify([track.album?.releaseId ?? track.folder, track.performers])
+    const key = JSON.stringify([track.album?.albumId ?? track.folder, track.performers])
 
     const recordings = pieces.get(title) ?? new Map<string, Building>()
     pieces.set(title, recordings)
@@ -64,7 +64,7 @@ export function worksOf(tracks: readonly TrackRow[]): Composition[] {
       recordings.set(key, {
         performers: track.performers,
         album: track.album?.title ?? leaf(track.folder),
-        releaseId: track.album?.releaseId ?? null,
+        albumId: track.album?.albumId ?? null,
         year: track.album?.year ?? null,
         tracks: 1,
       })

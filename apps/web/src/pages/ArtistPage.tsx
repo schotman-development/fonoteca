@@ -27,13 +27,7 @@ import type { AlbumSection, AlbumSectionKey, ArtistAlbum } from './artistAlbums.
 import { albumsOf, leaf, sameArtist, sectionsOf } from './artistAlbums.ts'
 import { countryName, lifeSpan } from './artistFacts.ts'
 import { type Composition, worksOf } from './artistWorks.ts'
-import {
-  artistBannerUrl,
-  artistImageUrl,
-  releaseArt,
-  releaseCover,
-  releaseGroupArt,
-} from './coverArt.ts'
+import { artistBannerUrl, artistImageUrl, releaseCover, releaseGroupArt } from './coverArt.ts'
 import styles from './Profile.module.css'
 import { blank, Edited, list, Prose, stamp, Value, year } from './profile.tsx'
 import { workGroups } from './workGroups.ts'
@@ -741,7 +735,7 @@ function Works({
                 <Stack direction="column" gap={4}>
                   {work.performances.map((performance) => (
                     <span
-                      key={`${performance.releaseId ?? performance.album}:${performance.performers}`}
+                      key={`${performance.albumId ?? performance.album}:${performance.performers}`}
                     >
                       {performance.performers ?? (
                         <Text size="sm" tone="tertiary">
@@ -1422,12 +1416,12 @@ function AlbumCard({
 }) {
   // Pulled out so the narrowing survives into the render callback below; the
   // property access on its own does not.
-  const { releaseId } = album
+  const { albumId, coverReleaseId } = album
   const folders = album.folders.join('\n')
 
   const meta = (
     <>
-      {album.releaseId == null ? (
+      {album.albumId == null ? (
         <Badge tone="warning" size="sm">
           folder
         </Badge>
@@ -1438,7 +1432,7 @@ function AlbumCard({
         folder card every track is unplaced, which the badge beside it already
         says in the one word that matters.
       */}
-      {album.releaseId != null && album.unplaced > 0 ? (
+      {album.albumId != null && album.unplaced > 0 ? (
         <Badge tone="warning" size="sm" mono>
           {album.unplaced} unplaced
         </Badge>
@@ -1491,15 +1485,15 @@ function AlbumCard({
       title={album.title}
       subtitle={subtitle}
       meta={meta}
-      {...(releaseId != null
-        ? { image: releaseCover(releaseId) }
+      {...(coverReleaseId != null
+        ? { image: releaseCover(coverReleaseId) }
         : album.mbid != null
-          ? { image: releaseArt(album.mbid) }
+          ? { image: releaseGroupArt(album.mbid) }
           : {})}
-      {...(releaseId != null
+      {...(albumId != null
         ? {
             render: (props) => (
-              <Link {...props} to="/library/releases/$releaseId" params={{ releaseId }} />
+              <Link {...props} to="/library/albums/$albumId" params={{ albumId }} />
             ),
           }
         : {})}
@@ -1563,8 +1557,8 @@ function Row({
       {track.album != null ? (
         <TableCell truncate title={track.album.title}>
           <Link
-            to="/library/releases/$releaseId"
-            params={{ releaseId: track.album.releaseId }}
+            to="/library/albums/$albumId"
+            params={{ albumId: track.album.albumId }}
             className={styles.album}
           >
             {/*

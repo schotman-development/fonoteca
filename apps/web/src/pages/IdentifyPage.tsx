@@ -1,15 +1,17 @@
 /**
  * Identify: one album folder at a time.
  *
- * The folder, a search prefilled from its tags, and the search results one
- * release at a time — each with its facts against the tags, its track list
+ * The folder, a search prefilled from its tags, and the albums found one at a
+ * time — each with its facts against the tags, its editions' track lists merged
  * against the files, and what would go wrong if it were filed. Skip moves on and
  * records nothing; "Not a release" and File are the two answers.
  *
- * The seating is worked out in `identify.ts` and committed through
- * `POST …/files/release` exactly as shown. A file is filed when its title matches
- * the track it sits on, even in part, or when somebody picked the track; the rest
- * stay open.
+ * The question is the album, never the pressing: File gives each file the
+ * recording of its track and the folder the album, and leaves the edition to the
+ * attribution pass to prove. The seating is worked out in `identify.ts` and
+ * committed through `POST …/files/album` exactly as shown. A file is filed when
+ * its title matches the track it sits on, even in part, or when somebody picked
+ * the track; the rest stay open.
  */
 
 import { type components, describeError } from '@fonoteca/api-client'
@@ -30,7 +32,7 @@ import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'rea
 
 import { api, apiBaseUrl } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
-import { releaseArt } from './coverArt.ts'
+import { releaseGroupArt } from './coverArt.ts'
 import { artUrl, contentUrl } from './files.ts'
 import styles from './IdentifyPage.module.css'
 import {
@@ -53,10 +55,10 @@ import { ALBUM_FOLDER_DEPTH } from './seating.ts'
 
 type FolderResponse = components['schemas']['IdentifyFolderResponse']
 type FileRow = components['schemas']['IdentifyFileRow']
-type SearchRow = components['schemas']['ReleaseSearchRow']
-type Slot = components['schemas']['ReleaseSlotRow']
-type SlotsResponse = components['schemas']['ReleaseSlotsResponse']
-type FilingResponse = components['schemas']['AlbumFilingResponse']
+type SearchRow = components['schemas']['AlbumSearchRow']
+type Slot = components['schemas']['AlbumSlotRow']
+type SlotsResponse = components['schemas']['AlbumSlotsResponse']
+type FilingResponse = components['schemas']['AlbumFilesResponse']
 type SeedResponse = components['schemas']['ReleaseSeedResponse']
 
 export function IdentifyPage() {
@@ -197,7 +199,8 @@ type Outcome =
       readonly kind: 'filed'
       readonly result: FilingResponse
       readonly seating: Seating
-      readonly release: SearchRow
+      readonly album: SearchRow
+      readonly discs: number
     }
   | { readonly kind: 'unreleased'; readonly detail: string }
 
@@ -477,26 +480,28 @@ function Chooser({
 }) {
   const [query, setQuery] = useState(() => initialQuery ?? searchFor(data.tags, data.folder))
   const [asked, setAsked] = useState(query)
-  // By id, not by index: the tag-named release can arrive after the text search
+  // By id, not by index: the tag-named album can arrive after the text search
   // and shift every option down one, which must not swap the card being read.
   const [chosen, setChosen] = useState<string | null>(null)
 
   const results = useApiQuery(
-    () => api.get('/api/catalogue/matching/releases/search', { params: { query: { q: asked } } }),
+    () => api.get('/api/catalogue/matching/albums/search', { params: { query: { q: asked } } }),
     [asked],
   )
 
-  // The release the tags name, looked up by id and put first. A text search for
-  // the tags' own album title does not always return it — a live release
-  // titled with its venue, say.
+  // The album of the release the tags name, looked up by id and put first. A
+  // text search for the tags' own album title does not always return it — a
+  // live release titled with its venue, say.
   const named = data.tags.release
   const tagged = useApiQuery(
     () =>
       named === null
         ? Promise.resolve(null)
-        : api.get('/api/catalogue/matching/releases/search', { params: { query: { q: named } } }),
+        : api.get('/api/catalogue/matching/albums/search', { params: { query: { q: named } } }),
     [named],
   )
+  const taggedAlbum =
+    tagged.status === 'ready' && tagged.data !== null ? (tagged.data.items[0]?.mbid ?? null) : null
 
   const options = useMemo(() => {
     const found = results.status === 'ready' ? results.data.items : []
@@ -518,17 +523,24 @@ function Chooser({
     if (next !== undefined) setChosen(next.mbid)
   }
 
+  // The edition the tags name leads the merged list when it is one of this album's.
+  // Asked again on every search, even for the same album: a pasted edition may be
+  // one the server's list of editions has only just learned of.
   const slots = useApiQuery(
-    () =>
+    (signal) =>
       selected === null
         ? Promise.resolve(null)
-        : api.get('/api/catalogue/matching/releases/{id}/slots', {
-            params: { path: { id: selected.mbid }, query: { folder: data.folder } },
+        : api.get('/api/catalogue/matching/albums/{id}/slots', {
+            params: {
+              path: { id: selected.mbid },
+              query: { folder: data.folder, ...(named !== null ? { release: named } : {}) },
+            },
+            signal,
           }),
-    [selected?.mbid, data.folder],
+    [selected?.mbid, data.folder, named, asked],
   )
 
-  // Tracks picked by hand belong to the release they were picked on.
+  // Tracks picked by hand belong to the album they were picked on.
   const [picked, setPicked] = useState<{ readonly mbid: string; readonly picks: Picks } | null>(
     null,
   )
@@ -543,7 +555,7 @@ function Chooser({
 
   const seating =
     slots.status === 'ready' && slots.data !== null && slots.data.mbid === selected?.mbid
-      ? seat(data.items, slots.data.slots, picks)
+      ? seat(data.items, slots.data.tracks, picks)
       : null
   const pairs = seating === null ? [] : pairsOf(seating)
 
@@ -559,10 +571,11 @@ function Chooser({
     setFailure(null)
 
     try {
-      const result = await api.post('/api/catalogue/matching/files/release', {
-        json: { release: selected.mbid, pairs: [...pairs] },
+      const result = await api.post('/api/catalogue/matching/files/album', {
+        json: { album: selected.mbid, pairs: [...pairs] },
       })
-      onOutcome({ kind: 'filed', result, seating, release: selected })
+      const discs = slots.status === 'ready' && slots.data !== null ? slots.data.leadDiscs : 1
+      onOutcome({ kind: 'filed', result, seating, album: selected, discs })
     } catch (cause: unknown) {
       setFailure(`Nothing was filed. ${describeError(cause)}`)
       setSending('idle')
@@ -609,7 +622,7 @@ function Chooser({
         >
           <Field
             label="Search MusicBrainz for the album"
-            hint="Filled in from your files’ tags. A release MBID or URL pasted here is looked up directly."
+            hint="Filled in from your files’ tags. An album or release MBID or URL pasted here is looked up directly."
           >
             {(control) => (
               <Input
@@ -639,8 +652,8 @@ function Chooser({
                 MusicBrainz could not search: {results.message}
               </Text>
               <Text size="xs" tone="tertiary">
-                A self-hosted mirror has no search index. Pasting a release MBID or URL works either
-                way.
+                A self-hosted mirror has no search index. Pasting an album or release MBID or URL
+                works either way.
               </Text>
             </Stack>
           ) : null}
@@ -688,10 +701,11 @@ function Chooser({
             </Stack>
           </Stack>
 
-          <ReleaseCard
+          <AlbumCard
             key={selected.mbid}
             data={data}
-            release={selected}
+            album={selected}
+            namedByTags={taggedAlbum === selected.mbid}
             position={`${current + 1} of ${options.length}`}
             slots={slots.status === 'ready' ? slots.data : null}
             slotsError={slots.status === 'error' ? slots.message : null}
@@ -741,9 +755,10 @@ function Chooser({
   )
 }
 
-function ReleaseCard({
+function AlbumCard({
   data,
-  release,
+  album,
+  namedByTags,
   position,
   slots,
   slotsError,
@@ -752,7 +767,9 @@ function ReleaseCard({
   onPick,
 }: {
   readonly data: FolderResponse
-  readonly release: SearchRow
+  readonly album: SearchRow
+  /** The release the files' tags name is an edition of this album. */
+  readonly namedByTags: boolean
   readonly position: string
   readonly slots: SlotsResponse | null
   readonly slotsError: string | null
@@ -760,34 +777,32 @@ function ReleaseCard({
   readonly picks: Picks
   readonly onPick: (file: string, slot: string | null) => void
 }) {
-  const namedByTags = data.tags.release === release.mbid
   const matched = seating === null ? 0 : pairsOf(seating).length
+  const artist = album.artist ?? slots?.artist ?? null
 
   const facts = [
-    release.year?.toString(),
-    release.country,
-    release.formats,
-    [release.primaryType, ...release.secondaryTypes].filter(Boolean).join(' · '),
-    release.status,
+    album.year?.toString(),
+    [album.primaryType, ...album.secondaryTypes].filter(Boolean).join(' · '),
+    album.editions > 0 ? `${album.editions} edition${album.editions === 1 ? '' : 's'}` : null,
   ].filter((part) => part != null && part !== '')
 
   return (
     <article
       className={styles.option}
       aria-roledescription="slide"
-      aria-label={`${position}: ${release.title}`}
+      aria-label={`${position}: ${album.title}`}
     >
       <Stack gap={16} align="start">
-        <Artwork name={release.title} src={releaseArt(release.mbid)} size="lg" />
+        <Artwork name={album.title} src={releaseGroupArt(album.mbid)} size="lg" />
         <Stack direction="column" gap={6} align="start" className={styles.grow}>
           <h3 className={styles.heading}>
             <Text size="md" weight="semibold">
-              {release.title}
+              {album.title}
             </Text>
-            {release.artist !== null ? (
+            {artist !== null ? (
               <Text size="sm" tone="secondary">
                 {' '}
-                — {release.artist}
+                — {artist}
               </Text>
             ) : null}
           </h3>
@@ -795,17 +810,20 @@ function ReleaseCard({
             <Text size="xs" tone="secondary" family="mono" block>
               {facts.join(' · ')}
             </Text>
-            <Text size="xs" tone="secondary" family="mono" block>
-              {release.trackCount} tracks · {release.discCount} disc
-              {release.discCount === 1 ? '' : 's'} · label{' '}
-              {slots === null ? '…' : (slots.label ?? 'not listed')} · cat. no.{' '}
-              {slots?.catalogNumber ?? '—'} · barcode {slots?.barcode ?? '—'}
-            </Text>
+            {slots !== null ? (
+              <Text size="xs" tone="secondary" block>
+                Tracks from {slots.editionsRead} edition{slots.editionsRead === 1 ? '' : 's'}, in
+                the order of the one nearest your folder
+                {slots.editionsRead < slots.editionsFound
+                  ? `. The ${slots.editionsFound - slots.editionsRead} least like it were not read.`
+                  : '.'}
+              </Text>
+            ) : null}
           </Stack>
           <Stack gap={6} wrap>
             {namedByTags ? (
               <Badge tone="success" size="sm">
-                Your files’ tags name this release
+                Your files’ tags name an edition of this album
               </Badge>
             ) : null}
             {seating !== null ? (
@@ -831,22 +849,18 @@ function ReleaseCard({
       {slots === null && slotsError === null ? (
         <div role="status" aria-busy>
           <Text size="sm" tone="tertiary">
-            Reading the track list…
+            Reading {album.editions > 1 ? `the ${album.editions} editions` : 'the editions'} of this
+            album from MusicBrainz, one request each. An album reissued many times takes up to a
+            minute.
           </Text>
         </div>
       ) : null}
 
       {slots !== null && seating !== null ? (
         <>
-          <Snackbars key={release.mbid} seating={seating} discs={release.discCount} picks={picks} />
-          <FactsTable data={data} release={release} slots={slots} />
-          <TrackTable
-            data={data}
-            release={release}
-            seating={seating}
-            picks={picks}
-            onPick={onPick}
-          />
+          <Snackbars key={album.mbid} seating={seating} discs={slots.leadDiscs} picks={picks} />
+          <FactsTable data={data} slots={slots} />
+          <TrackTable data={data} slots={slots} seating={seating} picks={picks} onPick={onPick} />
         </>
       ) : null}
     </article>
@@ -895,26 +909,23 @@ function Snackbars({
 
 function FactsTable({
   data,
-  release,
   slots,
 }: {
   readonly data: FolderResponse
-  readonly release: SearchRow
   readonly slots: SlotsResponse
 }) {
   const facts = factsOf(data.tags, data.files, {
-    title: release.title,
-    artist: release.artist,
-    year: release.year,
-    discCount: slots.discCount,
-    label: slots.label,
-    tracks: slots.slots.length,
+    title: slots.title,
+    artist: slots.artist,
+    year: slots.year,
+    tracks: slots.leadTracks,
+    merged: slots.tracks.length,
   })
 
   return (
     <table className={styles.table}>
       <caption>
-        <VisuallyHidden>Your tags against {release.title}</VisuallyHidden>
+        <VisuallyHidden>Your tags against {slots.title}</VisuallyHidden>
       </caption>
       <thead>
         <tr>
@@ -922,7 +933,7 @@ function FactsTable({
             <VisuallyHidden>Fact</VisuallyHidden>
           </th>
           <th scope="col">Your tags</th>
-          <th scope="col">This release</th>
+          <th scope="col">This album</th>
           <th scope="col">
             <VisuallyHidden>Difference</VisuallyHidden>
           </th>
@@ -933,7 +944,7 @@ function FactsTable({
           <tr key={fact.label} data-differs={fact.state === 'differs' || undefined}>
             <th scope="row">{fact.label}</th>
             <td>{fact.tags}</td>
-            <td>{fact.release}</td>
+            <td>{fact.album}</td>
             <td>
               <Badge
                 tone={
@@ -957,18 +968,18 @@ function FactsTable({
 
 function TrackTable({
   data,
-  release,
+  slots,
   seating,
   picks,
   onPick,
 }: {
   readonly data: FolderResponse
-  readonly release: SearchRow
+  readonly slots: SlotsResponse
   readonly seating: Seating
   readonly picks: Picks
   readonly onPick: (file: string, slot: string | null) => void
 }) {
-  const discs = release.discCount
+  const discs = slots.leadDiscs
   // A pick moves the row, which remounts its select: focus follows the file.
   const lastPicked = useRef<string | null>(null)
 
@@ -990,12 +1001,12 @@ function TrackTable({
   return (
     <table className={styles.table}>
       <caption>
-        <VisuallyHidden>Your files seated on {release.title}</VisuallyHidden>
+        <VisuallyHidden>Your files seated on {slots.title}</VisuallyHidden>
       </caption>
       <thead>
         <tr>
           <th scope="col">#</th>
-          <th scope="col">On the release</th>
+          <th scope="col">On the album</th>
           <th scope="col">Your file</th>
           <th scope="col">Length</th>
           <th scope="col">Difference</th>
@@ -1010,7 +1021,7 @@ function TrackTable({
                 <strong>
                   {picks.get(line.file.mediaFileId) === null
                     ? 'Left open by you'
-                    : 'Not on this release'}
+                    : 'Not on this album'}
                 </strong>
               </td>
               <td className={styles.mono}>
@@ -1026,7 +1037,7 @@ function TrackTable({
             </tr>
           ) : (
             <tr
-              key={`${line.slot.discNumber}-${line.slot.position}`}
+              key={slotKey(line.slot)}
               data-kind={line.kind}
               data-differs={(line.kind === 'seated' && !filed(line)) || undefined}
             >
@@ -1053,6 +1064,11 @@ function TrackTable({
               </td>
               <td>
                 <Stack gap={4} wrap>
+                  {line.slot.editions < slots.editionsRead ? (
+                    <Badge tone="neutral" size="sm" mono>
+                      on {line.slot.editions} of {slots.editionsRead} editions
+                    </Badge>
+                  ) : null}
                   {line.kind === 'empty' ? (
                     <Badge tone="neutral" size="sm">
                       no file
@@ -1177,8 +1193,8 @@ function Result({
   const empty =
     outcome.kind === 'filed'
       ? outcome.seating.rows
-          .filter((row) => row.kind === 'empty')
-          .map((row) => label(row.slot, outcome.release.discCount))
+          .filter((row) => row.kind === 'empty' && row.slot.onLead)
+          .map((row) => label(row.slot, outcome.discs))
       : []
 
   return (
@@ -1197,8 +1213,8 @@ function Result({
           <>
             <Stack gap={12} align="center">
               <Artwork
-                name={outcome.release.title}
-                src={releaseArt(outcome.release.mbid)}
+                name={outcome.album.title}
+                src={releaseGroupArt(outcome.album.mbid)}
                 size="md"
               />
               <Text size="md" weight="semibold" block>

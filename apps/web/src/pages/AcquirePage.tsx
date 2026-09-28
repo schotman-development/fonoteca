@@ -15,7 +15,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './AcquirePage.module.css'
-import { releaseArt, releaseCover, releaseGroupArt } from './coverArt.ts'
+import { releaseCover, releaseGroupArt } from './coverArt.ts'
 import { QobuzAlbumDialog, type Replacing } from './QobuzAlbumDialog.tsx'
 import { readiness } from './qobuz.ts'
 
@@ -491,7 +491,7 @@ function Upgrades({
       }
     >
       {items.map((item) => (
-        <UpgradeTile key={item.releaseId ?? item.folder} item={item} onSearch={onSearch} />
+        <UpgradeTile key={item.albumId ?? item.folder} item={item} onSearch={onSearch} />
       ))}
     </Shelf>
   )
@@ -526,14 +526,14 @@ function UpgradeTile({
       title={item.title}
       /*
         No cover for a folder no pass attributed: the Cover Art Archive is keyed
-        on the MusicBrainz release and there is not one. `Artwork` draws a
-        monogram, which is the honest picture of an album nothing has
-        identified — 75 of the 520 rows on this library.
+        on MusicBrainz ids and there is not one. `Artwork` draws a monogram,
+        which is the honest picture of an album nothing has identified — 75 of
+        the 520 rows on this library.
       */
-      {...(item.releaseId != null
-        ? { image: releaseCover(item.releaseId) }
+      {...(item.coverReleaseId != null
+        ? { image: releaseCover(item.coverReleaseId) }
         : item.mbid != null
-          ? { image: releaseArt(item.mbid) }
+          ? { image: releaseGroupArt(item.mbid) }
           : {})}
       subtitle={[item.artist, item.year].filter(Boolean).join(' · ') || 'No credited artist'}
       meta={
@@ -546,7 +546,7 @@ function UpgradeTile({
             160px tile truncates "Andrea Bocelli · from the folder name" to
             "Andrea Bocelli · from th…", which says nothing at all.
           */}
-          {item.releaseId === null ? (
+          {item.albumId === null ? (
             <Badge tone="neutral" size="sm">
               Folder name
             </Badge>
@@ -643,7 +643,7 @@ function Incomplete({
       }
     >
       {incomplete.map((album) => (
-        <IncompleteTile key={album.releaseId} album={album} onSearch={onSearch} />
+        <IncompleteTile key={album.albumId} album={album} onSearch={onSearch} />
       ))}
     </Shelf>
   )
@@ -684,7 +684,11 @@ function IncompleteTile({
     <CatalogueCard
       variant="album"
       title={album.title}
-      image={releaseCover(album.releaseId)}
+      {...(album.coverReleaseId != null
+        ? { image: releaseCover(album.coverReleaseId) }
+        : album.mbid != null
+          ? { image: releaseGroupArt(album.mbid) }
+          : {})}
       subtitle={[album.artist, album.year].filter(Boolean).join(' · ') || 'No credited artist'}
       meta={
         <>

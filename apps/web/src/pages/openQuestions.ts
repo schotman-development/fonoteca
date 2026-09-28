@@ -154,6 +154,9 @@ const ATTRIBUTION_NEXT: Readonly<Record<string, string>> = {
     'hold, and how closely the running times agree. A set need not be one album, so answering ' +
     'names one and leaves the files it does not list open: two rips glued together by a ' +
     'compilation are taken apart one album at a time.',
+  OrderContradicted:
+    'Yours to settle: check the track numbers in the files against the album. If the numbers are ' +
+    'wrong, name the album anyway; if the album is wrong, pick the right one from the candidates.',
   NoCandidate:
     'MusicBrainz holds no release containing this recording at all, so nothing local will move ' +
     'it. Re-running attribution against a freshly replicated mirror is the only thing that can.',
@@ -181,13 +184,21 @@ const ATTRIBUTION_NEXT: Readonly<Record<string, string>> = {
  * is one browse per recording and one lookup per album offered. Bounded, and a
  * wait rather than a job.
  *
+ * `OrderContradicted` is the same component question with another reason, and
+ * the pass stored its candidates the same way.
+ *
  * The rest still cannot. `Unknown` is audio AcoustID has never heard,
  * `NoRecording` is a cluster MusicBrainz links nothing to, and `NoCandidate` is
  * MusicBrainz holding no release with this recording on it at all — re-asking
  * any of the three spends a turn at the rate limit to reconfirm an emptiness the
  * catalogue already holds.
  */
-const ANSWERABLE: ReadonlySet<string> = new Set(['Ambiguous', 'BelowThreshold', 'NoConfidentFit'])
+const ANSWERABLE: ReadonlySet<string> = new Set([
+  'Ambiguous',
+  'BelowThreshold',
+  'NoConfidentFit',
+  'OrderContradicted',
+])
 
 /** Whether opening this refusal puts a real choice in front of somebody. */
 export function isAnswerable(reason: string): boolean {

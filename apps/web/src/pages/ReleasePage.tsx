@@ -25,19 +25,22 @@ import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { countryName } from './artistFacts.ts'
 import { CoverDialog } from './CoverDialog.tsx'
-import { CERTAINTY } from './certainty.ts'
-import { artistImageUrl, releaseCover } from './coverArt.ts'
+import { CERTAINTY, FOLDER_ORDER } from './certainty.ts'
+import { artistImageUrl, releaseCover, releaseGroupArt } from './coverArt.ts'
 import { contentUrl, parentOf } from './files.ts'
 import styles from './Profile.module.css'
 import { blank, Edited, list, Prose, stamp, Value, year } from './profile.tsx'
 import { ALBUM_FOLDER_DEPTH, albumFolderOf } from './seating.ts'
 import { workGroups } from './workGroups.ts'
 
-type Detail = components['schemas']['ReleaseDetailResponse']
-type ReleaseTrackRow = components['schemas']['ReleaseTrackRow']
+type Detail = components['schemas']['AlbumDetailResponse']
+type AlbumTrackRow = components['schemas']['AlbumTrackRow']
+type AlbumEditionRow = components['schemas']['AlbumEditionRow']
+type AlbumFileRow = components['schemas']['AlbumFileRow']
 type FileRow = components['schemas']['FileRow']
 type FileQuality = components['schemas']['FileQuality']
 type AlbumCredit = components['schemas']['AlbumCredit']
+type SearchRow = components['schemas']['ReleaseSearchRow']
 type EditRequest = components['schemas']['ReleaseEditRequest']
 
 const TABS = [
@@ -70,9 +73,13 @@ const COVER_SOURCE: Readonly<Record<string, string>> = {
  * The missing tracks are the reason this page stores the whole track list rather
  * than only the part that was matched. "Eleven of twelve" is a number; a greyed
  * row where track 7 should be is an answer.
+ *
+ * An album is a release group. Where the files are known to be one pressing,
+ * that pressing's facts are shown; where they are not, the tracks are every
+ * stored edition's at once and nothing only a pressing has is claimed.
  */
 export function ReleasePage() {
-  const { releaseId } = useParams({ from: '/library/releases/$releaseId' })
+  const { albumId: releaseId } = useParams({ from: '/library/albums/$albumId' })
   const [version, setVersion] = useState(0)
   // Here rather than in AskAgain: the refetch after a reopen unmounts it.
   const [reopened, setReopened] = useState<(Reopened & { readonly release: string }) | null>(null)
@@ -85,7 +92,7 @@ export function ReleasePage() {
   }, [])
 
   const state = useApiQuery(
-    () => api.get('/api/catalogue/releases/{id}', { params: { path: { id: releaseId } } }),
+    () => api.get('/api/catalogue/albums/{id}', { params: { path: { id: releaseId } } }),
     [releaseId, version],
   )
 
@@ -103,8 +110,8 @@ export function ReleasePage() {
     <Stack direction="column" gap={20}>
       {/* The list's order and filter, carried back. See the artist page. */}
       <Link
-        to="/library/releases"
-        from="/library/releases/$releaseId"
+        to="/library/albums"
+        from="/library/albums/$albumId"
         search={(prev) => prev}
         className={styles.back}
       >
@@ -168,7 +175,7 @@ function Album({
   readonly onChanged: () => void
   readonly onReopened: (result: Reopened) => void
 }) {
-  const { release, about, tracks, credits, moreBy } = data
+  const { album: release, about, tracks, credits, moreBy, unplaced, folders: onDisk } = data
   const [tab, setTab] = useState<TabKey>('overview')
   const [editing, setEditing] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -183,10 +190,9 @@ function Album({
   // Asked is the release lookup: a release row exists only because a pass or a
   // person looked it up, so its blanks are MusicBrainz's.
   const asked = true
-  const discs = release.discCount ?? 1
-  const files = tracks.flatMap((track) => track.files)
+  const discs = release.discCount ?? Math.max(1, ...tracks.map((track) => track.discNumber))
+  const files = [...tracks.flatMap((track) => track.files), ...unplaced.map((row) => row.file)]
   const held = tracks.filter((track) => track.held).length
-  const folders = [...new Set(files.map((file) => parentOf(file.path)))]
   const qualities = [
     ...new Map(
       files.flatMap((file) =>
@@ -195,15 +201,22 @@ function Album({
     ).entries(),
   ]
   const certainty = CERTAINTY[release.certainty]
-  const released = dateLabel(release.year, about.releasedMonth, about.releasedDay)
+  const released = dateLabel(about.releasedYear, about.releasedMonth, about.releasedDay)
   const facts = [
-    released ?? about.firstReleaseYear?.toString(),
+    released ?? release.year?.toString(),
     about.label,
     countryName(release.country),
     release.formats,
     about.disambiguation,
   ].filter((fact): fact is string => fact != null)
-  const cover = releaseCover(release.id, coverVersion)
+  // The stored sleeve of the edition that stands for the album, and the one a
+  // person changes; without one stored, the archive's picture of the album.
+  const cover =
+    release.coverReleaseId != null
+      ? releaseCover(release.coverReleaseId, coverVersion)
+      : release.mbid != null
+        ? releaseGroupArt(release.mbid)
+        : undefined
   // Owned is any file filed under it. Wanting a record already held means
   // nothing, so an owned album's slot for it writes its tags instead.
   const owned = release.files > 0
@@ -219,7 +232,7 @@ function Album({
 
         <div className={styles.identity}>
           <div className={styles.cover}>
-            <Artwork name={release.title} size="fill" src={cover} />
+            <Artwork name={release.title} size="fill" {...(cover != null ? { src: cover } : {})} />
           </div>
 
           <div className={styles.names}>
@@ -271,7 +284,7 @@ function Album({
                 </Badge>
               ))}
               {certainty !== undefined && certainty.tone !== 'ok' ? (
-                <Badge tone="warning" size="sm">
+                <Badge tone={certainty.tone === 'warning' ? 'warning' : 'neutral'} size="sm">
                   {certainty.label}
                 </Badge>
               ) : null}
@@ -285,7 +298,7 @@ function Album({
               onClick={() => {
                 if (first === undefined) return
                 playback.play({
-                  id: `${release.id}:${first.track.discNumber}:${first.track.position}`,
+                  id: `${release.id}:${first.track.discNumber}:${first.track.position}:${first.track.recordingId}`,
                   src: contentUrl(apiBaseUrl, first.file.path),
                   title: first.track.title,
                   subtitle: release.title,
@@ -296,16 +309,22 @@ function Album({
             </Button>
             {owned ? (
               <TagWritePanel
-                scope={{ kind: 'release', id: releaseId }}
+                scope={{ kind: 'album', id: releaseId }}
                 label="this album"
                 onWritten={onChanged}
               />
             ) : about.groupId != null ? (
               <WantButton groupId={about.groupId} monitored={about.monitored} />
             ) : null}
+            {/*
+              The corrections live on the display edition's row, which is what
+              every page reads the album from. A pressing's own facts are
+              corrected only where the files are proven to be it.
+            */}
             <Button
               variant="secondary"
               aria-pressed={editing}
+              disabled={release.coverReleaseId == null}
               onClick={() => {
                 setEditing(!editing)
                 flushSync(() => setTab('overview'))
@@ -318,9 +337,9 @@ function Album({
         </div>
       </header>
 
-      {choosing ? (
+      {choosing && release.coverReleaseId != null ? (
         <CoverDialog
-          releaseId={releaseId}
+          releaseId={release.coverReleaseId}
           title={release.title}
           onClose={() => setChoosing(false)}
           onChanged={() => {
@@ -366,27 +385,60 @@ function Album({
                     <h2 id={`${id}tracks`} className={styles.heading}>
                       Tracks
                     </h2>
-                    <Tracks tracks={tracks} discs={discs} />
+                    <Tracks tracks={tracks} discs={discs} editions={data.editions} />
                   </Stack>
                 </section>
 
-                {files.length > 0 ? (
+                {unplaced.length > 0 ? (
+                  <section aria-labelledby={`${id}unplaced`}>
+                    <Stack direction="column" gap={8}>
+                      <h2 id={`${id}unplaced`} className={styles.heading}>
+                        On no edition
+                      </h2>
+                      <Text size="sm" tone="secondary">
+                        Held to this album, but no edition of it stored here prints the recording.
+                      </Text>
+                      <Files files={unplaced.map((row) => row.file)} />
+                    </Stack>
+                  </section>
+                ) : null}
+
+                {/*
+                  One per folder, each in its own order: two rips of one album are
+                  two folders, and the pressing (or its absence) is a fact about
+                  each of them rather than about the album.
+                */}
+                {onDisk.map((folder) => (
                   <Disclosure
+                    key={folder.path}
                     size="sm"
                     summary={
                       <Text size="sm" weight="medium">
-                        Files on disk
+                        {folder.path}
                       </Text>
                     }
                     aside={
-                      <Text size="sm" tone="tertiary" family="mono">
-                        {files.length.toLocaleString()}
+                      <Text size="sm" tone="tertiary">
+                        {[
+                          folder.edition ?? 'pressing not known',
+                          FOLDER_ORDER[folder.order],
+                          folder.files.length,
+                        ]
+                          .filter((part) => part !== undefined)
+                          .join(' · ')}
                       </Text>
                     }
                   >
-                    <Files files={files} />
+                    <Stack direction="column" gap={12}>
+                      <FolderFiles files={folder.files} />
+                      <NotThisAlbum
+                        folder={folder.path}
+                        albumId={releaseId}
+                        onChanged={onChanged}
+                      />
+                    </Stack>
                   </Disclosure>
-                ) : null}
+                ))}
 
                 {moreBy.length > 0 ? (
                   <section className={styles.shelf} aria-labelledby={`${id}more`}>
@@ -404,12 +456,16 @@ function Album({
                           variant="album"
                           title={other.title}
                           subtitle={other.year?.toString() ?? 'undated'}
-                          image={releaseCover(other.id)}
+                          {...(other.coverReleaseId != null
+                            ? { image: releaseCover(other.coverReleaseId) }
+                            : other.mbid != null
+                              ? { image: releaseGroupArt(other.mbid) }
+                              : {})}
                           render={(props) => (
                             <Link
                               {...props}
-                              to="/library/releases/$releaseId"
-                              params={{ releaseId: other.id }}
+                              to="/library/albums/$albumId"
+                              params={{ albumId: other.id }}
                             />
                           )}
                         />
@@ -426,7 +482,7 @@ function Album({
 
                 {editing ? (
                   <EditForm
-                    releaseId={releaseId}
+                    releaseId={release.editionId ?? release.coverReleaseId ?? ''}
                     data={data}
                     onCancel={() => setEditing(false)}
                     onSaved={() => {
@@ -447,11 +503,6 @@ function Album({
                         <Value value={release.artist} asked={asked} />
                         <Edited by={edited('credit')} />
                       </dd>
-                      <dt>Edition note</dt>
-                      <dd>
-                        <Value value={about.disambiguation} asked={asked} />
-                        <Edited by={edited('disambiguation')} />
-                      </dd>
                       <dt>Type</dt>
                       <dd>
                         <Value
@@ -467,57 +518,84 @@ function Album({
                         <Value value={about.firstReleaseYear?.toString()} asked={asked} />
                         <Edited by={edited('firstReleaseYear')} />
                       </dd>
-                      <dt>This edition</dt>
-                      <dd>
-                        <Value value={released} asked={asked} />
-                        <Edited
-                          by={
-                            edited('releasedYear') ||
-                            edited('releasedMonth') ||
-                            edited('releasedDay')
-                          }
-                        />
-                      </dd>
-                      <dt>Country</dt>
-                      <dd>
-                        <Value value={countryName(release.country)} asked={asked} />
-                        <Edited by={edited('country')} />
-                      </dd>
-                      <dt>Status</dt>
-                      <dd>
-                        <Value value={release.status} asked={asked} />
-                        <Edited by={edited('status')} />
-                      </dd>
-                      <dt>Label</dt>
-                      <dd>
-                        <Value value={about.label} asked={asked} />
-                        <Edited by={edited('label')} />
-                      </dd>
-                      <dt>Catalogue no.</dt>
-                      <dd>
-                        <Value value={about.catalogNumber} asked={asked} mono />
-                        <Edited by={edited('catalogNumber')} />
-                      </dd>
-                      <dt>Barcode</dt>
-                      <dd>
-                        <Value value={about.barcode} asked={asked} mono />
-                        <Edited by={edited('barcode')} />
-                      </dd>
-                      <dt>Format</dt>
-                      <dd>
-                        <Value value={release.formats} asked={asked} />
-                        <Edited by={edited('formats')} />
-                      </dd>
-                      <dt>Discs</dt>
-                      <dd>
-                        <Value value={release.discCount?.toString()} asked={asked} />
-                      </dd>
+                      {/*
+                        What only a pressing has, shown only for the pressing the
+                        files are known to be. Without one these rows would read
+                        "none recorded" — an absence stated as a fact, about a
+                        record nobody chose.
+                      */}
+                      {release.editionId != null ? (
+                        <>
+                          <dt>Edition note</dt>
+                          <dd>
+                            <Value value={about.disambiguation} asked={asked} />
+                            <Edited by={edited('disambiguation')} />
+                          </dd>
+                          <dt>This edition</dt>
+                          <dd>
+                            <Value value={released} asked={asked} />
+                            <Edited
+                              by={
+                                edited('releasedYear') ||
+                                edited('releasedMonth') ||
+                                edited('releasedDay')
+                              }
+                            />
+                          </dd>
+                          <dt>Country</dt>
+                          <dd>
+                            <Value value={countryName(release.country)} asked={asked} />
+                            <Edited by={edited('country')} />
+                          </dd>
+                          <dt>Status</dt>
+                          <dd>
+                            <Value value={release.status} asked={asked} />
+                            <Edited by={edited('status')} />
+                          </dd>
+                          <dt>Label</dt>
+                          <dd>
+                            <Value value={about.label} asked={asked} />
+                            <Edited by={edited('label')} />
+                          </dd>
+                          <dt>Catalogue no.</dt>
+                          <dd>
+                            <Value value={about.catalogNumber} asked={asked} mono />
+                            <Edited by={edited('catalogNumber')} />
+                          </dd>
+                          <dt>Barcode</dt>
+                          <dd>
+                            <Value value={about.barcode} asked={asked} mono />
+                            <Edited by={edited('barcode')} />
+                          </dd>
+                          <dt>Format</dt>
+                          <dd>
+                            <Value value={release.formats} asked={asked} />
+                            <Edited by={edited('formats')} />
+                          </dd>
+                          <dt>Discs</dt>
+                          <dd>
+                            <Value value={release.discCount?.toString()} asked={asked} />
+                          </dd>
+                        </>
+                      ) : (
+                        <>
+                          <dt>Pressing</dt>
+                          <dd>
+                            <Text size="sm" tone="secondary">
+                              Not known. The album is; which edition of it the files are is not
+                              proven, so none is named.
+                            </Text>
+                          </dd>
+                        </>
+                      )}
                       <dt>Tracks</dt>
                       <dd>
-                        {held === release.trackCount
-                          ? `All ${release.trackCount} in your library`
-                          : `${held} of ${release.trackCount} in your library`}
-                        {release.files > release.held ? ` · ${release.files} files` : ''}
+                        {release.trackCount != null
+                          ? held === release.trackCount
+                            ? `All ${release.trackCount} in your library`
+                            : `${held} of ${release.trackCount} in your library`
+                          : `${held} of ${tracks.length} its editions print, in your library`}
+                        {release.files > held ? ` · ${release.files} files` : ''}
                       </dd>
                       <dt>Identified</dt>
                       <dd>
@@ -533,7 +611,7 @@ function Album({
                               {certainty.note}
                             </Text>
                           ) : null}
-                          <AskAgain tracks={tracks} onReopened={onReopened} />
+                          <AskAgain files={files} onReopened={onReopened} />
                         </Stack>
                       </dd>
                       <dt>Cover</dt>
@@ -545,12 +623,14 @@ function Album({
                             <Text size="sm" tone="tertiary">
                               {about.coverLookupUtc == null
                                 ? 'Not looked for yet'
-                                : 'Neither source has one'}
+                                : "Neither source has one; the files' own is shown if they carry one"}
                             </Text>
                           )}
-                          <Button size="sm" variant="ghost" onClick={() => setChoosing(true)}>
-                            Change cover
-                          </Button>
+                          {release.coverReleaseId != null ? (
+                            <Button size="sm" variant="ghost" onClick={() => setChoosing(true)}>
+                              Change cover
+                            </Button>
+                          ) : null}
                         </Stack>
                       </dd>
                       <dt>Review</dt>
@@ -574,7 +654,7 @@ function Album({
                         <Stack direction="column" gap={4} align="start">
                           {(
                             [
-                              ['release', release.mbid, 'This edition'],
+                              ['release', about.editionMbid, 'This edition'],
                               ['release-group', about.groupMbid, 'The album'],
                             ] as const
                           ).map(([kind, mbid, label]) =>
@@ -617,17 +697,22 @@ function Album({
                       <dt>On disk</dt>
                       <dd>
                         <Stack direction="column" gap={4} align="start">
-                          {folders.map((folder) => (
-                            <Link
-                              key={folder}
-                              to="/files"
-                              search={{ path: folder }}
-                              className={styles.album}
-                            >
-                              <Text size="xs" family="mono" className={styles.path}>
-                                {folder}
+                          {onDisk.map((folder) => (
+                            <Stack key={folder.path} direction="column" gap={2} align="start">
+                              <Link
+                                to="/files"
+                                search={{ path: folder.path }}
+                                className={styles.album}
+                              >
+                                <Text size="xs" family="mono" className={styles.path}>
+                                  {folder.path}
+                                </Text>
+                              </Link>
+                              <Text size="xs" tone="tertiary">
+                                {folder.files.length} {folder.files.length === 1 ? 'file' : 'files'}{' '}
+                                · {folder.edition ?? 'pressing not known'}
                               </Text>
-                            </Link>
+                            </Stack>
                           ))}
                         </Stack>
                       </dd>
@@ -740,7 +825,7 @@ function qualityTone(quality: FileQuality): BadgeTone {
 }
 
 /** A track's printed number, which is not always its position: "A1", "12a". */
-function numberOf(track: ReleaseTrackRow, discs: number): string {
+function numberOf(track: AlbumTrackRow, discs: number): string {
   return `${discs > 1 ? `${track.discNumber}·` : ''}${track.number ?? track.position}`
 }
 
@@ -830,22 +915,27 @@ function FileBadges({ files }: { readonly files: readonly FileRow[] }) {
 function Tracks({
   tracks,
   discs,
+  editions,
 }: {
-  readonly tracks: readonly ReleaseTrackRow[]
+  readonly tracks: readonly AlbumTrackRow[]
   readonly discs: number
+  /** The album's stored editions, which a row's `on` names — see `onlyOn`. */
+  readonly editions: readonly AlbumEditionRow[]
 }) {
   if (tracks.length === 0) {
-    return <Text tone="tertiary">MusicBrainz lists no tracks for this release.</Text>
+    return (
+      <Text tone="tertiary">No edition of this album is stored, so there is no track list.</Text>
+    )
   }
 
-  const byDisc = new Map<number, ReleaseTrackRow[]>()
+  const byDisc = new Map<number, AlbumTrackRow[]>()
   for (const track of tracks)
     byDisc.set(track.discNumber, [...(byDisc.get(track.discNumber) ?? []), track])
 
   return (
     <div className={styles.tracklist}>
       <Table density="cozy">
-        <caption className={styles.caption}>Every track on this edition, held or not</caption>
+        <caption className={styles.caption}>Every track its editions print, held or not</caption>
         <thead>
           <tr>
             <TableHeaderCell numeric>No</TableHeaderCell>
@@ -881,9 +971,10 @@ function Tracks({
               ) : null}
               {group.tracks.map((track) => (
                 <Row
-                  key={`${track.discNumber}-${track.position}`}
+                  key={`${track.discNumber}-${track.position}-${track.recordingId}`}
                   track={track}
                   strip={group.prefix}
+                  only={onlyOn(track, editions)}
                 />
               ))}
             </tbody>
@@ -894,13 +985,32 @@ function Tracks({
   )
 }
 
+/**
+ * The editions a track is on, where that is not all of them — the deluxe's bonus
+ * disc, the Japanese edition's extra song. Null on a track every stored edition
+ * prints, which is most of them, so the note only appears where it tells
+ * somebody something.
+ */
+function onlyOn(track: AlbumTrackRow, editions: readonly AlbumEditionRow[]): string | null {
+  if (track.on.length >= editions.length) return null
+  return editions
+    .filter((edition) => track.on.includes(edition.id))
+    .map((edition) =>
+      [edition.title, edition.country, edition.year?.toString()].filter(Boolean).join(', '),
+    )
+    .join('; ')
+}
+
 function Row({
   track,
   strip,
+  only,
 }: {
-  readonly track: ReleaseTrackRow
+  readonly track: AlbumTrackRow
   /** The run-in the group heading has already said. See `workGroups`. */
   readonly strip: string
+  /** The editions it is on, when it is not on all of them. */
+  readonly only: string | null
 }) {
   const tone = track.held ? 'primary' : 'tertiary'
 
@@ -919,6 +1029,11 @@ function Row({
           {track.artist != null ? (
             <Text size="xs" tone="secondary">
               {track.artist}
+            </Text>
+          ) : null}
+          {only != null ? (
+            <Text size="xs" tone="tertiary">
+              Only on {only}
             </Text>
           ) : null}
         </Stack>
@@ -997,6 +1112,194 @@ function Files({ files }: { readonly files: readonly FileRow[] }) {
   )
 }
 
+/**
+ * One folder's files, in the folder's own order. The number is the claimed
+ * pressing's where there is one, and otherwise the file's own tag — what the file
+ * says about itself, never a position on a pressing nobody claimed.
+ */
+function FolderFiles({ files }: { readonly files: readonly AlbumFileRow[] }) {
+  return (
+    <div className={styles.tracklist}>
+      <Table density="cozy">
+        <thead>
+          <tr>
+            <TableHeaderCell numeric>No</TableHeaderCell>
+            <TableHeaderCell>File</TableHeaderCell>
+            <TableHeaderCell>Format</TableHeaderCell>
+          </tr>
+        </thead>
+        <tbody>
+          {files.map((row) => {
+            const number = row.position ?? row.taggedTrack
+            const disc = row.position == null ? row.taggedDisc : row.disc
+
+            return (
+              <tr key={row.file.path}>
+                <TableCell numeric>
+                  <Text size="sm" family="mono" tone="tertiary">
+                    {number == null ? '—' : disc != null && disc > 1 ? `${disc}·${number}` : number}
+                  </Text>
+                </TableCell>
+                <TableCell title={row.file.path}>
+                  <Stack direction="column" gap={2}>
+                    <Text size="sm">{row.recording ?? row.file.path.split('/').at(-1)}</Text>
+                    <Text size="xs" family="mono" tone="tertiary" className={styles.path}>
+                      {row.file.path.split('/').at(-1)}
+                    </Text>
+                  </Stack>
+                </TableCell>
+                <TableCell>
+                  <FileBadges files={[row.file]} />
+                </TableCell>
+              </tr>
+            )
+          })}
+        </tbody>
+      </Table>
+    </div>
+  )
+}
+
+/**
+ * Naming which album a folder is, whatever the passes decided.
+ *
+ * Any release of the album names it — found by a search or a pasted link — but
+ * only its album is claimed: the pressing is left to the attribution pass, which
+ * may prove one of that album's editions from the audio and can never move the
+ * folder to another album.
+ */
+function NotThisAlbum({
+  folder,
+  albumId,
+  onChanged,
+}: {
+  readonly folder: string
+  readonly albumId: string
+  readonly onChanged: () => void
+}) {
+  const navigate = useNavigate()
+  const [query, setQuery] = useState('')
+  const [asked, setAsked] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+
+  const results = useApiQuery(
+    () =>
+      asked === null
+        ? Promise.resolve(null)
+        : api.get('/api/catalogue/matching/releases/search', { params: { query: { q: asked } } }),
+    [asked],
+  )
+
+  async function choose(row: SearchRow) {
+    if (
+      !window.confirm(
+        `File every file in “${folder}” under “${row.title}”?\n\n` +
+          'No pressing is claimed: the next attribution run may prove one of this album’s ' +
+          'editions from the audio. Nothing on disk is touched.',
+      )
+    ) {
+      return
+    }
+
+    setSending(true)
+    setFailure(null)
+
+    try {
+      const result = await api.post('/api/catalogue/matching/folders/album', {
+        json: { folder, release: row.mbid },
+      })
+
+      if (result.album === albumId) onChanged()
+      else void navigate({ to: '/library/albums/$albumId', params: { albumId: result.album } })
+    } catch (cause: unknown) {
+      setFailure(`Nothing was changed. ${describeError(cause)}`)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Stack direction="column" gap={8} align="stretch">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (query.trim() !== '') setAsked(query.trim())
+        }}
+      >
+        <Stack gap={8} align="end">
+          <Field
+            label="Not this album?"
+            hint="Search MusicBrainz, or paste a release link or MBID. Only the album is claimed."
+          >
+            {(control) => (
+              <Input
+                {...control}
+                fullWidth
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.currentTarget.value)
+                }}
+              />
+            )}
+          </Field>
+          <Button type="submit" size="sm" variant="secondary" disabled={query.trim() === ''}>
+            Search
+          </Button>
+        </Stack>
+      </form>
+
+      <div role="status" aria-busy={results.status === 'loading' && asked !== null}>
+        {results.status === 'loading' && asked !== null ? (
+          <Text size="xs" tone="tertiary">
+            Asking MusicBrainz…
+          </Text>
+        ) : null}
+        {results.status === 'error' ? (
+          <Text size="xs" tone="danger">
+            MusicBrainz could not search: {results.message}
+          </Text>
+        ) : null}
+        {results.status === 'ready' && results.data !== null && results.data.items.length === 0 ? (
+          <Text size="xs" tone="tertiary">
+            Nothing matched.
+          </Text>
+        ) : null}
+        {failure !== null ? (
+          <Text size="xs" tone="danger">
+            {failure}
+          </Text>
+        ) : null}
+      </div>
+
+      {results.status === 'ready' && results.data !== null
+        ? results.data.items.map((row) => (
+            <Stack key={row.mbid} gap={12} align="center" justify="between">
+              <Stack direction="column" gap={2}>
+                <Text size="sm">{row.title}</Text>
+                <Text size="xs" tone="tertiary">
+                  {[row.artist, row.year, row.country, row.formats]
+                    .filter((part) => part != null)
+                    .join(' · ')}
+                </Text>
+              </Stack>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={sending}
+                onClick={() => {
+                  void choose(row)
+                }}
+              >
+                This album
+              </Button>
+            </Stack>
+          ))
+        : null}
+    </Stack>
+  )
+}
+
 /** What one credited artist worked on here: their tracks, or the whole album. */
 function Songs({
   credit,
@@ -1004,7 +1307,7 @@ function Songs({
   discs,
 }: {
   readonly credit: AlbumCredit
-  readonly tracks: readonly ReleaseTrackRow[]
+  readonly tracks: readonly AlbumTrackRow[]
   readonly discs: number
 }) {
   const id = useId()
@@ -1039,7 +1342,7 @@ function Songs({
         </thead>
         <tbody>
           {theirs.map((track) => (
-            <tr key={`${track.discNumber}-${track.position}`}>
+            <tr key={`${track.discNumber}-${track.position}-${track.recordingId}`}>
               <TableCell numeric>
                 <Text size="sm" family="mono" tone="tertiary">
                   {numberOf(track, discs)}
@@ -1076,7 +1379,8 @@ function EditForm({
   readonly onCancel: () => void
   readonly onSaved: () => void
 }) {
-  const { release, about } = data
+  const { album: release, about } = data
+  const pressing = release.editionId != null
 
   const [draft, setDraft] = useState({
     title: release.title,
@@ -1085,7 +1389,7 @@ function EditForm({
     primaryType: about.primaryType ?? '',
     secondaryTypes: about.secondaryTypes.join(', '),
     firstReleaseYear: about.firstReleaseYear?.toString() ?? '',
-    releasedYear: release.year?.toString() ?? '',
+    releasedYear: about.releasedYear?.toString() ?? '',
     releasedMonth: about.releasedMonth?.toString() ?? '',
     releasedDay: about.releasedDay?.toString() ?? '',
     country: release.country ?? '',
@@ -1148,9 +1452,11 @@ function EditForm({
       <Field className={styles.wide} label="Credited to" hint="As the sleeve prints it.">
         {(control) => <Input {...control} {...text('credit')} fullWidth />}
       </Field>
-      <Field className={styles.wide} label="Edition note" hint="“remastered”, “deluxe”">
-        {(control) => <Input {...control} {...text('disambiguation')} fullWidth />}
-      </Field>
+      {pressing ? (
+        <Field className={styles.wide} label="Edition note" hint="“remastered”, “deluxe”">
+          {(control) => <Input {...control} {...text('disambiguation')} fullWidth />}
+        </Field>
+      ) : null}
       <Field label="Type" hint="Album, EP, Single">
         {(control) => <Input {...control} {...text('primaryType')} fullWidth />}
       </Field>
@@ -1162,57 +1468,64 @@ function EditForm({
           <Input {...control} {...text('firstReleaseYear')} type="number" mono fullWidth />
         )}
       </Field>
-      <Field label="This edition: year">
-        {(control) => <Input {...control} {...text('releasedYear')} type="number" mono fullWidth />}
-      </Field>
-      <Field label="Month" hint="Blank if unknown, never January">
-        {(control) => (
-          <Input
-            {...control}
-            {...text('releasedMonth')}
-            type="number"
-            min={1}
-            max={12}
-            disabled={draft.releasedYear === ''}
-            mono
-            fullWidth
-          />
-        )}
-      </Field>
-      <Field label="Day">
-        {(control) => (
-          <Input
-            {...control}
-            {...text('releasedDay')}
-            type="number"
-            min={1}
-            max={31}
-            disabled={draft.releasedMonth === ''}
-            mono
-            fullWidth
-          />
-        )}
-      </Field>
-      <Field label="Country" hint="Two-letter code">
-        {(control) => <Input {...control} {...text('country')} maxLength={2} mono fullWidth />}
-      </Field>
-      <Field label="Status" hint="Official, Promotion, Bootleg">
-        {(control) => <Input {...control} {...text('status')} fullWidth />}
-      </Field>
-      <Field label="Label">
-        {(control) => <Input {...control} {...text('label')} fullWidth />}
-      </Field>
-      <Field label="Catalogue number">
-        {(control) => <Input {...control} {...text('catalogNumber')} mono fullWidth />}
-      </Field>
-      <Field label="Barcode">
-        {(control) => (
-          <Input {...control} {...text('barcode')} inputMode="numeric" mono fullWidth />
-        )}
-      </Field>
-      <Field label="Format" hint="CD, Digital Media, CD+DVD-Video">
-        {(control) => <Input {...control} {...text('formats')} fullWidth />}
-      </Field>
+      {/* Sent either way; the server keeps them as they were without a pressing. */}
+      {pressing ? (
+        <>
+          <Field label="This edition: year">
+            {(control) => (
+              <Input {...control} {...text('releasedYear')} type="number" mono fullWidth />
+            )}
+          </Field>
+          <Field label="Month" hint="Blank if unknown, never January">
+            {(control) => (
+              <Input
+                {...control}
+                {...text('releasedMonth')}
+                type="number"
+                min={1}
+                max={12}
+                disabled={draft.releasedYear === ''}
+                mono
+                fullWidth
+              />
+            )}
+          </Field>
+          <Field label="Day">
+            {(control) => (
+              <Input
+                {...control}
+                {...text('releasedDay')}
+                type="number"
+                min={1}
+                max={31}
+                disabled={draft.releasedMonth === ''}
+                mono
+                fullWidth
+              />
+            )}
+          </Field>
+          <Field label="Country" hint="Two-letter code">
+            {(control) => <Input {...control} {...text('country')} maxLength={2} mono fullWidth />}
+          </Field>
+          <Field label="Status" hint="Official, Promotion, Bootleg">
+            {(control) => <Input {...control} {...text('status')} fullWidth />}
+          </Field>
+          <Field label="Label">
+            {(control) => <Input {...control} {...text('label')} fullWidth />}
+          </Field>
+          <Field label="Catalogue number">
+            {(control) => <Input {...control} {...text('catalogNumber')} mono fullWidth />}
+          </Field>
+          <Field label="Barcode">
+            {(control) => (
+              <Input {...control} {...text('barcode')} inputMode="numeric" mono fullWidth />
+            )}
+          </Field>
+          <Field label="Format" hint="CD, Digital Media, CD+DVD-Video">
+            {(control) => <Input {...control} {...text('formats')} fullWidth />}
+          </Field>
+        </>
+      ) : null}
       <Field
         className={styles.wide}
         label="Review"
@@ -1257,18 +1570,16 @@ type Reopened = {
 }
 
 function AskAgain({
-  tracks,
+  files,
   onReopened,
 }: {
-  readonly tracks: readonly ReleaseTrackRow[]
+  readonly files: readonly FileRow[]
   readonly onReopened: (result: Reopened) => void
 }) {
   const navigate = useNavigate()
   const [sending, setSending] = useState(false)
 
-  const parents = [
-    ...new Set(tracks.flatMap((track) => track.files.map((file) => parentOf(file.path)))),
-  ]
+  const parents = [...new Set(files.map((file) => parentOf(file.path)))]
   const folders = [
     ...new Set(
       parents.filter((parent) => parent.split('/').length >= ALBUM_FOLDER_DEPTH).map(albumFolderOf),
@@ -1392,7 +1703,7 @@ function Contribute({
     setState({ status: 'sending' })
 
     try {
-      const result = await api.post('/api/catalogue/releases/{id}/fingerprints', {
+      const result = await api.post('/api/catalogue/albums/{id}/fingerprints', {
         params: { path: { id: releaseId } },
       })
 
