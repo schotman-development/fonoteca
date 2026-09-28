@@ -6,7 +6,9 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
@@ -53,6 +55,7 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         "release_slots",
         "reopen_folder",
         "search_releases",
+        "set_folder_album",
         "start_pass",
     ];
 
@@ -170,6 +173,42 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>
+    /// An album an agent names is the agent's, so the owner can tell it from their own.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumNamedThroughTheEndpointIsTheAgentsNotTheOwners()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Somebody/Album/01.flac",
+                SizeBytes = 9_000_000,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture),
+            });
+
+            await db.SaveChangesAsync(Cancel);
+        }
+
+        await using var mcp = await ConnectAsync();
+
+        var result = await mcp.CallToolAsync(
+            "set_folder_album",
+            new Dictionary<string, object?> { ["folder"] = "Somebody/Album", ["release"] = Guid.NewGuid() },
+            cancellationToken: Cancel);
+
+        Assert.True(result.IsError is not true, Text(result));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await check.MediaFiles.SingleAsync(Cancel);
+
+        Assert.Equal(ReleaseAttributionOutcome.AlbumByAgent, row.AttributionOutcome);
+        Assert.NotNull(row.ReleaseGroupId);
+    }
+
+    /// <summary>
     /// The seating arrives with all three fields bound.
     /// </summary>
     /// <remarks>
@@ -213,6 +252,9 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
             builder.UseSetting("Fonoteca:WarmCandidates", "false");
             builder.UseSetting("Fonoteca:MusicBrainzContact", string.Empty);
             builder.UseSetting("Fonoteca:McpToken", token);
+
+            builder.ConfigureTestServices(services =>
+                services.AddSingleton<IMusicBrainzCatalogue>(new AnyRelease()));
         });
 
     private async Task<McpClient> ConnectAsync()
@@ -240,4 +282,60 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 
     private static string Text(CallToolResult result) =>
         string.Join('\n', result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+
+    /// <summary>A MusicBrainz where every release id names one album, and nothing else answers.</summary>
+    private sealed class AnyRelease : IMusicBrainzCatalogue
+    {
+        public Task<MusicBrainzRelease?> GetReleaseAsync(Mbid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzRelease?>(new MusicBrainzRelease(
+                id,
+                "An Album",
+                null,
+                null,
+                "Official",
+                null,
+                [],
+                new Mbid(Guid.Parse("22222222-2222-4222-8222-222222222222")),
+                "An Album",
+                "Album",
+                [],
+                [],
+                []));
+
+        public Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseMatch>>([]);
+
+        public Task<IReadOnlyList<MusicBrainzReleaseGroupMatch>> SearchReleaseGroupsAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroupMatch>>([]);
+
+        public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForReleaseGroupAsync(
+            Mbid releaseGroup,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseCandidate>>([]);
+
+        public Task<MusicBrainzRecording?> GetRecordingAsync(Mbid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzRecording?>(null);
+
+        public Task<MusicBrainzDiscography> BrowseReleaseGroupsForArtistAsync(
+            Mbid artist,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MusicBrainzDiscography([], Complete: true));
+
+        public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForRecordingAsync(
+            Mbid recording,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseCandidate>>([]);
+
+        public Task<MusicBrainzArtist?> GetArtistAsync(Mbid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzArtist?>(null);
+
+        public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MusicBrainzWork?>(null);
+    }
 }

@@ -49,6 +49,30 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     /// <summary>A second edition with the same track list, for the cross-edition case.</summary>
     private static readonly Mbid Other = new(Guid.Parse("44444444-4444-4444-4444-444444444444"));
 
+    /// <summary>The album <see cref="Album"/> and <see cref="Other"/> are editions of.</summary>
+    private static readonly Mbid Group = new(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+
+    /// <summary>A third edition of the album, with a bonus track the other two lack.</summary>
+    private static readonly Mbid Deluxe = new(Guid.Parse("88888888-8888-8888-8888-888888888888"));
+
+    /// <summary>
+    /// A fourth edition printing the same titles as <see cref="Album"/> on other
+    /// recordings — another performance, or MusicBrainz holding the audio twice.
+    /// </summary>
+    private static readonly Mbid Reissue = new(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+
+    /// <summary>A bootleg of the album, printing a recording no official edition carries.</summary>
+    private static readonly Mbid Bootleg = new(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+
+    /// <summary>
+    /// An edition added to MusicBrainz after the album's editions were first
+    /// read, with a track none of the others print.
+    /// </summary>
+    private static readonly Mbid Late = new(Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"));
+
+    /// <summary>A release of another album entirely.</summary>
+    private static readonly Mbid Foreign = new(Guid.Parse("99999999-9999-9999-9999-999999999999"));
+
     /// <summary>An artist the catalogue already holds, so a track credit can link to it.</summary>
     private static readonly Mbid Known = new(Guid.Parse("55555555-5555-5555-5555-555555555555"));
 
@@ -61,6 +85,9 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
 
     /// <summary>Held rather than built inline, so a test can read what was sent.</summary>
     private readonly StubSubmissions _submissions = new();
+
+    /// <summary>Held so a test can add <see cref="Late"/> to MusicBrainz part-way through.</summary>
+    private readonly StubAlbum _musicBrainz = new();
 
     /// <summary>Three files of one folder, in path order.</summary>
     private MediaFileId _first;
@@ -92,7 +119,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
 
             builder.ConfigureTestServices(services =>
             {
-                services.AddSingleton<IMusicBrainzCatalogue>(new StubAlbum());
+                services.AddSingleton<IMusicBrainzCatalogue>(_musicBrainz);
                 services.AddSingleton<IAcoustIdSubmission>(_submissions);
             });
         });
@@ -1024,6 +1051,378 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    /// <summary>
+    /// Naming a folder's album files every file in it under the album, with no
+    /// pressing, and hands the pressing back to the rule.
+    /// </summary>
+    /// <remarks>
+    /// Every file, answered or not — the settled one included, because a person
+    /// naming the album outranks what the pass decided. The folder whose name
+    /// merely begins the same is untouched.
+    /// </remarks>
+    [Fact]
+    public async Task NamingAFoldersAlbumKeepsItAndHandsTheEditionBackToTheRule()
+    {
+        using var client = _factory!.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/folders/album", UriKind.Relative),
+            new FolderAlbumRequest("Michael Jackson/Off the Wall", Other.Value),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<FolderAlbumResponse>(Token);
+
+        Assert.NotNull(result);
+        Assert.Equal(6, result.Files);
+        Assert.Equal("Off the Wall", result.Title);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var group = await db.ReleaseGroups.SingleAsync(Token);
+        Assert.Equal(group.Id.Value, result.Album);
+
+        var folder = await db.MediaFiles
+            .Where(file => file.Path.StartsWith("Michael Jackson/Off the Wall/"))
+            .ToListAsync(Token);
+
+        Assert.Equal(6, folder.Count);
+        Assert.All(folder, file =>
+        {
+            Assert.Equal(group.Id, file.ReleaseGroupId);
+            Assert.Null(file.ReleaseId);
+            Assert.Null(file.TrackId);
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.NotNull(file.ReleaseDecidedUtc);
+            Assert.Null(file.ReleaseLookupUtc);
+        });
+
+        var live = await db.MediaFiles.SingleAsync(file => file.Path.StartsWith("Michael Jackson/Off the Wall Live/"), Token);
+        Assert.Null(live.ReleaseGroupId);
+
+        Assert.Equal(1, await db.DomainEvents.CountAsync(row => row.Type == "matching.folder.album", Token));
+
+        // The two files with a recording are the rule's again, for the pressing.
+        var attribution = _factory.Services.GetRequiredService<Fonoteca.Api.Library.ReleaseAttributionService>();
+        Assert.Equal(2, await attribution.CountPendingAsync(Token));
+    }
+
+    [Fact]
+    public async Task NamingTheAlbumOfAFolderTheCatalogueDoesNotHoldIsNotFound()
+    {
+        using var client = _factory!.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/folders/album", UriKind.Relative),
+            new FolderAlbumRequest("Michael Jackson/Thriller", Album.Value),
+            Token);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    /// <summary>
+    /// A pasted release names its album, and so does a pasted album.
+    /// </summary>
+    [Theory]
+    [InlineData("https://musicbrainz.org/release/11111111-1111-1111-1111-111111111111")]
+    [InlineData("22222222-2222-2222-2222-222222222222")]
+    public async Task APastedReleaseOrAlbumComesBackAsTheAlbum(string pasted)
+    {
+        using var client = _factory!.CreateClient();
+
+        var result = await client.GetFromJsonAsync<AlbumSearchResponse>(
+            new Uri($"/api/catalogue/matching/albums/search?q={Uri.EscapeDataString(pasted)}", UriKind.Relative),
+            Token);
+
+        Assert.NotNull(result);
+
+        var row = Assert.Single(result.Items);
+        Assert.Equal(Group.Value, row.Mbid);
+        Assert.Equal("Off the Wall", row.Title);
+        Assert.Equal(5, row.Editions);
+        Assert.Equal(1979, row.Year);
+    }
+
+    /// <summary>
+    /// An edition added after the album was opened shows up when it is pasted,
+    /// rather than an hour later.
+    /// </summary>
+    [Fact]
+    public async Task APastedEditionTheCachedListLacksIsReadAgain()
+    {
+        Assert.Equal(7, (await AlbumSlotsAsync(null)).Tracks.Count);
+
+        _musicBrainz.LateIsAdded = true;
+
+        using var client = _factory!.CreateClient();
+
+        var result = await client.GetFromJsonAsync<AlbumSearchResponse>(
+            new Uri($"/api/catalogue/matching/albums/search?q={Late.Value}", UriKind.Relative),
+            Token);
+
+        Assert.NotNull(result);
+        Assert.Equal(6, Assert.Single(result.Items).Editions);
+
+        var slots = await AlbumSlotsAsync(null);
+
+        Assert.Equal(5, slots.EditionsFound);
+        Assert.Contains(slots.Tracks, track => track.Release == Late.Value && track.Title == "Off the Wall (live)");
+    }
+
+    [Fact]
+    public async Task ATextSearchListsAlbumsNotPressings()
+    {
+        using var client = _factory!.CreateClient();
+
+        var result = await client.GetFromJsonAsync<AlbumSearchResponse>(
+            new Uri("/api/catalogue/matching/albums/search?q=off%20the%20wall", UriKind.Relative),
+            Token);
+
+        Assert.NotNull(result);
+
+        var row = Assert.Single(result.Items);
+        Assert.Equal(Group.Value, row.Mbid);
+        Assert.Equal("Michael Jackson", row.Artist);
+        Assert.Equal(3, row.Editions);
+    }
+
+    /// <summary>
+    /// The editions merged: the lead's running order, then every recording the
+    /// others add — the deluxe's bonus track, and all three of the reissue's,
+    /// whose titles the lead already prints on other recordings.
+    /// </summary>
+    /// <remarks>
+    /// The reissue's rows are the case <c>Editions.Combine</c> leaves out, and
+    /// the one a rip of that edition can only be seated on.
+    /// </remarks>
+    [Fact]
+    public async Task EveryEditionsRecordingsAreMergedInTheNamedEditionsOrder()
+    {
+        var slots = await AlbumSlotsAsync($"release={Album.Value}");
+
+        Assert.Equal(Album.Value, slots.Lead);
+        Assert.Equal(3, slots.LeadTracks);
+        Assert.Equal(4, slots.EditionsRead);
+        Assert.Equal(4, slots.EditionsFound);
+
+        Assert.Equal(7, slots.Tracks.Count);
+        Assert.Equal(7, slots.Tracks.Select(track => track.Recording).Distinct().Count());
+
+        Assert.All(slots.Tracks.Take(3), track =>
+        {
+            Assert.True(track.OnLead);
+            Assert.Equal(Album.Value, track.Release);
+            Assert.Equal(3, track.Editions);
+        });
+
+        Assert.Equal(
+            [(Deluxe.Value, "Workin' Day and Night (demo)"), (Reissue.Value, "Don't Stop 'Til You Get Enough"),
+             (Reissue.Value, "Rock with You"), (Reissue.Value, "Working Day and Night")],
+            slots.Tracks.Skip(3).Select(track => (track.Release, track.Title)));
+
+        Assert.All(slots.Tracks.Skip(3), track =>
+        {
+            Assert.False(track.OnLead);
+            Assert.Equal(1, track.Editions);
+        });
+    }
+
+    /// <summary>With no edition named, the one the folder's settled files hold most of leads.</summary>
+    [Fact]
+    public async Task TheEditionTheFoldersSettledFilesHoldLeads()
+    {
+        await FileUnderAlbumAsync((_first, Reissue, 1, 1));
+
+        var slots = await AlbumSlotsAsync(null);
+
+        Assert.Equal(Reissue.Value, slots.Lead);
+        Assert.Equal("01 First.flac", slots.Tracks[0].HeldBy);
+    }
+
+    /// <summary>Two editions can print one recording; two files cannot both be it.</summary>
+    [Fact]
+    public async Task TwoFilesOnOneRecordingAreRefusedWhicheverEditionPrintsIt()
+    {
+        using var client = _factory!.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/files/album", UriKind.Relative),
+            new AlbumFilesRequest(
+                Group.Value,
+                [new AlbumFilesPair(_first.Value, Album.Value, 1, 1), new AlbumFilesPair(_second.Value, Other.Value, 1, 1)]),
+            Token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>With no edition named, the one whose length is nearest the folder's leads.</summary>
+    [Fact]
+    public async Task WithNoEditionNamedTheOneNearestTheFolderLeads()
+    {
+        // Six files in the folder: the four-track deluxe is nearer than either three-track edition.
+        var slots = await AlbumSlotsAsync(null);
+
+        Assert.Equal(Deluxe.Value, slots.Lead);
+        Assert.Equal([true, true, true, true, false, false, false], slots.Tracks.Select(track => track.OnLead));
+    }
+
+    /// <summary>
+    /// Filing under an album gives each file the recording it was seated on and
+    /// the album, claims no pressing, and hands the pressing to the rule.
+    /// </summary>
+    [Fact]
+    public async Task FilingUnderAnAlbumGivesEachFileItsRecordingAndTheAlbumButNoPressing()
+    {
+        var attribution = _factory!.Services.GetRequiredService<Fonoteca.Api.Library.ReleaseAttributionService>();
+        var pending = await attribution.CountPendingAsync(Token);
+
+        var result = await FileUnderAlbumAsync((_first, Album, 1, 1), (_second, Deluxe, 1, 4));
+
+        Assert.Equal(2, result.Filed);
+        Assert.Equal(0, result.Skipped);
+        Assert.Equal("Off the Wall", result.Title);
+        Assert.Equal(Group.Value, result.Album);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var group = await db.ReleaseGroups.SingleAsync(row => row.Mbid == Group, Token);
+
+        foreach (var (id, title) in new[] { (_first, "Don't Stop 'Til You Get Enough"), (_second, "Workin' Day and Night (demo)") })
+        {
+            var file = await db.MediaFiles.SingleAsync(row => row.Id == id, Token);
+
+            Assert.Equal(group.Id, file.ReleaseGroupId);
+            Assert.Null(file.ReleaseId);
+            Assert.Null(file.TrackId);
+            Assert.Equal(AcoustIdOutcome.IdentifiedByPerson, file.AcoustIdOutcome);
+            Assert.Equal(EnrichmentOutcome.LinkedByPerson, file.EnrichmentOutcome);
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.NotNull(file.IdentityDecidedUtc);
+            Assert.NotNull(file.ReleaseDecidedUtc);
+            Assert.Null(file.ReleaseLookupUtc);
+
+            var recording = await db.Recordings.SingleAsync(row => row.Id == file.RecordingId, Token);
+            Assert.Equal(title, recording.Title);
+        }
+
+        Assert.Equal(1, await db.DomainEvents.CountAsync(row => row.Type == "matching.files.album", Token));
+        Assert.Equal(pending + 2, await attribution.CountPendingAsync(Token));
+    }
+
+    /// <summary>
+    /// A file the pass already refused goes back to it: the refusal's stamp is
+    /// what kept it off the pass's worklist.
+    /// </summary>
+    [Fact]
+    public async Task FilingAFileThePassRefusedHandsItBackToThePass()
+    {
+        var attribution = _factory!.Services.GetRequiredService<Fonoteca.Api.Library.ReleaseAttributionService>();
+        var pending = await attribution.CountPendingAsync(Token);
+
+        await FileUnderAlbumAsync((_unfitted, Album, 1, 2));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles.SingleAsync(row => row.Id == _unfitted, Token);
+
+        Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+        Assert.Null(file.ReleaseLookupUtc);
+        Assert.Equal(pending + 1, await attribution.CountPendingAsync(Token));
+    }
+
+    /// <summary>A bootleg's songs are not tracks the album is missing, where it has an official edition.</summary>
+    [Fact]
+    public async Task ABootlegIsLeftOutWhereTheAlbumHasAnOfficialEdition()
+    {
+        var slots = await AlbumSlotsAsync(null);
+
+        Assert.DoesNotContain(slots.Tracks, track => track.Release == Bootleg.Value);
+        Assert.Equal(4, slots.EditionsFound);
+    }
+
+    /// <summary>A recording a settled file in the folder holds under the album is shown as taken.</summary>
+    [Fact]
+    public async Task ARecordingAlreadyFiledInTheFolderComesBackNamingTheFile()
+    {
+        await FileUnderAlbumAsync((_first, Album, 1, 1));
+
+        var slots = await AlbumSlotsAsync($"release={Album.Value}");
+
+        Assert.Equal("01 First.flac", slots.Tracks[0].HeldBy);
+        Assert.All(slots.Tracks.Skip(1), track => Assert.Null(track.HeldBy));
+    }
+
+    [Fact]
+    public async Task AnEditionOfAnotherAlbumIsRefusedBeforeAnythingIsWritten()
+    {
+        using var client = _factory!.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/files/album", UriKind.Relative),
+            new AlbumFilesRequest(Group.Value, [new AlbumFilesPair(_first.Value, Foreign.Value, 1, 1)]),
+            Token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var file = await db.MediaFiles.SingleAsync(row => row.Id == _first, Token);
+        Assert.Null(file.RecordingId);
+        Assert.Equal(AcoustIdOutcome.Unknown, file.AcoustIdOutcome);
+        Assert.Equal(0, await db.ReleaseGroups.CountAsync(Token));
+    }
+
+    [Fact]
+    public async Task ATrackTheEditionDoesNotPrintIsRefused()
+    {
+        using var client = _factory!.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/files/album", UriKind.Relative),
+            new AlbumFilesRequest(Group.Value, [new AlbumFilesPair(_first.Value, Album.Value, 1, 4)]),
+            Token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private async Task<AlbumSlotsResponse> AlbumSlotsAsync(string? query)
+    {
+        using var client = _factory!.CreateClient();
+
+        var folder = Uri.EscapeDataString("Michael Jackson/Off the Wall");
+        var result = await client.GetFromJsonAsync<AlbumSlotsResponse>(
+            new Uri(
+                $"/api/catalogue/matching/albums/{Group.Value}/slots?folder={folder}"
+                + (query is null ? "" : "&" + query),
+                UriKind.Relative),
+            Token);
+
+        Assert.NotNull(result);
+        return result;
+    }
+
+    private async Task<AlbumFilesResponse> FileUnderAlbumAsync(
+        params (MediaFileId File, Mbid Release, int Disc, int Position)[] seats)
+    {
+        using var client = _factory!.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/files/album", UriKind.Relative),
+            new AlbumFilesRequest(
+                Group.Value,
+                [.. seats.Select(seat =>
+                    new AlbumFilesPair(seat.File.Value, seat.Release.Value, seat.Disc, seat.Position))]),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<AlbumFilesResponse>(Token);
+
+        Assert.NotNull(result);
+        return result;
+    }
+
     private async Task<FolderReopenResponse> ReopenAsync(string folder)
     {
         using var client = _factory!.CreateClient();
@@ -1232,33 +1631,59 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         }
     }
 
-    /// <summary>One album with three printed positions, and nothing else.</summary>
+    /// <summary>
+    /// One album with three printed positions on two editions, a deluxe edition
+    /// adding a fourth, and one release of another album.
+    /// </summary>
     private sealed class StubAlbum : IMusicBrainzCatalogue
     {
-        private static readonly Mbid Group = new(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+        /// <summary>Whether <see cref="Late"/> exists yet.</summary>
+        public bool LateIsAdded { get; set; }
 
         public Task<MusicBrainzRelease?> GetReleaseAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<MusicBrainzRelease?>(id == Album || id == Other
-                ? new MusicBrainzRelease(
+            Task.FromResult<MusicBrainzRelease?>(
+                id == Album || id == Other ? Release(
                     id,
                     id == Album ? "Off the Wall" : "Off the Wall (2015 remaster)",
-                    new ReleaseDate(1979, 8, 10),
-                    "US",
-                    "Official",
-                    null,
-                    [],
                     Group,
-                    "Off the Wall",
-                    "Album",
-                    [],
-                    [],
                     [
                         Track(1, "Don't Stop 'Til You Get Enough"),
                         Track(2, "Rock with You"),
                         Track(3, "Working Day and Night"),
                     ])
+                : id == Deluxe ? Release(
+                    id,
+                    "Off the Wall (Deluxe)",
+                    Group,
+                    [
+                        Track(1, "Don't Stop 'Til You Get Enough"),
+                        Track(2, "Rock with You"),
+                        Track(3, "Working Day and Night"),
+                        Track(4, "Workin' Day and Night (demo)"),
+                    ])
+                : id == Reissue ? Release(
+                    id,
+                    "Off the Wall",
+                    Group,
+                    [
+                        Track(1, "Don't Stop 'Til You Get Enough", "aaaaaaaa-0000-0000-0000-00000000000"),
+                        Track(2, "Rock with You", "aaaaaaaa-0000-0000-0000-00000000000"),
+                        Track(3, "Working Day and Night", "aaaaaaaa-0000-0000-0000-00000000000"),
+                    ])
+                : id == Bootleg ? Release(id, "Off the Wall (Live)", Group, [Track(1, "Rock with You (live)", "bbbbbbbb-0000-0000-0000-00000000000")])
+                : id == Late && LateIsAdded ? Release(
+                    id,
+                    "Off the Wall (Anniversary)",
+                    Group,
+                    [
+                        Track(1, "Don't Stop 'Til You Get Enough"),
+                        Track(2, "Rock with You"),
+                        Track(3, "Working Day and Night"),
+                        Track(4, "Off the Wall (live)", "cccccccc-0000-0000-0000-00000000000"),
+                    ])
+                : id == Foreign ? Release(id, "Thriller", new Mbid(Guid.CreateVersion7()), [Track(1, "Wanna Be Startin' Somethin'")])
                 : null);
 
         public Task<IReadOnlyList<MusicBrainzReleaseMatch>> SearchReleasesAsync(
@@ -1271,12 +1696,56 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             string query,
             int limit,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroupMatch>>([]);
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseGroupMatch>>(
+            [
+                new(
+                    new MusicBrainzReleaseGroup(Group, "Off the Wall", "Album", [], 1979),
+                    [new MusicBrainzCredit(Known, "Michael Jackson", null, null, null, "Person")],
+                    3,
+                    100),
+            ]);
 
         public Task<IReadOnlyList<MusicBrainzReleaseCandidate>> BrowseReleasesForReleaseGroupAsync(
             Mbid releaseGroup,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MusicBrainzReleaseCandidate>>([]);
+            Task.FromResult<IReadOnlyList<MusicBrainzReleaseCandidate>>(releaseGroup == Group
+                ? [Candidate(Album, 3), Candidate(Other, 3), Candidate(Deluxe, 4), Candidate(Reissue, 3), Candidate(Bootleg, 1, "Bootleg"),
+                   .. LateIsAdded ? [Candidate(Late, 4)] : Array.Empty<MusicBrainzReleaseCandidate>()]
+                : []);
+
+        private static MusicBrainzReleaseCandidate Candidate(Mbid id, int tracks, string status = "Official") =>
+            new(
+                id,
+                "Off the Wall",
+                new ReleaseDate(1979, 8, 10),
+                "US",
+                status,
+                null,
+                Group,
+                "Off the Wall",
+                "Album",
+                [],
+                [new MusicBrainzMediumSummary(1, "CD", tracks)]);
+
+        private static MusicBrainzRelease Release(
+            Mbid id,
+            string title,
+            Mbid group,
+            IReadOnlyList<MusicBrainzTrack> tracks) =>
+            new(
+                id,
+                title,
+                new ReleaseDate(1979, 8, 10),
+                "US",
+                "Official",
+                null,
+                [],
+                group,
+                group == Group ? "Off the Wall" : title,
+                "Album",
+                [],
+                [],
+                tracks);
 
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
@@ -1303,14 +1772,17 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzWork?>(null);
 
-        private static MusicBrainzTrack Track(int position, string title) =>
+        private static MusicBrainzTrack Track(
+            int position,
+            string title,
+            string recordings = "33333333-3333-3333-3333-33333333333") =>
             new(
                 1,
                 position,
                 position.ToString(CultureInfo.InvariantCulture),
                 title,
                 TimeSpan.FromMinutes(4),
-                new Mbid(Guid.Parse($"33333333-3333-3333-3333-33333333333{position}")),
+                new Mbid(Guid.Parse($"{recordings}{position}")),
 
                 // The billing line every release lookup already returns. Two
                 // artists, and the catalogue holds only the first: a writer that

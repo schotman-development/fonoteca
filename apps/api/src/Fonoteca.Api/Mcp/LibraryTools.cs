@@ -438,6 +438,30 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
                 cancellationToken)
             .ConfigureAwait(false));
 
+    [McpServerTool(Name = "set_folder_album")]
+    [Description(
+        "Say which album (release group) an album folder is: every file in it is filed under the "
+        + "album with no pressing claimed, whatever any pass or person decided before, and the next "
+        + "attribution run may prove one of that album's editions but never another album. `folder` "
+        + "is an album folder as get_album prints it; `release` is any release of the album, e.g. "
+        + "from search_releases. Recorded as an agent's decision. Show the owner the album before "
+        + "calling this.")]
+    public async Task<string> SetFolderAlbum(
+        string folder,
+        [Description("Any MusicBrainz release MBID of the album.")] Guid release,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .SetFolderAlbum(
+                new FolderAlbumRequest(folder, release),
+                Get<FonotecaDbContext>(),
+                Get<IMusicBrainzCatalogue>(),
+                Get<IEventLog>(),
+                Get<LibraryWorkGate>(),
+                Agent,
+                Get<IClock>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
     /// <summary>A handler's result as the tool's answer, or its problem document as the tool's error.</summary>
     private string Answer(IResult result) => result switch
     {

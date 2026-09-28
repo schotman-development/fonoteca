@@ -108,6 +108,27 @@ public sealed record AlbumFilingPayload
 }
 
 /// <summary>
+/// The event log's payload for one person filing files under an album with no pressing.
+/// </summary>
+/// <remarks>
+/// <see cref="AlbumFilingPayload"/>'s shape keyed on the album's MBID, with the
+/// edition each seat was read off, since a position means nothing without it.
+/// </remarks>
+public sealed record AlbumFilesPayload
+{
+    public required Guid Album { get; init; }
+
+    public required string Title { get; init; }
+
+    public required int Filed { get; init; }
+
+    public required int Skipped { get; init; }
+
+    /// <summary>Every seat taken, as <c>{fileId:N}@{releaseId:N}/{disc}-{position}</c>.</summary>
+    public required IReadOnlyList<string> Seats { get; init; }
+}
+
+/// <summary>
 /// The event log's payload for one person dismissing a whole folder.
 /// </summary>
 /// <remarks>
@@ -124,6 +145,25 @@ public sealed record FolderUnreleasedPayload
 
     /// <summary>Files that had an open question and now do not.</summary>
     public required int Closed { get; init; }
+}
+
+/// <summary>
+/// The event log's payload for one person naming which album a folder is.
+/// </summary>
+/// <remarks>
+/// The album's MBID rather than the catalogue's id, because the log outlives
+/// the rows: a rescan can re-mint a group, never rename an MBID.
+/// </remarks>
+public sealed record FolderAlbumPayload
+{
+    public required string Folder { get; init; }
+
+    public required Guid Album { get; init; }
+
+    public required string Title { get; init; }
+
+    /// <summary>Files in the folder, all of which were filed under it.</summary>
+    public required int Files { get; init; }
 }
 
 /// <summary>
@@ -186,8 +226,10 @@ public sealed record FingerprintContributionPayload
 [JsonSerializable(typeof(RecordingDecisionPayload))]
 [JsonSerializable(typeof(ComponentDecisionPayload))]
 [JsonSerializable(typeof(AlbumFilingPayload))]
+[JsonSerializable(typeof(AlbumFilesPayload))]
 [JsonSerializable(typeof(FolderUnreleasedPayload))]
 [JsonSerializable(typeof(FolderReopenedPayload))]
+[JsonSerializable(typeof(FolderAlbumPayload))]
 [JsonSerializable(typeof(FingerprintContributionPayload))]
 [JsonSerializable(typeof(AcoustIdEvidence))]
 [JsonSerializable(typeof(Fonoteca.Api.Endpoints.RecordingCandidatesResponse))]

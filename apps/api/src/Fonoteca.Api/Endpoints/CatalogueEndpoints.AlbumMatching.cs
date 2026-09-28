@@ -81,6 +81,9 @@ public static partial class CatalogueEndpoints
     /// <summary>Event type for a person saying a pass got a whole folder wrong.</summary>
     private const string FolderReopenedEventType = "matching.folder.reopened";
 
+    /// <summary>Event type for a person naming which album a folder is.</summary>
+    private const string FolderAlbumEventType = "matching.folder.album";
+
     /// <summary>What the event log calls a folder somebody dismissed whole.</summary>
     private const string FolderSubject = "album-folder";
 
@@ -250,6 +253,28 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/matching/folders/album", SetFolderAlbum)
+            .WithName("SetFolderAlbum")
+            .WithSummary("Say which album a folder is, whatever the passes decided.")
+            .WithDescription(
+                "An album folder is one album, and this names it. `release` is any release of "
+                + "that album — the one a search or a pasted MBID found — and only its release "
+                + "group is claimed: every file in the folder is filed under the album with no "
+                + "pressing and the outcome `AlbumByPerson`, answered or not, because the folder "
+                + "is the unit and a person naming its album outranks every earlier answer.\n\n"
+                + "The pressing is left to the attribution pass, which is handed the folder back "
+                + "for it: it may claim an edition of *this* album only where the audio proves "
+                + "one, and it can never move the folder to another album. Naming the album "
+                + "again is the only way to do that.\n\n"
+                + "`folder` is an album folder exactly as the album page prints it, not a prefix. "
+                + "Nothing on disk is touched.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        MapAlbumFilingEndpoints(group);
     }
 
     internal static async Task<Results<Ok<ReleaseSearchResponse>, ProblemHttpResult>> SearchReleases(
@@ -1080,6 +1105,163 @@ public static partial class CatalogueEndpoints
             + "will answer them again. Nothing on disk was touched."));
     }
 
+    /// <summary>
+    /// One person's claim about which album a folder is, committed.
+    /// </summary>
+    /// <remarks>
+    /// <b>The album, never the pressing.</b> A person naming a record from the
+    /// shelf knows which album it is far more often than which of its twelve
+    /// editions, and a pressing claimed on their say-so is the lie this model
+    /// exists to stop. So the release in the request only says which group, and
+    /// the lookup stamp is cleared so the pass can prove an edition inside it —
+    /// and only inside it: <see cref="ReleaseAttributionOutcome.AlbumByPerson"/>
+    /// is what the pass reads the album from.
+    ///
+    /// <b>Every file in the folder, whatever it was.</b> The unit is the album
+    /// folder (<see cref="AlbumFolder.Of"/>), not a prefix, so a sibling folder
+    /// whose name merely starts the same is untouched and a box set's disc
+    /// folders are included. A file with no recording is filed under the album
+    /// too; it simply has nothing a pressing could be proved from.
+    /// </remarks>
+    internal static async Task<Results<Ok<FolderAlbumResponse>, ProblemHttpResult>>
+        SetFolderAlbum(
+            FolderAlbumRequest request,
+            FonotecaDbContext db,
+            IMusicBrainzCatalogue musicBrainz,
+            IEventLog events,
+            LibraryWorkGate gate,
+            ICallerContext caller,
+            IClock clock,
+            CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Folder))
+        {
+            return TypedResults.Problem(
+                title: "No folder named",
+                detail: "The request body must name a library-relative album `folder` and a `release`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var folder = request.Folder.TrimEnd('/');
+        var prefix = folder + "/";
+
+        if (!gate.TryEnter(DecisionWorkKind, out var lease))
+        {
+            return TypedResults.Problem(
+                title: "The library is busy",
+                detail:
+                    $"A {gate.ActiveKind ?? "pass"} is running, and it may clear or rewrite exactly "
+                    + "the columns this decision sets. Answer again once it has finished.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        using var held = lease;
+
+        var rows = (await db.MediaFiles
+                .Where(file => file.Path.StartsWith(prefix))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .Where(file => AlbumFolder.Of(file.Path) == folder)
+            .ToList();
+
+        if (rows.Count == 0)
+        {
+            return TypedResults.Problem(
+                title: "No such album folder",
+                detail:
+                    $"The catalogue holds no files in \u201c{folder}\u201d as an album folder. "
+                    + "A scan may have moved them \u2014 reload the page.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        MusicBrainzRelease? release;
+
+        try
+        {
+            release = await musicBrainz.GetReleaseAsync(new Mbid(request.Release), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ProviderException error)
+        {
+            return TypedResults.Problem(
+                title: "MusicBrainz did not answer",
+                detail: error.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        if (release is null)
+        {
+            return TypedResults.Problem(
+                title: "No such release",
+                detail:
+                    $"MusicBrainz no longer holds release {request.Release}. It has probably been "
+                    + "merged; search for it again to see where it went.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (release.ReleaseGroupId is not { } albumMbid)
+        {
+            return TypedResults.Problem(
+                title: "That release names no album",
+                detail: $"MusicBrainz lists no release group for \u201c{release.Title}\u201d.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var writer = new ReleaseAttributionService.ReleaseWriter(db);
+        var written = await writer.UpsertAsync(release, null, cancellationToken).ConfigureAwait(false);
+        var album = written.Group!.Value;
+
+        var now = StoreTime.ToStorePrecision(clock.UtcNow);
+        var correlationId = Guid.CreateVersion7().ToString("N")[..12];
+
+        foreach (var row in rows)
+        {
+            row.ReleaseGroupId = album;
+            row.ReleaseId = null;
+            row.TrackId = null;
+            row.EditionAlternatives = 0;
+            row.FolderPosition = null;
+            row.OrderOutcome = FolderOrderOutcome.NotChecked;
+            row.AttributionOutcome = ByCaller(caller, ReleaseAttributionOutcome.AlbumByPerson);
+            row.ReleaseDecidedUtc = now;
+
+            // Cleared so the pass proves the pressing, within this album only.
+            row.ReleaseLookupUtc = null;
+        }
+
+        var title = release.ReleaseGroupTitle ?? release.Title;
+
+        await events.AppendAsync(
+            DomainEvent.Create(
+                FolderAlbumEventType,
+                FolderSubject,
+                Fit(folder),
+                caller.ActorId,
+                now,
+                JsonSerializer.Serialize(
+                    new FolderAlbumPayload
+                    {
+                        Folder = folder,
+                        Album = albumMbid.Value,
+                        Title = title,
+                        Files = rows.Count,
+                    },
+                    MatchingJson.Default.FolderAlbumPayload),
+                correlationId),
+            cancellationToken).ConfigureAwait(false);
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new FolderAlbumResponse(
+            folder,
+            album.Value,
+            title,
+            rows.Count,
+            $"{rows.Count} file{(rows.Count == 1 ? "" : "s")} in \u201c{folder}\u201d filed under "
+            + $"\u201c{title}\u201d with no pressing claimed. The next attribution run may prove "
+            + "one of its editions. Nothing on disk was touched."));
+    }
+
     /// <summary>A folder path cut to what <c>DomainEvent.SubjectId</c> holds.</summary>
     /// <remarks>
     /// One character back if the cut lands between the halves of a surrogate
@@ -1365,6 +1547,19 @@ public sealed record FolderReopenRequest(string Folder);
 /// refusal says something true that "somebody disagreed" does not.
 /// </param>
 public sealed record FolderReopenResponse(string Folder, int Reopened, string Detail);
+
+/// <summary>A person's claim: this album folder is this album.</summary>
+/// <param name="Folder">An album folder exactly as the album page prints it.</param>
+/// <param name="Release">
+/// Any release of the album, by MBID — whatever a search or a pasted link found.
+/// Only its release group is claimed.
+/// </param>
+public sealed record FolderAlbumRequest(string Folder, Guid Release);
+
+/// <summary>What naming one folder's album did.</summary>
+/// <param name="Album">The album's id in the catalogue, for the page to go to.</param>
+/// <param name="Files">Every file in the folder, all of which are now under the album.</param>
+public sealed record FolderAlbumResponse(string Folder, Guid Album, string Title, int Files, string Detail);
 
 /// <summary>What marking one folder did.</summary>
 /// <param name="Closed">
