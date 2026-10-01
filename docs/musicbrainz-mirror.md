@@ -141,15 +141,19 @@ answering full-text `?query=` requests. It is the expensive half of a mirror:
 download. Worse, it is **not covered by replication** — you would have to
 rebuild it on a schedule of its own, forever.
 
-Fonoteca never asks for it. `IMusicBrainzCatalogue` exposes lookup by MBID and
-nothing else, deliberately: AcoustID supplies the identifier, and choosing
-between candidate recordings is a domain rule in `RecordingCandidates`, not a
-query someone else answers. So the search index would be a quarter of a
-terabyte maintaining an endpoint nothing calls.
+No pass asks for it. AcoustID supplies the identifier, and choosing between
+candidate recordings is a domain rule in `RecordingCandidates`, not a query
+someone else answers. The one caller is the album search on the Identify
+screen (`SearchReleasesAsync`, `SearchReleaseGroupsAsync`), where a person types
+an album name and picks from what comes back. A quarter of a terabyte for that
+one box is not worth it.
 
 The consequence, stated plainly: on this mirror `/ws/2/recording?query=…`
-fails, and the search box on the local website does not work. Lookup and browse
-— everything Fonoteca uses — are straight database reads and work fine.
+fails, the search box on the local website does not work, and so does the album
+search on the Identify screen — reported as the provider error it is rather than
+as "no albums match". Pasting an MBID or a MusicBrainz URL there is a lookup and
+works either way. Lookup and browse — everything the passes use — are straight
+database reads and work fine.
 
 If you ever want search, upstream documents both routes and this setup can grow
 into it; see their README under "Set up search indexes".

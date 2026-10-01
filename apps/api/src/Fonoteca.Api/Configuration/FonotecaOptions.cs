@@ -101,7 +101,7 @@ public sealed class FonotecaOptions : IValidatableObject
     /// <summary>Path to <c>ffmpeg</c>. Resolved from PATH when empty.</summary>
     public string FfmpegPath { get; init; } = "ffmpeg";
 
-    /// <summary>How many files to hash and fingerprint concurrently.</summary>
+    /// <summary>How many files to probe and fingerprint concurrently.</summary>
     [Range(1, 64)]
     public int ScanConcurrency { get; init; } = 4;
 

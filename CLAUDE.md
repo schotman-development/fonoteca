@@ -46,7 +46,10 @@ the rest.
    `LastVerifiedUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
-   is left null **only** when the lookup did not happen. Corollary: widening a
+   is left null **only** when the lookup did not happen. Where a source gains
+   answers over time — a portrait, an article, a banner, a cover — a stamp that
+   found nothing expires after a week (`NothingFoundRetryAfter`,
+   `CoverRetryAfter`); one that found something never does. Corollary: widening a
    lookup is invisible to everything already stamped, so re-asking is a
    hand-written `UPDATE` — narrow it to the rows that need it.
 
@@ -182,9 +185,9 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | identify | `Domain/Identification/AcoustIdSelection.cs` | `Ingest/FpcalcFingerprinter.cs`, `Tagging/AcoustIdTagField.cs` |
 | enrich | `Domain/Catalogue/PrimaryCredits.cs`, `LatinNames.cs` | `Providers/MusicBrainz/MusicBrainzCatalogue.cs` |
 | portraits | `Domain/Catalogue/ArtistNameMatch.cs`, `Abstractions/ArtistPortraitSources.cs` | `Providers/{Wikidata,Qobuz,AudioDb}/*Portraits.cs` |
-| attribute | `Domain/Identification/ReleaseAttribution.cs`, `EditionProof.cs`, `FolderOrder.cs`, `ReleaseFit.cs`, `Catalogue/AlbumFolder.cs` (and its TS twin `ALBUM_FOLDER_DEPTH` in `seating.ts` — change both), `Catalogue/Editions.cs` | `Api/Matching/ComponentCandidates.cs` |
+| attribute | `Domain/Identification/ReleaseAttribution.cs`, `EditionProof.cs`, `FolderOrder.cs`, `ReleaseFit.cs`, `Catalogue/AlbumFolder.cs` (and its TS twin `ALBUM_FOLDER_DEPTH` in `seating.ts` — change both), `Catalogue/Editions.cs`, `Catalogue/TrackTitles.cs` | `Api/Matching/ComponentCandidates.cs` |
 | probe | `Domain/Abstractions/IAudioProbe.cs` | `Ingest/FfprobeAudioProbe.cs` |
-| tag write | `Domain/Catalogue/CatalogueTags.cs` | `Tagging/TagWriter.cs`, `Tagging/CatalogueTagFields.cs` |
+| tag write | `Domain/Catalogue/CatalogueTags.cs`, `FileNaming.cs` | `Tagging/TagWriter.cs`, `Tagging/CatalogueTagFields.cs`, `Api/Library/TagWriteService.Rename.cs` |
 | by-hand matching | `web/src/pages/seating.ts`, `identify.ts` | `Api/Endpoints/CatalogueEndpoints.{AlbumMatching,Identify}.cs` |
 | files & previews | `Domain/Catalogue/FolderRollup.cs`, `FilePreview.cs` | `Api/Library/FileManagerService.cs` |
 | covers | — | `Providers/CoverArt/`, `Api/Endpoints/CatalogueEndpoints.Cover.cs` |
@@ -238,6 +241,21 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   recognises an ensemble by type OR by relation. Billed credits go to
   `ArtistCredit` (`Position`/`JoinPhrase` describe a printed billing line);
   everything else goes to `Relationship`.
+- **A merged MBID is followed, never refused.** WS/2 answers it with the
+  survivor's document, so a different id coming back *is* the merge.
+  `CatalogueWriter.UpsertAsync(…, asked)` folds the stale recording row into the
+  survivor: files and tracks repointed in place before the row goes
+  (`Tracks.RecordingId` cascades, `MediaFiles.TrackId` sets null), its credits
+  dropped, no outcome or decided stamp touched (rule 4), the move journalled as
+  `catalogue.recording.merged`, and a moved file the rule decided, or whose
+  album alone a person named, loses `ReleaseLookupUtc` so its folder is
+  attributed again. Enrichment, the recording decision and attribution
+  all pass `asked`; attribution looks a recording up only where a fetched track
+  list does not print what the browse placed on it (`MergedAsync`), saved in a
+  scope of its own before the component's. `RecordingNotFound` therefore means
+  *deleted*. **Known and not fixed:** a merged *artist* is logged
+  (`ArtistMerged`) and journalled, and its row keeps the old MBID, because moving
+  it touches follows, pictures and discographies.
 - **The artist stage is the only place with a source better than a sleeve**, so
   it overwrites — but only where there is an answer, since MusicBrainz sends `""`
   for absent text and a blank would stamp in the same save. Clamps are on length,
@@ -278,6 +296,12 @@ filed as the CD it resembles is a lie every later screen repeats.
   prove. The length is the probe's, else fpcalc's (hundredths of a second) —
   **so an unprobed folder can prove a CD it cannot contradict**, a gap accepted
   in the plan.
+- **`[silence]` and `[data track]` are positions, not songs** (`TrackTitles`,
+  and its TS twin `PLACEHOLDER_TITLES` in `identify.ts` — change both). One
+  counts towards an edition only where a file holds it — in the proof, the fit,
+  the album page and the incomplete lists — and Identify never seats a file on
+  one by its number alone. The SQL counts spell the two titles out, because a
+  helper inside a projection is a closure.
 - **Order is relative, never a number** (`FolderOrder`): the files' own tags if
   every one is numbered, else numbered names, checked against every official
   edition on shared recordings. Only a *tag* order every official edition
@@ -319,6 +343,12 @@ whether the bytes are intact — splitting them decodes the library twice. At
 objecting *while exiting zero*; that becomes `IntegrityState.Corrupt` and never
 reaches `AudioQuality`, which decides which duplicate to keep. Parallel over a
 claimed page with **deliberately no channel** — see the deadlock gotcha.
+Two readings are not the decoder's to give. A FLAC ending in a 128-byte ID3v1
+tag decodes the tag as a broken last frame, so a complaint about one is asked
+again without it (ffmpeg's `subfile` protocol) — 24 intact FLACs here were
+marked corrupt. And a stream that decodes no frames (`nb_read_frames` absent)
+is `Unreadable`, not intact with its header's numbers. A row a stricter reading
+refuses forgets the `Quality` an earlier pass stored.
 
 **Tag write: everything above this line writes to PostgreSQL.** Copy the library
 elsewhere and none of it exists; this pass is what makes the answers portable.
@@ -339,12 +369,33 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   `DATE` with them, because ATL derives it from the same value as `YEAR`. Without
   that pairing every write correcting a year rolls itself back.
 - **ATL re-renders a date on every save, and its own reading cannot see it.**
-  ID3v2.3's `TDAT` day is dropped on the upgrade to 2.4, "2008-10" gains a first
-  of the month, "12.10.2008" is read the other way round. When the year is not
-  in the plan, TagLib#'s reading of the stored date (`RecordedDate`) must match
-  before and after, or the file is not written — the owner's choice over losing
-  the day. TagLib# itself folds 2.3's `TYER`+`TDAT` month-first; `VerifierReading`
-  puts it back.
+  ID3v2.3's `TDAT` day is dropped on the upgrade to 2.4, a 2.4 "2017" (and
+  `TDOR`) gains a first of January, "2008-10" a first of the month. The writer
+  hands ATL back the precision TagLib# read (`Restate`), and when the year is not
+  in the plan TagLib#'s `RecordedDate` and `OriginalDate` must still match before
+  and after, or the file is not written — the owner's choice over losing the day.
+  A stored `0001-01-01` is read as no date, and an MP3 whose modern tag has no
+  date is dated by its ID3v1 year — the owner's choices too. TagLib#
+  itself folds 2.3's `TYER`+`TDAT` month-first; `VerifierReading` puts it back.
+- **ATL damages what it does not understand, so each reader is held to its own
+  before.** It wrote an encoding byte into every ID3 `UFID` owner (748 MP3s here
+  lost their MusicBrainz id to other readers) — `TaggingDefaults.UfidIsBinary`
+  patches ATL's private list by reflection, a planned `UFID` change repairs a
+  damaged one, and `Id3v2Repair` trims the NUL ATL still ends the id with —
+  MusicBrainz's only; a NUL it cannot take off (another owner's id, a tag it does
+  not walk) refuses the write, since TagLib# cannot see it. The same repair puts
+  back the old ReplayGain `RGAD` frame, which ATL rewrites as text, growing the
+  tag when ATL left no padding. **Both tags, old and new**, the owner's choice
+  for compatibility: ATL empties the ID3v1 year whenever it writes a full date
+  and drops a multi-value genre, and writes no ID3v1 where there was none, so
+  `Id3v1Trailer` writes it in full after every MP3 save — no reader checks it.
+  A journal value holding a NUL is stored as U+2400, since `jsonb` refuses it
+  and a failed journal save after the commit is rule 2 broken. It drops a cover
+  stored inside a Vorbis comment, which TagLib# never sees, so pictures are
+  compared per reader as well as across them — and `FlacCommentPictures` puts
+  it back as a picture block of its own, the owner's choice. And TagLib# 2.3 times an MP3
+  with a LAME `Info` header at double length, so durations are compared per
+  reader too.
 - **A pressing's tags only with a proven pressing.** A file held to its album
   alone gets the album's facts — title, artist, album, album artist (the display
   edition's billing), year (`AlbumYear`), recording and release-group MBIDs, and
@@ -358,6 +409,18 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
 - **No single file may end the run, and the catch is on `Exception`.** Because
   the diff is the worklist, nothing steps over a row that threw. Serial, because
   ATL renders the whole file into a staged sibling.
+- **Then every album folder the run covered is renamed** to `Fonoteca:FileNaming`
+  (`FileNaming`, default `{albumartist}/{album}[ ({year})]/[{disc}-]{track} -
+  {title}`), named from the catalogue — but a file held to its album alone by
+  the track and disc numbers its tags keep — rows first and never over anything,
+  through a link, or a folder holding links. A collaboration lives under its first-billed
+  artist; each other billed artist gets a *relative* directory symlink, journalled
+  — the journal is the only way the pass knows a link is its own; Navidrome
+  follows links by default and lists each linked track twice, hence
+  `ND_SCANNER_FOLLOWSYMLINKS=false` in compose. Unit is the album folder, so a
+  loose file or a folder naming two albums stays put. A file under a track's
+  name (`01.lrc`) goes with it, and an artist folder only respelled takes its
+  pictures along.
 
 ## The by-hand screens
 
@@ -516,11 +579,37 @@ album is found by the next scan and goes through all six passes. **Read the ADR
 before touching this** — most of what looks like an oversight is written up there
 as the next piece of work.
 
-- **No staging directory, and removing it was the point.** Bytes go to a `.part`
+- **No staging directory for a new album, and removing it was the point** — only
+  a download replacing a held album is fetched aside first, below. Bytes go to a `.part`
   sibling — an extension `AudioFormats` does not recognise — and the final name
   exists only after the body is checked against `Content-Length` and atomically
   renamed, so a scan only ever sees whole files. What staging did buy is kept:
   the collision check against a folder the library already holds.
+- **A download of an album the library holds replaces it.** The album is the
+  release group: `HeldAsync` finds the folder (a barcode of any edition, else
+  the cover rule's match — the shop's title also asked without an edition note,
+  "(Deluxe Edition)", never without "(Live)" — on more than half the folder, or
+  the `Artist/Album` it would land in); a folder whose files are filed under
+  another album, or under none, is replaced only once a person confirms it
+  (`Unconfirmed`, then `confirmed`), from a row or a search, the owner's
+  choice — the match misses a shop's "(Live)" and a band billed by its
+  leader's name. Where a search finds nothing that way, one held album of the
+  same title, whatever its billing, is asked about too (`SameTitle`), and a
+  person may say `separate` instead; two are a common title and no question.
+  Whether it is this album is asked before whether it is better — the other
+  order refused somebody else's *Unplugged* as a worse copy of the one held.
+  The offer is compared *before* fetching
+  (`UpgradeReplacement.Offer`: better, or as good with more tracks, never
+  fewer); the album is fetched into the hidden `.fonoteca-downloads/<id>` and
+  moved into the old folder once replaced — the old rip's cue sheets and
+  playlists archived with it, its sleeve kept — or removed, as it is when Qobuz
+  refuses part-way; one kept to resume goes after a week. An interrupted
+  download of the same album resumes instead. **Tracks are counted, never
+  matched by title** — the album is the release group and the reasons to
+  replace are quality and missing tracks, the owner's choice: the shop titles
+  one track "The Chain (Album Version)", and matching refused 15 of 22 real
+  upgrades. The stated cost: a held track the shop's album lacks is archived
+  with the rest.
 - **One album at a time**, about a double-click rather than throughput: two runs
   write the same paths and the loser corrupts the winner's files.
 - **The upgrade list answers two questions from different evidence.** "Is this
@@ -530,17 +619,17 @@ as the next piece of work.
   `UpgradeReason.None` rather than a guess. Guessing from implied bitrate was
   measured and is worse than silence. `m4a` is absent from both sides of the
   lossless split and so reads as lossy, which is the error worth making.
-- **Replacement runs after the download and measures what arrived** — what Qobuz
-  advertises is a ceiling, and this is the last place to take a provider's word
-  for anything when the consequence is deleting music.
+- **Replacement still runs after the download and measures what arrived** — what
+  Qobuz advertises is a ceiling, and this is the last place to take a provider's
+  word for anything when the consequence is deleting music.
 - **Files move to `Fonoteca:ReplacedPath`, outside the library root**, or the
   scan catalogues the archive. **The catalogue is not touched**: removing rows
   for missing files is exactly what the scan does, and a second copy of that logic
   here would be a worse one. It refuses to archive anything it just wrote.
 - **`AllowFileReplacement` is deliberately not `AllowFileMutation`.** Somebody
   who turned the first on to get their files tagged has not agreed to "may take
-  an album away". With the flag off an upgrade still downloads and reports what it
-  *would* have replaced.
+  an album away". With the flag off a download of a held album is refused before
+  anything is fetched, saying whether it was an upgrade.
 - **Download and upgrade are one request**, and both halves come back even on a
   refusal — otherwise somebody cannot tell whether they have two copies or none.
 - **`StagedFileName` clamps a segment to 200 UTF-8 *bytes*** (ext4's limit is 255
@@ -580,7 +669,11 @@ the MusicBrainz group instead. Keyed on `(ArtistId, Source, SourceId)`, because 
 shop rewords its own titles and a title-keyed upsert mints a fresh row each time
 it does. **Every field the source stated is kept**, the barcode above all: it is
 how a later pass recognises the record as one MusicBrainz has since described,
-and dropping it is what made the old shape a one-way door.
+and dropping it is what made the old shape a one-way door. So is the quality it
+states (`HiRes`, `MaximumBitDepth`, `MaximumSamplingRate`): a shop sells one
+record as several products under several barcodes, and the missing shelf folds
+the same artist, title and year into one row showing the best, the rest in
+`Also`, so not wanting the row stops wanting all of them.
 
 **Nothing about a discovered row is judged on the way in** — not the track count,
 not whether the library already holds it. Both are rules about the row rather
@@ -787,16 +880,14 @@ adding stories, because that is what tests it.**
   release**, and a test with one or two files cannot catch it — the producer
   finishes before the channel fills, which is why every existing test stayed green
   while the bug was live.
-- **Tag parsers throw whatever they like, and forty files here make ATL throw
-  `NullReferenceException`.** FLACs with a prepended ID3v2 tag; the trigger is
-  specifically **unsynchronisation**. Ordinary fields still read, which is why
-  stage A sails past and stage B falls over hundreds of files into a run.
-  `TagReader` converts any parser failure into `TagReadFailedException`, and the
-  pass reads that as **do not write to this file** — on these files ATL reports
-  zero pictures where TagLib# finds one, so a forgiving read would let the artwork
-  check compare nothing to nothing and pass. `Corpus.Id3PrefixedFlac` builds one,
-  and the recipe is spelled out there because four near-miss variants do *not*
-  reproduce it.
+- **Tag parsers throw whatever they like.** ATL threw `NullReferenceException`
+  on FLACs with a prepended, **unsynchronised** ID3v2 tag; it is now handed the
+  file from `fLaC` on (`Id3Prefix`), so a write drops that block — the owner's
+  choice — and is refused if the block held the only copy of a picture.
+  `TagReader` still converts any parser failure into `TagReadFailedException`, and
+  the pass reads that as **do not write to this file**. `Corpus.Id3PrefixedFlac`
+  builds one, and the recipe is spelled out there because four near-miss variants
+  do *not* reproduce it.
 - **`pnpm api:test` hangs about one run in three, and the tests have already
   passed when it does.** The hang is in `Fonoteca.Integration.Tests` at process
   exit, *after* success is reported; `dotnet test` buffers output, so "no output"
@@ -808,8 +899,10 @@ adding stories, because that is what tests it.**
   **The workaround, and it is a good one:** xUnit v3 projects are executables, so
   run the binary directly and skip the VSTest bridge —
   `./apps/api/tests/Fonoteca.Integration.Tests/bin/Debug/net10.0/Fonoteca.Integration.Tests`
-  runs the whole suite (349 tests) in seconds rather than the several minutes
-  `dotnet test` takes. Per-class runs are reliable for every class but that one.
+  runs a class in seconds rather than the several minutes `dotnet test` takes.
+  Run it one class at a time: the whole binary at once (602 tests) runs out of
+  PostgreSQL connections or goes idle. Per-class runs are reliable for every
+  class but that one.
   The flag is `-class` with a fully qualified name, not `--filter`.
 - **A running `dotnet run` API stalls `dotnet test`.** The test build wants to
   write `Fonoteca.Api.dll`, the running host holds it, and MSBuild waits rather

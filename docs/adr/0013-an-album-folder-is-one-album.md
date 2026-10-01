@@ -54,7 +54,10 @@ album, untouched, and the rule decides the rest.
 An edition is claimed (`Attributed`, with release and track links) only when
 `EditionProof.Seat` seats it:
 
-- its track count is the folder's file count, and every file takes a slot;
+- its track count is the folder's file count, and every file takes a slot. A
+  `[silence]` or `[data track]` position counts only where a file holds it
+  (`TrackTitles`, added 2026-09-29): a rip that dropped the silence before a
+  hidden track is still a rip of the whole pressing;
 - **every** track is within 100 ms of its printed length, and the printed
   lengths are known and not all whole seconds (a whole second is what a guess
   looks like);
@@ -84,8 +87,9 @@ A folder with no order of its own takes the editions' where they agree.
 This reads tags, which ADR 0011 says are not evidence. They still are not: a
 file's number is compared and shown as *the file's own*, never promoted into the
 catalogue as a position. The tags are read in the pass and stored for every file in the folder
-(`TagTrackNumber`, `TagDiscNumber`), and any failure to read them — forty files
-here make ATL throw — means the names are used instead. A file carrying no
+(`TagTrackNumber`, `TagDiscNumber`), and any failure to read them means the
+names are used instead. (Forty FLACs behind an unsynchronised ID3v2 tag made
+ATL throw; it is now handed those files from `fLaC` on.) A file carrying no
 number of its own is given its place in the folder's settled order when tags
 are written; one that carries a number keeps it.
 

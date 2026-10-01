@@ -65,6 +65,10 @@ day to build.
   website's search box does not work. Accepted: nothing calls it. If tag-based
   matching is ever added as a fallback for files AcoustID cannot identify, this
   decision has to be revisited before that feature is designed, not after.
+  *Amended 2026-10-01:* one caller now exists, the album search on the Identify
+  screen (`SearchReleasesAsync`). It is a person typing and choosing, never a
+  pass, and on a mirror it fails as a provider error; pasting an MBID still
+  works. The decision stands: no pass may search.
 - The mirror is a day stale at worst. Daily rather than hourly because a
   catalogue manager does not need edits from four hours ago, and the schedule is
   one line in a crontab if that changes.

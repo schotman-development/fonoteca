@@ -40,6 +40,17 @@ Any mismatch at step 4 or 5 aborts, leaving the original byte-for-byte
 untouched. Batch operations share a correlation id in the event log, so a whole
 batch is reversible as a unit.
 
+*Amended 2026-10-01:* ATL turned out to damage what it does not understand —
+an encoding byte in every ID3 `UFID` owner, ReplayGain's `RGAD` rewritten as
+text, a cover inside a Vorbis comment dropped, the ID3v1 year emptied. So
+between steps 3 and 4 the writer repairs ATL's output (`Id3v2Repair`,
+`FlacCommentPictures`, `Id3v1Trailer`), and step 5 holds each library to its
+own reading of the original as well as to the other. TagLib# still never
+writes. The repairs are bytes this code writes, and only some are read back:
+both libraries check the pictures and the `UFID` owner; the `RGAD` bytes, the
+NUL trimmed off MusicBrainz's id and the ID3v1 trailer are checked by neither,
+only by the tests' byte comparisons.
+
 ## Consequences
 
 - Two dependencies where one would do, and disagreements between them need

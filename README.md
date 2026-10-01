@@ -2,15 +2,23 @@
 
 A self-hosted music library manager for large libraries (100,000+ tracks).
 
-Four pillars, none of them built yet:
+Four pillars:
 
-1. **Catalogue and dedupe** — scan, hash, fingerprint, identify via AcoustID and
-   MusicBrainz, detect duplicates and rank quality tiers
-2. **Acquisition** — search and download from Qobuz and Deezer
-3. **Upgrade monitoring** — watch for better versions, *arr-style
-4. **Tag editor** — write corrected tags, artwork and MBIDs back to files
+1. **Catalogue and dedupe** — scan, fingerprint, identify via AcoustID and
+   MusicBrainz, measure quality and integrity. Built; hashing, and the dedupe
+   key it would make, are not.
+2. **Acquisition** — search and download from Qobuz. Built, and a download of an
+   album the library already holds replaces it when it is an upgrade and
+   `Fonoteca:AllowFileReplacement` is on; off, that download is refused.
+3. **Upgrade monitoring** — follow an artist, and the Acquire screen lists what
+   is lossy, below hi-res, incomplete or missing. Built.
+4. **Tag editor** — write the catalogue's tags and MBIDs back into the files,
+   put the sleeve beside them, and name the folders after it. Built.
 
-> **Status: scaffold, plus the first four slices of pillar 1.**
+There is no Deezer provider, and that absence is a decision
+(`ArtistPortraitSources.cs`).
+
+> **Status: six passes, six screens, one thing that can spend money.**
 >
 > `POST /api/library/scan` walks the library root and reconciles the catalogue's
 > file list with what is on disk — path, size and modification time, and nothing
@@ -21,13 +29,15 @@ Four pillars, none of them built yet:
 > and a job id: AcoustID allows three requests a second, so a first pass over
 > eight thousand files is tens of minutes. Progress arrives on `JobsHub`.
 >
-> **Tags are only written when `Fonoteca:AllowFileMutation` is enabled, and it
-> defaults to `false`.** With it off the pass still fingerprints, still asks, and
-> still records everything — it just does not write. Enabling it and running
+> **No pass writes to a file unless `Fonoteca:AllowFileMutation` is enabled, and
+> it defaults to `false`.** With it off every pass still fingerprints, still
+> asks, and still records everything — it just does not write. Enabling it and running
 > again then costs no further lookups, which makes the safe default a preview
 > rather than a wasted hour. Take a backup before the first real write: the path
-> is careful (see [ADR 0002](docs/adr/0002-two-tag-libraries.md)) and it is still
-> the only operation here that can destroy anything.
+> is careful (see [ADR 0002](docs/adr/0002-two-tag-libraries.md)) and it can
+> still destroy what a rescan cannot rebuild. Downloads and the file manager are
+> not passes and need no flag; replacing an album the library holds needs
+> `Fonoteca:AllowFileReplacement`, also off by default.
 >
 > **`POST /api/library/enrich`** is the pass after that, and the one that makes
 > a library browsable. It takes each identified file's *stored* fingerprint back
@@ -35,7 +45,8 @@ Four pillars, none of them built yet:
 > made it — so it opens no file, decodes nothing, and runs with the library
 > volume unmounted. `GET /api/catalogue/artists` and the `/library` page are what
 > come out: everyone credited on something you own, including the conductors,
-> orchestras and composers a credit line never mentions.
+> orchestras and composers a credit line never mentions. A recording MusicBrainz
+> has since merged is followed to the one it became.
 >
 > **`POST /api/library/attribute`** decides which album each album folder is,
 > and which pressing only where the audio proves it. A recording of *Sloe Gin*
@@ -56,8 +67,19 @@ Four pillars, none of them built yet:
 > file with no number of its own is given its place in the folder's order when
 > tags are written.
 >
+> **`POST /api/library/probe`** decodes every file once with `ffprobe
+> -count_frames`, which answers two questions together: what quality it is, and
+> whether the bytes are intact. The upgrade list and the choice between
+> duplicates read the first; the second marks a file corrupt.
+>
+> **`POST /api/library/tags`** writes the whole catalogue back into the files —
+> everything above this line lives in PostgreSQL until it does — and then
+> renames each album folder to `Fonoteca:FileNaming`. Nothing automates it.
+>
 > `GET /api/catalogue/albums` and the `/library/albums` page are what come
-> out, including the tracks you are missing. Nothing hashes, probes or downloads.
+> out, including the tracks you are missing. The `/acquire` page buys them from
+> Qobuz; `/rest` serves the library to any OpenSubsonic client, and `/mcp` lets
+> an agent answer the questions the passes refuse.
 
 ## Layout
 
@@ -68,10 +90,10 @@ apps/
       Fonoteca.Api/         minimal API, OpenAPI, SignalR
       Fonoteca.Domain/      PURE — entities, matching, quality ranking.
                             References nothing: no EF, no HttpClient, no System.IO
-      Fonoteca.Ingest/      walk, hash, probe, fingerprint
+      Fonoteca.Ingest/      walk, probe, fingerprint
       Fonoteca.Tagging/     read/write, dry-run diff, undo journal
-      Fonoteca.Providers/   qobuz | deezer | musicbrainz | acoustid
-      Fonoteca.Jobs/        queue abstraction, workers
+      Fonoteca.Providers/   acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb
+      Fonoteca.Jobs/        empty — Hangfire refs, no source (ADR 0007)
       Fonoteca.Data/        EF Core, migrations
     tests/
   web/                  Vite 8 + React 19 + TypeScript 7
@@ -143,10 +165,11 @@ OpenAPI document:
 
 1. Building `Fonoteca.Api` writes `openapi.json` to the repository root.
 2. `pnpm gen:api` turns it into `packages/api-client/src/schema.d.ts`.
-3. That file is **committed**, and CI regenerates it and fails on a diff.
+3. That file is **committed**, and `pnpm gen:api:check` regenerates it and fails on a diff.
 
-So a backend change that the frontend has not caught up with breaks the build,
-rather than returning `undefined` in a browser.
+So a backend change that the frontend has not caught up with fails
+`pnpm gen:api:check` or the typecheck, rather than returning `undefined` in a
+browser.
 
 ## Decisions worth knowing before you change things
 
@@ -154,14 +177,17 @@ rather than returning `undefined` in a browser.
 | --- | --- |
 | [0001](docs/adr/0001-dotnet-backend.md) | .NET 10 — every serious library manager (Roon, Lidarr, Jellyfin) is .NET; the Python tools in this space are manual taggers |
 | [0002](docs/adr/0002-two-tag-libraries.md) | Two tag libraries: ATL.NET writes, TagLib# verifies, disagreement aborts |
-| [0003](docs/adr/0003-custom-design-system.md) | Custom design system, `react` + `react-dom` only — a11y is ours, and axe enforces it in CI |
+| [0003](docs/adr/0003-custom-design-system.md) | Custom design system, `react` + `react-dom` only — a11y is ours, and axe enforces it in `pnpm test` |
 | [0004](docs/adr/0004-musicbrainz-shaped-entity-graph.md) | MusicBrainz-shaped entity graph, because it cannot be retrofitted |
 | [0005](docs/adr/0005-typescript-7.md) | TypeScript 7, with the OpenAPI generator isolated on 5.9 |
 | [0006](docs/adr/0006-musicbrainz-mirror.md) | Mirror MusicBrainz locally, without a search index — and don't try to mirror AcoustID |
 | [0007](docs/adr/0007-identification-in-process.md) | Identification runs in-process, not on a durable queue — the catalogue *is* the worklist |
 | [0008](docs/adr/0008-tanstack-router.md) | TanStack Router, routes in code — a route rename should be a build failure |
+| [0009](docs/adr/0009-one-audio-element-and-a-hand-built-slider.md) | One audio element and a hand-built slider for playback |
+| [0010](docs/adr/0010-command-bar-native-dialog-hand-built-combobox.md) | The command bar is a native `<dialog>` around a hand-built combobox |
 | [0011](docs/adr/0011-the-provider-is-an-authority.md) | A provider is an authority — a Qobuz download states what it delivered, and the download is where that is believed |
 | [0012](docs/adr/0012-opensubsonic.md) | OpenSubsonic under `/rest`, so somebody else's client can play the library — browsing the disk and the catalogue separately, because they are different answers |
+| [0013](docs/adr/0013-an-album-folder-is-one-album.md) | An album folder is one album; a pressing is claimed only on proof |
 
 ## Credentials
 
@@ -197,8 +223,10 @@ it again on every re-scan.
 
 An 8 GB download that expands to ~100 GB of Postgres, a few hours (mostly the
 import, not the download), a free MetaBrainz access token, and it replicates
-itself daily. No *search* index — Fonoteca only ever looks things up by MBID,
-and Solr would be another 250 GB that replication does not maintain.
+itself daily. No *search* index — every pass looks things up by MBID, and Solr
+would be another 250 GB that replication does not maintain. The one thing that
+needs it is the album search on the Identify screen; pasting an MBID there works
+on a mirror too.
 
 Full runbook in [`docs/musicbrainz-mirror.md`](docs/musicbrainz-mirror.md);
 the reasoning, including why AcoustID does *not* get the same treatment, in
@@ -220,7 +248,7 @@ the reasoning, including why AcoustID does *not* get the same treatment, in
   `NoConfidentFit` in `GET /api/catalogue/attribution`, and a track with no album
   falls back to naming its folder — labelled as a folder, not dressed up as an
   album.
-- **Run history is not persisted.** `LastCompleted` for the scan and both passes
+- **Run history is not persisted.** `LastCompleted` for the scan and every pass
   is an in-memory field, forgotten on restart. Making it
   durable means deciding what a run *is* as an entity, which ADR 0007 defers
   along with the job queue.
