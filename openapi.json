@@ -7033,6 +7033,16 @@
               "null",
               "string"
             ]
+          },
+          "also": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },

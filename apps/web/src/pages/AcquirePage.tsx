@@ -17,7 +17,7 @@ import { useApiQuery } from '../useApiQuery.ts'
 import styles from './AcquirePage.module.css'
 import { releaseCover, releaseGroupArt } from './coverArt.ts'
 import { QobuzAlbumDialog, type Replacing } from './QobuzAlbumDialog.tsx'
-import { readiness } from './qobuz.ts'
+import { readiness, unwantedRows } from './qobuz.ts'
 
 type QobuzAlbumSummary = components['schemas']['QobuzAlbumSummary']
 type UpgradeListResponse = components['schemas']['UpgradeListResponse']
@@ -995,10 +995,12 @@ function UnwantButton({ record }: { readonly record: MissingRecord }) {
 
     try {
       if (record.source != null) {
-        await api.post('/api/catalogue/discovered/{id}/monitor', {
-          params: { path: { id: record.releaseGroupId } },
-          json: { monitor: next },
-        })
+        for (const id of unwantedRows(record)) {
+          await api.post('/api/catalogue/discovered/{id}/monitor', {
+            params: { path: { id } },
+            json: { monitor: next },
+          })
+        }
       } else {
         await api.post('/api/catalogue/release-groups/{id}/monitor', {
           params: { path: { id: record.releaseGroupId } },

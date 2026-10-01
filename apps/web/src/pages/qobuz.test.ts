@@ -21,6 +21,7 @@ import {
   formatLabel,
   qualityLabel,
   readiness,
+  unwantedRows,
 } from './qobuz.ts'
 
 const READY = {
@@ -111,4 +112,30 @@ test('a clean album says only what it did', () => {
     }),
     '2 of 2 downloaded',
   )
+})
+
+test('not wanting a folded record changes every shop product it stands for', () => {
+  const record = {
+    releaseGroupId: 'hires',
+    also: ['cd'],
+    title: 'Live At The Blue Note',
+    artist: 'Samara Joy',
+    query: 'Samara Joy Live At The Blue Note',
+    secondaryTypes: [],
+    source: 'qobuz',
+  } as never
+
+  assert.deepEqual(unwantedRows(record), ['hires', 'cd'])
+})
+
+test('a record that folds nothing changes only itself', () => {
+  const record = {
+    releaseGroupId: 'only',
+    title: 'Record',
+    artist: 'Artist',
+    query: 'Artist Record',
+    secondaryTypes: [],
+  } as never
+
+  assert.deepEqual(unwantedRows(record), ['only'])
 })

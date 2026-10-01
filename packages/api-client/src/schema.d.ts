@@ -2242,6 +2242,7 @@ export interface components {
             source?: null | string;
             sourceId?: null | string;
             coverUrl?: null | string;
+            also?: null | string[];
         };
         MissingTrack: {
             /** Format: int32 */

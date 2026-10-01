@@ -1189,6 +1189,15 @@ public sealed class DiscoveredRecord
     /// <summary>How many tracks the source says it has, or null where it did not say.</summary>
     public int? TrackCount { get; set; }
 
+    /// <summary>Whether the source calls it hi-res, or null where the row predates the column.</summary>
+    public bool? HiRes { get; set; }
+
+    /// <summary>The best bit depth the source sells it in, or null where it did not say.</summary>
+    public int? MaximumBitDepth { get; set; }
+
+    /// <summary>The best sample rate the source sells it in, in kHz, or null where it did not say.</summary>
+    public double? MaximumSamplingRate { get; set; }
+
     /// <summary>Somebody wants this record.</summary>
     /// <remarks>
     /// <see cref="ReleaseGroup.Monitored"/>'s counterpart for a record the

@@ -80,7 +80,10 @@ public sealed class QobuzReleaseDiscovery(
                 // which is the exact opposite of that rule's stated bargain that
                 // an unknown count is kept because a silence is not a small
                 // number. No real album has no tracks, so the collapse is safe.
-                album.TrackCount == 0 ? null : album.TrackCount));
+                album.TrackCount == 0 ? null : album.TrackCount,
+                album.HiRes,
+                album.MaximumBitDepth,
+                album.MaximumSamplingRate));
         }
 
         return new DiscoveredReleases(releases, found.Total);

@@ -432,16 +432,46 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.DoesNotContain("Record Nobody Marked", titles);
     }
 
+    /// <summary>
+    /// One record a shop sells as two products is one row, carrying the other.
+    /// </summary>
+    [Fact]
+    public async Task OneRecordSoldAsTwoProductsIsOneRow()
+    {
+        var body = await ListAsync();
+
+        var rows = body.Missing.Where(record => record.Title == "Live At The Blue Note").ToList();
+        Assert.Equal(2, rows.Count);
+
+        // The best quality is shown although the others were found first: the
+        // deepest, then the fastest. The others ride along so that not wanting
+        // the row stops wanting all three.
+        var live = Assert.Single(rows, record => record.Year == 2026);
+        Assert.Equal("hires", live.SourceId);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var others = await db.DiscoveredRecords
+            .Where(record => record.SourceId == "cd" || record.SourceId == "hires-48")
+            .Select(record => record.Id)
+            .ToListAsync(Token);
+        Assert.Equal(others.Select(id => id.Value).Order(), live.Also!.Order());
+
+        // Another year is another record.
+        Assert.Null(Assert.Single(rows, record => record.Year == 2019).Also);
+    }
+
     [Fact]
     public async Task AGapNobodyMarkedIsCountedRatherThanShown()
     {
         var body = await ListAsync();
 
-        // One unmarked gap in the seed. Counted, because an empty shelf has two
-        // opposite causes and only this one is something a person can act on:
-        // "nothing marked" points at the artist page, "nothing missing" is good
-        // news, and the length of `missing` alone cannot tell them apart.
-        Assert.Equal(1, body.UnmonitoredGaps);
+        // Two unmarked gaps in the seed: one catalogue record, and one record a
+        // shop sells twice. Counted, because an empty shelf has two opposite
+        // causes and only this one is something a person can act on: "nothing
+        // marked" points at the artist page, "nothing missing" is good news, and
+        // the length of `missing` alone cannot tell them apart. An unmarked twin
+        // of a record already on the shelf is not a third.
+        Assert.Equal(2, body.UnmonitoredGaps);
     }
 
     [Fact]
@@ -720,6 +750,39 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         var ignored = Artist("Unfollowed Artist");
 
         db.Artists.AddRange(kept, pending, unreachable, ignored);
+
+        // One live album a shop sells three times — two hi-res and CD quality,
+        // three ids, the CD found first and the 24/48 before the 24/96 — and a
+        // same-titled record from
+        // another year, which is another record, wanted with an unmarked twin of
+        // its own. Then a record sold twice that nobody marked: one more
+        // unmarked gap, not two.
+        foreach (var (sourceId, title, year, found, monitored, depth, rate) in new (string, string, int, string, bool, int?, double?)[]
+                 {
+                     ("cd", "Live At The Blue Note", 2026, "2026-09-01T00:00:00Z", true, 16, 44.1),
+                     ("hires-48", "Live At The Blue Note", 2026, "2026-09-01T12:00:00Z", true, 24, 48),
+                     ("hires", "Live At The Blue Note", 2026, "2026-09-02T00:00:00Z", true, 24, 96),
+                     ("older", "Live At The Blue Note", 2019, "2026-09-03T00:00:00Z", true, null, null),
+                     ("older-cd", "Live At The Blue Note", 2019, "2026-09-04T00:00:00Z", false, null, null),
+                     ("unmarked-hires", "Unmarked Live Set", 2020, "2026-09-05T00:00:00Z", false, null, null),
+                     ("unmarked-cd", "Unmarked Live Set", 2020, "2026-09-06T00:00:00Z", false, null, null),
+                 })
+        {
+            db.DiscoveredRecords.Add(new DiscoveredRecord
+            {
+                Id = DiscoveredRecordId.New(),
+                ArtistId = kept.Id,
+                Source = "qobuz",
+                SourceId = sourceId,
+                Title = title,
+                Year = year,
+                Monitored = monitored,
+                MaximumBitDepth = depth,
+                MaximumSamplingRate = rate,
+                FoundUtc = DateTimeOffset.Parse(found, CultureInfo.InvariantCulture),
+                SeenUtc = DateTimeOffset.Parse(found, CultureInfo.InvariantCulture),
+            });
+        }
 
         // Marked as wanted, which is what puts it on the shelf. Everything a
         // first discography browse writes is unmonitored, so without this the

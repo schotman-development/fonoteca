@@ -1220,6 +1220,9 @@ public sealed class EnrichmentService(
                     seen.Barcode = record.Barcode;
                     seen.CoverUrl = record.CoverUrl;
                     seen.TrackCount = record.TrackCount;
+                    seen.HiRes = record.HiRes;
+                    seen.MaximumBitDepth = record.MaximumBitDepth;
+                    seen.MaximumSamplingRate = record.MaximumSamplingRate;
                     seen.SeenUtc = now;
                     continue;
                 }
@@ -1235,6 +1238,9 @@ public sealed class EnrichmentService(
                     Barcode = record.Barcode,
                     CoverUrl = record.CoverUrl,
                     TrackCount = record.TrackCount,
+                    HiRes = record.HiRes,
+                    MaximumBitDepth = record.MaximumBitDepth,
+                    MaximumSamplingRate = record.MaximumSamplingRate,
                     Monitored = Discography.IsNewRelease(followedUtc, record.Year),
                     FoundUtc = now,
                     SeenUtc = now,

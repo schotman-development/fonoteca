@@ -114,13 +114,25 @@ public readonly record struct DiscoveredReleases(
 /// would carry does not exist here, and the title rarely says. The track count
 /// is the only usable signal, which is why it travels.
 /// </param>
+/// <param name="HiRes">
+/// Whether the source calls it hi-res, or null from a source with no such flag.
+/// Qobuz's absent flag arrives as false.
+/// </param>
+/// <param name="MaximumBitDepth">The best bit depth the source sells it in.</param>
+/// <param name="MaximumSamplingRate">
+/// The best sample rate the source sells it in, in kHz as Qobuz report it. With
+/// the depth, what picks which of a record's several products a shelf shows.
+/// </param>
 public readonly record struct DiscoveredRelease(
     string Title,
     int? Year,
     string? Barcode,
     string? SourceId,
     string? CoverUrl,
-    int? TrackCount = null);
+    int? TrackCount = null,
+    bool? HiRes = null,
+    int? MaximumBitDepth = null,
+    double? MaximumSamplingRate = null);
 
 /// <summary>
 /// The sources that can answer "what has this artist released".

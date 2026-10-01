@@ -1829,7 +1829,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             recording: null, work: null, discography: () => [Released("Leave the Light On", 2003)]);
 
         var shop = new StubDiscovery(
-            new DiscoveredRelease("War In My Mind", 2019, "0810020502138", "abc", null, 12));
+            new DiscoveredRelease("War In My Mind", 2019, "0810020502138", "abc", null, 12, false, 16, 44.1));
 
         await EnrichAsync(Build(Answering(Recording), catalogue, releases: shop));
 
@@ -1851,6 +1851,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal("0810020502138", minted.Barcode);
         Assert.Equal("abc", minted.SourceId);
         Assert.Equal(12, minted.TrackCount);
+        Assert.False(minted.HiRes);
+        Assert.Equal(16, minted.MaximumBitDepth);
+        Assert.Equal(44.1, minted.MaximumSamplingRate);
 
         // And it is not in the catalogue's own album table, which is the whole
         // point: a shop's row is a question, not a record the catalogue holds.
@@ -1893,7 +1896,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             Answering(Recording),
             catalogue,
             releases: new StubDiscovery(new DiscoveredRelease(
-                "War In My Mind (Deluxe)", 2019, "0810020502138", "abc", "art", 14))));
+                "War In My Mind (Deluxe)", 2019, "0810020502138", "abc", "art", 14, true, 24, 96))));
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
@@ -1904,6 +1907,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal("0810020502138", row.Barcode);
         Assert.Equal("art", row.CoverUrl);
         Assert.Equal(14, row.TrackCount);
+        Assert.True(row.HiRes);
+        Assert.Equal(24, row.MaximumBitDepth);
+        Assert.Equal(96, row.MaximumSamplingRate);
 
         // And it is still the row the first browse wrote, so a reworded title
         // cannot make a record you have always known about look newly arrived.

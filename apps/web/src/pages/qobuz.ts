@@ -1,6 +1,7 @@
 import type { components } from '@fonoteca/api-client'
 
 type QobuzStatus = components['schemas']['QobuzStatusResponse']
+type MissingRecord = components['schemas']['MissingRecord']
 type TrackOutcome = components['schemas']['TrackOutcome']
 
 /**
@@ -157,4 +158,14 @@ export function downloadSummary(result: {
   if (failed > 0) parts.push(`${failed} failed`)
 
   return parts.join(', ')
+}
+
+/**
+ * Every row not wanting a missing record has to change: the one shown and every
+ * other shop product folded into it (`also`) — a hi-res and a CD-quality edition
+ * of one record are two rows underneath, and turning off only the first would
+ * leave the second on the shelf.
+ */
+export function unwantedRows(record: MissingRecord): readonly string[] {
+  return [record.releaseGroupId, ...(record.also ?? [])]
 }

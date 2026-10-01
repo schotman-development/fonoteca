@@ -754,32 +754,65 @@ public static class QobuzEndpoints
                 group.Secondary))
             .ToList();
 
+        var shopWanted = shopGaps.Where(record => record.Monitored).ToList();
+
+        // One row per record, not per product. A shop sells one record as
+        // several — Samara Joy's live album is two Qobuz products, 24/96 and
+        // 16/44.1, under two barcodes — and each is its own discovered row. Same
+        // artist, same title, same year is one record on this shelf; the others
+        // ride along in `Also` so that not wanting the row stops wanting every
+        // one of them, rather than leaving a twin on the shelf. The best quality
+        // the shop states is the one shown; a row found before the shop's
+        // quality was kept states none, and ties go to the first found.
+        var folded = shopWanted
+            .GroupBy(SameRecord)
+            .Select(group => group
+                .OrderByDescending(record => record.MaximumBitDepth ?? 0)
+                .ThenByDescending(record => record.MaximumSamplingRate ?? 0)
+                .ThenBy(record => record.FoundUtc)
+                .ThenBy(record => record.SourceId, StringComparer.Ordinal)
+                .ToList())
+            .Select(products => new MissingRecord(
+                products[0].Id.Value,
+                null,
+                products[0].Title,
+                names[products[0].ArtistId],
+                products[0].Year,
+                Join(names[products[0].ArtistId], products[0].Title),
+                null,
+                [],
+                products[0].Source,
+                products[0].SourceId,
+                products[0].CoverUrl,
+                products.Count > 1 ? [.. products.Skip(1).Select(record => record.Id.Value)] : null));
+
         // Interleaved rather than appended: the ordering that earns its place
         // here keeps an artist's records adjacent, and a shop's row is one of
         // that artist's records like any other.
         var wanted = records
-            .Concat(shopGaps.Where(record => record.Monitored).Select(record => new MissingRecord(
-                record.Id.Value,
-                null,
-                record.Title,
-                names[record.ArtistId],
-                record.Year,
-                Join(names[record.ArtistId], record.Title),
-                null,
-                [],
-                record.Source,
-                record.SourceId,
-                record.CoverUrl)))
+            .Concat(folded)
             .OrderBy(record => record.Artist, StringComparer.OrdinalIgnoreCase)
             .ThenByDescending(record => record.Year ?? int.MaxValue)
             .ThenBy(record => record.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Counted in records as the shelf is: unmarked twins are one record,
+        // and a twin of one already on the shelf is not another missing.
+        var shelved = shopWanted.Select(SameRecord).ToHashSet();
+
         return (
             followed.Count,
             unbrowsed,
-            gaps.Count + shopGaps.Count - wanted.Count,
+            gaps.Count - records.Count + shopGaps
+                .Where(record => !record.Monitored)
+                .Select(SameRecord)
+                .Where(key => !shelved.Contains(key))
+                .Distinct()
+                .Count(),
             wanted);
+
+        static (ArtistId, string, int?) SameRecord(DiscoveredRecord record) =>
+            (record.ArtistId, record.Title.Trim().ToUpperInvariant(), record.Year);
 
         // Local, because it needs `credited`, `groups` and `discovered` and is
         // read once. Per artist, since the catalogue a shop's row is compared
@@ -1253,6 +1286,12 @@ public sealed record UpgradeListResponse(
 /// there is for one of these rows — and dropping it, as the old shape did, is
 /// what left 13 of one artist's 31 rows permanently showing a monogram.
 /// </param>
+/// <param name="Also">
+/// The other shop products this row stands for: the same artist, title and year
+/// sold again under another id (a hi-res and a CD-quality edition). Not wanting
+/// the row means not wanting these too. Null where there are none, and always
+/// for a MusicBrainz row.
+/// </param>
 public sealed record MissingRecord(
     Guid ReleaseGroupId,
     Guid? Mbid,
@@ -1264,7 +1303,8 @@ public sealed record MissingRecord(
     IReadOnlyList<string> SecondaryTypes,
     string? Source = null,
     string? SourceId = null,
-    string? CoverUrl = null);
+    string? CoverUrl = null,
+    IReadOnlyList<Guid>? Also = null);
 
 /// <summary>An album held in part, with what is missing from it named.</summary>
 /// <param name="AlbumId">The album (release group) the folder's files are held to.</param>
