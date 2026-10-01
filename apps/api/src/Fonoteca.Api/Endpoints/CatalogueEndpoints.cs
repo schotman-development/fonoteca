@@ -1333,7 +1333,7 @@ public static partial class CatalogueEndpoints
                     $"MusicBrainz has no artist {mbid.Value}. The id was read out of what you "
                     + "pasted without checking what kind of thing it names, so the commonest "
                     + "cause is a release or recording URL rather than an artist one — check the "
-                    + "address says /artist/. Otherwise the artist has been merged away.",
+                    + "address says /artist/. Otherwise the artist has been deleted.",
                 statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -3346,17 +3346,18 @@ public static partial class CatalogueEndpoints
         {
             recording = await musicBrainz.GetRecordingAsync(mbid, cancellationToken).ConfigureAwait(false);
 
-            // The recording the person chose has been merged or deleted since the
-            // candidate list was drawn. Nothing here can repair that, and writing
-            // the link anyway would put an MBID in the catalogue that resolves to
-            // nothing.
+            // The recording the person chose has been deleted since the candidate
+            // list was drawn. Nothing here can repair that, and writing the link
+            // anyway would put an MBID in the catalogue that resolves to nothing.
+            // A merged one does not land here: WS/2 redirects to the recording it
+            // was merged into, and the writer below folds the old row into it.
             if (recording is null)
             {
                 return TypedResults.Problem(
                     title: "No such recording",
                     detail:
-                        $"MusicBrainz no longer holds recording {mbid}. It has probably been "
-                        + "merged; ask for the candidates again to see where it went.",
+                        $"MusicBrainz no longer holds recording {mbid}. It has been deleted; "
+                        + "ask for the candidates again.",
                     statusCode: StatusCodes.Status404NotFound);
             }
 
@@ -3422,9 +3423,10 @@ public static partial class CatalogueEndpoints
             // Highest score among the clusters that name the chosen recording,
             // ties broken by id. The same order `RecordingCandidates` collapses
             // by, and for the same reason: a rerun must not be able to change its
-            // mind about which of two equal answers it took.
+            // mind about which of two equal answers it took. Either id names it:
+            // AcoustID's links trail MusicBrainz's merges.
             cluster = matches
-                .Where(match => match.Recordings.Any(link => link.Id == mbid))
+                .Where(match => match.Recordings.Any(link => link.Id == mbid || link.Id == recording.Id))
                 .OrderByDescending(match => match.Score)
                 .ThenBy(match => match.AcoustId)
                 .Select(match => (AcoustId?)new AcoustId(match.AcoustId))
@@ -3435,8 +3437,8 @@ public static partial class CatalogueEndpoints
         // no summary to report it in.
         var artists = new HashSet<Mbid>();
 
-        row.RecordingId = await new CatalogueWriter(db, artists)
-            .UpsertAsync(recording, work, cancellationToken)
+        row.RecordingId = await new CatalogueWriter(db, artists, clock)
+            .UpsertAsync(recording, work, cancellationToken, mbid)
             .ConfigureAwait(false);
 
         row.RecordingLookupUtc = now;
@@ -3499,7 +3501,7 @@ public static partial class CatalogueEndpoints
             }
         }
 
-        await Journal(events, row, mbid, cluster, caller, now, correlationId, cancellationToken)
+        await Journal(events, row, recording.Id, cluster, caller, now, correlationId, cancellationToken)
             .ConfigureAwait(false);
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -3508,7 +3510,7 @@ public static partial class CatalogueEndpoints
             id,
             row.AcoustIdOutcome.ToString(),
             row.EnrichmentOutcome.ToString(),
-            mbid.Value,
+            recording.Id.Value,
             recording.Title,
             cluster?.Value,
             tag,
@@ -3683,8 +3685,9 @@ public static partial class CatalogueEndpoints
                     .GetReleaseAsync(id, cancellationToken)
                     .ConfigureAwait(false);
 
-                // Merged away between the browse and the lookup, which is
-                // ordinary rather than exceptional on a mirror mid-replication.
+                // Deleted between the browse and the lookup, which is ordinary
+                // rather than exceptional on a mirror mid-replication. A merged
+                // one is not null: the lookup follows the merge.
                 if (release is not null) fetched.Add(release);
             }
         }
@@ -4019,8 +4022,8 @@ public static partial class CatalogueEndpoints
             return TypedResults.Problem(
                 title: "No such release",
                 detail:
-                    $"MusicBrainz no longer holds release {mbid}. It has probably been merged; "
-                    + "ask for the candidates again to see where it went.",
+                    $"MusicBrainz no longer holds release {mbid}. It has been deleted; "
+                    + "ask for the candidates again.",
                 statusCode: StatusCodes.Status404NotFound);
         }
 

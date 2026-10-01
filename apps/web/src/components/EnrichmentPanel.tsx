@@ -257,7 +257,7 @@ export function EnrichmentPanel({ onEnriched }: { readonly onEnriched?: () => vo
  * The two shortfalls are shown apart because they mean opposite things. A
  * cluster with no MusicBrainz recording is a gap in AcoustID's links that
  * submitting to them would close; a recording MusicBrainz no longer has was
- * merged away since AcoustID last saw it, and nothing here can fix that.
+ * deleted since AcoustID last saw it, and nothing here can fix that.
  */
 function Result({ summary }: { readonly summary: Summary }) {
   return (
@@ -280,8 +280,8 @@ function Result({ summary }: { readonly summary: Summary }) {
 
       {summary.recordingNotFound > 0 ? (
         <Text size="xs" tone="tertiary">
-          {summary.recordingNotFound.toLocaleString()} named a recording MusicBrainz has since
-          merged away.
+          {summary.recordingNotFound.toLocaleString()} named a recording MusicBrainz no longer
+          holds.
         </Text>
       ) : null}
 

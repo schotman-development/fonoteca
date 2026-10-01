@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Domain.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fonoteca.Api.Library;
@@ -32,12 +34,23 @@ namespace Fonoteca.Api.Library;
 /// set it discards. A parameter rather than a field on the writer because the
 /// lifetime differs — the pass accumulates across a whole run.
 /// </param>
-internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> artistsTouched)
+/// <param name="clock">Stamps the journal entry a merge leaves.</param>
+internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> artistsTouched, IClock clock)
 {
+    /// <summary>The journal entry a merged recording leaves, subject the MBID that went away.</summary>
+    public const string MergedEvent = "catalogue.recording.merged";
+
+    /// <param name="asked">
+    /// The MBID the caller asked MusicBrainz about, where it had one. WS/2 answers
+    /// a merged MBID with a redirect to the recording it was merged into, so
+    /// <paramref name="source"/> can carry a different id — and when it does, the
+    /// catalogue's row for the asked one is stale and is folded into this one.
+    /// </param>
     public async Task<RecordingId> UpsertAsync(
         MusicBrainzRecording source,
         MusicBrainzWork? work,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Mbid? asked = null)
     {
         var workRow = work is null
             ? null
@@ -72,7 +85,111 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
 
         await ApplyCreditsAsync(recording, workRow, credits, cancellationToken).ConfigureAwait(false);
 
+        if (asked is { } old && old != source.Id)
+        {
+            await AbsorbAsync(old, recording, cancellationToken).ConfigureAwait(false);
+        }
+
         return recording.Id;
+    }
+
+    /// <summary>
+    /// Moves everything that hangs off the row for a merged MBID onto the
+    /// recording it was merged into, and removes that row.
+    /// </summary>
+    /// <remarks>
+    /// <b>A merge renames an answer; it does not change it.</b> Whoever linked a
+    /// file — the rule, a person, an agent — said "this audio is recording X",
+    /// and MusicBrainz merging X into Y says X and Y were always one recording.
+    /// So no outcome and no decided stamp is touched: a person's answer stays a
+    /// person's. The journal entry, by the system, is what records that the id
+    /// moved and which files it moved.
+    ///
+    /// <b>The old row cannot simply take the new MBID.</b> The survivor usually
+    /// exists already — a stored edition printed it — and <c>IX_Recordings_Mbid</c>
+    /// is unique, so the references move and the old row goes.
+    ///
+    /// <b>Tracks move in place, never delete-and-add.</b> <c>MediaFiles.TrackId</c>
+    /// is <c>ON DELETE SET NULL</c>, so a fresh track id would silently strip the
+    /// position off every file seated on it. <c>Tracks.RecordingId</c> is also
+    /// <c>ON DELETE CASCADE</c>, which is why the tracks are repointed before the
+    /// old row is removed rather than after.
+    ///
+    /// The old row's credits and relationships are dropped rather than moved: the
+    /// survivor's were just rebuilt from MusicBrainz, and moving them would bill
+    /// every artist twice.
+    ///
+    /// Moved files the attribution worklist would take — the rule's, and those
+    /// whose album alone a person or agent named — lose <c>ReleaseLookupUtc</c>,
+    /// which puts their folder back through attribution: a file whose recording
+    /// was merged away is on no stored edition's track list and could not prove a
+    /// pressing. A file a person seated keeps its stamp; its track moved with it.
+    /// </remarks>
+    private async Task AbsorbAsync(Mbid old, Recording survivor, CancellationToken cancellationToken)
+    {
+        var stale = await db.Recordings
+            .FirstOrDefaultAsync(r => r.Mbid == old, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (stale is null || stale.Id == survivor.Id) return;
+
+        var files = await db.MediaFiles
+            .Where(f => f.RecordingId == stale.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var file in files)
+        {
+            file.RecordingId = survivor.Id;
+
+            if (file.ReleaseDecidedUtc is null
+                || file.AttributionOutcome is ReleaseAttributionOutcome.AlbumByPerson or ReleaseAttributionOutcome.AlbumByAgent)
+            {
+                file.ReleaseLookupUtc = null;
+            }
+        }
+
+        var tracks = await db.Tracks
+            .Where(t => t.RecordingId == stale.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var track in tracks)
+        {
+            db.Entry(track).Property(t => t.RecordingId).CurrentValue = survivor.Id;
+        }
+
+        db.ArtistCredits.RemoveRange(await db.ArtistCredits
+            .Where(c => c.RecordingId == stale.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
+
+        db.Relationships.RemoveRange(await db.Relationships
+            .Where(r => r.RecordingId == stale.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
+
+        db.Recordings.Remove(stale);
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            from = old.Value,
+            to = survivor.Mbid?.Value,
+            files = files.Select(f => f.Id.Value).ToList(),
+            tracks = tracks.Count,
+        });
+
+        await new EventLog(db)
+            .AppendAsync(
+                DomainEvent.Create(
+                    MergedEvent,
+                    RelationshipTargets.Recording,
+                    old.Value.ToString(),
+                    SystemCallerContext.SystemId,
+                    StoreTime.ToStorePrecision(clock.UtcNow),
+                    payload),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<Work> UpsertWorkAsync(

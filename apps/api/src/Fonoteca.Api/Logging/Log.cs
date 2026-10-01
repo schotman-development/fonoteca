@@ -267,7 +267,7 @@ internal static partial class Log
         EventId = 1251,
         Level = LogLevel.Information,
         Message = "Enrichment finished ({JobId}): {Linked} linked, {NoRecording} clusters with no "
-            + "MusicBrainz recording, {NotFound} recordings merged away, {Failed} failed; "
+            + "MusicBrainz recording, {NotFound} recordings MusicBrainz no longer holds, {Failed} failed; "
             + "{Recordings} recordings and {Artists} artists looked up, {Described} artists "
             + "described, in {ElapsedMs}ms")]
     public static partial void EnrichmentCompleted(
@@ -521,6 +521,17 @@ internal static partial class Log
         string path,
         int files,
         int worthFetching);
+
+    /// <remarks>
+    /// Warning: the artist row still carries the MBID that went away, and nothing
+    /// here moves artists yet. The journal has the same fact as
+    /// <c>catalogue.artist.merged</c>.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1266,
+        Level = LogLevel.Warning,
+        Message = "MusicBrainz merged artist {From} ({Artist}) into {To}; the row keeps the old MBID")]
+    public static partial void ArtistMerged(ILogger logger, Guid from, string artist, Guid to);
 
     [LoggerMessage(
         EventId = 1280,

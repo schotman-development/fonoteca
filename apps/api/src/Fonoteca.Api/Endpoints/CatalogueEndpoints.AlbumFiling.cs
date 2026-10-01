@@ -219,7 +219,7 @@ public static partial class CatalogueEndpoints
             {
                 return TypedResults.Problem(
                     title: "No such album",
-                    detail: $"MusicBrainz lists no editions of album {id}. It may have been merged.",
+                    detail: $"MusicBrainz lists no editions of album {id}. It may have been deleted.",
                     statusCode: StatusCodes.Status404NotFound);
             }
 
@@ -485,7 +485,7 @@ public static partial class CatalogueEndpoints
                     return TypedResults.Problem(
                         title: "No such release",
                         detail:
-                            $"MusicBrainz no longer holds release {id}. It has probably been merged; "
+                            $"MusicBrainz no longer holds release {id}. It has been deleted; "
                             + "read the album's track list again.",
                         statusCode: StatusCodes.Status404NotFound);
                 }

@@ -348,12 +348,12 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     }
 
     /// <summary>
-    /// An artist MusicBrainz has merged away is an answer, not a failure — the
+    /// An artist MusicBrainz has deleted is an answer, not a failure — the
     /// same arm every other lookup here takes, and what lets the pass stamp the
     /// row and stop asking.
     /// </summary>
     [Fact]
-    public async Task AnArtistThatHasBeenMergedAwayComesBackNull()
+    public async Task AnArtistThatHasBeenDeletedComesBackNull()
     {
         var (catalogue, _) = Build(_ => StubHttpHandler.Json(HttpStatusCode.NotFound, "{}"));
 
@@ -405,7 +405,7 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     }
 
     /// <summary>
-    /// An MBID that AcoustID still points at can have been merged away hours
+    /// An MBID that AcoustID still points at can have been deleted hours
     /// ago. That is an answer, not a failure — a batch of 100,000 files cannot
     /// treat it as one.
     /// </summary>
@@ -417,6 +417,25 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
             """{"error":"Not Found","help":"For usage, please see: https://musicbrainz.org/development/mmd"}"""));
 
         Assert.Null(await catalogue.GetRecordingAsync(RecordingId, Token));
+    }
+
+    /// <summary>
+    /// A merged MBID is answered with a redirect to the recording it became, and
+    /// what arrives is that recording's document. The id reported is the
+    /// document's, never the one asked for — the difference is how every caller
+    /// tells a merge happened.
+    /// </summary>
+    [Fact]
+    public async Task AMergedRecordingComesBackUnderItsNewId()
+    {
+        var (catalogue, _) = Build(Recorded("recording-lower-your-eyelids.json"));
+
+        var asked = new Mbid(Guid.Parse("0b304971-9f84-485b-9f34-50f12004cf0d"));
+
+        var recording = await catalogue.GetRecordingAsync(asked, Token);
+
+        Assert.NotNull(recording);
+        Assert.Equal(RecordingId, recording.Id);
     }
 
     [Fact]

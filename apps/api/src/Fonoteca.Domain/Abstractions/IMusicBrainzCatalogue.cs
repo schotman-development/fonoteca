@@ -165,7 +165,10 @@ public interface IMusicBrainzCatalogue
     /// artists, and they change on the timescale of MusicBrainz edits rather
     /// than of scans.
     /// </remarks>
-    /// <returns>Null when MusicBrainz has no such artist — merged away, or deleted.</returns>
+    /// <returns>
+    /// Null when MusicBrainz has deleted the artist. A merged one is not null: it
+    /// comes back under the id it was merged into.
+    /// </returns>
     /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
     /// <exception cref="ProviderRejectedException">The request was refused.</exception>
     Task<MusicBrainzArtist?> GetArtistAsync(

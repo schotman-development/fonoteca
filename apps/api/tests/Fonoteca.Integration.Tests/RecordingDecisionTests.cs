@@ -306,6 +306,64 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
+    /// Choosing a recording MusicBrainz has since merged links the survivor and
+    /// folds the old row into it.
+    /// </summary>
+    /// <remarks>
+    /// The candidate list can be minutes old, and the MBID a person clicks can
+    /// have been merged in between. The file already linked to the old row is
+    /// the one this would otherwise strand on a recording no edition prints.
+    /// </remarks>
+    [Fact]
+    public async Task ChoosingAMergedRecordingLinksTheSurvivorAndFoldsTheOldRow()
+    {
+        SkipWithoutTools();
+
+        var id = await SeedAsync("Bootlegs/20 Merged.flac");
+        var survivor = new Mbid(new Guid("18ca3bc6-b646-4a6b-82bc-07584bd28e95"));
+        var earlier = MediaFileId.New();
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var old = new Recording { Id = RecordingId.New(), Title = "Old", Mbid = Chosen };
+            seed.Recordings.Add(old);
+
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = earlier,
+                Path = "Bootlegs/21 Earlier.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                RecordingId = old.Id,
+                EnrichmentOutcome = EnrichmentOutcome.Linked,
+                ReleaseLookupUtc = DateTimeOffset.UtcNow,
+            });
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        await using var factory = FactoryWith(
+            allowMutation: false,
+            new StubClusters(unavailable: false),
+            new StubCatalogue(knowsNothing: false, mergedInto: survivor));
+
+        var decision = await DecideAsync(factory, id, Answer(Chosen));
+
+        // The cluster AcoustID names is still found by the id it knows.
+        Assert.Equal(survivor.Value, decision.Recording);
+        Assert.Equal(ChosenCluster, decision.AcoustId);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = await db.Recordings.SingleAsync(Token);
+        Assert.Equal(survivor, recording.Mbid);
+
+        var files = await db.MediaFiles.ToListAsync(Token);
+        Assert.All(files, file => Assert.Equal(recording.Id, file.RecordingId));
+        Assert.Null(files.Single(file => file.Id == earlier).ReleaseLookupUtc);
+    }
+
+    /// <summary>
     /// A decided file is out of reach of the identification worklist.
     /// </summary>
     /// <remarks>
@@ -395,7 +453,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     /// <remarks>
     /// The candidate list is recovered from a live lookup rather than read back,
     /// so it can be minutes old by the time somebody answers it and MusicBrainz
-    /// merges recordings constantly. Writing the link anyway would put an MBID in
+    /// deletes recordings. Writing the link anyway would put an MBID in
     /// the catalogue that resolves to nothing.
     /// </remarks>
     [Fact]
@@ -403,7 +461,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     {
         SkipWithoutTools();
 
-        var id = await SeedAsync("Bootlegs/14 Merged away.flac");
+        var id = await SeedAsync("Bootlegs/14 Deleted.flac");
 
         await using var factory = FactoryWith(allowMutation: false, knowsNothing: true);
         using var client = factory.CreateClient();
@@ -1029,7 +1087,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>Names whatever recording it is asked about, or holds nothing at all.</summary>
-    private sealed class StubCatalogue(bool knowsNothing) : IMusicBrainzCatalogue
+    private sealed class StubCatalogue(bool knowsNothing, Mbid? mergedInto = null) : IMusicBrainzCatalogue
     {
         /// <summary>Recording lookups that reached it — one per candidate, the expensive half.</summary>
         public int Calls { get; private set; }
@@ -1058,10 +1116,12 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         {
             Calls++;
 
+            // A merged MBID is answered under the recording it became, as WS/2's
+            // redirect delivers it.
             return Task.FromResult(knowsNothing
                 ? null
                 : new MusicBrainzRecording(
-                    id,
+                    mergedInto ?? id,
                     "Burn This Disco Out",
                     null,
                     TimeSpan.FromSeconds(Corpus.DurationSeconds),

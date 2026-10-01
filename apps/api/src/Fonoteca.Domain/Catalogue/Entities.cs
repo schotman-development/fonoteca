@@ -477,7 +477,7 @@ public sealed class MediaFile
     /// The enrichment worklist, and a timestamp rather than
     /// <c>RecordingId IS NULL</c> for exactly the reason
     /// <see cref="AcoustIdCheckedUtc"/> is not <c>AcoustId IS NULL</c>: a library
-    /// contains audio AcoustID knows and MusicBrainz has since merged away, and
+    /// contains audio AcoustID knows and MusicBrainz has since deleted, and
     /// keying the worklist on the answer re-asks about every one of them on every
     /// pass forever, at a third of a second each.
     /// </remarks>
@@ -743,8 +743,9 @@ public enum AcoustIdOutcome
 /// The sibling of <see cref="AcoustIdOutcome"/> and there for the same reason:
 /// four ways of having no artist that invite four different follow-ups. "The
 /// cluster names no recording" is a gap in AcoustID's links that submitting to
-/// them would fix; "MusicBrainz has no such recording" is an MBID merged away
-/// since AcoustID last saw it; "the lookup failed" is transient and will retry.
+/// them would fix; "MusicBrainz has no such recording" is an MBID deleted
+/// since AcoustID last saw it (a merged one is followed to the recording it
+/// became); "the lookup failed" is transient and will retry.
 /// One null <c>RecordingId</c> answers none of those, and on a library where
 /// most files resolve, the ones that do not are the only interesting rows.
 /// </remarks>

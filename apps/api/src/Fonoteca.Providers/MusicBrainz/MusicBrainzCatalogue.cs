@@ -401,8 +401,8 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
 
         // Null is the 404 arm, which for this browse means the artist is gone —
         // indistinguishable from one credited with nothing, and the caller
-        // treats both the same way. Not complete: an MBID merged into another
-        // artist is a 404 too, and says nothing about their records.
+        // treats both the same way. A merged MBID is not a 404: WS/2 follows
+        // the merge and answers for the artist it became.
         return groups ?? new MusicBrainzDiscography([], false);
     }
 
@@ -426,7 +426,7 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// <paramref name="id"/> is null for the one call that is not a lookup by
     /// identifier, and that nullability is load-bearing rather than cosmetic: the
     /// 404 arm below turns "MusicBrainz no longer has this" into a null answer,
-    /// which is right for an MBID that has been merged away and badly wrong for a
+    /// which is right for an MBID that has been deleted and badly wrong for a
     /// search — a server with no search index answers 404, and swallowing it
     /// would report "no albums match your query" for a mirror that cannot search
     /// at all.
@@ -459,8 +459,10 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         catch (HttpError error) when (id is not null && error.Status == HttpStatusCode.NotFound)
         {
             // Not a failure. An MBID AcoustID still points at can have been
-            // merged away hours ago, and "MusicBrainz no longer has this" is an
-            // answer the caller can act on.
+            // deleted hours ago, and "MusicBrainz no longer has this" is an
+            // answer the caller can act on. A merged one never lands here: WS/2
+            // answers it with a redirect, the handler follows it, and the
+            // document carries the id of the recording it was merged into.
             ProviderLog.MusicBrainzNotFound(_logger, entityType, id!.Value.Value);
             return null;
         }

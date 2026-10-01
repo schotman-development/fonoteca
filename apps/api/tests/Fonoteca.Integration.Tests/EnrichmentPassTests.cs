@@ -4,6 +4,7 @@ using Fonoteca.Api.Realtime;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Domain.Identification;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -197,7 +198,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     /// <summary>
     /// Both shortfalls are answers rather than errors, and are told apart on the
     /// row — a cluster nobody has linked to MusicBrainz invites submitting one,
-    /// a merged-away MBID does not.
+    /// a deleted MBID does not.
     /// </summary>
     [Fact]
     public async Task ClustersWithNoRecordingAndRecordingsMusicBrainzLostAreDistinguished()
@@ -359,6 +360,245 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
         Assert.Equal(EnrichmentOutcome.LinkedByPerson, file.EnrichmentOutcome);
         Assert.NotNull(file.RecordingId);
+    }
+
+    /// <summary>
+    /// A recording MusicBrainz merged into another moves everything it held onto
+    /// the survivor, and nobody's answer changes hands.
+    /// </summary>
+    /// <remarks>
+    /// The shape of the three files found on 2026-09-28: the survivor already has
+    /// a row, because a stored edition printed it, so the old row cannot take
+    /// the new MBID and must be folded in. The seated file is the one that loses
+    /// most if this is done carelessly — <c>Tracks.RecordingId</c> cascades and
+    /// <c>MediaFiles.TrackId</c> sets null, so a track deleted and re-added
+    /// strips the file's position without a word.
+    /// </remarks>
+    [Fact]
+    public async Task AMergedRecordingMovesEveryFileAndTrackToTheSurvivor()
+    {
+        await SeedPersonFiledAsync("Concertgebouw/Beethoven 1/01 - Adagio molto.flac");
+
+        var survivorMbid = Mb("18ca3bc6-b646-4a6b-82bc-07584bd28e95");
+        MediaFileId seated, ruleOwned, albumByHand;
+        TrackId track;
+        RecordingId survivorRow;
+        DateTimeOffset decided = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var old = await seed.Recordings.SingleAsync(Token);
+
+            var survivor = new Recording { Id = RecordingId.New(), Title = "Survivor", Mbid = survivorMbid };
+            survivorRow = survivor.Id;
+            seed.Recordings.Add(survivor);
+
+            var release = new Release { Id = ReleaseId.New(), Title = "Symphonies", Mbid = Mb("a0000000-0000-4000-8000-000000000001") };
+            seed.Releases.Add(release);
+
+            track = TrackId.New();
+            seed.Tracks.Add(new Track { Id = track, ReleaseId = release.Id, RecordingId = old.Id, Position = 1 });
+
+            var artist = new Artist { Id = ArtistId.New(), Name = "Old credit", Mbid = Mb("a0000000-0000-4000-8000-000000000002") };
+            seed.Artists.Add(artist);
+            seed.ArtistCredits.Add(new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = artist.Id, RecordingId = old.Id, Position = 0 });
+
+            // A typed link on the old row too, which holds it in place: the
+            // foreign key is NO ACTION, so a row still linked cannot be removed.
+            seed.Relationships.Add(new Relationship
+            {
+                Id = Guid.CreateVersion7(),
+                SourceType = RelationshipTargets.Artist,
+                SourceId = artist.Id.Value,
+                TargetType = RelationshipTargets.Recording,
+                TargetId = old.Id.Value,
+                Type = "conductor",
+                ArtistId = artist.Id,
+                RecordingId = old.Id,
+            });
+
+            seated = MediaFileId.New();
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = seated,
+                Path = "Concertgebouw/Beethoven 1/02 - Allegro.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                RecordingId = old.Id,
+                RecordingLookupUtc = decided,
+                EnrichmentOutcome = EnrichmentOutcome.Linked,
+                AttributionOutcome = ReleaseAttributionOutcome.AttributedByPerson,
+                ReleaseId = release.Id,
+                TrackId = track,
+                ReleaseLookupUtc = decided,
+                ReleaseDecidedUtc = decided,
+            });
+
+            ruleOwned = MediaFileId.New();
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = ruleOwned,
+                Path = "Concertgebouw/Beethoven 1/03 - Menuetto.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                RecordingId = old.Id,
+                RecordingLookupUtc = decided,
+                EnrichmentOutcome = EnrichmentOutcome.Linked,
+                AttributionOutcome = ReleaseAttributionOutcome.GroupOnly,
+                ReleaseLookupUtc = decided,
+            });
+
+            albumByHand = MediaFileId.New();
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = albumByHand,
+                Path = "Concertgebouw/Beethoven 1/04 - Finale.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                RecordingId = old.Id,
+                RecordingLookupUtc = decided,
+                EnrichmentOutcome = EnrichmentOutcome.Linked,
+                AttributionOutcome = ReleaseAttributionOutcome.AlbumByPerson,
+                ReleaseLookupUtc = decided,
+                ReleaseDecidedUtc = decided,
+            });
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        var catalogue = Classical(merged: new Dictionary<Mbid, Mbid> { [Recording] = survivorMbid });
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        // One row, the one that was already there.
+        var recording = await db.Recordings.AsNoTracking().SingleAsync(Token);
+        Assert.Equal(survivorRow, recording.Id);
+        Assert.Equal(survivorMbid, recording.Mbid);
+
+        var files = await db.MediaFiles.AsNoTracking().ToListAsync(Token);
+        Assert.All(files, file => Assert.Equal(survivorRow, file.RecordingId));
+
+        // The track moved in place, so the seated file still sits on it.
+        var moved = await db.Tracks.AsNoTracking().SingleAsync(Token);
+        Assert.Equal(track, moved.Id);
+        Assert.Equal(survivorRow, moved.RecordingId);
+
+        var person = files.Single(file => file.Id == seated);
+        Assert.Equal(track, person.TrackId);
+        Assert.Equal(ReleaseAttributionOutcome.AttributedByPerson, person.AttributionOutcome);
+        Assert.Equal(decided, person.ReleaseDecidedUtc);
+        Assert.Equal(decided, person.ReleaseLookupUtc);
+
+        // The rule's file goes back through attribution, and so does one whose
+        // album alone a person named — its pressing is still the rule's to prove.
+        // The file a person seated does not: its track moved with it.
+        Assert.Null(files.Single(file => file.Id == ruleOwned).ReleaseLookupUtc);
+
+        var album = files.Single(file => file.Id == albumByHand);
+        Assert.Null(album.ReleaseLookupUtc);
+        Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, album.AttributionOutcome);
+        Assert.Equal(decided, album.ReleaseDecidedUtc);
+
+        // The person-filed file is still the person's.
+        var filed = files.Single(file => file.Id != seated && file.Id != ruleOwned && file.Id != albumByHand);
+        Assert.NotNull(filed.IdentityDecidedUtc);
+
+        Assert.False(await db.ArtistCredits.AnyAsync(c => c.Artist!.Name == "Old credit", Token));
+        Assert.False(await db.Relationships.AnyAsync(r => r.ArtistId == db.Artists.Single(a => a.Name == "Old credit").Id, Token));
+
+        var merge = await db.DomainEvents.AsNoTracking().SingleAsync(e => e.Type == "catalogue.recording.merged", Token);
+        Assert.Equal(Recording.Value.ToString(), merge.SubjectId);
+        Assert.Equal("system", merge.ActorId);
+    }
+
+    /// <summary>
+    /// AcoustID still naming an MBID MusicBrainz has merged is the commonest way
+    /// a merge arrives, and it folds the old row in the same way.
+    /// </summary>
+    /// <remarks>
+    /// AcoustID's links trail MusicBrainz's merges, so the cluster names the old
+    /// id and the lookup answers with the survivor. The file already linked to
+    /// the old row is the one this would strand.
+    /// </remarks>
+    [Fact]
+    public async Task AMergeAcoustIdStillNamesIsFoldedIntoTheSurvivor()
+    {
+        await SeedAsync(("Karajan/Beethoven 5/01 - Allegro.flac", Cluster(1)));
+
+        var survivorMbid = Mb("d91d6ea4-a1a6-4945-b372-6b4fae18f6b6");
+        var earlier = MediaFileId.New();
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var old = new Recording { Id = RecordingId.New(), Title = "Old", Mbid = Recording };
+            seed.Recordings.Add(old);
+
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = earlier,
+                Path = "Karajan/Beethoven 5/02 - Andante.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                RecordingId = old.Id,
+                RecordingLookupUtc = DateTimeOffset.UtcNow,
+                EnrichmentOutcome = EnrichmentOutcome.Linked,
+                ReleaseLookupUtc = DateTimeOffset.UtcNow,
+            });
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            Classical(merged: new Dictionary<Mbid, Mbid> { [Recording] = survivorMbid })));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = await db.Recordings.AsNoTracking().SingleAsync(Token);
+        Assert.Equal(survivorMbid, recording.Mbid);
+
+        var files = await db.MediaFiles.AsNoTracking().ToListAsync(Token);
+        Assert.All(files, file => Assert.Equal(recording.Id, file.RecordingId));
+        Assert.Null(files.Single(file => file.Id == earlier).ReleaseLookupUtc);
+
+        Assert.Equal(
+            1,
+            await db.DomainEvents.CountAsync(e => e.Type == "catalogue.recording.merged", Token));
+    }
+
+    /// <summary>
+    /// An artist MusicBrainz merged is said out loud rather than renamed in silence.
+    /// </summary>
+    /// <remarks>
+    /// The row keeps the old MBID — moving artists is not built — so the journal
+    /// entry is the only durable trace that the facts written onto it are the
+    /// survivor's.
+    /// </remarks>
+    [Fact]
+    public async Task AMergedArtistIsJournalled()
+    {
+        await SeedArtistAsync(Karajan, "Karajan");
+
+        var survivor = Mb("e0000000-0000-4000-8000-000000000003");
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(
+                recording: null,
+                work: null,
+                artist: Conductor(),
+                merged: new Dictionary<Mbid, Mbid> { [Karajan] = survivor })));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var merge = await db.DomainEvents.AsNoTracking().SingleAsync(e => e.Type == "catalogue.artist.merged", Token);
+        Assert.Equal(Karajan.Value.ToString(), merge.SubjectId);
+        Assert.Equal("system", merge.ActorId);
+        Assert.Contains(survivor.Value.ToString(), merge.PayloadJson, StringComparison.Ordinal);
+
+        Assert.Equal(Karajan, (await db.Artists.AsNoTracking().SingleAsync(Token)).Mbid);
     }
 
     /// <summary>
@@ -929,7 +1169,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     /// </summary>
     /// <remarks>
     /// The two halves of the bargain, and they must not be the same answer. "We
-    /// asked and the artist has been merged away" is an answer and leaving it
+    /// asked and the artist has been deleted" is an answer and leaving it
     /// unstamped re-asks forever; "MusicBrainz did not respond" is not an answer
     /// and stamping it would silently give up on the row for good, since no
     /// endpoint clears this column.
@@ -1933,8 +2173,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     /// The classical shape: billed to the composer, everyone who played it in
     /// relationships, and a soloist who must not become an artist.
     /// </summary>
-    private static StubCatalogue Classical() =>
+    private static StubCatalogue Classical(IReadOnlyDictionary<Mbid, Mbid>? merged = null) =>
         new(
+            merged: merged,
             recording: RecordingWith(
                 credits: [Credit(Mozart, "Wolfgang Amadeus Mozart")],
                 relations:
@@ -2247,7 +2488,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         MusicBrainzWork? work,
         bool unavailable = false,
         MusicBrainzArtist? artist = null,
-        Func<IReadOnlyList<MusicBrainzReleaseGroup>>? discography = null) : IMusicBrainzCatalogue
+        Func<IReadOnlyList<MusicBrainzReleaseGroup>>? discography = null,
+        IReadOnlyDictionary<Mbid, Mbid>? merged = null) : IMusicBrainzCatalogue
     {
         private int _recordingCalls;
         private int _workCalls;
@@ -2293,7 +2535,11 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
             if (unavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
 
-            return Task.FromResult(recording is null ? null : recording with { Id = id });
+            // A merged MBID is answered under the recording it became, as WS/2's
+            // redirect delivers it; anything else echoes the id asked for.
+            return Task.FromResult(recording is null
+                ? null
+                : recording with { Id = merged?.GetValueOrDefault(id, id) ?? id });
         }
 
         public Task<MusicBrainzRelease?> GetReleaseAsync(
@@ -2359,7 +2605,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
             if (unavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
 
-            return Task.FromResult(artist is null ? null : artist with { Id = id });
+            return Task.FromResult(artist is null ? null : artist with { Id = merged?.GetValueOrDefault(id, id) ?? id });
         }
     }
 

@@ -900,6 +900,52 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         // Four files are not a three-track pressing.
         Assert.All(files, file => Assert.Null(file.ReleaseId));
+
+        // Every track list agreed with every browse, so nothing was asked twice.
+        Assert.Equal(0, catalogue.RecordingCalls);
+    }
+
+    /// <summary>
+    /// A file whose recording MusicBrainz merged away proves its pressing in the
+    /// same run, once the merge is seen.
+    /// </summary>
+    /// <remarks>
+    /// Rumours and Folk Singer, 2026-09-28. The browse by the old id follows the
+    /// merge and names the album, but the album's track list prints the survivor,
+    /// so without this the file is on no edition and the whole folder loses its
+    /// pressing. Exactly one recording lookup, for the one recording a track
+    /// list contradicted.
+    /// </remarks>
+    [Fact]
+    public async Task AFileWhoseRecordingWasMergedProvesThePressing()
+    {
+        var old = Mb("b25f351b-206f-4297-95bd-78459b704144");
+
+        await SeedAsync(
+            ("Artist/Album/01.flac", old, 180),
+            ("Artist/Album/02.flac", Song(2), 200),
+            ("Artist/Album/03.flac", Song(3), 220));
+
+        var catalogue = new StubCatalogue()
+            .With(Album())
+            .On(Song(1), AlbumId)
+            .On(Song(2), AlbumId)
+            .On(Song(3), AlbumId)
+            .Merged(old, Song(1));
+
+        await RunAsync(catalogue);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var files = await db.MediaFiles.Include(f => f.Recording).OrderBy(f => f.Path).ToListAsync(Token);
+
+        Assert.All(files, file => Assert.Equal(ReleaseAttributionOutcome.Attributed, file.AttributionOutcome));
+        Assert.All(files, file => Assert.NotNull(file.TrackId));
+        Assert.Equal(Song(1), files[0].Recording!.Mbid);
+
+        Assert.False(await db.Recordings.AnyAsync(r => r.Mbid == old, Token));
+        Assert.Equal(1, catalogue.RecordingCalls);
+        Assert.Equal(1, await db.DomainEvents.CountAsync(e => e.Type == "catalogue.recording.merged", Token));
     }
 
     /// <summary>
@@ -1452,10 +1498,15 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
     {
         private readonly Dictionary<Mbid, MusicBrainzRelease> _releases = [];
         private readonly Dictionary<Mbid, List<Mbid>> _appearsOn = [];
+        private readonly Dictionary<Mbid, Mbid> _merged = [];
 
         private int _calls;
+        private int _recordingCalls;
 
         public int Calls => Volatile.Read(ref _calls);
+
+        /// <summary>Recording lookups, which only a track list contradicting a browse may cause.</summary>
+        public int RecordingCalls => Volatile.Read(ref _recordingCalls);
 
         /// <summary>Set by a test that needs every browse to fail as an outage would.</summary>
         public bool Unavailable { get; init; }
@@ -1470,6 +1521,18 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         public StubCatalogue On(Mbid recording, params Mbid[] releases)
         {
             _appearsOn[recording] = [.. releases];
+            return this;
+        }
+
+        /// <summary>
+        /// MusicBrainz merged <paramref name="old"/> into <paramref name="survivor"/>:
+        /// a browse by the old id follows the merge, and a lookup of it answers
+        /// with the survivor's document.
+        /// </summary>
+        public StubCatalogue Merged(Mbid old, Mbid survivor)
+        {
+            _merged[old] = survivor;
+            _appearsOn[old] = _appearsOn.GetValueOrDefault(survivor) ?? [];
             return this;
         }
 
@@ -1521,9 +1584,13 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
 
         public Task<MusicBrainzRecording?> GetRecordingAsync(
             Mbid id,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException(
-                "Attribution reads recordings from the catalogue; nothing here should call this.");
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _recordingCalls);
+
+            return Task.FromResult<MusicBrainzRecording?>(new MusicBrainzRecording(
+                _merged.GetValueOrDefault(id, id), "Survivor", null, null, [], [], [], [], null, null));
+        }
 
         public Task<MusicBrainzArtist?> GetArtistAsync(
             Mbid id,

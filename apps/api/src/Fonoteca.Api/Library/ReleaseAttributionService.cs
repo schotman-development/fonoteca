@@ -883,7 +883,13 @@ public sealed class ReleaseAttributionService(
         var formats = new Dictionary<Mbid, string?>();
         var capped = false;
 
-        foreach (var (id, _) in worth)
+        // Recordings a browse placed on a release whose own track list does not
+        // print them. A healthy recording cannot do that; a merged one does it
+        // every time — the browse follows the merge, the track list prints the
+        // survivor. See MergedAsync.
+        var unprinted = new HashSet<Mbid>();
+
+        foreach (var (id, holding) in worth)
         {
             if (confirmed.Count >= MaximumComponentCandidates)
             {
@@ -896,11 +902,89 @@ public sealed class ReleaseAttributionService(
 
             confirmed.Add(release);
             formats[release.Id] = Formats(summaries[id]);
+
+            var printed = release.Tracks.Select(track => track.RecordingId).OfType<Mbid>().ToHashSet();
+            unprinted.UnionWith(holding.Where(recording => !printed.Contains(recording)));
         }
 
         if (capped) Log.AttributionComponentCapped(logger, seed.Path, files.Count, worth.Count);
 
+        var merged = await MergedAsync(unprinted, memo, cancellationToken).ConfigureAwait(false);
+
+        if (merged.Count > 0)
+        {
+            files = [.. files.Select(file => file.Recording is { } recording && merged.TryGetValue(recording, out var survivor)
+                ? file with { Recording = survivor }
+                : file)];
+
+            foreach (var (old, survivor) in merged)
+            {
+                if (groups.Remove(old, out var on)) groups[survivor] = on;
+            }
+        }
+
         return new Component(files, confirmed, formats, groups, !capped);
+    }
+
+    /// <summary>
+    /// Which of the suspect recordings MusicBrainz has merged into another, each
+    /// already folded into its survivor in the catalogue.
+    /// </summary>
+    /// <remarks>
+    /// <b>Cheap first.</b> Nothing is asked about a recording every fetched track
+    /// list agrees with, which is all of them on a healthy library; a suspect
+    /// costs one recording lookup, and a work lookup where it has one. WS/2
+    /// answers a merged MBID with the survivor's document, so a different id
+    /// coming back is the whole test — and a deleted one, which answers nothing,
+    /// is left alone.
+    ///
+    /// <b>Saved in a scope of its own, before the component's.</b> The release
+    /// writer asks the database, not the change tracker, for the recordings a
+    /// track list names — the <c>_minted</c> trap — so a survivor still pending
+    /// in the same unit of work would be minted a second time and fail the whole
+    /// component on <c>IX_Recordings_Mbid</c>.
+    ///
+    /// The caller swaps the survivor into the folder in memory, so the same run
+    /// can seat the file and prove the pressing the merge was hiding.
+    /// </remarks>
+    private async Task<Dictionary<Mbid, Mbid>> MergedAsync(
+        IReadOnlySet<Mbid> suspects,
+        Memo memo,
+        CancellationToken cancellationToken)
+    {
+        var merged = new Dictionary<Mbid, Mbid>();
+
+        foreach (var suspect in suspects.OrderBy(recording => recording.Value))
+        {
+            if (!memo.Recordings.TryGetValue(suspect, out var recording))
+            {
+                recording = await musicBrainz.GetRecordingAsync(suspect, cancellationToken).ConfigureAwait(false);
+                memo.Recordings[suspect] = recording;
+            }
+
+            if (recording is null || recording.Id == suspect) continue;
+
+            var work = recording.WorkId is { } workId
+                ? await musicBrainz.GetWorkAsync(workId, cancellationToken).ConfigureAwait(false)
+                : null;
+
+            var scope = scopeFactory.CreateAsyncScope();
+
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                await new CatalogueWriter(db, new HashSet<Mbid>(), clock)
+                    .UpsertAsync(recording, work, cancellationToken, suspect)
+                    .ConfigureAwait(false);
+
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            merged[suspect] = recording.Id;
+        }
+
+        return merged;
     }
 
     /// <summary>
@@ -1092,6 +1176,9 @@ public sealed class ReleaseAttributionService(
         public Dictionary<Mbid, IReadOnlyList<MusicBrainzReleaseCandidate>> Browses { get; } = [];
 
         public Dictionary<Mbid, MusicBrainzRelease?> Releases { get; } = [];
+
+        /// <summary>Recordings a track list contradicted, looked up to see whether they were merged.</summary>
+        public Dictionary<Mbid, MusicBrainzRecording?> Recordings { get; } = [];
 
         /// <summary>AcoustID's answer, by the cluster the file was identified as.</summary>
         public Dictionary<AcoustId, IReadOnlyList<AcoustIdMatch>> Clusters { get; } = [];

@@ -75,7 +75,7 @@ public sealed class CandidateWarmService(
     /// <remarks>
     /// A missing API key, a blocked address and a mirror that is down all look
     /// the same from here and all fail on every item. Three is enough to tell
-    /// that from one recording MusicBrainz happens to have merged away.
+    /// that from one recording MusicBrainz happens to have deleted.
     /// </remarks>
     private const int GiveUpAfter = 3;
 

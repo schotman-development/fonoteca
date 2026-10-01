@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Logging;
 using Fonoteca.Api.Matching;
@@ -7,6 +8,7 @@ using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Acquisition;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Domain.Events;
 using Fonoteca.Domain.Identification;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.Qobuz;
@@ -629,10 +631,10 @@ public sealed class EnrichmentService(
             // Absent means a scan removed it while we were working.
             if (row is null) return;
 
-            var writer = new CatalogueWriter(db, memo.Artists);
+            var writer = new CatalogueWriter(db, memo.Artists, clock);
 
             row.RecordingId = await writer
-                .UpsertAsync(recording, work, cancellationToken)
+                .UpsertAsync(recording, work, cancellationToken, file.Mbid)
                 .ConfigureAwait(false);
 
             // Now it is what the value promises: linked, with its artists.
@@ -700,10 +702,10 @@ public sealed class EnrichmentService(
 
             if (resolved.Recording is { } recording)
             {
-                var writer = new CatalogueWriter(db, memo.Artists);
+                var writer = new CatalogueWriter(db, memo.Artists, clock);
 
                 row.RecordingId = await writer
-                    .UpsertAsync(recording, resolved.Work, cancellationToken)
+                    .UpsertAsync(recording, resolved.Work, cancellationToken, resolved.Asked)
                     .ConfigureAwait(false);
 
                 counts.Linked++;
@@ -1963,7 +1965,7 @@ public sealed class EnrichmentService(
             if (row is null) return;
 
             // Stamped whether or not MusicBrainz had them. "We asked and the
-            // artist has been merged away" is an answer, and a row left unstamped
+            // artist has been deleted" is an answer, and a row left unstamped
             // on it is re-asked about on every run forever.
             row.LookupUtc = now;
 
@@ -1973,6 +1975,33 @@ public sealed class EnrichmentService(
             }
             else
             {
+                // A merged artist comes back under the id it was merged into —
+                // WS/2 redirects rather than refusing. The facts are still this
+                // artist's, so they are written as ever; what is not done here is
+                // moving the row to the new MBID, which touches follows, pictures
+                // and discographies. Said out loud instead, so it is not silent.
+                if (described.Id != artist.Mbid)
+                {
+                    Log.ArtistMerged(logger, artist.Mbid.Value, artist.Name, described.Id.Value);
+
+                    await new Data.EventLog(db)
+                        .AppendAsync(
+                            DomainEvent.Create(
+                                "catalogue.artist.merged",
+                                RelationshipTargets.Artist,
+                                artist.Mbid.Value.ToString(),
+                                SystemCallerContext.SystemId,
+                                now,
+                                JsonSerializer.Serialize(new
+                                {
+                                    from = artist.Mbid.Value,
+                                    to = described.Id.Value,
+                                    artist = row.Id.Value,
+                                })),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 // Guarded where the three below are, and for a reason they do not
                 // have: MusicBrainz sends "" for absent text rather than null,
                 // so `ToArtist`'s `source.Name ?? string.Empty` can hand over a
@@ -2146,7 +2175,8 @@ public sealed class EnrichmentService(
 
             if (recording is null)
             {
-                // AcoustID still points at an MBID MusicBrainz has merged away.
+                // AcoustID still points at an MBID MusicBrainz has deleted. A
+                // merged one never lands here: WS/2 redirects it to the survivor.
                 // Recorded rather than retried: the answer will not change until
                 // AcoustID's links are updated, which is not on our schedule.
                 return new Resolution(
@@ -2155,7 +2185,7 @@ public sealed class EnrichmentService(
 
             var work = await WorkForAsync(recording, memo, cancellationToken).ConfigureAwait(false);
 
-            return new Resolution(EnrichmentOutcome.Linked, recording, work, null, evidence);
+            return new Resolution(EnrichmentOutcome.Linked, recording, work, null, evidence, mbid);
         }
         catch (ProviderUnavailableException cause)
         {
@@ -2320,13 +2350,19 @@ public sealed class EnrichmentService(
     /// can keep it. Null means nothing was asked — a file with no stored
     /// fingerprint, or a lookup that failed — which is different from an answer
     /// that named nothing, and only the second is worth writing down.
+    ///
+    /// <see cref="Asked"/> is the MBID AcoustID named. It differs from
+    /// <see cref="Recording"/>'s id when MusicBrainz has since merged it, and
+    /// AcoustID's links trail MusicBrainz's merges, so this is where most merges
+    /// are first seen.
     /// </remarks>
     private readonly record struct Resolution(
         EnrichmentOutcome Outcome,
         MusicBrainzRecording? Recording,
         MusicBrainzWork? Work,
         string? Detail,
-        IReadOnlyList<AcoustIdMatch>? Matches = null);
+        IReadOnlyList<AcoustIdMatch>? Matches = null,
+        Mbid? Asked = null);
 }
 
 /// <summary>
@@ -2446,7 +2482,7 @@ public sealed record EnrichmentSummary(
     /// </remarks>
     int NoRecording,
 
-    /// <summary>Files whose recording MBID MusicBrainz no longer has. Merged away.</summary>
+    /// <summary>Files whose recording MBID MusicBrainz no longer has. Deleted.</summary>
     int RecordingNotFound,
 
     /// <summary>Transient failures. These stay on the worklist for the next run.</summary>

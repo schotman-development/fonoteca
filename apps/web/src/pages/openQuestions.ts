@@ -130,12 +130,13 @@ const IDENTITY: Readonly<Record<string, OpenReason>> = {
     label: 'The recording is gone',
     tone: 'warning',
     note:
-      'AcoustID names a MusicBrainz recording that MusicBrainz no longer holds — merged away ' +
-      'since AcoustID last saw it. The audio is identified; the thing it was identified as has ' +
-      'moved.',
+      'AcoustID names a MusicBrainz recording that MusicBrainz no longer holds — deleted since ' +
+      'AcoustID last saw it, or, on a mirror, too new to have replicated yet. A merged ' +
+      'recording never lands here: the lookup follows the merge.',
     next:
-      'Worth re-running enrichment after the mirror has replicated: the recording was merged ' +
-      'rather than deleted, so the catalogue it moved into may already be there.',
+      'On a mirror, re-run enrichment once it has replicated. Otherwise it is yours to settle: ' +
+      'open it and choose the recording the file really is, or match its folder to an album — ' +
+      'AcoustID will keep naming the deleted one until somebody fixes the link there.',
   },
 }
 
