@@ -97,7 +97,11 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(BoxSet.Value.ToString(), box.Mbid);
         Assert.Equal(40, box.Slots.Count);
         Assert.Equal(10, box.Slots.Count(slot => slot.Path is not null));
-        Assert.Equal(0.25, box.Coverage, 3);
+
+        // The box closes on a [silence] placeholder: a slot, but not a track
+        // anybody is missing, so the count and the coverage both leave it out.
+        Assert.Equal(39, box.TrackCount);
+        Assert.Equal(10 / 39.0, box.Coverage, 3);
     }
 
     /// <summary>
@@ -734,7 +738,7 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
                     1,
                     index + 1,
                     (index + 1).ToString(CultureInfo.InvariantCulture),
-                    $"Track {index + 1}",
+                    id == BoxSet && index == tracks - 1 ? "[silence]" : $"Track {index + 1}",
                     Length(index),
                     id != Elsewhere && index < AlbumTracks ? Recording(index) : Foreign(index),
                     []))]);

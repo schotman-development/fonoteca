@@ -9,7 +9,11 @@ public sealed record EditionSlot(
     string? Number,
     string? Title,
     TimeSpan? Length,
-    RecordingId Recording);
+    RecordingId Recording)
+{
+    /// <summary>A position holding no song — see <see cref="TrackTitles"/>.</summary>
+    public bool IsPlaceholder => TrackTitles.IsPlaceholder(Title);
+}
 
 /// <summary>An edition's whole track list, disc-major.</summary>
 public sealed record EditionTracks(ReleaseId Id, IReadOnlyList<EditionSlot> Slots);
@@ -64,7 +68,12 @@ public static class Editions
         var rows = new List<(EditionSlot Slot, List<ReleaseId> On)>();
         var seen = new Dictionary<RecordingId, int>();
 
-        var lead = editions.Take(1).SelectMany(edition => edition.Slots).Select(slot => slot.Recording).ToHashSet();
+        var lead = editions
+            .Take(1)
+            .SelectMany(edition => edition.Slots)
+            .Where(slot => !slot.IsPlaceholder)
+            .Select(slot => slot.Recording)
+            .ToHashSet();
         var songs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (var e = 0; e < editions.Count; e++)
@@ -74,6 +83,10 @@ public static class Editions
 
             foreach (var slot in edition.Slots)
             {
+                // Not a song, so a row for it would read as a track to buy —
+                // unless a file holds it, when it is where that file sits.
+                if (slot.IsPlaceholder && !held.Contains(slot.Recording)) continue;
+
                 // One row per recording, at its first place. An unclaimed
                 // edition that prints one twice is usually a box carrying the
                 // album on two media — vinyl and the CD inside it — and a second
@@ -118,7 +131,7 @@ public static class Editions
 
         return editions
             .OrderBy(edition => held.Count(recording => !edition.Slots.Any(slot => slot.Recording == recording)))
-            .ThenBy(edition => edition.Slots.Count)
+            .ThenBy(edition => edition.Slots.Count(slot => !slot.IsPlaceholder || held.Contains(slot.Recording)))
             .ThenByDescending(edition => edition.Slots.All(slot => slot.Length is not null))
             .ThenByDescending(edition => edition.Slots.All(slot =>
                 int.TryParse(slot.Number, NumberStyles.None, CultureInfo.InvariantCulture, out _)))

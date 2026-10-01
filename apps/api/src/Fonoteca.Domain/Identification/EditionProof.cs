@@ -53,10 +53,16 @@ public static class EditionProof
         ArgumentNullException.ThrowIfNull(edition);
         ArgumentNullException.ThrowIfNull(files);
 
-        if (files.Count == 0 || edition.Tracks.Count != files.Count) return null;
+        // A placeholder track counts only where a file holds it; see TrackTitles.
+        var held = files.Select(file => file.Recording).OfType<Mbid>().ToHashSet();
+        var songs = edition.Tracks
+            .Where(track => !track.IsPlaceholder || (track.RecordingId is { } recording && held.Contains(recording)))
+            .ToList();
+
+        if (files.Count == 0 || songs.Count != files.Count) return null;
         if (files.Any(file => file.Recording is null)) return null;
 
-        var lengths = edition.Tracks.Select(track => track.Length).ToList();
+        var lengths = songs.Select(track => track.Length).ToList();
         if (lengths.Any(length => length is null)) return null;
         if (lengths.All(length => length!.Value.Ticks % TimeSpan.TicksPerSecond == 0)) return null;
 

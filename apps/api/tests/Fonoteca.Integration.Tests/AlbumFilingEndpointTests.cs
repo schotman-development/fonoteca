@@ -1168,6 +1168,14 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
 
         Assert.Equal(5, slots.EditionsFound);
         Assert.Contains(slots.Tracks, track => track.Release == Late.Value && track.Title == "Off the Wall (live)");
+
+        // The anniversary edition closes on a [silence] placeholder. It is listed,
+        // so a file could be seated on it, but a folder is not measured against it.
+        var late = await AlbumSlotsAsync($"release={Late.Value}");
+
+        Assert.Equal(Late.Value, late.Lead);
+        Assert.Contains(late.Tracks, track => track.Title == "[silence]");
+        Assert.Equal(4, late.LeadTracks);
     }
 
     [Fact]
@@ -1682,6 +1690,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
                         Track(2, "Rock with You"),
                         Track(3, "Working Day and Night"),
                         Track(4, "Off the Wall (live)", "cccccccc-0000-0000-0000-00000000000"),
+                        Track(5, "[silence]", "cccccccc-0000-0000-0000-00000000000"),
                     ])
                 : id == Foreign ? Release(id, "Thriller", new Mbid(Guid.CreateVersion7()), [Track(1, "Wanna Be Startin' Somethin'")])
                 : null);
@@ -1710,7 +1719,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MusicBrainzReleaseCandidate>>(releaseGroup == Group
                 ? [Candidate(Album, 3), Candidate(Other, 3), Candidate(Deluxe, 4), Candidate(Reissue, 3), Candidate(Bootleg, 1, "Bootleg"),
-                   .. LateIsAdded ? [Candidate(Late, 4)] : Array.Empty<MusicBrainzReleaseCandidate>()]
+                   .. LateIsAdded ? [Candidate(Late, 5)] : Array.Empty<MusicBrainzReleaseCandidate>()]
                 : []);
 
         private static MusicBrainzReleaseCandidate Candidate(Mbid id, int tracks, string status = "Official") =>

@@ -2078,7 +2078,13 @@ public static partial class CatalogueEndpoints
                 r.Status,
                 r.MediumFormats,
                 r.DiscCount,
-                r.TrackCount ?? r.Tracks.Count,
+                // A placeholder counts only where a file sits on it (TrackTitles),
+                // which is what Held counts too. Spelled out rather than called,
+                // because a helper inside a projection is read as a closure and
+                // fails in SQL.
+                (r.TrackCount ?? r.Tracks.Count)
+                    - r.Tracks.Count(t => (t.Title == TrackTitles.Silence || t.Title == TrackTitles.DataTrack)
+                        && !r.Files.Any(f => f.TrackId == t.Id)),
                 r.Files.Any(),
                 db.ReleaseCovers.Any(c => c.ReleaseId == r.Id && c.Bytes != null),
                 r.EditsJson,
@@ -2374,13 +2380,17 @@ public static partial class CatalogueEndpoints
             .AsNoTracking()
             .Where(release => release.Files.Any()
                 && release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count()
-                    < (release.TrackCount ?? 0))
+                    < (release.TrackCount ?? 0)
+                        - release.Tracks.Count(t => (t.Title == TrackTitles.Silence || t.Title == TrackTitles.DataTrack)
+                            && !release.Files.Any(f => f.TrackId == t.Id)))
             .OrderBy(release => release.Title)
             .Select(release => new IncompleteRelease(
                 release.Id.Value,
                 release.Title,
                 release.Files.Where(f => f.TrackId != null).Select(f => f.TrackId).Distinct().Count(),
-                release.TrackCount ?? 0,
+                (release.TrackCount ?? 0)
+                    - release.Tracks.Count(t => (t.Title == TrackTitles.Silence || t.Title == TrackTitles.DataTrack)
+                        && !release.Files.Any(f => f.TrackId == t.Id)),
                 release.MediumFormats))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -5187,7 +5197,10 @@ public sealed record NoReleaseAlbum(string Folder, string Title, string? Artist,
 /// files; null only when no edition of the album is stored.
 /// </param>
 /// <param name="Formats">CD, Digital Media, CD+DVD-Video, of the claimed pressing. Why a rip may be legitimately partial.</param>
-/// <param name="TrackCount">Tracks the claimed pressing prints. The number a rip is measured against.</param>
+/// <param name="TrackCount">
+/// Tracks the claimed pressing prints, a placeholder only where a file sits on it
+/// (<c>TrackTitles</c>). The number a rip is measured against.
+/// </param>
 /// <param name="Held">
 /// Distinct tracks of the claimed pressing the library holds. Tracks, not files:
 /// five encodings of one song are one track of the album, and counting files

@@ -97,6 +97,62 @@ public sealed class EditionsTests
         Assert.Equal([A, C], combined.Select(row => row.Slot.Recording));
     }
 
+    /// <summary>
+    /// A placeholder track is neither held nor missing, so the album page lists
+    /// no row for it and the rip is measured against its songs alone.
+    /// </summary>
+    [Fact]
+    public void APlaceholderTrackIsNeitherHeldNorMissing()
+    {
+        var silence = RecordingId.New();
+        var padded = Titled(Edition((1, A), (1, B), (1, silence), (1, silence), (1, C)), "A", "B", "[silence]", "[silence]", "C");
+        var plain = Titled(Edition((1, A), (1, B), (1, C), (1, Bonus1)), "A", "B", "C", "Bonus");
+
+        var held = new HashSet<RecordingId> { A, B, C };
+
+        Assert.Equal([A, B, C], Editions.Combine([padded], held).Select(row => row.Slot.Recording));
+
+        // Three songs against four: the padded pressing is the nearer, not the longer.
+        Assert.Equal(padded.Id, Editions.Nearest([plain, padded], held)?.Id);
+    }
+
+    /// <summary>
+    /// A placeholder a file holds is where that file sits, so it keeps its row.
+    /// </summary>
+    [Fact]
+    public void APlaceholderAFileHoldsKeepsItsRow()
+    {
+        var silence = RecordingId.New();
+        var padded = Titled(Edition((1, A), (1, silence), (1, C)), "A", "[silence]", "C");
+
+        var combined = Editions.Combine([padded], new HashSet<RecordingId> { A, silence, C });
+
+        Assert.Equal([A, silence, C], combined.Select(row => row.Slot.Recording));
+    }
+
+    /// <summary>
+    /// Silence is not what makes two editions the same performance.
+    /// </summary>
+    /// <remarks>
+    /// MusicBrainz links many releases' silent tracks to one shared recording,
+    /// so another night of the tour shares the lead's silence and nothing else.
+    /// Counted as shared, its songs would be listed again under their own titles.
+    /// </remarks>
+    [Fact]
+    public void SharingOnlyTheSilenceDoesNotMakeAnotherNightTheSameShow()
+    {
+        var silence = RecordingId.New();
+        var otherA = RecordingId.New();
+        var otherB = RecordingId.New();
+
+        var lead = Titled(Edition((1, A), (1, B), (1, silence)), "A", "B", "[silence]");
+        var night = Titled(Edition((1, otherA), (1, otherB), (1, silence)), "A", "B", "[silence]");
+
+        var combined = Editions.Combine([lead, night], new HashSet<RecordingId> { A, B });
+
+        Assert.Equal([A, B], combined.Select(row => row.Slot.Recording));
+    }
+
     private static EditionTracks Titled(EditionTracks edition, params string[] titles) =>
         edition with { Slots = [.. edition.Slots.Select((slot, index) => slot with { Title = titles[index] })] };
 

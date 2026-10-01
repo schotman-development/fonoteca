@@ -42,7 +42,7 @@ public sealed record ReleaseFit
     /// <summary>Which file landed on which track, in track order.</summary>
     public IReadOnlyList<SlotMatch> Matches { get; }
 
-    /// <summary>Tracks on the release, filled or not.</summary>
+    /// <summary>Tracks on the release, filled or not — a placeholder only where a file holds it.</summary>
     public int SlotCount { get; }
 
     /// <summary>
@@ -154,7 +154,12 @@ public sealed record ReleaseFit
             ? (TimeSpan?)null
             : TimeSpan.FromTicks(measured.Sum(match => match.Drift!.Value.Ticks) / measured.Count);
 
-        return new ReleaseFit(release, matches, release.Tracks.Count, meanDrift);
+        // A placeholder track is part of what a folder covers only where a file
+        // holds it; see TrackTitles.
+        var slots = release.Tracks.Count(track =>
+            !track.IsPlaceholder || (track.RecordingId is { } recording && byRecording.ContainsKey(recording)));
+
+        return new ReleaseFit(release, matches, slots, meanDrift);
     }
 
     /// <summary>

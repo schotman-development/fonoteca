@@ -1,11 +1,13 @@
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fonoteca.Integration.Tests;
 
@@ -116,8 +118,8 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // 38 since the group-linked FLAC joined the seed: lossless, loose and on
         // no list, but it is still a file in the library and this is the count
         // of every one of them. 44 since the two-edition album's folder and the
-        // album ripped twice joined it.
-        Assert.Equal(44, body.Files);
+        // album ripped twice joined it, 54 since the four hidden-track albums did.
+        Assert.Equal(54, body.Files);
     }
 
     [Fact]
@@ -292,8 +294,73 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
         // And the list is nearest-to-whole first: one missing track is an album
         // somebody can finish, nine is a decision about whether they want it.
         Assert.Equal(
-            ["Nearly There", "Twice Ripped", "Unforgettable", "Half a Record"],
+            ["Hidden Track", "Nearly There", "Silence Unfiled", "Twice Ripped", "Unforgettable", "Half a Record"],
             body.Incomplete.Select(item => item.Title));
+    }
+
+    /// <summary>
+    /// Silent placeholder tracks are not songs anybody is missing.
+    /// </summary>
+    /// <remarks>
+    /// Marc Broussard's <i>Carencro</i> printed eleven <c>[silence]</c> tracks
+    /// before its hidden track 23 and was listed as 12 of 23 with the silence as
+    /// the missing tracks. Counted in SQL for the album page's pressing and in
+    /// the edition rule here, so both halves are exercised.
+    /// </remarks>
+    [Fact]
+    public async Task SilentPlaceholdersAreNeitherCountedNorMissing()
+    {
+        var body = await ListAsync();
+
+        // Two of three songs, not two of five, and the one to buy is the song.
+        var album = Assert.Single(body.Incomplete, item => item.Title == "Hidden Track");
+        Assert.Equal(3, album.TrackCount);
+        Assert.Equal(2, album.Held);
+        Assert.Equal("Two", Assert.Single(album.Missing).Title);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var group = await db.ReleaseGroups.SingleAsync(row => row.Title == "Hidden Track", Token);
+
+        using var client = _factory!.CreateClient();
+        var page = await client.GetFromJsonAsync<JsonElement>(
+            new Uri($"/api/catalogue/albums/{group.Id.Value}", UriKind.Relative), Token);
+
+        // Two of three songs on the album page too, and no row for either silence.
+        Assert.Equal(3, page.GetProperty("album").GetProperty("trackCount").GetInt32());
+        Assert.Equal(2, page.GetProperty("album").GetProperty("held").GetInt32());
+        Assert.DoesNotContain(
+            page.GetProperty("tracks").EnumerateArray(),
+            row => row.GetProperty("title").GetString() == "[silence]");
+
+        // A placeholder a file sits on counts, on the page as in the rule.
+        var keptGroup = await db.ReleaseGroups.SingleAsync(row => row.Title == "Silence Kept", Token);
+        var keptPage = await client.GetFromJsonAsync<JsonElement>(
+            new Uri($"/api/catalogue/albums/{keptGroup.Id.Value}", UriKind.Relative), Token);
+
+        Assert.Equal(3, keptPage.GetProperty("album").GetProperty("trackCount").GetInt32());
+        Assert.Equal(3, keptPage.GetProperty("album").GetProperty("held").GetInt32());
+        Assert.DoesNotContain(body.Incomplete, item => item.Title == "Silence Kept");
+
+        // And the attribution report's short pressings count songs too.
+        var report = await client.GetFromJsonAsync<JsonElement>(
+            new Uri("/api/catalogue/attribution", UriKind.Relative), Token);
+
+        var pressing = Assert.Single(
+            report.GetProperty("incomplete").EnumerateArray(),
+            row => row.GetProperty("title").GetString() == "Hidden Track");
+        Assert.Equal(3, pressing.GetProperty("trackCount").GetInt32());
+        Assert.Equal(2, pressing.GetProperty("held").GetInt32());
+
+        Assert.DoesNotContain(
+            report.GetProperty("incomplete").EnumerateArray(),
+            row => row.GetProperty("title").GetString() == "Silence Dropped");
+        Assert.DoesNotContain(body.Incomplete, item => item.Title == "Silence Dropped");
+
+        // Four tracks, the held silence among them, and the one to buy is a song.
+        var unfiled = Assert.Single(body.Incomplete, item => item.Title == "Silence Unfiled");
+        Assert.Equal(4, unfiled.TrackCount);
+        Assert.Equal(3, unfiled.Held);
+        Assert.Equal("Four", Assert.Single(unfiled.Missing).Title);
     }
 
     [Fact]
@@ -524,6 +591,43 @@ public sealed class QobuzUpgradeTests(PostgresFixture postgres) : IAsyncLifetime
             Seated(db, "Sas/Nearly There/01.flac", nearly, 1),
             Seated(db, "Sas/Nearly There/03.flac", nearly, 3),
             Seated(db, "Sas/Nearly There/04.flac", nearly, 4));
+
+        // A hidden track behind silent placeholders, as on Marc Broussard's
+        // Carencro: five positions printed, three songs, one of them not held.
+        var padded = Release(db, "Hidden Track", trackCount: 5);
+        Tracks(db, padded, ["One", "Two", "[silence]", "[silence]", "Hidden"]);
+        db.MediaFiles.AddRange(
+            Seated(db, "Broussard/Hidden Track/01.flac", padded, 1),
+            Seated(db, "Broussard/Hidden Track/05.flac", padded, 5));
+
+        // The same shape ripped with its silence kept: a file on every position,
+        // the silent one included, which then counts.
+        var silenceKept = Release(db, "Silence Kept", trackCount: 3);
+        Tracks(db, silenceKept, ["One", "[silence]", "Hidden"]);
+        db.MediaFiles.AddRange(
+            Seated(db, "Broussard/Silence Kept/01.flac", silenceKept, 1),
+            Seated(db, "Broussard/Silence Kept/02.flac", silenceKept, 2),
+            Seated(db, "Broussard/Silence Kept/03.flac", silenceKept, 3));
+
+        // And ripped whole without its silence: every song, nothing short.
+        var silenceDropped = Release(db, "Silence Dropped", trackCount: 3);
+        Tracks(db, silenceDropped, ["One", "[silence]", "Hidden"]);
+        db.MediaFiles.AddRange(
+            Seated(db, "Broussard/Silence Dropped/01.flac", silenceDropped, 1),
+            Seated(db, "Broussard/Silence Dropped/03.flac", silenceDropped, 3));
+
+        // Kept silence again, filed to the album alone: nothing is seated, so the
+        // silent track counts because a file holds its recording, not a slot.
+        var silenceUnfiled = Release(db, "Silence Unfiled", trackCount: 4);
+        Tracks(db, silenceUnfiled, ["One", "[silence]", "Hidden", "Four"]);
+
+        foreach (var position in new[] { 1, 2, 3 })
+        {
+            var file = Seated(db, $"Broussard/Silence Unfiled/{position:D2}.flac", silenceUnfiled, position);
+            file.ReleaseId = null;
+            file.TrackId = null;
+            db.MediaFiles.Add(file);
+        }
 
         var partial = Release(db, "Half a Record", trackCount: 4);
         Tracks(db, partial, ["One", "Two", "Three", "Four"]);

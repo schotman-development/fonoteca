@@ -39,6 +39,7 @@ import {
   clock,
   factsOf,
   filed,
+  gapsOf,
   interleave,
   label,
   noticesOf,
@@ -48,6 +49,7 @@ import {
   searchFor,
   seat,
   slotKey,
+  songCount,
   worstDrift,
 } from './identify.ts'
 import { MatchingDialog, type MatchingSubjectRef } from './MatchingDialog.tsx'
@@ -919,7 +921,7 @@ function FactsTable({
     artist: slots.artist,
     year: slots.year,
     tracks: slots.leadTracks,
-    merged: slots.tracks.length,
+    merged: songCount(slots.tracks),
   })
 
   return (
@@ -1192,9 +1194,7 @@ function Result({
 
   const empty =
     outcome.kind === 'filed'
-      ? outcome.seating.rows
-          .filter((row) => row.kind === 'empty' && row.slot.onLead)
-          .map((row) => label(row.slot, outcome.discs))
+      ? gapsOf(outcome.seating).map((row) => label(row.slot, outcome.discs))
       : []
 
   return (

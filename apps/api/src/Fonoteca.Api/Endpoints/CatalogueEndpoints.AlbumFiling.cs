@@ -327,7 +327,8 @@ public static partial class CatalogueEndpoints
                 first.SecondaryTypes,
                 lead.Id.Value,
                 lead.Tracks.Select(track => track.DiscNumber).Distinct().Count(),
-                lead.Tracks.Count,
+                lead.Tracks.Count(track => !track.IsPlaceholder
+                    || (track.RecordingId is { } recording && held.ContainsKey(recording.Value))),
                 read.Count,
                 editions.Count,
                 rows));
@@ -696,7 +697,11 @@ public sealed record AlbumSearchRow(
 /// <summary>One album's editions merged into one track list.</summary>
 /// <param name="Lead">The edition whose running order the list follows.</param>
 /// <param name="LeadDiscs">Discs on the lead edition, for how a position is printed.</param>
-/// <param name="LeadTracks">Tracks on the lead edition, which is what a folder is measured against.</param>
+/// <param name="LeadTracks">
+/// Tracks on the lead edition, which is what a folder is measured against — a placeholder
+/// (<c>TrackTitles</c>) only where a settled file in the folder holds it. Every placeholder is
+/// still listed in <paramref name="Tracks"/>, so a file can be seated on one.
+/// </param>
 /// <param name="EditionsRead">Editions whose track lists are in <paramref name="Tracks"/>.</param>
 /// <param name="EditionsFound">Editions considered; above <paramref name="EditionsRead"/> when the list was cut.</param>
 public sealed record AlbumSlotsResponse(

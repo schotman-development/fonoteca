@@ -462,7 +462,10 @@ public static class QobuzEndpoints
             if (measured is null) continue;
 
             var facts = editions[id].First(edition => edition.Id == measured.Id);
-            var trackCount = facts.TrackCount;
+            // Counted off the stored track list rather than the edition's facts,
+            // so that a placeholder counts exactly when a file holds it
+            // (TrackTitles) — here by recording, the unit Held is counted in.
+            var trackCount = measured.Slots.Count(slot => !slot.IsPlaceholder || held.Contains(slot.Recording));
             var holding = measured.Slots.Count(slot => held.Contains(slot.Recording));
 
             if (trackCount == 0 || holding >= trackCount) continue;
@@ -514,7 +517,7 @@ public static class QobuzEndpoints
                 holding,
                 unfiled,
                 [.. measured.Slots
-                    .Where(slot => !held.Contains(slot.Recording))
+                    .Where(slot => !slot.IsPlaceholder && !held.Contains(slot.Recording))
                     .Take(MissingShown)
                     .Select(slot => new MissingTrack(slot.Disc, slot.Position, slot.Title))]));
         }

@@ -47,6 +47,77 @@ public sealed class EditionProofTests
     public void OnlyTheCompactDiscFamilyIsHeldToIt(string? format, bool compactDisc) =>
         Assert.Equal(compactDisc, EditionProof.MayBeCompactDisc(format));
 
+    /// <summary>
+    /// Placeholder tracks are not songs a folder could hold, so a rip of every
+    /// song proves the pressing that pads its hidden track with silence.
+    /// </summary>
+    /// <remarks>
+    /// Marc Broussard's <i>Carencro</i>: eleven <c>[silence]</c> tracks before
+    /// track 23. Counted, twelve files could never equal twenty-three tracks.
+    /// </remarks>
+    [Fact]
+    public void AHiddenTrackBehindSilentPlaceholdersProvesItsPressing()
+    {
+        var album = Release("carencro", Tracks(
+            ("a", 180_437),
+            ("b", 200_437),
+            ("[silence]", 4_000),
+            ("[silence]", 4_000),
+            ("[data track]", 4_000),
+            ("hidden", 240_437)));
+
+        var files = new[] { File("a", 180_437, [album]), File("b", 200_437, [album]), File("hidden", 240_437, [album]) };
+
+        var seats = EditionProof.Seat(album, files);
+
+        Assert.NotNull(seats);
+        Assert.Equal([1, 2, 6], seats.Select(seat => seat.Slot.Position));
+
+        var fit = ReleaseFit.For(album, [.. files.Select(file => new AttributionFile(file.Id, file.Recording!.Value, file.Duration))]);
+        Assert.NotNull(fit);
+        Assert.Equal(1.0, fit.Coverage);
+    }
+
+    /// <summary>
+    /// A rip that kept its silent tracks as files proves the pressing just as
+    /// one that dropped them does: a placeholder counts where a file holds it.
+    /// </summary>
+    [Fact]
+    public void ARipThatKeptItsSilentTracksProvesItsPressingToo()
+    {
+        var album = Release("carencro", Tracks(
+            ("a", 180_437),
+            ("[silence]", 4_000),
+            ("hidden", 240_437)));
+
+        var files = new[]
+        {
+            File("a", 180_437, [album]),
+            File("[silence]", 4_000, [album]),
+            File("hidden", 240_437, [album]),
+        };
+
+        var seats = EditionProof.Seat(album, files);
+
+        Assert.NotNull(seats);
+        Assert.Equal([1, 2, 3], seats.Select(seat => seat.Slot.Position));
+
+        var fit = ReleaseFit.For(album, [.. files.Select(file => new AttributionFile(file.Id, file.Recording!.Value, file.Duration))]);
+        Assert.NotNull(fit);
+        Assert.Equal(1.0, fit.Coverage);
+    }
+
+    /// <summary>A song that is really called "Silence" is a song.</summary>
+    [Fact]
+    public void OnlyMusicBrainzsExactPlaceholderTitlesAreLeftOut()
+    {
+        Assert.True(Domain.Catalogue.TrackTitles.IsPlaceholder("[silence]"));
+        Assert.True(Domain.Catalogue.TrackTitles.IsPlaceholder("[data track]"));
+        Assert.False(Domain.Catalogue.TrackTitles.IsPlaceholder("Silence"));
+        Assert.False(Domain.Catalogue.TrackTitles.IsPlaceholder("[untitled]"));
+        Assert.False(Domain.Catalogue.TrackTitles.IsPlaceholder(null));
+    }
+
     [Fact]
     public void AHiResFileMatchingACompactDiscToTheMillisecondDoesNotProveIt()
     {

@@ -226,7 +226,7 @@ internal static class ComponentCandidates
             release.PrimaryType,
             release.SecondaryTypes,
             formats,
-            release.Tracks.Count,
+            fit.SlotCount,
             release.Tracks.Select(track => track.DiscNumber).Distinct().Count(),
             fit.FilesExplained,
             fit.Coverage,

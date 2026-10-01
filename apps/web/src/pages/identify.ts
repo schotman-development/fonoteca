@@ -21,6 +21,38 @@ type Slot = components['schemas']['AlbumSlotRow']
 /** More than this many seconds off the track and a seated file is worth a notice. */
 export const DRIFT_WARNING_S = 8
 
+/**
+ * The titles MusicBrainz gives a position that holds no song: the silence in
+ * front of a hidden track, an enhanced CD's data session. Matched exactly, as
+ * MusicBrainz writes them. Twin of `TrackTitles` in
+ * `apps/api/src/Fonoteca.Domain/Catalogue/TrackTitles.cs`; change both.
+ */
+const PLACEHOLDER_TITLES: ReadonlySet<string> = new Set(['[silence]', '[data track]'])
+
+export function isPlaceholderTrack(title: string | null | undefined): boolean {
+  return title != null && PLACEHOLDER_TITLES.has(title)
+}
+
+/**
+ * How many tracks a folder is measured against: every song, and a placeholder
+ * only where a file in the folder already holds it — a rip that kept its
+ * silent tracks has a file on each, one that dropped them has none missing.
+ */
+export function songCount(slots: readonly Slot[]): number {
+  return slots.filter((slot) => !isPlaceholderTrack(slot.title) || slot.heldBy != null).length
+}
+
+/**
+ * The lead edition's tracks with no file, which is what a rip of the lead edition
+ * would not look like. A placeholder with no file is what a rip without the
+ * silence looks like, so it is never one of them.
+ */
+export function gapsOf(seating: Seating): readonly Row[] {
+  return seating.rows.filter(
+    (row) => row.kind === 'empty' && row.slot.onLead && !isPlaceholderTrack(row.slot.title),
+  )
+}
+
 export type Row =
   | {
       readonly kind: 'seated'
@@ -199,7 +231,11 @@ export function seat(
     }
   }
 
+  // By number alone, never onto a placeholder: a hidden track tagged 12 on a
+  // rip that dropped the silence is not the twelfth position's silence. A file
+  // that is the silence says so in its title, and the passes above seat it.
   for (const slot of numbered) {
+    if (isPlaceholderTrack(slot.title)) continue
     take(
       slot,
       files.find((file) => !used.has(file) && file.track === slot.position && onDisc(file, slot)),
@@ -333,7 +369,7 @@ export function noticesOf(
   const drifting = seated.filter(
     (row) => filed(row) && row.drift !== null && Math.abs(row.drift) > DRIFT_WARNING_S,
   )
-  const empty = seating.rows.filter((row) => row.kind === 'empty' && row.slot.onLead)
+  const empty = gapsOf(seating)
 
   // A file somebody chose to leave open needs no telling.
   const notices: Notice[] = seating.unseated

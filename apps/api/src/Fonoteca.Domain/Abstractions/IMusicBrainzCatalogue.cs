@@ -715,4 +715,8 @@ public sealed record MusicBrainzTrack(
     /// <summary>The recording this track is an appearance of.</summary>
     Mbid? RecordingId,
 
-    IReadOnlyList<MusicBrainzCredit> Credits);
+    IReadOnlyList<MusicBrainzCredit> Credits)
+{
+    /// <summary>A position holding no song — see <see cref="TrackTitles"/>.</summary>
+    public bool IsPlaceholder => TrackTitles.IsPlaceholder(Title);
+}

@@ -5,12 +5,15 @@ import type { components } from '@fonoteca/api-client'
 
 import {
   factsOf,
+  gapsOf,
   interleave,
+  isPlaceholderTrack,
   label,
   normalise,
   noticesOf,
   pairsOf,
   seat,
+  songCount,
   titleMatch,
 } from './identify.ts'
 
@@ -341,6 +344,101 @@ test('only the lead edition’s tracks with no file are a notice, and the rest p
   const empty = noticesOf(seating).find((notice) => notice.key === 'empty')
   assert.equal(empty?.text, 'Track #2 of this album has no file.')
   assert.equal(label(extra, 1), '+')
+})
+
+test('a hidden track is never seated on the silence in front of it, nor is the silence a gap', () => {
+  // Carencro, cut down: the rip dropped the silence, so the hidden track is
+  // its third file and tagged 3, while the album prints it fourth.
+  const slots = [
+    slot(1, 'One', 100),
+    slot(2, 'Two', 100),
+    slot(3, '[silence]', 4),
+    slot(4, '', 240),
+  ]
+  const seating = seat([file(1, 'One', 100), file(2, 'Two', 100), file(3, '', 240)], slots)
+
+  assert.equal(
+    seating.rows.some((row) => row.kind === 'seated' && row.slot.title === '[silence]'),
+    false,
+  )
+  assert.equal(
+    noticesOf(seating).some((notice) => notice.key === 'empty' && notice.text.includes('#3')),
+    false,
+  )
+})
+
+test('a rip that kept its silence has the silent file seated where title and number agree', () => {
+  const slots = [slot(1, 'One', 100), slot(2, '[silence]', 4), slot(3, 'Hidden', 240)]
+  const seating = seat(
+    [file(1, 'One', 100), file(2, '[silence]', 4), file(3, 'Hidden', 240)],
+    slots,
+  )
+
+  assert.deepEqual(seating.unseated, [])
+  assert.equal(seating.rows.find((row) => row.slot.title === '[silence]')?.kind, 'seated')
+})
+
+test('a rip that kept a run of silences has each silent file seated on its own', () => {
+  // Real placeholder runs are long — Carencro prints eleven — so the title
+  // alone never picks one out: it is the title and the number together.
+  const slots = [
+    slot(1, 'One', 100),
+    slot(2, '[silence]', 4),
+    slot(3, '[silence]', 4),
+    slot(4, '[silence]', 4),
+    slot(5, 'Hidden', 240),
+  ]
+  const files = [
+    file(1, 'One', 100),
+    file(2, '[silence]', 4),
+    file(3, '[silence]', 4),
+    file(4, '[silence]', 4),
+    file(5, 'Hidden', 240),
+  ]
+
+  const seating = seat(files, slots)
+
+  assert.deepEqual(seating.unseated, [])
+  assert.deepEqual(
+    seating.rows.map((row) => (row.kind === 'seated' ? row.file.track : null)),
+    [1, 2, 3, 4, 5],
+  )
+})
+
+test('a person can still put a file on a placeholder', () => {
+  const silence = slot(3, '[silence]', 4)
+  const seating = seat(
+    [file(3, '', 4)],
+    [slot(1, 'One', 100), silence],
+    new Map([['file-3', silence.recording]]),
+  )
+
+  assert.equal(seating.rows.find((row) => row.slot === silence)?.kind, 'seated')
+})
+
+test('a placeholder counts as a track only where a file already holds it', () => {
+  const kept = slot(2, '[silence]', 4, { heldBy: '02.flac' })
+  const dropped = slot(3, '[silence]', 4, { recording: 'rec-silence' })
+
+  assert.equal(songCount([slot(1, 'One', 100), kept, dropped, slot(4, 'Hidden', 240)]), 3)
+})
+
+test('the tracks left without a file after filing never include a placeholder', () => {
+  const slots = [slot(1, 'One', 100), slot(2, '[silence]', 4), slot(3, 'Three', 100)]
+  const seating = seat([file(1, 'One', 100)], slots)
+
+  assert.deepEqual(
+    gapsOf(seating).map((row) => row.slot.title),
+    ['Three'],
+  )
+})
+
+test('only the exact placeholder titles are placeholders', () => {
+  assert.equal(isPlaceholderTrack('[silence]'), true)
+  assert.equal(isPlaceholderTrack('[data track]'), true)
+  assert.equal(isPlaceholderTrack('Silence'), false)
+  assert.equal(isPlaceholderTrack('[untitled]'), false)
+  assert.equal(isPlaceholderTrack(null), false)
 })
 
 test('a title and number that agree only on another edition are not a match on their own', () => {
