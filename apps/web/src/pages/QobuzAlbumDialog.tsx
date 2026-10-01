@@ -25,7 +25,7 @@ type DownloadState =
   | { readonly status: 'running' }
   | {
       readonly status: 'done'
-      readonly result: AlbumDownload
+      readonly result: AlbumDownload | null
       readonly replacement: AlbumReplacement | null
     }
   | { readonly status: 'error'; readonly message: string }
@@ -62,26 +62,27 @@ export function QobuzAlbumDialog({
     [album.id],
   )
 
-  async function start() {
+  // `confirmed` is a person saying to replace a folder whose files the API
+  // could not show to be this album, `separate` that it is another album —
+  // their two answers when it asks.
+  async function start({ confirmed = false, separate = false } = {}) {
     setDownload({ status: 'running' })
 
     try {
-      if (replacing === undefined) {
-        const result = await api.post('/api/qobuz/albums/{albumId}/download', {
-          params: { path: { albumId: album.id } },
-        })
-
-        setDownload({ status: 'done', result, replacement: null })
-        return
-      }
-
-      const upgrade = await api.post('/api/qobuz/albums/{albumId}/upgrade', {
-        params: { path: { albumId: album.id } },
-        // The file count travels with the folder so the API can refuse a
-        // folder that turns out to hold more than the row said — a row's folder
-        // is a prefix, and not every one of them is an album.
-        json: { folder: replacing.folder, files: replacing.files },
-      })
+      // Without a folder the API looks for the album in the library itself;
+      // a separate album is downloaded as one, whichever way it was reached.
+      const upgrade =
+        replacing === undefined || separate
+          ? await api.post('/api/qobuz/albums/{albumId}/download', {
+              params: { path: { albumId: album.id }, query: { confirmed, separate } },
+            })
+          : await api.post('/api/qobuz/albums/{albumId}/upgrade', {
+              params: { path: { albumId: album.id } },
+              // The file count travels with the folder so the API can refuse a
+              // folder that turns out to hold more than the row said — a row's
+              // folder is a prefix, and not every one of them is an album.
+              json: { folder: replacing.folder, files: replacing.files, confirmed },
+            })
 
       setDownload({ status: 'done', result: upgrade.download, replacement: upgrade.replacement })
     } catch (cause: unknown) {
@@ -90,6 +91,12 @@ export function QobuzAlbumDialog({
   }
 
   const running = download.status === 'running'
+  const verdict = download.status === 'done' ? download.replacement?.verdict : undefined
+  const asked = verdict === 'Unconfirmed' || verdict === 'SameTitle'
+  // Downloaded separately it lands in its own Artist/Album: from a search asked
+  // about only the folder it would land in, that folder, and refused.
+  const separable =
+    verdict === 'SameTitle' || (verdict === 'Unconfirmed' && replacing !== undefined)
 
   return (
     <Dialog
@@ -114,24 +121,35 @@ export function QobuzAlbumDialog({
             {download.status === 'done' ? 'Done' : 'Cancel'}
           </Button>
 
+          {/* The folder asked about may hold another album: this one can land beside it. */}
+          {separable ? (
+            <Button variant="secondary" onClick={() => void start({ separate: true })}>
+              Download as a separate album
+            </Button>
+          ) : null}
+
           <Button
             variant="primary"
-            onClick={() => void start()}
+            onClick={() => void start({ confirmed: asked })}
             disabled={
               !canDownload ||
               running ||
-              download.status === 'done' ||
+              (download.status === 'done' && !asked) ||
               !album.streamable ||
               state.status !== 'ready'
             }
           >
             {running
               ? 'Downloading…'
-              : download.status === 'done'
-                ? 'Downloaded'
-                : replacing !== undefined
-                  ? 'Download and replace'
-                  : 'Download'}
+              : asked
+                ? 'Replace anyway'
+                : download.status === 'done'
+                  ? download.result === null
+                    ? 'Not downloaded'
+                    : 'Downloaded'
+                  : replacing !== undefined
+                    ? 'Download and replace'
+                    : 'Download'}
           </Button>
         </Stack>
       }
@@ -167,8 +185,10 @@ export function QobuzAlbumDialog({
           go looking for a bug.
         */}
         <Text size="xs" tone="tertiary">
-          Downloads land in the library as <code>Artist/Album/NN Title</code>. Nothing is added to
-          the catalogue by the download itself — the next library scan is what catalogues them.
+          Downloads land in the library as <code>Artist/Album/NN Title</code>. An album the library
+          already holds is downloaded only if this is better or has tracks it is missing, and then
+          replaces it. Nothing is added to the catalogue by the download itself — the next library
+          scan is what catalogues them.
         </Text>
 
         {/*
@@ -193,7 +213,7 @@ export function QobuzAlbumDialog({
                 {replacing.files} file{replacing.files === 1 ? '' : 's'}
                 {replacing.formats.length > 0 ? ` · ${replacing.formats.join(', ')}` : ''}. Its
                 files are moved out of the library, not deleted — and only if every track arrives
-                and what arrives measures better than what is there.
+                and what arrives is better, or as good with the tracks it is missing.
               </Text>
             </Stack>
           </div>
@@ -222,7 +242,7 @@ export function QobuzAlbumDialog({
 
           {download.status === 'done' ? (
             <Stack direction="column" gap={12}>
-              <Result result={download.result} />
+              {download.result !== null ? <Result result={download.result} /> : null}
               {download.replacement !== null ? (
                 <ReplacementResult replacement={download.replacement} />
               ) : null}

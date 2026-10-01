@@ -75,6 +75,18 @@ public sealed class QobuzDownloadService(
     /// </remarks>
     private readonly SemaphoreSlim _oneAtATime = new(1, 1);
 
+    /// <summary>
+    /// Where a download meant to replace an album is fetched, library-relative.
+    /// </summary>
+    /// <remarks>
+    /// Inside the library root, so moving the files into the album's folder is
+    /// a rename on one filesystem; and a dot-folder, which the scan's walk skips
+    /// as hidden, so a replacement half-fetched or refused is never catalogued
+    /// beside the album it was meant to replace. One folder per Qobuz album, so
+    /// an interrupted replacement resumes like any other download.
+    /// </remarks>
+    public const string ReplacementArea = ".fonoteca-downloads";
+
     /// <summary>Whether a download is running right now.</summary>
     public bool IsBusy => _oneAtATime.CurrentCount == 0;
 
@@ -87,6 +99,27 @@ public sealed class QobuzDownloadService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(albumId);
 
+        var album = await qobuz.GetAlbumAsync(albumId, cancellationToken).ConfigureAwait(false)
+            ?? throw new ProviderRejectedException(
+                QobuzClient.ProviderName, $"Qobuz has no album {albumId}.");
+
+        return await DownloadAlbumAsync(album, replacing: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Fetches every streamable track of an album already looked up.</summary>
+    /// <param name="replacing">
+    /// Into <see cref="ReplacementArea"/> rather than <c>Artist/Album</c>: the
+    /// album it replaces is usually in that very folder.
+    /// </param>
+    /// <exception cref="ProviderRejectedException">Nothing is configured, or Qobuz refused.</exception>
+    /// <exception cref="DownloadInProgressException">Another download is already running.</exception>
+    public async Task<AlbumDownload> DownloadAlbumAsync(
+        QobuzAlbum album,
+        bool replacing,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(album);
+
         var config = options.Value;
         var root = LibraryRoot(config);
 
@@ -97,13 +130,13 @@ public sealed class QobuzDownloadService(
 
         try
         {
-            var album = await qobuz.GetAlbumAsync(albumId, cancellationToken).ConfigureAwait(false)
-                ?? throw new ProviderRejectedException(
-                    QobuzClient.ProviderName, $"Qobuz has no album {albumId}.");
+            var folder = replacing
+                ? $"{ReplacementArea}/{StagedFileName.Segment(album.Id)}"
+                : $"{StagedFileName.Segment(album.Artist)}/{StagedFileName.Segment(album.Title)}";
 
-            var folder = $"{StagedFileName.Segment(album.Artist)}/{StagedFileName.Segment(album.Title)}";
-
-            RefuseToMergeEditions(root, folder, album);
+            // The replacement area holds nothing but this album's own tracks.
+            if (!replacing) RefuseToMergeEditions(root, folder, album);
+            else SweepReplacementArea(root, folder);
 
             var delay = TimeSpan.FromMilliseconds(config.Download.TrackDelayMs);
 
@@ -209,7 +242,7 @@ public sealed class QobuzDownloadService(
         // limit re-deriving a filename already on disk.
         foreach (var container in Containers)
         {
-            var candidate = Named(album, track, container);
+            var candidate = Named(folder, album, track, container);
 
             if (File.Exists(Contained(root, candidate)))
             {
@@ -228,7 +261,7 @@ public sealed class QobuzDownloadService(
             return TrackDownload.Skipped(track, audio.Refusal ?? "Qobuz offers no audio.");
         }
 
-        var relative = Named(album, track, ExtensionFor(url));
+        var relative = Named(folder, album, track, ExtensionFor(url));
         var target = Contained(root, relative);
 
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -305,15 +338,15 @@ public sealed class QobuzDownloadService(
             Detail: null);
     }
 
-    private static string Named(QobuzAlbum album, QobuzTrack track, string extension) =>
-        StagedFileName.For(
+    private static string Named(string folder, QobuzAlbum album, QobuzTrack track, string extension) =>
+        $"{folder}/" + Path.GetFileName(StagedFileName.For(
             album.Artist,
             album.Title,
             track.DiscNumber,
             track.TrackNumber,
             track.Title,
             extension,
-            album.DiscCount);
+            album.DiscCount));
 
     /// <summary>
     /// The container Qobuz actually served, from what it said rather than what
@@ -374,23 +407,8 @@ public sealed class QobuzDownloadService(
 
         if (!Directory.Exists(directory)) return;
 
-        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var track in album.Tracks)
-        {
-            // Both containers, because which one arrives is not known until
-            // Qobuz answers — the same reason the resume check tries both.
-            foreach (var container in Containers)
-            {
-                expected.Add(Path.GetFileName(Named(album, track, container)));
-            }
-        }
-
-        var strangers = Directory
-            .EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .Where(AudioFormats.IsAudioFile)
-            .Select(Path.GetFileName)
-            .Where(name => name is not null && !expected.Contains(name))
+        var strangers = Audio(directory)
+            .Where(name => !Expected(album).Contains(name))
             .Take(3)
             .ToArray();
 
@@ -403,6 +421,99 @@ public sealed class QobuzDownloadService(
             + "folder, which nothing downstream could tell apart afterwards. Move or rename what "
             + "is there first.");
     }
+
+    /// <summary>How long a replacement left in the hidden area to resume is kept for.</summary>
+    private static readonly TimeSpan ResumeKept = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Replacements left in the hidden area to resume that nobody has resumed
+    /// in a week. Hidden, so nothing else would ever clear them.
+    /// </summary>
+    private void SweepReplacementArea(string root, string current)
+    {
+        var area = Contained(root, ReplacementArea);
+
+        if (!Directory.Exists(area)) return;
+
+        var cutoff = clock.UtcNow - ResumeKept;
+        var mine = Contained(root, current);
+
+        foreach (var fetched in Directory.EnumerateDirectories(area))
+        {
+            if (fetched == mine) continue;
+
+            var touched = Directory.EnumerateFiles(fetched, "*", SearchOption.AllDirectories)
+                .Select(File.GetLastWriteTimeUtc)
+                .Append(Directory.GetLastWriteTimeUtc(fetched))
+                .Max();
+
+            if (touched < cutoff.UtcDateTime) Directory.Delete(fetched, recursive: true);
+        }
+    }
+
+    /// <summary>Removes what a replacing download of this album fetched into the hidden area.</summary>
+    public void Discard(QobuzAlbum album)
+    {
+        ArgumentNullException.ThrowIfNull(album);
+
+        var root = LibraryRoot(options.Value);
+        var fetched = Contained(root, $"{ReplacementArea}/{StagedFileName.Segment(album.Id)}");
+
+        if (Directory.Exists(fetched)) Directory.Delete(fetched, recursive: true);
+
+        var area = Contained(root, ReplacementArea);
+        if (Directory.Exists(area) && !Directory.EnumerateFileSystemEntries(area).Any()) Directory.Delete(area);
+    }
+
+    /// <summary>
+    /// Whether a library folder is an interrupted download of this very album:
+    /// only its own tracks, by name, and not all of them.
+    /// </summary>
+    /// <remarks>
+    /// Asked before a folder is taken for an album to replace, because a scan
+    /// between two attempts catalogues the first attempt's tracks — and asking
+    /// again is how a download resumes, for a stat a track.
+    /// </remarks>
+    /// <param name="formatId">
+    /// The format downloads ask for, <c>QobuzOptions.FormatId</c>: only files in
+    /// the container it arrives in can be this download's own. Somebody's MP3
+    /// rip named the way Picard names files looks exactly like a Qobuz MP3.
+    /// </param>
+    public bool IsInterrupted(string folder, QobuzAlbum album, int formatId)
+    {
+        ArgumentNullException.ThrowIfNull(album);
+
+        var directory = Contained(LibraryRoot(options.Value), folder);
+
+        if (!Directory.Exists(directory)) return false;
+
+        var names = Audio(directory).ToList();
+        var container = formatId == 5 ? "mp3" : "flac";
+        var expected = album.Tracks
+            .Select(track => Path.GetFileName(Named("_", album, track, container)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return names.Count > 0
+            && names.All(expected.Contains)
+            && names.Count < album.Tracks.Count(track => track.Streamable);
+    }
+
+    private static IEnumerable<string> Audio(string directory) =>
+        Directory
+            .EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(AudioFormats.IsAudioFile)
+            .Select(Path.GetFileName)
+            .OfType<string>();
+
+    /// <summary>Every file name this album's tracks can land under.</summary>
+    /// <remarks>
+    /// Both containers, because which one arrives is not known until Qobuz
+    /// answers — the same reason the resume check tries both.
+    /// </remarks>
+    private static HashSet<string> Expected(QobuzAlbum album) =>
+        album.Tracks
+            .SelectMany(track => Containers.Select(container => Path.GetFileName(Named("_", album, track, container))))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private static string LibraryRoot(FonotecaOptions config)
     {

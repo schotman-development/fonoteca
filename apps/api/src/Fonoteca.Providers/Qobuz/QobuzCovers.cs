@@ -144,7 +144,7 @@ public sealed class QobuzCovers(
     /// name that is only on the line still has to come with the title and the
     /// year.
     /// </remarks>
-    private static QobuzAlbum? Match(
+    public static QobuzAlbum? Match(
         IReadOnlyList<QobuzAlbum> albums,
         string title,
         string? artist,

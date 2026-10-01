@@ -151,6 +151,95 @@ public sealed class QobuzDownloadTests : IDisposable
     }
 
     [Fact]
+    public async Task AnAlbumFetchedToReplaceAnotherLandsInTheHiddenArea()
+    {
+        // The folder it would otherwise land in holds the copy it replaces,
+        // which is exactly what the collision check refuses. The replacement
+        // area is hidden, so the scan never catalogues it beside that copy.
+        var folder = Path.Combine(_library, "Fleetwood Mac", "Rumours");
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(Path.Combine(folder, "08 - The Chain.mp3"), "old copy", Token);
+
+        var (downloads, _) = Build(Answer([1, 2, 3, 4]));
+        var album = new QobuzAlbum(
+            "1", "Rumours", "Fleetwood Mac", null, 1, 1, false, null, null, true, null,
+            [new QobuzTrack(55, "The Chain", 1, 8, null, null, Streamable: true)]);
+
+        var result = await downloads.DownloadAlbumAsync(album, replacing: true, Token);
+
+        Assert.Equal(1, result.Downloaded);
+        Assert.Equal($"{QobuzDownloadService.ReplacementArea}/1/08 The Chain.flac", Assert.Single(result.Tracks).Path);
+        Assert.True(File.Exists(Path.Combine(_library, QobuzDownloadService.ReplacementArea, "1", "08 The Chain.flac")));
+        Assert.True(new DirectoryInfo(Path.Combine(_library, QobuzDownloadService.ReplacementArea))
+            .Attributes.HasFlag(FileAttributes.Hidden));
+    }
+
+    [Fact]
+    public async Task AnInterruptedDownloadIsToldApartFromAnAlbumToReplace()
+    {
+        var (downloads, _) = Build(Answer([1, 2, 3, 4]));
+        var folder = Path.Combine(_library, "Fleetwood Mac", "Rumours");
+        Directory.CreateDirectory(folder);
+
+        var album = new QobuzAlbum(
+            "1", "Rumours", "Fleetwood Mac", null, 2, 1, false, null, null, true, null,
+            [
+                new QobuzTrack(55, "The Chain", 1, 7, null, null, Streamable: true),
+                new QobuzTrack(56, "You Make Loving Fun", 1, 8, null, null, Streamable: true),
+            ]);
+
+        // One of its own two tracks: an interrupted download, resumed.
+        await File.WriteAllTextAsync(Path.Combine(folder, "07 The Chain.flac"), "part one", Token);
+        Assert.True(downloads.IsInterrupted("Fleetwood Mac/Rumours", album, 27));
+
+        // Both: a whole album, which a download may replace.
+        await File.WriteAllTextAsync(Path.Combine(folder, "08 You Make Loving Fun.flac"), "part two", Token);
+        Assert.False(downloads.IsInterrupted("Fleetwood Mac/Rumours", album, 27));
+
+        // An MP3 of its own name is somebody's rip, Picard-named, when the
+        // download will arrive as FLAC.
+        File.Delete(Path.Combine(folder, "08 You Make Loving Fun.flac"));
+        File.Move(Path.Combine(folder, "07 The Chain.flac"), Path.Combine(folder, "07 The Chain.mp3"));
+        Assert.False(downloads.IsInterrupted("Fleetwood Mac/Rumours", album, 27));
+        Assert.True(downloads.IsInterrupted("Fleetwood Mac/Rumours", album, 5));
+        File.Move(Path.Combine(folder, "07 The Chain.mp3"), Path.Combine(folder, "07 The Chain.flac"));
+        await File.WriteAllTextAsync(Path.Combine(folder, "08 You Make Loving Fun.flac"), "part two", Token);
+
+        // Anything not its own: somebody's rip, which a download may replace.
+        File.Delete(Path.Combine(folder, "08 You Make Loving Fun.flac"));
+        await File.WriteAllTextAsync(Path.Combine(folder, "02 - Dreams.mp3"), "a rip", Token);
+        Assert.False(downloads.IsInterrupted("Fleetwood Mac/Rumours", album, 27));
+    }
+
+    [Fact]
+    public async Task AReplacementLeftAWeekToResumeIsSweptByTheNext()
+    {
+        var area = Path.Combine(_library, QobuzDownloadService.ReplacementArea);
+        var stale = Path.Combine(area, "stale");
+        var fresh = Path.Combine(area, "fresh");
+
+        foreach (var folder in new[] { stale, fresh })
+        {
+            Directory.CreateDirectory(folder);
+            await File.WriteAllTextAsync(Path.Combine(folder, "01 Track.flac"), "part", Token);
+        }
+
+        var old = DateTime.UtcNow.AddDays(-8);
+        File.SetLastWriteTimeUtc(Path.Combine(stale, "01 Track.flac"), old);
+        Directory.SetLastWriteTimeUtc(stale, old);
+
+        var (downloads, _) = Build(Answer([1, 2, 3, 4]));
+        var album = new QobuzAlbum(
+            "1", "Rumours", "Fleetwood Mac", null, 1, 1, false, null, null, true, null,
+            [new QobuzTrack(55, "The Chain", 1, 8, null, null, Streamable: true)]);
+
+        await downloads.DownloadAlbumAsync(album, replacing: true, Token);
+
+        Assert.False(Directory.Exists(stale));
+        Assert.True(Directory.Exists(fresh));
+    }
+
+    [Fact]
     public async Task ReDownloadingTheSameAlbumIsNotACollision()
     {
         // The collision check must not break resume. A folder holding only

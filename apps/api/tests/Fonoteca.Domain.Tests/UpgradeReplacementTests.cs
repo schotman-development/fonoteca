@@ -95,6 +95,46 @@ public sealed class UpgradeReplacementTests
             UpgradeReplacement.Check([null, Mp3()], 2, [HiRes(), HiRes()]));
     }
 
+    [Fact]
+    public void TheSameQualityWithTheTracksAnAlbumIsMissingCompletesIt()
+    {
+        // The Incomplete list's case: two of three held in CD quality, all three
+        // arriving in CD quality.
+        Assert.Equal(
+            ReplacementVerdict.Replace,
+            UpgradeReplacement.Check([Cd(), Cd()], 2, [Cd(), Cd(), Cd()]));
+
+        // A smaller encode of the same master is still no upgrade.
+        Assert.Equal(
+            ReplacementVerdict.NotBetter,
+            UpgradeReplacement.Check([Cd()], 1, [Cd() with { BitrateBps = 1 }]));
+    }
+
+    [Fact]
+    public void TheShopsOfferIsJudgedByTheSameRuleBeforeAnythingIsDownloaded()
+    {
+        Assert.Equal(ReplacementVerdict.Replace, UpgradeReplacement.Offer([Mp3(), Mp3()], 2, Cd(), 2));
+        Assert.Equal(ReplacementVerdict.Replace, UpgradeReplacement.Offer([Cd()], 1, Cd(), 2));
+        Assert.Equal(ReplacementVerdict.NotBetter, UpgradeReplacement.Offer([Cd(), Cd()], 2, Cd(), 2));
+        Assert.Equal(ReplacementVerdict.Incomplete, UpgradeReplacement.Offer([Cd(), Cd()], 2, HiRes(), 1));
+        Assert.Equal(ReplacementVerdict.NothingArrived, UpgradeReplacement.Offer([Cd()], 1, HiRes(), 0));
+        Assert.Equal(ReplacementVerdict.NotMeasured, UpgradeReplacement.Offer([null], 1, HiRes(), 1));
+    }
+
+    [Theory]
+    [InlineData("Rumours (Deluxe Edition)", "Rumours")]
+    [InlineData("Rumours (Super Deluxe Edition)", "Rumours")]
+    [InlineData("Rumours (Remastered Deluxe Edition)", "Rumours")]
+    [InlineData("Rumours (2004 Remaster)", "Rumours")]
+    [InlineData("Rumours - Remastered 2011", "Rumours")]
+    [InlineData("Rumours (40th Anniversary Edition)", "Rumours")]
+    [InlineData("Rumours [Bonus Tracks]", "Rumours")]
+    [InlineData("Rumours (Live)", "Rumours (Live)")]
+    [InlineData("Rumours (Acoustic)", "Rumours (Acoustic)")]
+    [InlineData("Special Forces", "Special Forces")]
+    public void AnEditionNoteIsSetAsideAndNothingElse(string title, string album) =>
+        Assert.Equal(album, UpgradeReplacement.WithoutEditionNote(title));
+
     private static AudioQuality Mp3() => new()
     {
         Codec = "mp3",

@@ -63,17 +63,23 @@ public static class QobuzEndpoints
 
         group.MapPost("/albums/{albumId}/download", DownloadAlbum)
             .WithName("DownloadQobuzAlbum")
-            .WithSummary("Fetch every streamable track of an album into the library.");
+            .WithSummary(
+                "Fetch an album into the library, replacing the copy already held when it is an upgrade.")
+            .WithDescription(
+                "Finds the album folder already holding this album, if any, and then does what "
+                + "`upgrade` does with it. With none, the album lands under Artist/Album.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/albums/{albumId}/upgrade", UpgradeAlbum)
             .WithName("UpgradeQobuzAlbum")
             .WithSummary("Download an album and retire the one in the library it replaces.")
             .WithDescription(
-                "Downloads first, measures what landed, and only then decides. Refuses if fewer "
-                + "tracks arrived than the album holds, if what arrived is no better than the best "
-                + "file already there, or if nothing has measured the old album. Nothing is "
-                + "deleted — the old files are moved to Fonoteca:ReplacedPath keeping their "
-                + "layout, and only when Fonoteca:AllowFileReplacement is on.")
+                "What Qobuz offers is compared with the album in the folder first, and nothing is "
+                + "downloaded unless it is better, or as good with tracks the album is missing. The "
+                + "download is then fetched into a hidden folder and measured before anything is "
+                + "decided: the old files are moved to Fonoteca:ReplacedPath keeping their layout "
+                + "and the new ones take their place, or the download is removed. Replacing needs "
+                + "Fonoteca:AllowFileReplacement.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         return app;
@@ -508,6 +514,7 @@ public static class QobuzEndpoints
                 heading.CoverReleaseId,
                 heading.Mbid,
                 group.Folder,
+                group.Files,
                 heading.Title,
                 heading.Artist,
                 heading.Year,
@@ -962,22 +969,172 @@ public static class QobuzEndpoints
         }
     }
 
+    /// <summary>
+    /// Download an album, and retire the copy it replaces when it is an upgrade.
+    /// </summary>
     /// <remarks>
+    /// <b>One request, and every download goes through here.</b> Splitting
+    /// download from replacement reads tidier and is worse: the two would have
+    /// to agree about which download the replacement is about, across a gap in
+    /// which a person can close the tab.
+    ///
+    /// <b>Compared before it is fetched.</b> An album the library already holds
+    /// is downloaded only when Qobuz offers something better, or as good with
+    /// tracks the album is missing — the Incomplete list's case. The download
+    /// then lands in <see cref="QobuzDownloadService.ReplacementArea"/>, because
+    /// the album it replaces usually sits in the very <c>Artist/Album</c> folder
+    /// it would otherwise land in.
+    ///
+    /// <b>The folder comes from the caller and is never trusted as a path.</b>
+    /// It is matched against <c>MediaFiles.Path</c> as a prefix and used to build
+    /// an archive path; a caller sending <c>../</c> or an absolute path must not
+    /// reach the filesystem. <c>AlbumReplacementService</c> re-derives everything
+    /// from the library root, and a folder the catalogue has no files under is
+    /// refused before anything is fetched.
+    ///
     /// Long-running on purpose — see <see cref="QobuzDownloadService"/>. A
-    /// hi-res album is minutes, and the request is held for all of it.
+    /// hi-res album is minutes, and every track that lands in place of another
+    /// is measured with a decoder afterwards.
     /// </remarks>
-    private static async Task<Results<Ok<AlbumDownload>, ProblemHttpResult>>
-        DownloadAlbum(
-            string albumId,
-            QobuzDownloadService downloads,
-            CancellationToken cancellationToken)
+    /// <param name="confirmed">A person has said to replace the held folder though its files cannot be shown to be this album.</param>
+    /// <param name="separate">A person has said this is not the album held, to be downloaded as one of its own.</param>
+    private static Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> DownloadAlbum(
+        string albumId,
+        bool? confirmed,
+        bool? separate,
+        QobuzClient qobuz,
+        IOptions<QobuzOptions> qobuzOptions,
+        QobuzDownloadService downloads,
+        AlbumReplacementService replacements,
+        CancellationToken cancellationToken) =>
+        AcquireAsync(albumId, null, confirmed == true, separate == true, qobuz, qobuzOptions, downloads, replacements, cancellationToken);
+
+    /// <summary>
+    /// <see cref="DownloadAlbum"/>, replacing the folder a row named rather than
+    /// the one the catalogue finds.
+    /// </summary>
+    private static Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> UpgradeAlbum(
+        string albumId,
+        UpgradeRequest request,
+        QobuzClient qobuz,
+        IOptions<QobuzOptions> qobuzOptions,
+        QobuzDownloadService downloads,
+        AlbumReplacementService replacements,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Folder))
+        {
+            return Task.FromResult<Results<Ok<AlbumUpgrade>, ProblemHttpResult>>(TypedResults.Problem(
+                "Name the album folder this download replaces.",
+                statusCode: StatusCodes.Status400BadRequest));
+        }
+
+        // `required` in the schema is decorative: minimal APIs run no body
+        // validation unless it is wired up, and this application does not wire
+        // it. A hand-written request omitting `files` binds to zero, which is
+        // the value that skips the count check — so the one field that stops a
+        // prefix taking more than the row covered is switchable off by leaving
+        // it out. Nothing legitimate sends zero.
+        if (request.Files <= 0)
+        {
+            return Task.FromResult<Results<Ok<AlbumUpgrade>, ProblemHttpResult>>(TypedResults.Problem(
+                "Say how many files that folder holds, so the catalogue can be checked against it.",
+                statusCode: StatusCodes.Status400BadRequest));
+        }
+
+        // A path, not a folder name. Refused here rather than sanitised, because
+        // the only caller that sends one is a broken one and quietly correcting
+        // it would replace an album nobody named.
+        if (request.Folder.Contains("..", StringComparison.Ordinal)
+            || Path.IsPathRooted(request.Folder))
+        {
+            return Task.FromResult<Results<Ok<AlbumUpgrade>, ProblemHttpResult>>(TypedResults.Problem(
+                "A library folder, relative to the library root.",
+                statusCode: StatusCodes.Status400BadRequest));
+        }
+
+        return AcquireAsync(
+            albumId,
+            new HeldFolder(request.Folder.Trim('/'), request.Files),
+            request.Confirmed,
+            false,
+            qobuz,
+            qobuzOptions,
+            downloads,
+            replacements,
+            cancellationToken);
+    }
+
+    private static async Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> AcquireAsync(
+        string albumId,
+        HeldFolder? held,
+        bool confirmed,
+        bool separate,
+        QobuzClient qobuz,
+        IOptions<QobuzOptions> qobuzOptions,
+        QobuzDownloadService downloads,
+        AlbumReplacementService replacements,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var result = await downloads.DownloadAlbumAsync(albumId, cancellationToken)
-                .ConfigureAwait(false);
+            var album = await qobuz.GetAlbumAsync(albumId, cancellationToken).ConfigureAwait(false)
+                ?? throw new ProviderRejectedException(
+                    QobuzClient.ProviderName, $"Qobuz has no album {albumId}.");
 
-            return TypedResults.Ok(result);
+            if (held is null && !separate)
+            {
+                // An interrupted download of this album is resumed, never
+                // replaced by itself.
+                var found = (await replacements.HeldAsync(album, cancellationToken).ConfigureAwait(false))
+                    .Where(folder => !downloads.IsInterrupted(folder.Folder, album, qobuzOptions.Value.FormatId))
+                    .ToList();
+
+                // Two copies held: which one a download replaces is a person's
+                // choice, and the Upgrade and Incomplete lists are where they
+                // make it.
+                if (found.Count > 1)
+                {
+                    return TypedResults.Problem(
+                        $"This album is already held in {found.Count} folders ("
+                        + string.Join(", ", found.Select(folder => folder.Folder))
+                        + "). Download it from the Upgrade or Incomplete list, which names the one "
+                        + "it replaces. Nothing was downloaded.",
+                        statusCode: StatusCodes.Status409Conflict,
+                        title: "Held more than once");
+                }
+
+                held = found.SingleOrDefault();
+            }
+
+            if (held is null)
+            {
+                var download = await downloads.DownloadAlbumAsync(album, replacing: false, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return TypedResults.Ok(new AlbumUpgrade(download, null));
+            }
+
+            // One replacement at a time, from the offer to the move in: two tabs
+            // replacing one album share its hidden folder, and one's cleanup
+            // would take the other's files.
+            if (!Replacing.Wait(0, CancellationToken.None))
+            {
+                return TypedResults.Problem(
+                    "A replacement is already running. This instance runs one at a time.",
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "A download is already running");
+            }
+
+            try
+            {
+                return await ReplaceAsync(album, held, confirmed, qobuzOptions, downloads, replacements, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                Replacing.Release();
+            }
         }
         catch (DownloadInProgressException cause)
         {
@@ -998,104 +1155,57 @@ public static class QobuzEndpoints
         catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
         {
             // The disk, not the provider. A full volume and an unwritable
-            // staging directory are both ordinary and both used to be a 500
-            // with a stack trace — on the one endpoint whose whole job is to
-            // put bytes on that disk.
+            // folder are both ordinary and both used to be a 500 with a stack
+            // trace — on the one endpoint whose whole job is to put bytes on
+            // that disk.
             return TypedResults.Problem(
                 cause.Message,
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "The download could not be written to staging");
+                title: "The download could not be written to disk");
         }
     }
 
-    /// <summary>
-    /// Download an album, then retire the one it replaces.
-    /// </summary>
-    /// <remarks>
-    /// <b>One request, and the download half is the ordinary one.</b> Splitting
-    /// it — download, then a second call to replace — reads tidier and is worse:
-    /// the two would have to agree about which download the replacement is
-    /// about, across a gap in which a person can close the tab, and the failure
-    /// that leaves is an album downloaded and its predecessor still there with
-    /// nothing recording that a swap was intended.
-    ///
-    /// <b>The folder comes from the caller and is never trusted as a path.</b>
-    /// It is matched against <c>MediaFiles.Path</c> as a prefix and used to build
-    /// an archive path; a caller sending <c>../</c> or an absolute path must not
-    /// reach the filesystem. <c>AlbumReplacementService</c> re-derives everything
-    /// from the library root, and a folder the catalogue has no files under is
-    /// refused before anything is moved.
-    ///
-    /// Long-running, for the download's reasons and then some: a hi-res album is
-    /// minutes and every track that lands is measured with a decoder afterwards.
-    /// </remarks>
-    private static async Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> UpgradeAlbum(
-        string albumId,
-        UpgradeRequest request,
+    private static readonly SemaphoreSlim Replacing = new(1, 1);
+
+    private static async Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> ReplaceAsync(
+        QobuzAlbum album,
+        HeldFolder held,
+        bool confirmed,
+        IOptions<QobuzOptions> qobuzOptions,
         QobuzDownloadService downloads,
         AlbumReplacementService replacements,
         CancellationToken cancellationToken)
     {
-        if (request is null || string.IsNullOrWhiteSpace(request.Folder))
+        if (await replacements
+                .RefuseOfferAsync(held.Folder, held.Files, album, qobuzOptions.Value.FormatId, confirmed, cancellationToken)
+                .ConfigureAwait(false) is { } refused)
         {
-            return TypedResults.Problem(
-                "Name the album folder this download replaces.",
-                statusCode: StatusCodes.Status400BadRequest);
+            // A download kept from an earlier attempt to resume is not
+            // wanted by an offer that is no longer an upgrade.
+            downloads.Discard(album);
+            return TypedResults.Ok(new AlbumUpgrade(null, refused));
         }
 
-        // `required` in the schema is decorative: minimal APIs run no body
-        // validation unless it is wired up, and this application does not wire
-        // it. A hand-written request omitting `files` binds to zero, which is
-        // the value that skips the count check — so the one field that stops a
-        // prefix taking more than the row covered is switchable off by leaving
-        // it out. Nothing legitimate sends zero.
-        if (request.Files <= 0)
-        {
-            return TypedResults.Problem(
-                "Say how many files that folder holds, so the catalogue can be checked against it.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
-        // A path, not a folder name. Refused here rather than sanitised, because
-        // the only caller that sends one is a broken one and quietly correcting
-        // it would replace an album nobody named.
-        if (request.Folder.Contains("..", StringComparison.Ordinal)
-            || Path.IsPathRooted(request.Folder))
-        {
-            return TypedResults.Problem(
-                "A library folder, relative to the library root.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
+        AlbumDownload fetched;
 
         try
         {
-            var download = await downloads.DownloadAlbumAsync(albumId, cancellationToken)
+            fetched = await downloads.DownloadAlbumAsync(album, replacing: true, cancellationToken)
                 .ConfigureAwait(false);
+        }
+        catch (Exception cause) when (cause is not DownloadInProgressException)
+        {
+            // Hidden, so nothing else would ever clear it. A failed track is
+            // an answer rather than an exception, and is kept to resume.
+            downloads.Discard(album);
+            throw;
+        }
 
-            var replacement = await replacements
-                .ReplaceAsync(request.Folder, request.Files, download, cancellationToken)
-                .ConfigureAwait(false);
+        var replacement = await replacements
+            .ReplaceAsync(held.Folder, held.Files, fetched, cancellationToken)
+            .ConfigureAwait(false);
 
-            return TypedResults.Ok(new AlbumUpgrade(download, replacement));
-        }
-        catch (DownloadInProgressException cause)
-        {
-            return TypedResults.Problem(
-                cause.Message,
-                statusCode: StatusCodes.Status409Conflict,
-                title: "A download is already running");
-        }
-        catch (ProviderException cause)
-        {
-            return Refused(cause);
-        }
-        catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
-        {
-            return TypedResults.Problem(
-                cause.Message,
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "The upgrade could not be written to disk");
-        }
+        return TypedResults.Ok(new AlbumUpgrade(fetched, replacement));
     }
 
     /// <summary>
@@ -1159,24 +1269,26 @@ public sealed record QobuzAlbumResponse(QobuzAlbumSummary Album, QobuzTrackRespo
 
 /// <param name="Folder">
 /// The library folder being replaced, relative to the library root — the
-/// <c>folder</c> an upgrade row carries.
+/// <c>folder</c> an upgrade or incomplete row carries.
 /// </param>
 /// <param name="Files">
 /// How many files the row said that folder holds. The catalogue has to agree, or
 /// the replacement is refused — see <c>AlbumReplacementService</c>. Must be positive:
 /// the endpoint refuses zero rather than treating it as "do not check".
 /// </param>
-public sealed record UpgradeRequest(string Folder, int Files);
+/// <param name="Confirmed">A person has said to replace the folder though its files cannot be shown to be this album.</param>
+public sealed record UpgradeRequest(string Folder, int Files, bool Confirmed = false);
 
 /// <summary>
 /// What was fetched, and what happened to what it was meant to replace.
 /// </summary>
 /// <remarks>
-/// Both halves always, including on a refusal: the download happened either way,
-/// and a response that reported only the refusal would leave somebody unable to
-/// tell whether they now have two copies or none.
+/// Both halves wherever they happened, so somebody can always tell whether they
+/// now have two copies or one.
 /// </remarks>
-public sealed record AlbumUpgrade(AlbumDownload Download, AlbumReplacement Replacement);
+/// <param name="Download">Null when the offer was refused and nothing was fetched.</param>
+/// <param name="Replacement">Null when the library held no copy of the album.</param>
+public sealed record AlbumUpgrade(AlbumDownload? Download, AlbumReplacement? Replacement);
 
 /// <param name="DurationSeconds">Qobuz's stated length, which is a claim and not a measurement.</param>
 public sealed record QobuzTrackResponse(
@@ -1316,6 +1428,10 @@ public sealed record MissingRecord(
 /// <param name="CoverReleaseId">The edition whose stored sleeve stands for the album.</param>
 /// <param name="Mbid">The release group's MusicBrainz identifier, for a cover where no sleeve is stored.</param>
 /// <param name="Folder">The album folder its files sit in, for a person to recognise it by.</param>
+/// <param name="Files">
+/// Every file in that folder, which is what a download completing the album
+/// replaces and what the replacement checks the catalogue against.
+/// </param>
 /// <param name="Query">The first billed artist and the title, as on an upgrade row.</param>
 /// <param name="MediumFormats">
 /// CD, Digital Media, <c>CD+DVD-Video</c>. The honest explanation for a gap
@@ -1342,6 +1458,7 @@ public sealed record IncompleteAlbum(
     Guid? CoverReleaseId,
     Guid? Mbid,
     string Folder,
+    int Files,
     string Title,
     string? Artist,
     int? Year,

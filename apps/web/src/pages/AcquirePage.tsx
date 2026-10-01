@@ -196,14 +196,11 @@ export function AcquirePage() {
             Upgrading
           </Badge>
           <Text size="sm" tone="secondary">
-            Whichever album you download will replace{' '}
+            A download from here replaces, when it is an upgrade,{' '}
             <Text size="sm" family="mono" tone="primary">
               {replacing.folder}
             </Text>
           </Text>
-          <Button size="sm" variant="ghost" onClick={() => setReplacing(null)}>
-            Just download instead
-          </Button>
         </Stack>
       ) : null}
 
@@ -238,14 +235,18 @@ export function AcquirePage() {
       <Incomplete
         state={upgrades}
         /*
-          A plain search, never an upgrade. Replacing refuses when what arrives
-          is no better than the best file already held — see
-          `AlbumReplacementService` — which is exactly the case here: the tracks
-          that are missing are missing, and the ones that are not are usually
-          the same quality. So the album lands in staging and the person moves
-          in the tracks they wanted.
+          A replacement like an upgrade row's: a download as good as what is
+          held but with the tracks it is missing completes the album in place —
+          see `UpgradeReplacement`.
         */
-        onSearch={(album) => ask(album.query)}
+        onSearch={(album) =>
+          ask(album.query, {
+            folder: album.folder,
+            title: album.title,
+            files: album.files,
+            formats: [],
+          })
+        }
       />
 
       {/* A plain search for the same reason: there is no file to replace. */}
@@ -599,9 +600,9 @@ function UpgradeTile({
  * them out and says how many it took; without that this list would be four
  * fifths wrong, in the direction that costs money.
  *
- * Nothing here is an upgrade. Downloading fetches the whole album into staging
- * and the person moves in the tracks they were missing — see the note at the
- * call site for why offering a replacement would only ever be refused.
+ * A download from here is an upgrade at the same quality: it completes the
+ * album in its own folder when Qobuz has the tracks it is missing, and replaces
+ * nothing otherwise.
  */
 function Incomplete({
   state,
@@ -634,8 +635,8 @@ function Incomplete({
       detail={
         <>
           Albums whose release prints more tracks than the library holds, nearest to whole first.{' '}
-          <strong>Qobuz has not been asked about any of them</strong> — and a download lands the
-          whole album in staging, so only the tracks you are missing need moving in.
+          <strong>Qobuz has not been asked about any of them</strong> — and a download from here
+          completes the album in its own folder, when Qobuz has the tracks it is missing.
           {unmatchedAlbums > 0
             ? ` ${unmatchedAlbums.toLocaleString()} more were left off: the files that would fill their gaps are already in the folder, waiting on Identify.`
             : ''}

@@ -3330,7 +3330,8 @@
         "tags": [
           "Qobuz"
         ],
-        "summary": "Fetch every streamable track of an album into the library.",
+        "summary": "Fetch an album into the library, replacing the copy already held when it is an upgrade.",
+        "description": "Finds the album folder already holding this album, if any, and then does what `upgrade` does with it. With none, the album lands under Artist/Album.",
         "operationId": "DownloadQobuzAlbum",
         "parameters": [
           {
@@ -3340,6 +3341,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "confirmed",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "separate",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -3348,7 +3363,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AlbumDownload"
+                  "$ref": "#/components/schemas/AlbumUpgrade"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -3362,7 +3387,7 @@
           "Qobuz"
         ],
         "summary": "Download an album and retire the one in the library it replaces.",
-        "description": "Downloads first, measures what landed, and only then decides. Refuses if fewer tracks arrived than the album holds, if what arrived is no better than the best file already there, or if nothing has measured the old album. Nothing is deleted — the old files are moved to Fonoteca:ReplacedPath keeping their layout, and only when Fonoteca:AllowFileReplacement is on.",
+        "description": "What Qobuz offers is compared with the album in the folder first, and nothing is downloaded unless it is better, or as good with tracks the album is missing. The download is then fetched into a hidden folder and measured before anything is decided: the old files are moved to Fonoteca:ReplacedPath keeping their layout and the new ones take their place, or the download is removed. Replacing needs Fonoteca:AllowFileReplacement.",
         "operationId": "UpgradeQobuzAlbum",
         "parameters": [
           {
@@ -4420,10 +4445,24 @@
         "type": "object",
         "properties": {
           "download": {
-            "$ref": "#/components/schemas/AlbumDownload"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlbumDownload"
+              }
+            ]
           },
           "replacement": {
-            "$ref": "#/components/schemas/AlbumReplacement"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlbumReplacement"
+              }
+            ]
           }
         }
       },
@@ -6742,6 +6781,7 @@
           "coverReleaseId",
           "mbid",
           "folder",
+          "files",
           "title",
           "artist",
           "year",
@@ -6778,6 +6818,10 @@
           },
           "folder": {
             "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
           },
           "title": {
             "type": "string"
@@ -8617,7 +8661,9 @@
           "NotMeasured",
           "ArrivalNotMeasured",
           "LandedInside",
-          "NotHeld"
+          "NotHeld",
+          "Unconfirmed",
+          "SameTitle"
         ]
       },
       "SeedField": {
@@ -9381,6 +9427,10 @@
           "files": {
             "type": "integer",
             "format": "int32"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

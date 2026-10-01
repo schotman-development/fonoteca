@@ -1256,7 +1256,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fetch every streamable track of an album into the library. */
+        /**
+         * Fetch an album into the library, replacing the copy already held when it is an upgrade.
+         * @description Finds the album folder already holding this album, if any, and then does what `upgrade` does with it. With none, the album lands under Artist/Album.
+         */
         post: operations["DownloadQobuzAlbum"];
         delete?: never;
         options?: never;
@@ -1275,7 +1278,7 @@ export interface paths {
         put?: never;
         /**
          * Download an album and retire the one in the library it replaces.
-         * @description Downloads first, measures what landed, and only then decides. Refuses if fewer tracks arrived than the album holds, if what arrived is no better than the best file already there, or if nothing has measured the old album. Nothing is deleted — the old files are moved to Fonoteca:ReplacedPath keeping their layout, and only when Fonoteca:AllowFileReplacement is on.
+         * @description What Qobuz offers is compared with the album in the folder first, and nothing is downloaded unless it is better, or as good with tracks the album is missing. The download is then fetched into a hidden folder and measured before anything is decided: the old files are moved to Fonoteca:ReplacedPath keeping their layout and the new ones take their place, or the download is removed. Replacing needs Fonoteca:AllowFileReplacement.
          */
         post: operations["UpgradeQobuzAlbum"];
         delete?: never;
@@ -1546,8 +1549,8 @@ export interface components {
             on: string[];
         };
         AlbumUpgrade: {
-            download: components["schemas"]["AlbumDownload"];
-            replacement: components["schemas"]["AlbumReplacement"];
+            download: null | components["schemas"]["AlbumDownload"];
+            replacement: null | components["schemas"]["AlbumReplacement"];
         };
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];
@@ -2172,6 +2175,8 @@ export interface components {
             /** Format: uuid */
             mbid: null | string;
             folder: string;
+            /** Format: int32 */
+            files: number;
             title: string;
             artist: null | string;
             /** Format: int32 */
@@ -2623,7 +2628,7 @@ export interface components {
             slots: components["schemas"]["ReleaseSlotRow"][];
         };
         /** @enum {unknown} */
-        ReplacementVerdict: "Replace" | "NothingArrived" | "Incomplete" | "NotBetter" | "NotMeasured" | "ArrivalNotMeasured" | "LandedInside" | "NotHeld";
+        ReplacementVerdict: "Replace" | "NothingArrived" | "Incomplete" | "NotBetter" | "NotMeasured" | "ArrivalNotMeasured" | "LandedInside" | "NotHeld" | "Unconfirmed" | "SameTitle";
         SeedField: {
             name: string;
             value: string;
@@ -2820,6 +2825,8 @@ export interface components {
             folder: string;
             /** Format: int32 */
             files: number;
+            /** @default false */
+            confirmed: boolean;
         };
         WrittenText: {
             text: string;
@@ -5446,7 +5453,10 @@ export interface operations {
     };
     DownloadQobuzAlbum: {
         parameters: {
-            query?: never;
+            query?: {
+                confirmed?: boolean;
+                separate?: boolean;
+            };
             header?: never;
             path: {
                 albumId: string;
@@ -5461,7 +5471,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AlbumDownload"];
+                    "application/json": components["schemas"]["AlbumUpgrade"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
