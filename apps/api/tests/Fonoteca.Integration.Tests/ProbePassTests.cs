@@ -119,6 +119,54 @@ public sealed class ProbePassTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.NotNull(truncated.LastVerifiedUtc);
     }
 
+    /// <summary>
+    /// A file re-asked after a rule change, and refused this time, forgets the
+    /// numbers the earlier pass remembered.
+    /// </summary>
+    [Fact]
+    public async Task ARemeasurementThatFailsForgetsTheOldNumbers()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        // Both refusals: a decoder complaint, and a file with nothing to measure.
+        var refused = new[] { Path.GetFileName(Corpus.TruncatedFlac), Path.GetFileName(Corpus.NotAudioFlac) };
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var row in await seed.MediaFiles.Where(f => refused.Contains(f.Path)).ToListAsync(Token))
+            {
+                row.Quality = new AudioQuality
+                {
+                    Codec = "flac",
+                    SampleRateHz = 44_100,
+                    Channels = 2,
+                    BitDepth = 16,
+                    BitrateBps = 900_000,
+                    IsLossless = true,
+                    Duration = TimeSpan.FromMinutes(7),
+                };
+            }
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        await RunAsync();
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var truncated = await db.MediaFiles.AsNoTracking()
+            .SingleAsync(f => f.Path == Path.GetFileName(Corpus.TruncatedFlac), Token);
+
+        Assert.Equal(IntegrityState.Corrupt, truncated.Integrity);
+        Assert.Null(truncated.Quality);
+
+        var nothing = await db.MediaFiles.AsNoTracking()
+            .SingleAsync(f => f.Path == Path.GetFileName(Corpus.NotAudioFlac), Token);
+
+        Assert.Equal(IntegrityState.Unreadable, nothing.Integrity);
+        Assert.Null(nothing.Quality);
+    }
+
     [Fact]
     public async Task AFileNothingCanMeasureStillLeavesTheWorklist()
     {

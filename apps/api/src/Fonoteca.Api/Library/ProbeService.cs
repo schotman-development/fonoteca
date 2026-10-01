@@ -589,10 +589,14 @@ public sealed class ProbeService(
             // Only a clean decode is remembered. A complaint means the numbers
             // came out of a header the decoder then disagreed with, and
             // AudioQuality is read by the rules that pick between duplicates.
-            if (reading is { } measured && measured.DecodedCleanly)
-            {
-                row.Quality = measured.Quality;
-            }
+            //
+            // And anything else forgets what an earlier pass remembered. The
+            // bytes are the same — a scan would have cleared this otherwise — so
+            // an earlier measurement is one a stricter reading has since refused:
+            // the Coltrane FLAC with no decodable audio kept 7:28 and 924 kbps
+            // from its header after it was found unreadable, and attribution,
+            // Subsonic and the upgrade list all read those.
+            row.Quality = reading is { DecodedCleanly: true } measured ? measured.Quality : null;
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }

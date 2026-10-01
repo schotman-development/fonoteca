@@ -113,7 +113,7 @@ public sealed class FfprobeAudioProbe(
         "-count_frames",
 
         "-show_entries",
-        "stream=codec_name,codec_long_name,sample_rate,channels,bits_per_raw_sample,bit_rate,duration"
+        "stream=codec_name,codec_long_name,sample_rate,channels,bits_per_raw_sample,bit_rate,duration,nb_read_frames"
             + ":format=duration,bit_rate,size",
         "-of", "json",
     ];
@@ -147,12 +147,49 @@ public sealed class FfprobeAudioProbe(
         // the one place that owns the root.
         var absolute = _files.AbsolutePathFor(path);
 
+        var reading = await ReadAsync(path, absolute, cancellationToken).ConfigureAwait(false);
+
+        // An ID3v1 tag is 128 bytes glued to the end of the file, and ffmpeg's
+        // FLAC demuxer does not know it: every frame decodes, then the tag is
+        // read as one more frame and the decoder objects — "invalid sync code",
+        // "decode_frame() failed" — on a file that is perfectly intact. Measured:
+        // 24 FLACs here, two whole albums, all of them marked corrupt and so
+        // missing from every quality decision. The MP3 demuxer does know the
+        // tag, so there it changes nothing. Asked again without those bytes,
+        // the decoder's answer is about the audio alone; damage anywhere before
+        // the tag still objects. Only a complaint is asked twice, so a clean
+        // file is read once as before, and a second read that fails keeps the
+        // first answer rather than inventing a worse one.
+        if (reading is { DecodedCleanly: false } && Id3v1TagStart(absolute) is { } audioEnd)
+        {
+            try
+            {
+                reading = await ReadAsync(
+                        path,
+                        $"subfile,,start,0,end,{audioEnd},,:file:{absolute}",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (AudioProbeFailedException)
+            {
+            }
+        }
+
+        return reading;
+    }
+
+    /// <summary>One ffprobe run over <paramref name="input"/>, a path or an ffmpeg URL.</summary>
+    private async Task<AudioProbeReading?> ReadAsync(
+        LibraryPath path,
+        string input,
+        CancellationToken cancellationToken)
+    {
         ProcessResult result;
 
         try
         {
             result = await ProcessRunner
-                .RunAsync(_ffprobePath, [.. BaseArguments, absolute], _timeout, cancellationToken)
+                .RunAsync(_ffprobePath, [.. BaseArguments, input], _timeout, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (ProcessStartFailedException cause)
@@ -207,6 +244,15 @@ public sealed class FfprobeAudioProbe(
         // measurement.
         if (sampleRate is not > 0 || stream.Channels is not > 0) return null;
 
+        // Zero frames decoded, and nothing said about it: the header is whole and
+        // what follows it is not audio. ffprobe reports the count only when it
+        // decoded something, so a missing one is zero. Every number above would
+        // be the header's claim about audio that is not there — measured on John
+        // Coltrane's "Lazy Bird (alternate take 2)", 7:28 declared and not one
+        // sample decodable, which fpcalc refused and this read as intact. Not a
+        // measurement, so Unreadable, for the same reason as the line above.
+        if (Number(stream.ReadFrames) is not > 0) return null;
+
         var duration = Seconds(stream.Duration) ?? Seconds(document.Format?.Duration);
 
         var quality = new AudioQuality
@@ -238,6 +284,32 @@ public sealed class FfprobeAudioProbe(
         // residual", "decode_frame() failed", "Header missing" — and it exits
         // zero having done so, which is why the exit code above is not enough.
         return new AudioProbeReading(quality, Summarise(result.StandardError));
+    }
+
+    /// <summary>
+    /// Where the audio ends, when the file closes with an ID3v1 tag; otherwise null.
+    /// </summary>
+    private static long? Id3v1TagStart(string absolute)
+    {
+        const int TagLength = 128;
+
+        try
+        {
+            using var file = File.OpenRead(absolute);
+
+            if (file.Length < TagLength) return null;
+
+            file.Seek(-TagLength, SeekOrigin.End);
+
+            Span<byte> marker = stackalloc byte[3];
+            file.ReadExactly(marker);
+
+            return marker.SequenceEqual("TAG"u8) ? file.Length - TagLength : null;
+        }
+        catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Whether this codec's output is bit-exact.</summary>
@@ -309,7 +381,8 @@ public sealed class FfprobeAudioProbe(
         [property: JsonPropertyName("channels")] int? Channels,
         [property: JsonPropertyName("bits_per_raw_sample")] string? BitsPerRawSample,
         [property: JsonPropertyName("bit_rate")] string? BitRate,
-        [property: JsonPropertyName("duration")] string? Duration);
+        [property: JsonPropertyName("duration")] string? Duration,
+        [property: JsonPropertyName("nb_read_frames")] string? ReadFrames);
 
     private sealed record FfprobeFormat(
         [property: JsonPropertyName("duration")] string? Duration,

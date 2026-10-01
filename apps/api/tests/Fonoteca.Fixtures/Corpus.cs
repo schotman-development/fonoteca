@@ -118,6 +118,29 @@ public static class Corpus
     /// </remarks>
     public static string Id3PrefixedFlac => Built.Value.Id3Prefixed;
 
+    /// <summary>
+    /// A playable FLAC with a 128-byte ID3v1 tag after the last frame.
+    /// </summary>
+    /// <remarks>
+    /// The other end of the same habit: 24 FLACs in the library this was written
+    /// for close this way, and ffmpeg reads the tag as a broken frame.
+    /// </remarks>
+    public static string Id3v1TrailedFlac => Built.Value.Id3v1Trailed;
+
+    /// <summary><see cref="TruncatedFlac"/> with the same ID3v1 tag after it — damaged, and tagged.</summary>
+    public static string TruncatedId3v1TrailedFlac => Built.Value.TruncatedId3v1Trailed;
+
+    /// <summary>
+    /// A FLAC whose header is whole and whose audio is not FLAC frames at all.
+    /// </summary>
+    /// <remarks>
+    /// Every byte after the metadata blocks is zero, so no frame sync is ever
+    /// found: ffmpeg decodes nothing, says nothing and exits zero, and the header
+    /// still declares the full length. John Coltrane's "Lazy Bird (alternate take
+    /// 2)" in the library this was written for is that shape.
+    /// </remarks>
+    public static string NoFramesFlac => Built.Value.NoFrames;
+
     /// <summary>Every generated file, for a test that wants to sweep the lot.</summary>
     public static IReadOnlyList<string> All => Built.Value.All;
 
@@ -224,9 +247,45 @@ public static class Corpus
         var id3Prefixed = Path.Combine(root, "id3-prefixed.flac");
         File.WriteAllBytes(id3Prefixed, [.. UnsynchronisedId3Tag(), .. File.ReadAllBytes(flac)]);
 
+        var id3v1Trailed = Path.Combine(root, "id3v1-trailed.flac");
+        File.WriteAllBytes(id3v1Trailed, [.. whole, .. Id3v1Tag()]);
+
+        var truncatedId3v1Trailed = Path.Combine(root, "truncated-id3v1-trailed.flac");
+        File.WriteAllBytes(truncatedId3v1Trailed, [.. whole[..(whole.Length / 4)], .. Id3v1Tag()]);
+
+        var noFrames = Path.Combine(root, "no-frames.flac");
+        var audioStart = FlacAudioStart(whole);
+        File.WriteAllBytes(noFrames, [.. whole[..audioStart], .. new byte[whole.Length - audioStart]]);
+
         return new CorpusFiles(
             root, flac, mp3, m4a, ogg, withArtwork, alreadyTagged,
-            truncated, empty, notAudio, awkward, nonAscii, id3Prefixed);
+            truncated, empty, notAudio, awkward, nonAscii, id3Prefixed,
+            id3v1Trailed, truncatedId3v1Trailed, noFrames);
+    }
+
+    /// <summary>Where a FLAC's first audio frame starts: past <c>fLaC</c> and every metadata block.</summary>
+    private static int FlacAudioStart(byte[] flac)
+    {
+        var at = 4;
+        var last = false;
+
+        while (!last)
+        {
+            last = (flac[at] & 0x80) != 0;
+            at += 4 + ((flac[at + 1] << 16) | (flac[at + 2] << 8) | flac[at + 3]);
+        }
+
+        return at;
+    }
+
+    /// <summary>An ID3v1 tag: <c>TAG</c>, a title, and fixed-width blanks to 128 bytes.</summary>
+    private static byte[] Id3v1Tag()
+    {
+        var tag = new byte[128];
+        "TAG"u8.CopyTo(tag);
+        "Corpus"u8.CopyTo(tag.AsSpan(3));
+        tag[^1] = 0xFF;
+        return tag;
     }
 
     /// <summary>
@@ -403,12 +462,16 @@ public static class Corpus
         string NotAudio,
         string AwkwardName,
         string NonAscii,
-        string Id3Prefixed)
+        string Id3Prefixed,
+        string Id3v1Trailed,
+        string TruncatedId3v1Trailed,
+        string NoFrames)
     {
         public IReadOnlyList<string> All =>
         [
             Flac, Mp3, M4a, Ogg, FlacWithArtwork, AlreadyTagged,
             Truncated, Empty, NotAudio, AwkwardName, NonAscii, Id3Prefixed,
+            Id3v1Trailed, TruncatedId3v1Trailed, NoFrames,
         ];
     }
 }
