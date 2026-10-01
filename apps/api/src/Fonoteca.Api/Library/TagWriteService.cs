@@ -663,10 +663,10 @@ public sealed class TagWriteService(
                 return;
             }
 
-            // The forty FLACs carrying a prepended ID3v2 header throw out of here
-            // rather than returning: two libraries have to agree about what is in
-            // a file before it is changed, and one of them cannot parse it. The
-            // backstop in RunAsync counts it and moves on.
+            // A file one of the two libraries cannot parse throws out of here
+            // rather than returning: they have to agree about what is in a file
+            // before it is changed. The backstop in RunAsync counts it and
+            // moves on.
             var plan = await writer
                 .PlanAsync(path, CatalogueTags.For(file.Describe()), cancellationToken)
                 .ConfigureAwait(false);

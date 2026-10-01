@@ -135,8 +135,22 @@ public sealed class TagWriter(
             }
         }
 
+        // A UFID an earlier save left with an encoding byte in front of its
+        // owner — see TaggingDefaults.UfidIsBinary — is put right as a change of
+        // its own, so the journal can undo it and a file whose tags are already
+        // correct is still opened for it.
+        if (TaggingDefaults.UfidIsBinary
+            && before.Fields.TryGetValue(UfidField, out var ufid)
+            && ufid.StartsWith('\u0003'))
+        {
+            changes.Add(new TagFieldChange(UfidField, ufid, ufid[1..]));
+        }
+
         return new TagWritePlan(path, changes, before);
     }
+
+    /// <summary>ATL's name for the ID3v2 frame MusicBrainz's recording id lives in.</summary>
+    private const string UfidField = "UFID";
 
     /// <summary>Carries out a plan, or explains why it did not.</summary>
     /// <param name="subjectId">
@@ -198,11 +212,34 @@ public sealed class TagWriter(
             return new TagWriteResult(plan, TagWriteStatus.Failed, "The file is no longer there.");
         }
 
+        var stored = await _reader.ReadWithVerifierAsync(plan.Path, null, cancellationToken).ConfigureAwait(false);
+
+        // An ID3 tag in front of a FLAC is dropped by the write — see Id3Prefix —
+        // and with it whatever only it held, so the checks on ID3-only facts
+        // stand down for this file.
+        var source = await _files.OpenReadAsync(plan.Path, cancellationToken).ConfigureAwait(false);
+        var mp3 = plan.Path.Value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase);
+        var flac = plan.Path.Value.EndsWith(".flac", StringComparison.OrdinalIgnoreCase);
+        bool stripped;
+        Dictionary<string, byte[]>? kept = [];
+        List<byte[]> commentPictures = [];
+
+        await using (source.ConfigureAwait(false))
+        {
+            stripped = Id3Prefix.Length(source, plan.Path.Value) > 0;
+
+            // The frames ATL rewrites as text, as they were — see Id3v2Repair.
+            if (mp3) kept = Id3v2Repair.Kept(source);
+
+            // The covers ATL drops from a Vorbis comment — see FlacCommentPictures.
+            if (flac) commentPictures = FlacCommentPictures.Read(Id3Prefix.Past(source, plan.Path.Value));
+        }
+
         var staged = await _files.OpenForReplaceAsync(plan.Path, cancellationToken).ConfigureAwait(false);
 
         await using (staged.ConfigureAwait(false))
         {
-            var rendered = await RenderAsync(plan, staged, cancellationToken).ConfigureAwait(false);
+            var rendered = await RenderAsync(plan, stored, staged, cancellationToken).ConfigureAwait(false);
 
             if (rendered is not null)
             {
@@ -213,7 +250,18 @@ public sealed class TagWriter(
                 return new TagWriteResult(plan, TagWriteStatus.VerificationFailed, rendered);
             }
 
-            var problem = await VerifyAsync(plan, staged, facts, cancellationToken).ConfigureAwait(false);
+            // Before the checks, so both readers verify the file as it will be.
+            if (flac) FlacCommentPictures.Restore(staged.Content, commentPictures);
+
+            var problem = !mp3 ? null
+                : kept is null ? "ATL damages the RGAD frame, and the repair cannot read this tag to put it back."
+                : Id3v2Repair.Repair(staged.Content, kept);
+
+            // The base64 of the covers moved out of the comment, which the file sheds.
+            var shed = commentPictures.Sum(picture => 4L * ((picture.Length + 2) / 3));
+
+            problem ??= await VerifyAsync(plan, stored, stripped, shed, staged, facts, cancellationToken)
+                .ConfigureAwait(false);
 
             if (problem is not null)
             {
@@ -241,6 +289,7 @@ public sealed class TagWriter(
     /// <summary>Renders the tagged file into the staging stream. Null on success.</summary>
     private async Task<string?> RenderAsync(
         TagWritePlan plan,
+        TagSnapshot stored,
         IStagedWrite staged,
         CancellationToken cancellationToken)
     {
@@ -248,11 +297,34 @@ public sealed class TagWriter(
 
         await using (source.ConfigureAwait(false))
         {
-            var track = new Track(source, Path.GetExtension(plan.Path.Value));
+            var track = new Track(Id3Prefix.Past(source, plan.Path.Value), Path.GetExtension(plan.Path.Value));
+
+            // ATL 7.16 judges an ID3v2 date's precision wrongly on load: a 2.4
+            // "2017" becomes "2017-01-01" on save, a 2.3 TYER+TDAT loses its day.
+            // Hand it back the precision the file stores, as TagLib# read it.
+            Restate(stored.RecordedDate, track.Date, year => track.Year = year, date => track.Date = date);
+            Restate(stored.OriginalDate, track.OriginalReleaseDate,
+                year => track.OriginalReleaseYear = year, date => track.OriginalReleaseDate = date);
+
+            // And the totals it read as none — see TagSnapshot.TrackTotal — or
+            // they are dropped by a write that never meant to touch them.
+            if (track.TrackTotal is null or 0 && stored.TrackTotal is { } tracks) track.TrackTotal = tracks;
+            if (track.DiscTotal is null or 0 && stored.DiscTotal is { } discs) track.DiscTotal = discs;
 
             foreach (var change in plan.Changes)
             {
                 Set(track, change);
+            }
+
+            // ATL reads a WXXX frame as its description and URL joined by its own
+            // value separator, and writes that separator into the URL. The frame
+            // defines a NUL between them; put it back.
+            foreach (var key in track.AdditionalFields.Keys.Where(key => key is "WXXX" or "WXX").ToList())
+            {
+                var url = track.AdditionalFields[key];
+                var at = url.IndexOf(TaggingDefaults.ValueSeparator, StringComparison.Ordinal);
+
+                if (at >= 0) track.AdditionalFields[key] = string.Concat(url.AsSpan(0, at), "\0", url.AsSpan(at + 1));
             }
 
             // ATL renders the complete file — audio and all — to offset 0 of the
@@ -267,6 +339,8 @@ public sealed class TagWriter(
                 // here without making this class depend on that global.
                 return "ATL declined to write the file.";
             }
+
+            if (plan.Path.Value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)) Id3v1Trailer.Write(staged.Content, track);
         }
 
         await staged.Content.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -303,9 +377,45 @@ public sealed class TagWriter(
             // CatalogueTagSource.Year.
             case CatalogueTags.Year: track.Year = Count(value); break;
 
-            default: track.AdditionalFields[change.Field] = value!; break;
+            default:
+                // Every spelling of the key. A file carrying an APE tag beside
+                // its ID3 one holds the field twice, one key uppercased, and ATL's
+                // writers keep whichever comes first — the old value.
+                foreach (var key in track.AdditionalFields.Keys
+                             .Where(key => key.Equals(change.Field, StringComparison.OrdinalIgnoreCase))
+                             .ToList())
+                {
+                    track.AdditionalFields[key] = value!;
+                }
+
+                track.AdditionalFields[change.Field] = value!;
+                break;
         }
     }
+
+    /// <summary>
+    /// Puts back a stored date ATL parsed at the wrong precision; leaves any other alone.
+    /// </summary>
+    private static void Restate(string? stored, DateTime? parsed, Action<int> year, Action<DateTime> date)
+    {
+        if (stored is null || parsed is not { Month: 1, Day: 1 } read || read.TimeOfDay != TimeSpan.Zero) return;
+
+        if (stored.Length == 4 && Count(stored) == read.Year)
+        {
+            year(read.Year);
+        }
+        else if (DateTime.TryParseExact(stored, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
+            && day.Year == read.Year && day != DateTime.MinValue)
+        {
+            date(day);
+        }
+    }
+
+    /// <summary>A value with its control characters spelled out, for a message.</summary>
+    private static string Visible(string? value) =>
+        value is null
+            ? "none"
+            : string.Concat(value.Select(c => char.IsControl(c) ? $"\\x{(int)c:X2}" : c.ToString()));
 
     private static int? Count(string? value) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number)
@@ -313,8 +423,12 @@ public sealed class TagWriter(
             : null;
 
     /// <summary>The checks. Returns the first failure, or null when all pass.</summary>
+    /// <param name="shed">Bytes the file may lose beyond a tag write's own, for covers moved out of a Vorbis comment.</param>
     private async Task<string?> VerifyAsync(
         TagWritePlan plan,
+        TagSnapshot stored,
+        bool stripped,
+        long shed,
         IStagedWrite staged,
         FileFacts original,
         CancellationToken cancellationToken)
@@ -334,11 +448,22 @@ public sealed class TagWriter(
             }
         }
 
-        var lost = Lost(plan, written);
+        var lost = Lost(plan, stored, written);
 
         if (lost.Count > 0)
         {
             return $"Writing these tags would have changed or dropped: {string.Join(", ", lost)}.";
+        }
+
+        // Each reader's pictures before against its own after, in any order.
+        // The two agreeing with each other is not enough: ATL drops a cover
+        // stored inside a Vorbis comment, TagLib# never saw it, and both then
+        // agreed about a file with one sleeve fewer.
+        if (!plan.Before.PictureDigests.Order(StringComparer.Ordinal)
+                .SequenceEqual(written.PictureDigests.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+        {
+            return "Writing these tags would have changed or dropped an embedded picture: "
+                + $"{plan.Before.PictureCount} before, {written.PictureCount} after.";
         }
 
         var verified = await _reader
@@ -365,6 +490,52 @@ public sealed class TagWriter(
             return "The two tag libraries disagree about the file they just read.";
         }
 
+        // As a set: TagLib# counts a cover twice when an ID3 tag in front of a
+        // FLAC carries a copy of it, and the copy going is not a cover going.
+        // A cover moved out of a Vorbis comment is new to TagLib#, which never
+        // read it there; ATL did, so it may be new only if ATL saw it before.
+        var pictures = stored.PictureDigests.ToHashSet(StringComparer.Ordinal);
+
+        if (!pictures.IsSubsetOf(verified.PictureDigests)
+            || !verified.PictureDigests.All(digest => pictures.Contains(digest) || plan.Before.PictureDigests.Contains(digest)))
+        {
+            return "Writing these tags would have changed or dropped an embedded picture, as TagLib# reads them: "
+                + $"{stored.PictureCount} before, {verified.PictureCount} after.";
+        }
+
+        foreach (var (field, before, after) in new (string Field, int? Before, int? After)[]
+                 {
+                     (CatalogueTags.TrackTotal, stored.TrackTotal, verified.TrackTotal),
+                     (CatalogueTags.DiscTotal, stored.DiscTotal, verified.DiscTotal),
+                 })
+        {
+            if (before is not null && before != after && !plan.Changes.Any(change => change.Field == field))
+            {
+                return $"Writing these tags would have rewritten {field} '{before}' as '{after?.ToString(CultureInfo.InvariantCulture) ?? "none"}'.";
+            }
+        }
+
+        // MusicBrainz's recording id on an MP3, which ATL has damaged before —
+        // see TaggingDefaults.UfidIsBinary. Only a planned repair may change it.
+        var identifiers = plan.Changes.Any(change => change.Field == UfidField)
+            ? stored.FileIdentifiers?.Replace("\u0003", string.Empty, StringComparison.Ordinal)
+            : stored.FileIdentifiers;
+
+        if (!stripped && !string.Equals(identifiers, verified.FileIdentifiers, StringComparison.Ordinal))
+        {
+            return $"Writing these tags would have rewritten the file identifiers '{Visible(stored.FileIdentifiers)}' "
+                + $"as '{Visible(verified.FileIdentifiers)}'.";
+        }
+
+        // Each library against its own reading of the original, not against the
+        // other: TagLib# 2.3 ignores LAME's "Info" header and times a CBR stream at
+        // the first frame's bitrate, so the two can disagree about an untouched file.
+        if (Math.Abs(written.DurationSeconds - plan.Before.DurationSeconds) > 1.0
+            || Math.Abs(verified.DurationSeconds - stored.DurationSeconds) > 1.0)
+        {
+            return "The staged file is not as long as the original.";
+        }
+
         // ATL renders a date from its own parse on every save, so a date nothing
         // asked to change can still come out different: ID3v2.3's day and month
         // dropped on the upgrade to 2.4, "2008-10" given a first of the month,
@@ -372,15 +543,17 @@ public sealed class TagWriter(
         // and it is not in the plan, so the journal could not undo it. TagLib# reads
         // the date as stored on both sides; a difference means this file is not
         // written.
-        if (!plan.Changes.Any(change => change.Field == CatalogueTags.Year))
+        if (!plan.Changes.Any(change => change.Field == CatalogueTags.Year)
+            && !string.Equals(stored.RecordedDate, verified.RecordedDate, StringComparison.Ordinal))
         {
-            var stored = await _reader.ReadWithVerifierAsync(plan.Path, null, cancellationToken).ConfigureAwait(false);
+            return $"Writing these tags would have rewritten the date '{stored.RecordedDate ?? "none"}' "
+                + $"as '{verified.RecordedDate ?? "none"}'.";
+        }
 
-            if (!string.Equals(stored.RecordedDate, verified.RecordedDate, StringComparison.Ordinal))
-            {
-                return $"Writing these tags would have rewritten the date '{stored.RecordedDate ?? "none"}' "
-                    + $"as '{verified.RecordedDate ?? "none"}'.";
-            }
+        if (!stripped && !string.Equals(stored.OriginalDate, verified.OriginalDate, StringComparison.Ordinal))
+        {
+            return $"Writing these tags would have rewritten the original date '{stored.OriginalDate ?? "none"}' "
+                + $"as '{verified.OriginalDate ?? "none"}'.";
         }
 
         var stagedFacts = await _files.StatAsync(stagedPath, cancellationToken).ConfigureAwait(false);
@@ -392,7 +565,7 @@ public sealed class TagWriter(
 
         var drift = Math.Abs(stagedFacts.SizeBytes - original.SizeBytes);
 
-        if (drift > ToleratedSizeDrift(original.SizeBytes))
+        if (drift > ToleratedSizeDrift(original.SizeBytes) + shed)
         {
             return $"The staged file is {stagedFacts.SizeBytes} bytes against the original's "
                 + $"{original.SizeBytes}; that is too large a change for a tag write.";
@@ -411,15 +584,27 @@ public sealed class TagWriter(
     /// the same value as <c>YEAR</c> and reports both. Without that pairing every
     /// write that corrects a year fails verification and rolls itself back.
     /// </remarks>
-    private static IReadOnlyList<string> Lost(TagWritePlan plan, TagSnapshot written)
+    private static IReadOnlyList<string> Lost(TagWritePlan plan, TagSnapshot stored, TagSnapshot written)
     {
         var intended = new HashSet<string>(
             plan.Changes.Select(change => change.Field), StringComparer.OrdinalIgnoreCase);
 
-        if (intended.Contains(CatalogueTags.Year)) intended.Add("DATE");
+        // ATL's DATE is its parse, which is what gets a date's precision wrong;
+        // a date TagLib# read as stored is compared as stored instead.
+        if (intended.Contains(CatalogueTags.Year) || stored.RecordedDate is not null) intended.Add("DATE");
 
         return [.. plan.Before.FieldsLostIn(written).Where(field => !intended.Contains(field))];
     }
+
+    /// <summary>A value PostgreSQL's <c>jsonb</c> will store.</summary>
+    /// <remarks>
+    /// <c>jsonb</c> refuses <c>\u0000</c> outright, and a <c>UFID</c> is an owner
+    /// and an identifier either side of one. Refused, the journal's save fails
+    /// after the file is committed and takes the row's new size and mtime with
+    /// it — the one thing a write must never do (rule 2). Shown as U+2400, the
+    /// symbol for NUL; nothing reads a <c>UFID</c> back out of the journal.
+    /// </remarks>
+    private static string? Storable(string? value) => value?.Replace('\0', '\u2400');
 
     private async Task<Guid> JournalAsync(
         TagWritePlan plan,
@@ -440,11 +625,11 @@ public sealed class TagWriter(
                         new TagFieldWrite
                         {
                             Field = change.Field,
-                            Previous = change.From,
-                            Written = change.To,
+                            Previous = Storable(change.From),
+                            Written = Storable(change.To),
                         }),
                 ],
-                Reason = reason,
+                Reason = Storable(reason),
                 Pictures = plan.Before.PictureCount,
                 PictureDigests = plan.Before.PictureDigests,
                 Writer = "ATL.NET",

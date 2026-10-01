@@ -33,10 +33,10 @@ public sealed class TagReader(IAudioFileStore files)
     ///
     /// Never throws on a file it cannot parse, and that promise is kept with a
     /// catch-all rather than a list of expected types — because the expected
-    /// types are not what a tag parser actually raises. ATL throws a
+    /// types are not what a tag parser actually raises — ATL threw a
     /// <see cref="NullReferenceException"/> on a FLAC carrying a prepended ID3v2
-    /// header, and there are forty of those in the author's library. Here that
-    /// costs nothing: a file whose fields cannot be read has no AcoustID as far
+    /// header until <see cref="Id3Prefix"/>. Here a failure costs nothing: a
+    /// file whose fields cannot be read has no AcoustID as far
     /// as this is concerned, which is the same answer as a file that was never
     /// tagged, and both lead to the same next step — fingerprint it.
     ///
@@ -55,7 +55,7 @@ public sealed class TagReader(IAudioFileStore files)
             var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
             await using (stream.ConfigureAwait(false))
             {
-                var track = new Track(stream, ExtensionOf(path));
+                var track = new Track(Id3Prefix.Past(stream, path.Value), ExtensionOf(path));
                 return Normalise(Lookup(track, field));
             }
         }
@@ -97,7 +97,9 @@ public sealed class TagReader(IAudioFileStore files)
         {
             try
             {
-                return Describe(new Track(stream, ExtensionOf(container)), AcoustIdTagField.For(container));
+                return Describe(
+                    new Track(Id3Prefix.Past(stream, container.Value), ExtensionOf(container)),
+                    AcoustIdTagField.For(container));
             }
             catch (OperationCanceledException)
             {

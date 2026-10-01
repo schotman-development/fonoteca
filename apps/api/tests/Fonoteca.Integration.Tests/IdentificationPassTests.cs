@@ -627,16 +627,17 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
     }
 
     /// <summary>
-    /// A file we cannot read is a file we do not write to.
+    /// A file whose write would lose something is identified and left untouched.
     /// </summary>
     /// <remarks>
     /// The AcoustID is still worth keeping — the lookup succeeded, and discarding
     /// it would mean paying the rate limit again for the same answer once the
     /// file is repaired. What is not kept is any pretence that the tag was
-    /// written.
+    /// written. This FLAC's only picture is in the ID3 tag glued to its front,
+    /// which a write drops, so the write is refused.
     /// </remarks>
     [Fact]
-    public async Task AFileWhoseTagsCannotBeReadIsIdentifiedButLeftUntouched()
+    public async Task AFileWhoseWriteWouldLoseAPictureIsIdentifiedButLeftUntouched()
     {
         SkipWithoutTools();
         Copy(Corpus.Id3PrefixedFlac, "id3-prefixed.flac");
@@ -644,16 +645,15 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
         var file = Path.Combine(_root, "id3-prefixed.flac");
         var before = await File.ReadAllBytesAsync(file, Token);
 
-        // Mutation ON, so the refusal has to come from the file being unreadable
-        // rather than from the safety switch.
+        // Mutation ON, so the refusal has to come from the verification rather
+        // than from the safety switch.
         var services = Build(allowMutation: true, Answering(0.97));
 
         await ScanAsync(services);
         var summary = await IdentifyAsync(services);
 
-        Assert.Equal(1, summary.TagUnreadable);
         Assert.Equal(0, summary.Tagged);
-        Assert.Equal(0, summary.Failed);
+        Assert.Equal(1, summary.Failed);
 
         var row = await RowAsync("id3-prefixed.flac");
 

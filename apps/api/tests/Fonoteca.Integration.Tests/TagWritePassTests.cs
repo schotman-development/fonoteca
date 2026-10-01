@@ -199,6 +199,48 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>
+    /// A damaged MusicBrainz id is repaired, and the row keeps up with the file.
+    /// </summary>
+    /// <remarks>
+    /// Against real PostgreSQL, because the repair's journal entry carries the
+    /// NUL a UFID is made of, which <c>jsonb</c> refuses: refused, the save
+    /// failed after the file was committed and the row kept its old size.
+    /// </remarks>
+    [Fact]
+    public async Task ADamagedMusicBrainzIdIsRepairedAndTheRowKeepsUp()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01.mp3", 1));
+
+        using (var file = TagLib.File.Create(Path.Combine(_root, "Miles Davis", "Kind of Blue", "01.mp3")))
+        {
+            var tag = (TagLib.Id3v2.Tag)file.GetTag(TagLib.TagTypes.Id3v2, true);
+            tag.AddFrame(new TagLib.Id3v2.UniqueFileIdentifierFrame(
+                "\u0003http://musicbrainz.org",
+                TagLib.ByteVector.FromString(RecordingMbid.ToString(), TagLib.StringType.Latin1)));
+            file.Save();
+        }
+
+        var services = Build();
+        var summary = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(1, summary.Written);
+        Assert.Equal(0, summary.Failed);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.True(await db.DomainEvents.AnyAsync(entry => entry.Type == "tagging.catalogue.written", Token));
+        }
+
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+        Assert.Equal(0, rescan.Summary!.Updated);
+        Assert.Equal(1, rescan.Summary.Unchanged);
+
+        using var written = TagLib.File.Create(Path.Combine(_root, "Miles Davis", "Kind of Blue", "01.mp3"));
+        Assert.Equal(RecordingMbid.ToString(), written.Tag.MusicBrainzTrackId);
+    }
+
+    /// <summary>
     /// An album's button writes that album and leaves everything else alone.
     /// </summary>
     [Fact]
@@ -1564,7 +1606,7 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     {
         var full = Path.Combine(_root, path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.Copy(Corpus.Flac, full, overwrite: true);
+        File.Copy(path.EndsWith(".mp3", StringComparison.Ordinal) ? Corpus.Mp3 : Corpus.Flac, full, overwrite: true);
 
         var facts = new FileInfo(full);
 

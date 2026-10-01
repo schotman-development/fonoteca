@@ -37,24 +37,26 @@ public sealed class TagReadFailureTests : IDisposable
     }
 
     /// <summary>
-    /// The exact shape of the forty files that stopped the pass.
+    /// The exact shape of the forty files that stopped the pass, read past the
+    /// ID3 tag in front of it.
     /// </summary>
+    /// <remarks>
+    /// ATL threw <see cref="NullReferenceException"/> on these. It is handed the
+    /// file from its FLAC stream on instead — see <c>Id3Prefix</c> — so it reads
+    /// the FLAC's own comment and none of the ID3 tag, whose picture is the one
+    /// thing only the tag holds.
+    /// </remarks>
     [Fact]
-    public async Task AFlacCarryingAPrependedId3TagIsReportedAsUnreadableRatherThanCrashing()
+    public async Task AFlacCarryingAPrependedId3TagIsReadFromItsFlacStream()
     {
         SkipWithoutTools();
 
         var reader = ReaderOver(Corpus.Id3PrefixedFlac, "id3-prefixed.flac");
 
-        var failure = await Assert.ThrowsAsync<TagReadFailedException>(
-            () => reader.ReadAsync(new LibraryPath("id3-prefixed.flac"), null, Token));
+        var snapshot = await reader.ReadAsync(new LibraryPath("id3-prefixed.flac"), null, Token);
 
-        Assert.Equal("ATL", failure.Library);
-        Assert.Equal("id3-prefixed.flac", failure.Path.Value);
-
-        // The point of naming the underlying type: this is ATL's bug, not ours,
-        // and the day it is fixed upstream this assertion is how we find out.
-        Assert.Equal(nameof(NullReferenceException), failure.CauseType);
+        Assert.True(snapshot.DurationSeconds > 0);
+        Assert.Equal(0, snapshot.PictureCount);
     }
 
     /// <summary>

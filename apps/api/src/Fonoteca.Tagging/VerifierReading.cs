@@ -37,15 +37,24 @@ internal static partial class VerifierReading
             DurationSeconds = file.Properties?.Duration.TotalSeconds ?? 0,
             BitrateKbps = file.Properties?.AudioBitrate ?? 0,
             RecordedDate = ReadDate(file),
+            TrackTotal = file.Tag.TrackCount > 0 ? (int)file.Tag.TrackCount : null,
+            DiscTotal = file.Tag.DiscCount > 0 ? (int)file.Tag.DiscCount : null,
+            OriginalDate = file.GetTag(TagTypes.Id3v2, create: false) is TagLib.Id3v2.Tag id3
+                && Text(id3, "TDOR") is { } original ? Dated(original) : null,
+            FileIdentifiers = file.GetTag(TagTypes.Id3v2, create: false) is TagLib.Id3v2.Tag frames
+                && frames.GetFrames<TagLib.Id3v2.UniqueFileIdentifierFrame>()
+                    .Select(frame => $"{frame.Owner}={frame.Identifier?.ToString(StringType.Latin1)}")
+                    .ToList() is { Count: > 0 } ids
+                ? string.Join(' ', ids)
+                : null,
         };
     }
 
     /// <summary>
     /// The date as stored, from whichever tag system this container uses: the
     /// Vorbis <c>DATE</c>, ID3v2's <c>TDRC</c> (ID3v2.3's <c>TYER</c> and <c>TDAT</c>
-    /// as TagLib# folds them), MP4's <c>©day</c>, APE's <c>Year</c>. Cut to its
-    /// ISO prefix, so a timestamp's time or a spelling ATL merely reformats does
-    /// not read as a lost date; anything that is not ISO is compared whole.
+    /// as TagLib# folds them), MP4's <c>©day</c>, APE's <c>Year</c>. Compared
+    /// whole: a time or a zone ATL drops or moves is a date changed.
     /// </summary>
     private static string? ReadDate(File file)
     {
@@ -80,6 +89,14 @@ internal static partial class VerifierReading
             return Dated(apeYear);
         }
 
+        // The old ID3v1 tag last: its year is the file's date where the modern
+        // tag has none, as on eleven ID3v2.2 files here that ATL writes it into
+        // TDRC — the owner's choice, dropping a lone "01 Jan" TDA with it.
+        if (file.GetTag(TagTypes.Id3v1, create: false) is TagLib.Id3v1.Tag old && old.Year is > 0 and var year)
+        {
+            return year.ToString("D4", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         return null;
     }
 
@@ -89,10 +106,13 @@ internal static partial class VerifierReading
             ? text[0]
             : null;
 
-    private static string Dated(string value)
+    private static string? Dated(string value)
     {
-        var iso = IsoPrefix().Match(value);
-        return iso.Success ? iso.Value : value.Trim();
+        var date = value.Trim();
+
+        // DateTime.MinValue written out: a tagger's "no date", which ATL drops
+        // on save. Read as the absence it stands for — the owner's choice.
+        return IsoPrefix().Match(date).Value is "0001" or "0001-01-01" ? null : date;
     }
 
     [System.Text.RegularExpressions.GeneratedRegex(@"^\d{4}(-\d{2}(-\d{2})?)?(?![\d-])")]

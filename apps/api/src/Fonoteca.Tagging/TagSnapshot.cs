@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Security.Cryptography;
 
 namespace Fonoteca.Tagging;
@@ -48,6 +49,27 @@ public sealed record TagSnapshot
     /// </summary>
     public string? RecordedDate { get; init; }
 
+    /// <summary>ID3v2's <c>TDOR</c> (2.3's <c>TORY</c>) as stored. TagLib#'s reading only.</summary>
+    public string? OriginalDate { get; init; }
+
+    /// <summary>The track and disc totals as TagLib# reads them; null where none. TagLib#'s reading only.</summary>
+    /// <remarks>
+    /// ATL reads both as zero from a Vorbis comment holding <c>TRACKTOTAL</c>
+    /// and <c>TOTALTRACKS</c> together — 69 FLACs here — and a zero is written
+    /// back as nothing.
+    /// </remarks>
+    public int? TrackTotal { get; init; }
+
+    /// <inheritdoc cref="TrackTotal"/>
+    public int? DiscTotal { get; init; }
+
+    /// <summary>
+    /// Every ID3v2 <c>UFID</c> as <c>owner=identifier</c>, in file order.
+    /// TagLib#'s reading only: it is how a write that damaged one is seen —
+    /// see <c>TaggingDefaults.UfidIsBinary</c>.
+    /// </summary>
+    public string? FileIdentifiers { get; init; }
+
     /// <summary>
     /// Whether this reading and another agree about everything that matters.
     /// </summary>
@@ -55,8 +77,9 @@ public sealed record TagSnapshot
     /// Deliberately not <c>==</c> on the record. Two libraries reading the same
     /// file legitimately disagree about tag-mapping conventions — ADR 0002 says
     /// as much — so equality of the whole <see cref="Fields"/> map across
-    /// libraries is not a meaningful test. What must agree is the AcoustID, the
-    /// artwork and the audio.
+    /// libraries is not a meaningful test. What must agree is the AcoustID and the
+    /// artwork; the audio's length is held to each library's own reading of the
+    /// original, in <c>TagWriter</c>.
     /// </remarks>
     public bool AgreesWith(TagSnapshot other)
     {
@@ -64,13 +87,7 @@ public sealed record TagSnapshot
 
         return string.Equals(AcoustId, other.AcoustId, StringComparison.OrdinalIgnoreCase)
             && PictureCount == other.PictureCount
-            && PictureDigests.SequenceEqual(other.PictureDigests, StringComparer.Ordinal)
-
-            // A second is generous, and it has to be: the two libraries compute
-            // duration from different headers and round differently. What this
-            // catches is a container rewrite that dropped the stream, which does
-            // not miss by a second.
-            && Math.Abs(DurationSeconds - other.DurationSeconds) <= 1.0;
+            && PictureDigests.SequenceEqual(other.PictureDigests, StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -116,7 +133,19 @@ public sealed record TagSnapshot
 
         foreach (var (key, value) in Fields)
         {
-            if (!after.Fields.TryGetValue(key, out var now) || !string.Equals(now, value, StringComparison.Ordinal))
+            // ATL writes every ID3v2 tag as 2.4, renaming a 2.2 frame as it
+            // goes: TMT is TMED afterwards, the same field.
+            if (!after.Fields.TryGetValue(key, out var now)
+                && !(Id3v22Successors.TryGetValue(key, out var successor)
+                    && after.Fields.TryGetValue(successor, out now)))
+            {
+                // An empty value is no value, and ATL does not write an empty atom back.
+                if (value.Length > 0) lost.Add(key);
+            }
+
+            // ATL ends a URL frame with a NUL of its own whether or not the
+            // file did.
+            else if (!string.Equals(now.TrimEnd('\0'), value.TrimEnd('\0'), StringComparison.Ordinal))
             {
                 lost.Add(key);
             }
@@ -124,6 +153,20 @@ public sealed record TagSnapshot
 
         return lost;
     }
+
+    /// <summary>ATL's own ID3v2.2 to 2.4 frame renames (<c>frameMapping_v22_4</c>).</summary>
+    private static readonly FrozenDictionary<string, string> Id3v22Successors =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["BUF"] = "RBUF", ["CNT"] = "PCNT", ["CRA"] = "AENC", ["ETC"] = "ETCO", ["EQU"] = "EQU2",
+            ["GEO"] = "GEOB", ["IPL"] = "TIPL", ["LNK"] = "LINK", ["MCI"] = "MCDI", ["MLL"] = "MLLT",
+            ["REV"] = "RVRB", ["RVA"] = "RVA2", ["SLT"] = "SYLT", ["STC"] = "SYTC", ["TBP"] = "TBPM",
+            ["TDY"] = "TDLY", ["TEN"] = "TENC", ["TFT"] = "TFLT", ["TKE"] = "TKEY", ["TLA"] = "TLAN",
+            ["TLE"] = "TLEN", ["TMT"] = "TMED", ["TOF"] = "TOFN", ["TOL"] = "TOLY", ["TP4"] = "TPE4",
+            ["TPA"] = "TPOS", ["TRC"] = "TSRC", ["TSS"] = "TSSE", ["TXT"] = "TEXT", ["TXX"] = "TXXX",
+            ["UFI"] = "UFID", ["ULT"] = "USLT", ["WAF"] = "WOAF", ["WAR"] = "WOAR", ["WAS"] = "WOAS",
+            ["WCM"] = "WCOM", ["WCP"] = "WCOP", ["WPB"] = "WPUB", ["WXX"] = "WXXX",
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
     internal static string Digest(byte[] data) => Convert.ToHexString(SHA256.HashData(data));
 }

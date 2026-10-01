@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Fonoteca.Tagging;
@@ -38,8 +39,38 @@ internal static class TaggingDefaults
     /// <summary>The character ATL joins and splits multi-valued fields on.</summary>
     internal const char ValueSeparator = '\u001F';
 
+    /// <summary>Whether ATL now writes an ID3v2 <c>UFID</c> frame as the format defines it.</summary>
+    /// <remarks>
+    /// <b>ATL 7.16–7.18 writes a text-encoding byte into every <c>UFID</c>
+    /// frame</b>, a frame that has none: its owner comes out as
+    /// <c>"\x03http://musicbrainz.org"</c>, and TagLib#, Picard and anything else
+    /// looking for MusicBrainz's owner no longer find the recording id. Every MP3
+    /// Picard tagged carries one, and every save rewrites it — 748 files here
+    /// before this was seen. ATL keeps the frames that carry no encoding byte in
+    /// a private set, <c>noTextEncodingFields</c>, and <c>UFID</c> belonging in
+    /// it is the whole upstream fix, so this adds it.
+    ///
+    /// Reflection into a private field is the fragile part, which is why this
+    /// is a flag rather than an assumption: a test fails the day an upgrade moves
+    /// the field, and <see cref="TagWriter"/> refuses any write that would change
+    /// a <c>UFID</c> in a way it did not plan, whether this held or not.
+    /// </remarks>
+    internal static bool UfidIsBinary { get; private set; }
+
 #pragma warning disable CA2255 // ATL is configured through a mutable static; nothing else runs early enough.
     [ModuleInitializer]
-    internal static void Apply() => ATL.Settings.DisplayValueSeparator = ValueSeparator;
+    internal static void Apply()
+    {
+        ATL.Settings.DisplayValueSeparator = ValueSeparator;
+
+        if (typeof(ATL.Track).Assembly
+                .GetType("ATL.AudioData.IO.ID3v2")
+                ?.GetField("noTextEncodingFields", BindingFlags.NonPublic | BindingFlags.Static)
+                ?.GetValue(null) is ISet<string> frames)
+        {
+            frames.Add("UFID");
+            UfidIsBinary = true;
+        }
+    }
 #pragma warning restore CA2255
 }
