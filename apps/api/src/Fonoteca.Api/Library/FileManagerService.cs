@@ -347,7 +347,7 @@ public sealed class FileManagerService(
 
                     await using (transaction.ConfigureAwait(false))
                     {
-                        var repointed = await RewritePathsAsync(source, target, token)
+                        var repointed = await RewritePathsAsync(db, source, target, token)
                             .ConfigureAwait(false);
 
                         // Before the branch, not inside the file half of it.
@@ -535,7 +535,12 @@ public sealed class FileManagerService(
     /// alone because nothing derived has changed. Same bytes, same size, same
     /// modification time — a rename is not an edit.
     /// </summary>
-    private async Task<int> RewritePathsAsync(
+    /// <remarks>
+    /// <c>internal static</c> for the tag write pass, which moves album folders
+    /// by the same rule while it holds the gate this service would take.
+    /// </remarks>
+    internal static async Task<int> RewritePathsAsync(
+        FonotecaDbContext db,
         string source,
         string target,
         CancellationToken cancellationToken)
@@ -546,7 +551,11 @@ public sealed class FileManagerService(
             .ConfigureAwait(false);
 
         var prefix = source + "/";
-        var cut = source.Length;
+
+        // In characters as PostgreSQL counts them, code points, not .NET's
+        // UTF-16 units: a folder named with an emoji is one longer here than
+        // there, and the cut would eat the slash after it.
+        var cut = source.EnumerateRunes().Count();
 
         // CA1845 wants AsSpan here and is wrong about this one: the lambda is an
         // expression tree that EF translates into a SQL UPDATE, and a span has

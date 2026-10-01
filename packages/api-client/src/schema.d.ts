@@ -2715,6 +2715,12 @@ export interface components {
             coversWritten: number;
             /** Format: int32 */
             portraitsWritten: number;
+            /** Format: int32 */
+            renamed: number;
+            /** Format: int32 */
+            notRenamed: number;
+            /** Format: int32 */
+            linked: number;
             cancelled: boolean;
         };
         TrackAlbum: {

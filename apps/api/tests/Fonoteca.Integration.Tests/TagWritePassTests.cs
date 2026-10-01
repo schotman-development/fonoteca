@@ -198,6 +198,754 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.NotNull(row.TrackId);
     }
 
+    [Fact]
+    public async Task TheAlbumFolderAndItsFilesTakeTheNamesThePatternGives()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/track one.flac", 1));
+        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "kob rip", "cover.jpg"), "sleeve", Token);
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        var summary = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(1, summary.Renamed);
+        Assert.Equal(0, summary.NotRenamed);
+
+        // The folder moved whole, the file came up out of its disc folder, and
+        // nothing was left behind.
+        const string renamed = "Miles Davis/Kind of Blue (1959)/01 - So What.flac";
+        Assert.True(File.Exists(Path.Combine(_root, renamed)));
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)", "cover.jpg")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis", "kob rip")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)", "CD1")));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(Token);
+            Assert.Equal(renamed, row.Path);
+            Assert.NotNull(row.TrackId);
+
+            Assert.True(await db.DomainEvents.AnyAsync(entry => entry.Type == "tagging.catalogue.renamed", Token));
+        }
+
+        // The rows moved with the bytes, so the scan sees the same file.
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+        Assert.Equal(0, rescan.Summary!.Added);
+        Assert.Equal(0, rescan.Summary.Removed);
+        Assert.Equal(1, rescan.Summary.Unchanged);
+    }
+
+    [Fact]
+    public async Task ACollaborationLivesUnderItsFirstArtistAndIsLinkedFromTheOthers()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis, John Coltrane/Kind of Blue/01.flac", 1));
+        await BillColtraneAsync();
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        var summary = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(1, summary.Linked);
+
+        var real = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        var link = new DirectoryInfo(Path.Combine(_root, "John Coltrane", "Kind of Blue (1959)"));
+
+        Assert.True(File.Exists(Path.Combine(real, "01 - So What.flac")));
+        Assert.Equal(Path.Combine("..", "Miles Davis", "Kind of Blue (1959)"), link.LinkTarget);
+        Assert.True(File.Exists(Path.Combine(link.FullName, "01 - So What.flac")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis, John Coltrane")));
+
+        // Catalogued once: the scan does not walk through the link.
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+        Assert.Equal(0, rescan.Summary!.Added);
+
+        // And a second run finds the link it made and makes no other.
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library, services)).Linked);
+    }
+
+    [Fact]
+    public async Task ARenameNeverFollowsALinkOutOfTheLibrary()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        // The artist's shelf is a link to somewhere else entirely: by its path
+        // the album would move "into" the library and land outside it.
+        var elsewhere = Directory.CreateTempSubdirectory("fonoteca-elsewhere-").FullName;
+        try
+        {
+            Directory.Move(Path.Combine(_root, "Miles Davis"), Path.Combine(_root, "Holding"));
+            Directory.CreateSymbolicLink(Path.Combine(_root, "Miles Davis"), elsewhere);
+            Directory.Move(Path.Combine(_root, "Holding"), Path.Combine(elsewhere, "unused"));
+            Directory.CreateDirectory(Path.Combine(_root, "Real"));
+            Directory.Move(Path.Combine(elsewhere, "unused", "kob rip"), Path.Combine(_root, "Real", "kob rip"));
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                var row = await db.MediaFiles.SingleAsync(Token);
+                row.Path = "Real/kob rip/01.flac";
+                await db.SaveChangesAsync(Token);
+            }
+
+            var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+            Assert.Equal(1, summary.NotRenamed);
+            Assert.True(File.Exists(Path.Combine(_root, "Real", "kob rip", "01.flac")));
+            Assert.Empty(Directory.GetFileSystemEntries(elsewhere, "*.flac", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(elsewhere, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ALinkForACollaboratorNoLongerBilledGoesAndNobodyElsesDoes()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue (1959)/01 - So What.flac", 1));
+        var coltrane = await BillColtraneAsync();
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Linked);
+
+        var real = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        var ours = Path.Combine(_root, "John Coltrane", "Kind of Blue (1959)");
+        Assert.NotNull(new FileInfo(ours).LinkTarget);
+
+        // A person's own links, the same shape as the pass's: a folder and a file.
+        var theirs = Path.Combine(_root, "Favourites", "Kind of Blue");
+        Directory.CreateDirectory(Path.GetDirectoryName(theirs)!);
+        Directory.CreateSymbolicLink(theirs, Path.Combine("..", "Miles Davis", "Kind of Blue (1959)"));
+        var favourite = Path.Combine(_root, "Miles Davis", "favourite.flac");
+        File.CreateSymbolicLink(favourite, Path.Combine("Kind of Blue (1959)", "01 - So What.flac"));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ArtistCredits.Where(credit => credit.ArtistId == coltrane).ExecuteDeleteAsync(Token);
+        }
+
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library, services)).Linked);
+
+        Assert.Null(new FileInfo(ours).LinkTarget);
+        Assert.False(Directory.Exists(Path.Combine(_root, "John Coltrane")));
+        Assert.NotNull(new FileInfo(theirs).LinkTarget);
+        Assert.NotNull(new FileInfo(favourite).LinkTarget);
+        Assert.True(Directory.Exists(real));
+    }
+
+    [Fact]
+    public async Task ADiscFolderThatIsALinkIsNeverEmptiedIntoTheLibrary()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/01.flac", 1));
+
+        var outside = Directory.CreateTempSubdirectory("fonoteca-outside-").FullName;
+        try
+        {
+            var disc = Path.Combine(_root, "Miles Davis", "kob rip", "CD1");
+            File.Move(Path.Combine(disc, "01.flac"), Path.Combine(outside, "01.flac"));
+            Directory.Delete(disc);
+            Directory.CreateSymbolicLink(disc, outside);
+
+            var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+            Assert.Equal(1, summary.NotRenamed);
+            Assert.True(File.Exists(Path.Combine(outside, "01.flac")));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnAlbumFolderThatIsALinkIsNeverEmptied()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        var outside = Directory.CreateTempSubdirectory("fonoteca-outside-").FullName;
+        try
+        {
+            var folder = Path.Combine(_root, "Miles Davis", "kob rip");
+            File.Move(Path.Combine(folder, "01.flac"), Path.Combine(outside, "01.flac"));
+            Directory.Delete(folder);
+            Directory.CreateSymbolicLink(folder, outside);
+
+            var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+            Assert.Equal(1, summary.NotRenamed);
+            Assert.True(File.Exists(Path.Combine(outside, "01.flac")));
+            Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)")));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AFileThatIsALinkKeepsItsPlace()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/01.flac", 1));
+
+        // Tags first, with nothing renamed: a write replaces a link with the
+        // file it wrote, so the link has to arrive after it.
+        var services = Build();
+        await RunAsync(TagWriteScope.Library, services);
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(Token);
+            var facts = new FileInfo(Path.Combine(_root, row.Path));
+            row.SizeBytes = facts.Length;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var store = Directory.CreateTempSubdirectory("fonoteca-store-").FullName;
+        try
+        {
+            var disc = Path.Combine(_root, "Miles Davis", "kob rip", "CD1");
+            File.Move(Path.Combine(disc, "01.flac"), Path.Combine(store, "01.flac"));
+            File.CreateSymbolicLink(Path.Combine(disc, "01.flac"), Path.GetRelativePath(disc, Path.Combine(store, "01.flac")));
+
+            var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+            // A folder of links is somebody's arrangement, not an album: it and
+            // the link in it stay put, and the link still points somewhere.
+            Assert.Equal(1, summary.NotRenamed);
+            Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "kob rip", "CD1", "01.flac")));
+        }
+        finally
+        {
+            Directory.Delete(store, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AFileWithItsOwnTrackNumberIsNamedByIt()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        // Held to its album alone, fourteenth in the folder's order, while its
+        // own tag says track 1 — which the write keeps.
+        await HoldToAlbumAsync(position: 14);
+        Tag("Miles Davis/kob rip/01.flac", track: 1, disc: null);
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        var named = Assert.Single(Directory.GetFiles(_root, "01 - So What.flac", SearchOption.AllDirectories));
+        using var file = TagLib.File.Create(named);
+        Assert.Equal(1u, file.Tag.Track);
+    }
+
+    [Fact]
+    public async Task DiscsHeldToTheirAlbumAloneAreNamedByTheirOwnDiscNumbers()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/01.flac", 1), ("Miles Davis/kob rip/CD2/01.flac", 2));
+        await HoldToAlbumAsync(position: null);
+        Tag("Miles Davis/kob rip/CD1/01.flac", track: 1, disc: 1);
+        Tag("Miles Davis/kob rip/CD2/01.flac", track: 1, disc: 2);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(0, summary.NotRenamed);
+        var folder = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        Assert.True(File.Exists(Path.Combine(folder, "1-01 - So What.flac")));
+        Assert.True(File.Exists(Path.Combine(folder, "2-01 - So What.flac")));
+    }
+
+    [Fact]
+    public async Task AFolderNamedWithAnEmojiKeepsItsRowsInStep()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob 🎵 rip/01.flac", 1));
+
+        // Not the pass's to name, so it moves with its folder by the prefix rewrite.
+        await SeedUnattributedAsync("Miles Davis/kob 🎵 rip/extra.flac");
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        await RunAsync(TagWriteScope.Library, services);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Equal(
+                ["Miles Davis/Kind of Blue (1959)/01 - So What.flac", "Miles Davis/Kind of Blue (1959)/extra.flac"],
+                (await db.MediaFiles.Select(row => row.Path).ToListAsync(Token)).Order(StringComparer.Ordinal));
+        }
+
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+        Assert.Equal(0, rescan.Summary!.Added);
+        Assert.Equal(0, rescan.Summary.Removed);
+    }
+
+    [Fact]
+    public async Task ALongFolderNameIsJournalledWithoutSplittingACharacter()
+    {
+        SkipWithoutTools();
+
+        // "Miles Davis/" and 187 letters put the emoji's first half at the 200th unit.
+        var folder = $"Miles Davis/{new string('a', 187)}🎵b";
+        await SeedAsync(($"{folder}/01.flac", 1));
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.Renamed);
+        Assert.Equal(0, summary.NotRenamed);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal("Miles Davis/Kind of Blue (1959)/01 - So What.flac", (await db.MediaFiles.SingleAsync(Token)).Path);
+    }
+
+    [Fact]
+    public async Task DiscFoldersNothingNumbersKeepTheirFolders()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/01.flac", 1), ("Miles Davis/kob rip/CD2/01.flac", 2));
+        await HoldToAlbumAsync(position: null);
+        Tag("Miles Davis/kob rip/CD1/01.flac", track: 1, disc: null);
+        Tag("Miles Davis/kob rip/CD2/01.flac", track: 1, disc: null);
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        var folder = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        Assert.True(File.Exists(Path.Combine(folder, "CD1", "01 - So What.flac")));
+        Assert.True(File.Exists(Path.Combine(folder, "CD2", "01 - So What.flac")));
+    }
+
+    [Fact]
+    public async Task AnAlbumOnlyFileMissingFromDiskLeavesTheRestRenamed()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1), ("Miles Davis/kob rip/02.flac", 2));
+        await HoldToAlbumAsync(position: null);
+        Tag("Miles Davis/kob rip/02.flac", track: 2, disc: null);
+        File.Delete(Path.Combine(_root, "Miles Davis", "kob rip", "01.flac"));
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.Renamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)", "02 - So What.flac")));
+    }
+
+    [Fact]
+    public async Task ALinkOfThePassesOwnToAFolderSinceGoneIsSwept()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+        await BillColtraneAsync();
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Linked);
+
+        // The album trashed by hand, its rows not yet scanned away.
+        Directory.Delete(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)"), recursive: true);
+
+        await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Null(new FileInfo(Path.Combine(_root, "John Coltrane", "Kind of Blue (1959)")).LinkTarget);
+    }
+
+    [Fact]
+    public async Task AnArtistFolderThatIsALinkIsNeverRenamedThrough()
+    {
+        SkipWithoutTools();
+
+        // Named for nobody, so the album's own folder is free and only the
+        // link on the way out stops the move.
+        await SeedAsync(("Shelf Link/kob rip/01.flac", 1));
+        Directory.Move(Path.Combine(_root, "Shelf Link"), Path.Combine(_root, "Real Shelf"));
+        Directory.CreateSymbolicLink(Path.Combine(_root, "Shelf Link"), "Real Shelf");
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Real Shelf", "kob rip", "01.flac")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis")));
+    }
+
+    [Fact]
+    public async Task AFileLooseUnderAnArtistStaysWhereItIs()
+    {
+        SkipWithoutTools();
+
+        // Under somebody else's folder: its album folder would be the whole shelf.
+        await SeedAsync(("Somebody Else/01.flac", 1));
+        await File.WriteAllTextAsync(Path.Combine(_root, "Somebody Else", "folder.jpg"), "portrait", Token);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(0, summary.Renamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Somebody Else", "01.flac")));
+        Assert.True(File.Exists(Path.Combine(_root, "Somebody Else", "folder.jpg")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis")));
+    }
+
+    [Fact]
+    public async Task ACatalogueStillHoldingRowsWhereTheAlbumWouldGoRefusesTheMove()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        // A row left by a file deleted outside the application, no scan since.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Miles Davis/Kind of Blue (1959)/gone.flac",
+                SizeBytes = 1,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "kob rip", "01.flac")));
+    }
+
+    [Fact]
+    public async Task ALyricsFileBesideATrackTakesItsNewName()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/01.flac", 1));
+        var disc = Path.Combine(_root, "Miles Davis", "kob rip", "CD1");
+        await File.WriteAllTextAsync(Path.Combine(disc, "01.lrc"), "[00:00.00]So What", Token);
+        await File.WriteAllTextAsync(Path.Combine(disc, "01.flac.txt"), "a name of its own", Token);
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        var folder = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        Assert.True(File.Exists(Path.Combine(folder, "01 - So What.lrc")));
+        Assert.True(File.Exists(Path.Combine(folder, "CD1", "01.flac.txt")));
+    }
+
+    [Fact]
+    public async Task ABillingTurnedRoundMovesTheAlbumIntoItsOwnLinksPlace()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+        var coltrane = await BillColtraneAsync();
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        await RunAsync(TagWriteScope.Library, services);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var credit in await db.ArtistCredits.Where(credit => credit.ReleaseId != null).ToListAsync(Token))
+            {
+                credit.Position = credit.ArtistId == coltrane ? 0 : 1;
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(0, summary.NotRenamed);
+        var real = Path.Combine(_root, "John Coltrane", "Kind of Blue (1959)");
+        Assert.Null(new FileInfo(real).LinkTarget);
+        Assert.True(File.Exists(Path.Combine(real, "01 - So What.flac")));
+        Assert.Equal(
+            Path.Combine("..", "John Coltrane", "Kind of Blue (1959)"),
+            new FileInfo(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)")).LinkTarget);
+    }
+
+    [Fact]
+    public async Task AMoveTheJournalRefusesIsPutBack()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern, events: db => new RenamesFail(new EventLog(db)));
+        var summary = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "kob rip", "01.flac")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)")));
+
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+        Assert.Equal(0, rescan.Summary!.Added);
+        Assert.Equal(0, rescan.Summary.Removed);
+    }
+
+    [Fact]
+    public async Task AnArtistFolderRenamedOnlyInSpellingTakesItsPicturesAlong()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("milesdavis/kob rip/01.flac", 1));
+        await File.WriteAllTextAsync(Path.Combine(_root, "milesdavis", "folder.jpg"), "portrait", Token);
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "folder.jpg")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "milesdavis")));
+    }
+
+    [Fact]
+    public async Task ARespelledFolderOfASecondBilledArtistGivesItsPicturesToTheirFolder()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("johncoltrane/kob rip/01.flac", 1));
+        await BillColtraneAsync();
+        await File.WriteAllTextAsync(Path.Combine(_root, "johncoltrane", "folder.jpg"), "portrait", Token);
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.NotNull(new FileInfo(Path.Combine(_root, "John Coltrane", "Kind of Blue (1959)")).LinkTarget);
+        Assert.True(File.Exists(Path.Combine(_root, "John Coltrane", "folder.jpg")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "johncoltrane")));
+    }
+
+    [Fact]
+    public async Task AnArtistsFolderIsNamedForThemNotForHowTheyAreBilledOrShown()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var miles = await db.Artists.SingleAsync(artist => artist.Mbid == ArtistMbid, Token);
+            miles.LatinName = "Miles Dewey Davis";
+
+            foreach (var credit in await db.ArtistCredits.Where(credit => credit.ReleaseId != null).ToListAsync(Token))
+            {
+                credit.CreditedAs = "Miles";
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)", "01 - So What.flac")));
+    }
+
+    [Fact]
+    public async Task AnotherArtistsFolderKeepsItsPictures()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis Quintet/kob rip/01.flac", 1));
+        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis Quintet", "folder.jpg"), "portrait", Token);
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)", "01 - So What.flac")));
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis Quintet", "folder.jpg")));
+        Assert.False(File.Exists(Path.Combine(_root, "Miles Davis", "folder.jpg")));
+    }
+
+    [Fact]
+    public async Task ABandBilledUnderItsLeadersNameLeavesTheLeadersPictures()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "folder.jpg"), "portrait", Token);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var band = await db.Artists.SingleAsync(artist => artist.Mbid == ArtistMbid, Token);
+            band.Name = "Miles Davis Quintet";
+
+            foreach (var credit in await db.ArtistCredits.Where(credit => credit.ReleaseId != null).ToListAsync(Token))
+            {
+                credit.CreditedAs = "Miles Davis";
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis Quintet", "Kind of Blue (1959)", "01 - So What.flac")));
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "folder.jpg")));
+    }
+
+    [Fact]
+    public async Task AFolderWhereALinkWouldGoIsLeftAlone()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+        await BillColtraneAsync();
+
+        var theirs = Path.Combine(_root, "John Coltrane", "Kind of Blue (1959)");
+        Directory.CreateDirectory(theirs);
+        await File.WriteAllTextAsync(Path.Combine(theirs, "notes.txt"), "somebody's", Token);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(0, summary.Linked);
+        Assert.Equal(0, summary.NotRenamed);
+        Assert.Null(new FileInfo(theirs).LinkTarget);
+        Assert.True(File.Exists(Path.Combine(theirs, "notes.txt")));
+    }
+
+    [Fact]
+    public async Task TwoTracksUnderOneNameAreEachRenamedAsThemselves()
+    {
+        SkipWithoutTools();
+
+        // Two catalogued files sharing a stem: neither is the other's companion.
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1), ("Miles Davis/kob rip/01.mp3", 2));
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        var summary = await RunAsync(TagWriteScope.Library, services);
+
+        Assert.Equal(2, summary.Renamed);
+        var folder = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        Assert.True(File.Exists(Path.Combine(folder, "01 - So What.flac")));
+        Assert.True(File.Exists(Path.Combine(folder, "02 - So What.mp3")));
+
+        var rescan = await services.GetRequiredService<LibraryScanService>().ScanAsync(Token);
+        Assert.Equal(0, rescan.Summary!.Added);
+        Assert.Equal(0, rescan.Summary.Removed);
+    }
+
+    /// <summary>A journal that takes everything but a rename.</summary>
+    private sealed class RenamesFail(IEventLog inner) : IEventLog
+    {
+        public Task AppendAsync(DomainEvent domainEvent, CancellationToken cancellationToken = default) =>
+            domainEvent.Type.EndsWith(".renamed", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("The journal refused the rename.")
+                : inner.AppendAsync(domainEvent, cancellationToken);
+
+        public Task AppendAsync(IReadOnlyCollection<DomainEvent> events, CancellationToken cancellationToken = default) =>
+            inner.AppendAsync(events, cancellationToken);
+
+        public IAsyncEnumerable<DomainEvent> ReadSubjectAsync(
+            string subjectType,
+            string subjectId,
+            CancellationToken cancellationToken = default) =>
+            inner.ReadSubjectAsync(subjectType, subjectId, cancellationToken);
+    }
+
+    /// <summary>Unfiles every seeded file from its pressing, leaving it held to the album alone.</summary>
+    private async Task HoldToAlbumAsync(int? position)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        foreach (var row in await db.MediaFiles.ToListAsync(Token))
+        {
+            row.ReleaseId = null;
+            row.TrackId = null;
+            row.FolderPosition = position;
+        }
+
+        await db.SaveChangesAsync(Token);
+    }
+
+    /// <summary>Gives a seeded file a track and disc number of its own.</summary>
+    private void Tag(string path, uint track, uint? disc)
+    {
+        using var file = TagLib.File.Create(Path.Combine(_root, path));
+        file.Tag.Track = track;
+        if (disc is { } number) file.Tag.Disc = number;
+        file.Save();
+    }
+
+    [Fact]
+    public async Task AFileMissingFromDiskLeavesTheRestOfItsFolderRenamed()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1), ("Miles Davis/kob rip/02.flac", 2));
+        File.Delete(Path.Combine(_root, "Miles Davis", "kob rip", "01.flac"));
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.Renamed);
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)", "02 - So What.flac")));
+    }
+
+    [Fact]
+    public async Task AFileThePatternCannotNameKeepsItsNameAndIsCounted()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        // Held to its album alone, with no place in the folder's order: no track number.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(Token);
+            row.ReleaseId = null;
+            row.TrackId = null;
+            row.FolderPosition = null;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(0, summary.Renamed);
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.Single(Directory.GetFiles(_root, "01.flac", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task ALibraryThatIsNotThereIsNotRenamed()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+        Directory.Delete(_root, recursive: true);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(0, summary.Renamed);
+        Assert.False(Directory.Exists(_root));
+    }
+
+    [Fact]
+    public async Task AnAlbumFolderNotOnDiskIsCountedAndNothingIsCreated()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+        Directory.Delete(Path.Combine(_root, "Miles Davis"), recursive: true);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis")));
+    }
+
+    [Fact]
+    public async Task ANameAlreadyTakenIsNeverOverwritten()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        // Somebody's other rip already sits where this one would go.
+        var taken = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
+        Directory.CreateDirectory(taken);
+        await File.WriteAllTextAsync(Path.Combine(taken, "01 - So What.flac"), "another rip", Token);
+
+        var summary = await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(0, summary.Renamed);
+        Assert.Equal(1, summary.NotRenamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "kob rip", "01.flac")));
+        Assert.Equal("another rip", await File.ReadAllTextAsync(Path.Combine(taken, "01 - So What.flac"), Token));
+    }
+
+    [Fact]
+    public async Task WithMutationOffARenameIsCountedAndNotMade()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/01.flac", 1));
+
+        var summary = await RunAsync(
+            TagWriteScope.Library, Build(allowMutation: false, fileNaming: FileNaming.DefaultPattern));
+
+        Assert.Equal(1, summary.Renamed);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis", "kob rip", "01.flac")));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal("Miles Davis/kob rip/01.flac", (await db.MediaFiles.SingleAsync(Token)).Path);
+    }
+
     /// <summary>
     /// A damaged MusicBrainz id is repaired, and the row keeps up with the file.
     /// </summary>
@@ -1400,6 +2148,25 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
             .SingleAsync(Token);
     }
 
+    /// <summary>Bills John Coltrane second on the seeded release.</summary>
+    private async Task<ArtistId> BillColtraneAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var coltrane = new Artist { Id = ArtistId.New(), Name = "John Coltrane" };
+        db.Artists.Add(coltrane);
+        db.ArtistCredits.Add(new ArtistCredit
+        {
+            Id = Guid.CreateVersion7(),
+            ArtistId = coltrane.Id,
+            ReleaseId = (await db.Releases.SingleAsync(Token)).Id,
+            Position = 1,
+        });
+        await db.SaveChangesAsync(Token);
+
+        return coltrane.Id;
+    }
+
     private async Task<TagWriteSummary> RunAsync(TagWriteScope scope, ServiceProvider? services = null)
     {
         var provider = services ?? Build();
@@ -1421,7 +2188,12 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>The same graph Program builds, minus the web host.</summary>
-    private ServiceProvider Build(bool allowMutation = true)
+    /// <param name="fileNaming">Empty, so a run leaves every seeded path where the test put it.</param>
+    /// <param name="events">A journal of the test's own in place of the real one.</param>
+    private ServiceProvider Build(
+        bool allowMutation = true,
+        string fileNaming = "",
+        Func<FonotecaDbContext, IEventLog>? events = null)
     {
         var services = new ServiceCollection();
 
@@ -1441,7 +2213,9 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
 
         services.AddSingleton<TagReader>();
         services.AddSingleton(new TagWriterOptions { AllowFileMutation = allowMutation });
-        services.AddScoped<IEventLog, EventLog>();
+        if (events is null) services.AddScoped<IEventLog, EventLog>();
+        else services.AddScoped(provider => events(provider.GetRequiredService<FonotecaDbContext>()));
+
         services.AddScoped<TagWriter>();
 
         services.AddSingleton<LibraryWorkGate>();
@@ -1452,6 +2226,7 @@ public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
             {
                 LibraryPath = _root,
                 AllowFileMutation = allowMutation,
+                FileNaming = fileNaming,
             }));
 
         services.AddSingleton<IHostApplicationLifetime, NeverStops>();

@@ -707,6 +707,22 @@ internal static partial class Log
     public static partial void PortraitNotWritten(ILogger logger, string path, string reason);
 
     [LoggerMessage(
+        EventId = 1310,
+        Level = LogLevel.Information,
+        Message = "Renamed '{From}' to '{To}'")]
+    public static partial void Renamed(ILogger logger, string from, string to);
+
+    /// <remarks>
+    /// Warning: the files kept their names, and a run that reports them nowhere
+    /// else leaves a library half-normalised with no reason on record.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1311,
+        Level = LogLevel.Warning,
+        Message = "'{Path}' was not renamed: {Reason}")]
+    public static partial void NotRenamed(ILogger logger, string path, string reason);
+
+    [LoggerMessage(
         EventId = 1400,
         Level = LogLevel.Warning,
         Message = "Trashing '{Path}' to '{Destination}'.")]

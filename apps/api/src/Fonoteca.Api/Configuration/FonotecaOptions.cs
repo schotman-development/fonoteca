@@ -85,6 +85,19 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public string TrashPath { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Where the tag write puts each file: a pattern of <c>{albumartist}</c>,
+    /// <c>{album}</c>, <c>{year}</c>, <c>{disc}</c>, <c>{track}</c>,
+    /// <c>{title}</c> and <c>{artist}</c>, with <c>[…]</c> dropped whole when a
+    /// token in it is empty.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="Domain.Catalogue.FileNaming"/>, which renders it and says
+    /// what is refused. Read with <see cref="AllowFileMutation"/>: with that off
+    /// a run only counts what it would rename. Empty renames nothing.
+    /// </remarks>
+    public string FileNaming { get; init; } = Domain.Catalogue.FileNaming.DefaultPattern;
+
     /// <summary>Path to <c>ffmpeg</c>. Resolved from PATH when empty.</summary>
     public string FfmpegPath { get; init; } = "ffmpeg";
 
@@ -349,6 +362,14 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        // Refused at start rather than at the first tag write, which is hours
+        // into a run over the library.
+        if (!string.IsNullOrEmpty(FileNaming) && Domain.Catalogue.FileNaming.Problem(FileNaming) is { } naming)
+        {
+            yield return new ValidationResult(
+                $"Fonoteca:FileNaming ('{FileNaming}'): {naming}", [nameof(FileNaming)]);
+        }
+
         // The archive must be outside the library, and both the doc comment and
         // .env.example said so with nothing enforcing it. Inside, the next scan
         // catalogues the archive and the album somebody just replaced looks like

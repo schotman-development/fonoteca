@@ -102,7 +102,7 @@ namespace Fonoteca.Api.Library;
 /// shelves. See <see cref="EnsurePortraitAsync"/>.</item>
 /// </list>
 /// </remarks>
-public sealed class TagWriteService(
+public sealed partial class TagWriteService(
     LibraryWorkGate gate,
     IServiceScopeFactory scopeFactory,
     IHubContext<JobsHub, IJobsClient> hub,
@@ -425,6 +425,22 @@ public sealed class TagWriteService(
             // Between files, or between pages. The file being written finished.
         }
 
+        // After every file, because the unit is the folder and a folder's files
+        // are spread across the pages. Not on a stopped run: half a library's
+        // folders renamed is a library in two layouts.
+        try
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await RenameAsync(jobId, scope, counts, pending, correlationId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Between folders. The folder being moved finished.
+        }
+
         // Rule 6: refusing is an answer, and this one is otherwise invisible —
         // the run finishes clean, the panel says nothing, and no picture arrives.
         if (portraits is { Artist: not null, Shelved: false, Subject: not null })
@@ -447,6 +463,9 @@ public sealed class TagWriteService(
             Skipped: counts.Missing,
             CoversWritten: counts.CoversWritten,
             PortraitsWritten: counts.PortraitsWritten,
+            Renamed: counts.Renamed,
+            NotRenamed: counts.NotRenamed,
+            Linked: counts.Linked,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.TagWriteCompleted(
@@ -485,49 +504,63 @@ public sealed class TagWriteService(
 
             var files = await NarrowAsync(db, scope, cancellationToken).ConfigureAwait(false);
 
-            // A pressing's facts where one is filed, the album's where not: its
-            // title and first-release year here, its billing line below.
-            var page = await files
-                .OrderBy(file => file.Id)
-                .Skip(offset)
-                .Take(PageSize)
-                .Select(file => new PendingTagWrite(
-                    file.Id,
-                    file.Path,
-                    file.ReleaseId,
-                    file.ReleaseGroupId,
-                    file.AcoustId,
-                    file.Track!.Title,
-                    file.Recording!.Title,
-                    file.Recording.Mbid,
-                    file.Track != null ? (int?)file.Track.Position : file.FolderPosition,
-                    file.Release!.TrackCount,
-                    (int?)file.Track!.DiscNumber,
-                    file.Release.DiscCount,
-                    file.Release != null ? file.Release.Title : file.ReleaseGroup!.Title,
-                    file.Release!.Mbid,
-                    file.ReleaseGroup!.Mbid,
-                    file.Release != null ? file.Release.ReleasedYear : file.ReleaseGroup!.FirstReleaseYear,
-                    file.Recording.Work!.Mbid,
-                    file.Recording.Credits
-                        .OrderBy(credit => credit.Position)
-                        .Select(credit => new PendingCredit(
-                            credit.CreditedAs ?? credit.Artist!.Name,
-                            credit.JoinPhrase,
-                            credit.Artist!.Mbid))
-                        .ToList(),
-                    file.Release!.Credits
-                        .OrderBy(credit => credit.Position)
-                        .Select(credit => new PendingCredit(
-                            credit.CreditedAs ?? credit.Artist!.Name,
-                            credit.JoinPhrase,
-                            credit.Artist!.Mbid))
-                        .ToList()))
-                .ToListAsync(cancellationToken)
+            return await ProjectAsync(
+                    db,
+                    files.OrderBy(file => file.Id).Skip(offset).Take(PageSize),
+                    cancellationToken)
                 .ConfigureAwait(false);
-
-            return await AlbumOnlyAsync(db, page, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Files with everything a tag needs joined, as <see cref="ClaimAsync"/> reads a page.</summary>
+    private static async Task<List<PendingTagWrite>> ProjectAsync(
+        FonotecaDbContext db,
+        IQueryable<MediaFile> files,
+        CancellationToken cancellationToken)
+    {
+        // A pressing's facts where one is filed, the album's where not: its
+        // title and first-release year here, its billing line below.
+        var page = await files
+            .Select(file => new PendingTagWrite(
+                file.Id,
+                file.Path,
+                file.ReleaseId,
+                file.ReleaseGroupId,
+                file.AcoustId,
+                file.Track!.Title,
+                file.Recording!.Title,
+                file.Recording.Mbid,
+                file.Track != null ? (int?)file.Track.Position : file.FolderPosition,
+                file.Release!.TrackCount,
+                (int?)file.Track!.DiscNumber,
+                file.Release.DiscCount,
+                file.Release != null ? file.Release.Title : file.ReleaseGroup!.Title,
+                file.Release!.Mbid,
+                file.ReleaseGroup!.Mbid,
+                file.Release != null ? file.Release.ReleasedYear : file.ReleaseGroup!.FirstReleaseYear,
+                file.Recording.Work!.Mbid,
+                file.Recording.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new PendingCredit(
+                        credit.CreditedAs ?? credit.Artist!.Name,
+                        credit.JoinPhrase,
+                        credit.Artist!.Mbid,
+                        credit.Artist!.Name,
+                        credit.Artist!.LatinName))
+                    .ToList(),
+                file.Release!.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new PendingCredit(
+                        credit.CreditedAs ?? credit.Artist!.Name,
+                        credit.JoinPhrase,
+                        credit.Artist!.Mbid,
+                        credit.Artist!.Name,
+                        credit.Artist!.LatinName))
+                    .ToList()))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return await AlbumOnlyAsync(db, page, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -610,7 +643,12 @@ public sealed class TagWriteService(
                 {
                     credit.ReleaseId,
                     credit.ReleaseGroupId,
-                    Credit = new PendingCredit(credit.CreditedAs ?? credit.Artist!.Name, credit.JoinPhrase, credit.Artist!.Mbid),
+                    Credit = new PendingCredit(
+                        credit.CreditedAs ?? credit.Artist!.Name,
+                        credit.JoinPhrase,
+                        credit.Artist!.Mbid,
+                        credit.Artist!.Name,
+                        credit.Artist!.LatinName),
                 })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false));
@@ -1438,6 +1476,15 @@ public sealed class TagWriteService(
 
         /// <summary>Artist folders that got a photograph. Per folder too, and there is rarely more than one.</summary>
         public int PortraitsWritten;
+
+        /// <summary>Files that moved to the name the pattern gives them, with their folder or alone.</summary>
+        public int Renamed;
+
+        /// <summary>Files left where they were because the name was taken or a fact was missing.</summary>
+        public int NotRenamed;
+
+        /// <summary>Links made in a collaborator's folder. Per album, like the covers.</summary>
+        public int Linked;
     }
 
     /// <summary>
@@ -1551,7 +1598,10 @@ public sealed class TagWriteService(
     /// <summary>A picture downloaded for this run, with the type the host called it.</summary>
     private sealed record FetchedImage(byte[] Bytes, string? MediaType);
 
-    private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid);
+    /// <param name="Name">As billed: what the tags print.</param>
+    /// <param name="Own">The artist's own name, whatever the billing: what a folder is named for.</param>
+    /// <param name="Latin">The displayed alias, only to recognise a folder named by it.</param>
+    private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid, string Own, string? Latin);
 
     /// <summary>
     /// One file's row, flattened out of the entity graph.
@@ -1681,6 +1731,19 @@ public sealed record TagWriteProgress(
 /// zero</b>: only the artist button writes these, and it writes to the one shelf
 /// named for that artist.
 /// </param>
+/// <param name="Renamed">
+/// Files moved to where <c>Fonoteca:FileNaming</c> puts them, with their album
+/// folder or on their own. With <c>Fonoteca:AllowFileMutation</c> off, the files
+/// that would have moved.
+/// </param>
+/// <param name="NotRenamed">
+/// Files left where they were: the name was taken, or the catalogue lacks a fact
+/// the pattern needs. The log names each one.
+/// </param>
+/// <param name="Linked">
+/// Links made in a collaborator's folder to an album filed under its
+/// first-billed artist. Per album, like the covers.
+/// </param>
 public sealed record TagWriteSummary(
     string JobId,
     string Scope,
@@ -1696,4 +1759,7 @@ public sealed record TagWriteSummary(
     int Skipped,
     int CoversWritten,
     int PortraitsWritten,
+    int Renamed,
+    int NotRenamed,
+    int Linked,
     bool Cancelled);

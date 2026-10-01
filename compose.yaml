@@ -69,6 +69,9 @@ services:
     environment:
       # This is a test instance reading somebody else's music. Don't report it.
       ND_ENABLEINSIGHTSCOLLECTOR: 'false'
+      # The tag write links a collaboration into every billed artist's folder.
+      # Followed, each linked track is listed twice (measured on 0.64).
+      ND_SCANNER_FOLLOWSYMLINKS: 'false'
     ports:
       - '${NAVIDROME_PORT:-4533}:4533'
     volumes:

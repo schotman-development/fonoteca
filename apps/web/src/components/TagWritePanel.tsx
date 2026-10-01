@@ -254,7 +254,8 @@ export function TagWritePanel({
           identifier. Each file is rendered to a staged copy, read back by two independent tag
           libraries and length-checked before the swap; the previous values go to the undo journal.
           A file that already says what the catalogue says is not opened, so running this again is
-          cheap.
+          cheap. Then every album folder is renamed to the <code>Fonoteca:FileNaming</code> pattern,
+          and a collaboration is linked into each other billed artist&apos;s folder.
         </Text>
       ) : null}
     </Stack>
@@ -289,8 +290,17 @@ function Result({ summary }: { readonly summary: Summary }) {
           : ''}
         {/* Only the artist button writes one, and only onto the shelf named for
             them, so this is 1 or nothing rather than a count worth spelling. */}
-        {summary.portraitsWritten > 0 ? ' · the artist got a picture' : ''} · took{' '}
-        {formatDuration(summary.durationMilliseconds)}
+        {summary.portraitsWritten > 0 ? ' · the artist got a picture' : ''}
+        {summary.renamed > 0 ? ` · ${summary.renamed.toLocaleString()} renamed` : ''}
+        {summary.notRenamed > 0
+          ? ` · ${summary.notRenamed.toLocaleString()} kept their names (the log says why)`
+          : ''}
+        {summary.linked > 0
+          ? ` · ${summary.linked.toLocaleString()} collaboration${
+              summary.linked === 1 ? '' : 's'
+            } linked into another artist's folder`
+          : ''}{' '}
+        · took {formatDuration(summary.durationMilliseconds)}
         {summary.cancelled ? ' · stopped early' : ''}
       </Text>
 

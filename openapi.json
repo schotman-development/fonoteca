@@ -8906,6 +8906,9 @@
           "skipped",
           "coversWritten",
           "portraitsWritten",
+          "renamed",
+          "notRenamed",
+          "linked",
           "cancelled"
         ],
         "type": "object",
@@ -8961,6 +8964,18 @@
             "format": "int32"
           },
           "portraitsWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "renamed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "notRenamed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "linked": {
             "type": "integer",
             "format": "int32"
           },
