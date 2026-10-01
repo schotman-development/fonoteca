@@ -1141,6 +1141,84 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>
+    /// A week-old "found nothing" is asked again; a fresh one, or one that found
+    /// something, is not — for pictures, articles and banners alike.
+    /// </summary>
+    /// <remarks>
+    /// Six followed artists here were stamped "no biography, no banner" on one
+    /// day and, keyed on the stamp alone, would never have been asked again
+    /// however much the sources learned. Karajan's answer is stale and empty,
+    /// the orchestra's is empty but a day old, and Mozart's is stale but full.
+    /// </remarks>
+    [Fact]
+    public async Task AWeekOldNothingFoundIsAskedAgain()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+        await SeedBilledArtistAsync(Berliner, "Berliner Philharmoniker");
+        await SeedBilledArtistAsync(Mozart, "Mozart");
+
+        var stale = DateTimeOffset.UtcNow - EnrichmentService.NothingFoundRetryAfter - TimeSpan.FromDays(1);
+        var fresh = DateTimeOffset.UtcNow - TimeSpan.FromDays(1);
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var artist in await seed.Artists.ToListAsync(Token))
+            {
+                var when = artist.Mbid == Berliner ? fresh : stale;
+
+                artist.LookupUtc = when;
+                artist.PortraitLookupUtc = when;
+                artist.BiographyLookupUtc = when;
+                artist.BannerLookupUtc = when;
+
+                if (artist.Mbid == Mozart)
+                {
+                    artist.PortraitUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/Mozart.jpg";
+                    artist.BiographyText = "Wolfgang Amadeus Mozart was a composer.";
+                    artist.BannerUrl = "https://r2.theaudiodb.com/images/media/artist/fanart/mozart.jpg";
+                }
+            }
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        // Counted as the run will claim them, or the panel says nothing is
+        // pending and disables the button that would ask.
+        var pending = await Build(Answering(Recording), new StubCatalogue(null, null))
+            .GetRequiredService<EnrichmentService>()
+            .CountPendingAsync(Token);
+
+        Assert.Equal(1, pending.Portraits);
+        Assert.Equal(1 + 3, pending.Articles); // Karajan, and each seed's album
+        Assert.Equal(1, pending.Banners);
+
+        var portraits = new StubPortraits();
+        var encyclopedia = new StubEncyclopedia();
+        var banners = new StubBanners();
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(recording: null, work: null, artist: null),
+            portraits,
+            encyclopedia: encyclopedia,
+            banners: banners));
+
+        Assert.Equal([Karajan], portraits.Asked.Select(artist => artist.Id));
+        Assert.Equal([Karajan], banners.Asked);
+        Assert.Contains(Karajan, encyclopedia.Asked);
+        Assert.DoesNotContain(Berliner, encyclopedia.Asked);
+        Assert.DoesNotContain(Mozart, encyclopedia.Asked);
+
+        // Asked again and still nothing: stamped afresh, so not asked next run.
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var karajan = await db.Artists.AsNoTracking().SingleAsync(a => a.Mbid == Karajan, Token);
+
+        Assert.True(karajan.PortraitLookupUtc > fresh);
+        Assert.True(karajan.BiographyLookupUtc > fresh);
+        Assert.True(karajan.BannerLookupUtc > fresh);
+    }
+
+    /// <summary>
     /// A second run asks nothing, because the stamp is the worklist.
     /// </summary>
     /// <remarks>

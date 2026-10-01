@@ -172,7 +172,7 @@ public sealed class EnrichmentService(
                 .ConfigureAwait(false);
 
             var portraits = await db.Artists
-                .Where(UnpicturedArtist)
+                .Where(UnpicturedArtist(NothingFoundCutoff))
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
@@ -181,13 +181,13 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            var articles = await db.Artists.Where(UnreadArtist).CountAsync(cancellationToken)
+            var articles = await db.Artists.Where(UnreadArtist(NothingFoundCutoff)).CountAsync(cancellationToken)
                 .ConfigureAwait(false)
                 + await db.ReleaseGroups.Where(UnreadAlbum).CountAsync(cancellationToken)
                     .ConfigureAwait(false);
 
             var banners = await db.Artists
-                .Where(UnbanneredArtist)
+                .Where(UnbanneredArtist(NothingFoundCutoff))
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
@@ -835,8 +835,9 @@ public sealed class EnrichmentService(
     /// How stale a discography may be before this pass asks again.
     /// </summary>
     /// <remarks>
-    /// <b>The clause that makes monitoring possible, and the only clock-driven
-    /// re-ask in the application.</b> Keyed on the stamp being null alone — which
+    /// <b>The clause that makes monitoring possible, and one of the few
+    /// clock-driven re-asks in the application</b> (the other here is
+    /// <see cref="NothingFoundRetryAfter"/>). Keyed on the stamp being null alone — which
     /// is what every other worklist here does and what this one did — a followed
     /// artist is browsed once and never again, so "released after you followed
     /// them" has nothing to compare against and <c>ReleaseGroup.Monitored</c>
@@ -1269,8 +1270,27 @@ public sealed class EnrichmentService(
     /// a long way past a hundred thousand files, since a library has an order of
     /// magnitude fewer artists than tracks.
     /// </remarks>
-    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnpicturedArtist =
-        artist => artist.PortraitLookupUtc == null && artist.Mbid != null;
+    private static System.Linq.Expressions.Expression<Func<Artist, bool>> UnpicturedArtist(
+        DateTimeOffset cutoff) =>
+        artist => artist.Mbid != null
+            && (artist.PortraitLookupUtc == null
+                || (artist.PortraitUrl == null && artist.PortraitLookupUtc < cutoff));
+
+    /// <summary>
+    /// How long "no source had one" is believed for a picture, an article or a
+    /// banner: a week, as for an album cover (<c>CoverRetryAfter</c>).
+    /// </summary>
+    /// <remarks>
+    /// These sources gain artists all the time, and a nothing-found stamp that
+    /// never expires freezes the page at whatever the first run knew — six
+    /// followed artists here were stamped "no biography, no banner" on one day
+    /// and would never have been asked again. What was found is kept for good:
+    /// only an answer of nothing is re-asked. The stamp still goes on either way,
+    /// so within the week nothing is asked twice.
+    /// </remarks>
+    public static readonly TimeSpan NothingFoundRetryAfter = TimeSpan.FromDays(7);
+
+    private DateTimeOffset NothingFoundCutoff => clock.UtcNow - NothingFoundRetryAfter;
 
     /// <summary>
     /// Find a picture for every artist that has not been looked for.
@@ -1421,7 +1441,7 @@ public sealed class EnrichmentService(
 
             page = await db.Artists
                 .AsNoTracking()
-                .Where(UnpicturedArtist)
+                .Where(UnpicturedArtist(NothingFoundCutoff))
                 .OrderBy(a => a.Id)
                 .Select(a => new PendingArtist(a.Id, a.Name, a.Mbid!.Value))
                 .Take(size)
@@ -1503,9 +1523,12 @@ public sealed class EnrichmentService(
     /// </remarks>
     private readonly record struct PictureBatch(int Claimed);
 
-    /// <summary>Artists nobody has looked for a Wikipedia article about.</summary>
-    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnreadArtist =
-        artist => artist.BiographyLookupUtc == null && artist.Mbid != null;
+    /// <summary>Artists nobody has looked for a Wikipedia article about, or found none for a week ago.</summary>
+    private static System.Linq.Expressions.Expression<Func<Artist, bool>> UnreadArtist(
+        DateTimeOffset cutoff) =>
+        artist => artist.Mbid != null
+            && (artist.BiographyLookupUtc == null
+                || (artist.BiographyText == null && artist.BiographyLookupUtc < cutoff));
 
     /// <summary>
     /// Albums the library holds that nobody has looked for an article about.
@@ -1520,7 +1543,8 @@ public sealed class EnrichmentService(
             && group.Files.Any();
 
     /// <summary>
-    /// Artists a release is billed to that nobody has looked for a banner of.
+    /// Artists a release is billed to that nobody has looked for a banner of, or
+    /// found none for a week ago.
     /// </summary>
     /// <remarks>
     /// Billed on a release rather than every artist, because this source costs
@@ -1528,9 +1552,11 @@ public sealed class EnrichmentService(
     /// is an album artist's, not a session player's. Keyed on the billing so the
     /// count is one query: an artist billed later joins the worklist then.
     /// </remarks>
-    private static readonly System.Linq.Expressions.Expression<Func<Artist, bool>> UnbanneredArtist =
-        artist => artist.BannerLookupUtc == null
-            && artist.Mbid != null
+    private static System.Linq.Expressions.Expression<Func<Artist, bool>> UnbanneredArtist(
+        DateTimeOffset cutoff) =>
+        artist => artist.Mbid != null
+            && (artist.BannerLookupUtc == null
+                || (artist.BannerUrl == null && artist.BannerLookupUtc < cutoff))
             && artist.Credits.Any(credit => credit.ReleaseId != null);
 
     /// <summary>Banners asked per batch: small, because each is a request and a failure ends the stage.</summary>
@@ -1617,7 +1643,7 @@ public sealed class EnrichmentService(
 
             page = await db.Artists
                 .AsNoTracking()
-                .Where(UnreadArtist)
+                .Where(UnreadArtist(NothingFoundCutoff))
                 .OrderBy(artist => artist.Id)
                 .Select(artist => new PendingArtist(artist.Id, artist.Name, artist.Mbid!.Value))
                 .Take(Math.Max(size, 1))
@@ -1730,7 +1756,7 @@ public sealed class EnrichmentService(
 
             page = await db.Artists
                 .AsNoTracking()
-                .Where(UnbanneredArtist)
+                .Where(UnbanneredArtist(NothingFoundCutoff))
                 .OrderBy(artist => artist.Id)
                 .Select(artist => new PendingArtist(artist.Id, artist.Name, artist.Mbid!.Value))
                 .Take(size)
