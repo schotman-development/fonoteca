@@ -169,7 +169,9 @@ function NoReleaseCard({ album }: { readonly album: NoReleaseAlbum }) {
           {album.files} {album.files === 1 ? 'file' : 'files'}
         </Badge>
       }
-      render={(props) => <Link {...props} to="/files" search={{ path: album.folder }} />}
+      render={(props) => (
+        <Link {...props} to="/files" search={{ path: album.folder, tags: true }} />
+      )}
     />
   )
 }

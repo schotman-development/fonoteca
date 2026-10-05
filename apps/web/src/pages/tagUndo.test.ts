@@ -31,6 +31,14 @@ test('the label names which edit a press reverses', () => {
   )
 })
 
+test('undoing a tag edit says the corrections go with it, and asks nothing of Identify', () => {
+  const edit = { id: 'a', kind: 'TagEdit', at: '2026-10-01T12:00:00Z', files: 3 } as const
+
+  assert.equal(undoLabel(edit), 'Undo the last tag edit')
+  assert.match(undoQuestion('A/B', edit), /corrections it saved are forgotten/)
+  assert.doesNotMatch(undoQuestion('A/B', edit), /Identify screen/)
+})
+
 test('undoing a tag write says the folder becomes a question', () => {
   const question = undoQuestion('Miles Davis/Kind of Blue', {
     id: 'a',

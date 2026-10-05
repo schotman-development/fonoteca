@@ -21,6 +21,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { api, apiBaseUrl } from '../api.ts'
+import { TagEditor } from '../components/TagEditor.tsx'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { UndoFolderButton } from '../components/UndoFolderButton.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
@@ -155,6 +156,7 @@ export function ReleasePage() {
           key={releaseId}
           releaseId={releaseId}
           data={data}
+          version={version}
           onChanged={changed}
           onReopened={(result) => {
             setReopened({ ...result, release: releaseId })
@@ -169,11 +171,14 @@ export function ReleasePage() {
 function Album({
   releaseId,
   data,
+  version,
   onChanged,
   onReopened,
 }: {
   readonly releaseId: string
   readonly data: Detail
+  /** Bumped by every change on the page, so each folder's Undo asks again what it would undo. */
+  readonly version: number
   readonly onChanged: () => void
   readonly onReopened: (result: Reopened) => void
 }) {
@@ -434,11 +439,13 @@ function Album({
                   >
                     <Stack direction="column" gap={12}>
                       <FolderFiles files={folder.files} />
+                      <FolderTags folder={folder.path} onSaved={onChanged} />
                       {/*
                         Undoing a tag write reopens the folder, which takes it off
                         this album: where it went is on the Files screen.
                       */}
                       <UndoFolderButton
+                        key={`${folder.path}:${version}`}
                         folder={folder.path}
                         onUndone={(result) => {
                           // Said before the page moves on, since neither the
@@ -1176,6 +1183,28 @@ function FolderFiles({ files }: { readonly files: readonly AlbumFileRow[] }) {
         </tbody>
       </Table>
     </div>
+  )
+}
+
+/** The tag editor for one folder of the album, opened on request. */
+function FolderTags({
+  folder,
+  onSaved,
+}: {
+  readonly folder: string
+  readonly onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Stack direction="column" gap={12} align="stretch">
+      <Stack gap={8}>
+        <Button size="sm" variant="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? 'Close the tag editor' : 'Edit tags'}
+        </Button>
+      </Stack>
+      {open ? <TagEditor folder={folder} onSaved={onSaved} /> : null}
+    </Stack>
   )
 }
 

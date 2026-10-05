@@ -153,8 +153,12 @@ const filesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/files',
   component: FilesPage,
-  validateSearch: (search: Record<string, unknown>): { readonly path?: string | undefined } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { readonly path?: string | undefined; readonly tags?: true | undefined } => ({
     path: typeof search.path === 'string' && search.path !== '' ? search.path : undefined,
+    // The tag editor open, as an album card with no release links to it.
+    tags: search.tags === true || search.tags === 'true' ? true : undefined,
   }),
 })
 

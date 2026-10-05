@@ -16,6 +16,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { type ChangeEvent, useId, useState } from 'react'
 
 import { api, apiBaseUrl } from '../api.ts'
+import { TagEditor } from '../components/TagEditor.tsx'
 import { UndoFolderButton } from '../components/UndoFolderButton.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { FilePreviewPane } from './FilePreviewPane.tsx'
@@ -57,7 +58,7 @@ type Notice = { readonly tone: 'success' | 'warning' | 'danger'; readonly messag
  * then wondering why the album has no artists is the obvious first confusion.
  */
 export function FilesPage() {
-  const { path: folder = '' } = useSearch({ from: '/files' })
+  const { path: folder = '', tags = false } = useSearch({ from: '/files' })
   const navigate = useNavigate({ from: '/files' })
   const [attempt, setAttempt] = useState(0)
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
@@ -256,6 +257,35 @@ export function FilesPage() {
         onUpload={upload}
         onScan={scan}
       />
+
+      {album === folder ? (
+        <Stack direction="column" gap={12} align="stretch">
+          <Stack gap={8} align="center">
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-expanded={tags}
+              onClick={() =>
+                void navigate({
+                  to: '/files',
+                  search: { path: folder, ...(tags ? {} : { tags: true }) },
+                })
+              }
+            >
+              {tags ? 'Close the tag editor' : 'Edit tags'}
+            </Button>
+          </Stack>
+          {tags ? (
+            <TagEditor
+              folder={folder}
+              onSaved={(result) => {
+                if (result.folder === folder) refresh()
+                else void navigate({ to: '/files', search: { path: result.folder, tags: true } })
+              }}
+            />
+          ) : null}
+        </Stack>
+      ) : null}
 
       {/* Hidden unless this is an album folder with an edit to its files left to undo. */}
       <UndoFolderButton

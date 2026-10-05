@@ -17,7 +17,11 @@ type Result = components['schemas']['TagUndoResult']
 
 /** The button's label for the edit it would reverse. */
 export function undoLabel(edit: Edit): string {
-  return edit.kind === 'TagWrite' ? 'Undo the last tag write' : 'Undo the AcoustID tag'
+  return edit.kind === 'TagWrite'
+    ? 'Undo the last tag write'
+    : edit.kind === 'TagEdit'
+      ? 'Undo the last tag edit'
+      : 'Undo the AcoustID tag'
 }
 
 /** The confirmation, naming the edit, its date and what follows from undoing it. */
@@ -27,6 +31,14 @@ export function undoQuestion(folder: string, edit: Edit): string {
     timeStyle: 'short',
   })
   const files = `${edit.files} file${edit.files === 1 ? '' : 's'}`
+
+  if (edit.kind === 'TagEdit') {
+    return (
+      `Undo the tag edit saved ${when} in “${folder}”?\n\n` +
+      `The tags it changed in ${files} go back to what they were, and the corrections it ` +
+      'saved are forgotten with them. Anything it renamed gets its old name back.'
+    )
+  }
 
   return edit.kind === 'TagWrite'
     ? `Undo the tag write of ${when} on “${folder}”?\n\n` +
