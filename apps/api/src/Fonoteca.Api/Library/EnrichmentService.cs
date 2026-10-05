@@ -501,10 +501,16 @@ public sealed class EnrichmentService(
     /// it files them; and a decision sets <c>IdentityDecidedUtc</c>. Hence a
     /// second worklist rather than a widened one — and it needs no AcoustID turn
     /// at all, because the recording MBID is already in the catalogue.
+    ///
+    /// A download filed under MusicBrainz's recordings (ADR 0011) is the same
+    /// case — an identity and no graph — and joins it until MusicBrainz has been
+    /// asked once: <c>RecordingLookupUtc</c> is what takes it off, since its
+    /// outcome stays the shop's.
     /// </remarks>
     private static readonly System.Linq.Expressions.Expression<Func<MediaFile, bool>> PersonFiled =
         file => (file.EnrichmentOutcome == EnrichmentOutcome.LinkedByPerson
-                || file.EnrichmentOutcome == EnrichmentOutcome.LinkedByAgent)
+                || file.EnrichmentOutcome == EnrichmentOutcome.LinkedByAgent
+                || (file.EnrichmentOutcome == EnrichmentOutcome.LinkedByProvider && file.RecordingLookupUtc == null))
             && file.Recording != null
             && file.Recording.Mbid != null;
 
@@ -536,12 +542,12 @@ public sealed class EnrichmentService(
                     .AsNoTracking()
                     .Where(PersonFiled)
                     .OrderBy(f => f.Id)
-                    .Select(f => new { f.Id, f.Path, Mbid = f.Recording!.Mbid })
+                    .Select(f => new { f.Id, f.Path, Mbid = f.Recording!.Mbid, Shop = f.EnrichmentOutcome == EnrichmentOutcome.LinkedByProvider })
                     .Take(PageSize)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
 
-                page = [.. rows.Select(r => new PersonFiledFile(r.Id, r.Path, r.Mbid!.Value))];
+                page = [.. rows.Select(r => new PersonFiledFile(r.Id, r.Path, r.Mbid!.Value, r.Shop))];
             }
 
             var fresh = page.Where(file => seen.Add(file.Id)).ToList();
@@ -560,7 +566,8 @@ public sealed class EnrichmentService(
     /// <see cref="HandleAsync"/> gives.
     ///
     /// **Nothing here writes <c>RecordingLookupUtc</c> or an outcome other than
-    /// <see cref="EnrichmentOutcome.Linked"/>**, and the second half of that is
+    /// <see cref="EnrichmentOutcome.Linked"/>** — but for a download's file, whose
+    /// outcome stays the shop's and whose lookup is stamped — and the second half of that is
     /// load-bearing. <c>RecordingNotFound</c> is one of the two values the
     /// by-hand album screen reads as an open question, so writing it onto a file
     /// somebody already answered would put their decision back on the worklist
@@ -616,6 +623,10 @@ public sealed class EnrichmentService(
             Log.FileNotEnriched(
                 logger, file.Path, EnrichmentOutcome.RecordingNotFound, missing);
 
+            // A download's file is asked once (rule 1); a person's keeps being
+            // asked, for the reason above.
+            if (file.Shop) await StampAsync(file.Id, cancellationToken).ConfigureAwait(false);
+
             return;
         }
 
@@ -637,12 +648,29 @@ public sealed class EnrichmentService(
                 .UpsertAsync(recording, work, cancellationToken, file.Mbid)
                 .ConfigureAwait(false);
 
-            // Now it is what the value promises: linked, with its artists.
-            row.EnrichmentOutcome = EnrichmentOutcome.Linked;
+            // Now it is what the value promises: linked, with its artists. A
+            // download's stays the shop's answer, now asked of MusicBrainz too.
+            if (file.Shop) row.RecordingLookupUtc = clock.UtcNow;
+            else row.EnrichmentOutcome = EnrichmentOutcome.Linked;
 
             counts.Linked++;
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Records that MusicBrainz was asked about a download's file and had no such recording.</summary>
+    private async Task StampAsync(MediaFileId id, CancellationToken cancellationToken)
+    {
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            await db.MediaFiles
+                .Where(f => f.Id == id)
+                .ExecuteUpdateAsync(update => update.SetProperty(f => f.RecordingLookupUtc, clock.UtcNow), cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -726,7 +754,8 @@ public sealed class EnrichmentService(
     }
 
     /// <summary>A file that has a recording MBID already, and needs its graph.</summary>
-    private sealed record PersonFiledFile(MediaFileId Id, string Path, Mbid Mbid);
+    /// <param name="Shop">Filed by a download, whose outcome stays the shop's and whose lookup is stamped.</param>
+    private sealed record PersonFiledFile(MediaFileId Id, string Path, Mbid Mbid, bool Shop);
 
     /// <summary>
     /// Artists nobody has asked MusicBrainz about — the third worklist.

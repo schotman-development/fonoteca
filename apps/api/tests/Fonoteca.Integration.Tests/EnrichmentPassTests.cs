@@ -363,6 +363,45 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>
+    /// A download filed under a MusicBrainz recording (ADR 0011) is given its
+    /// graph the same way, and stays the shop's answer, asked once.
+    /// </summary>
+    [Fact]
+    public async Task ADownloadFiledUnderAMusicBrainzRecordingIsEnrichedAndStaysTheShops()
+    {
+        await SeedPersonFiledAsync("Concertgebouw/Beethoven 1/01 - Adagio molto.flac", byShop: true);
+
+        var services = Build(Answering(Recording), Classical());
+        Assert.Equal(1, await PendingAsync(services));
+
+        await EnrichAsync(services);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var file = await db.MediaFiles.AsNoTracking().SingleAsync(Token);
+
+        Assert.Equal(EnrichmentOutcome.LinkedByProvider, file.EnrichmentOutcome);
+        Assert.NotNull(file.RecordingLookupUtc);
+        Assert.Contains("Herbert von Karajan", await db.Artists.AsNoTracking().Select(a => a.Name).ToListAsync(Token));
+        Assert.Equal(0, await PendingAsync(services));
+    }
+
+    [Fact]
+    public async Task ADownloadsRecordingMusicBrainzCannotProduceIsAskedOnce()
+    {
+        await SeedPersonFiledAsync("Concertgebouw/Beethoven 1/01 - Adagio molto.flac", byShop: true);
+
+        var services = Build(Answering(Recording), new StubCatalogue(recording: null, work: null));
+        await EnrichAsync(services);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var file = await db.MediaFiles.AsNoTracking().SingleAsync(Token);
+
+        Assert.Equal(EnrichmentOutcome.LinkedByProvider, file.EnrichmentOutcome);
+        Assert.NotNull(file.RecordingLookupUtc);
+        Assert.Equal(0, await PendingAsync(services));
+    }
+
+    /// <summary>
     /// A recording MusicBrainz merged into another moves everything it held onto
     /// the survivor, and nobody's answer changes hands.
     /// </summary>
