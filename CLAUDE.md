@@ -442,6 +442,29 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   `TRACKTOTAL`/`TOTALTRACKS`, so an older entry's missing total is believed only
   when its number goes too. Not restored: a date cut to a year, a dropped ID3
   prefix, the ID3 version and ID3v1 trailer, repairs, a shelf's carried pictures.
+- **A person's tags (`PersonTags`, the tag editor on Files and on each album
+  folder) are stored beside the catalogue's and laid over them by this pass —
+  they win**, over the catalogue and over a tagger that changed the file since.
+  Per file in `MediaFiles.TagEditsJson` (null = "carries none", the one way a
+  removal enters a write); where the folder is one album its title and artist
+  are corrections to the album, in `ReleaseGroups.EditsJson` — the album page's
+  own corrections now live there too, a pressing's facts on
+  `Releases.EditsJson`, read back with `PersonEdits.Combine` — and its year is
+  set on every file of the folder, so it survives the folder being filed under
+  a pressing later and leaves the album's other folders alone (the owner's
+  choice). Taking out a track or disc number takes its total too, since ATL
+  writes no total without its number. A file with corrections is on the worklist even with no
+  catalogue answer, and names follow them; an album artist typed is the shelf
+  as typed, with no links. A year typed for an album on the album page is the
+  person's on a file held to the album alone too, replacing its own. Saving
+  writes the folder at once (`TagWriteScope.ForFolder`, run in the request under
+  the gate) and journals `tagging.person.saved`, so one Undo press reverts the
+  files and the corrections and reopens nothing — only the keys that save
+  changed, so a later album-page correction or another folder's stays. Any
+  field a person names is allowed but an identity, a four-character name (ATL
+  writes those as an ID3 frame or MP4 atom) or a name ATL maps to a field of
+  its own (`PersonTags.TagLibraryOwn`, "Publisher" in a FLAC); TagLib# confirms
+  each in its container's own place, as it does the AcoustID.
 - **With `AllowFileMutation` off no button that writes a file is shown** — Write
   tags and Undo alike (the owner's choice); the endpoints refuse as well.
 
@@ -768,13 +791,14 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Twenty-three tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Twenty-five tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
 `list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
 `release_slots`, `start_pass`, `cancel_pass`, `decide_recording`,
 `decide_component`, `file_under_release`, `mark_folder_unreleased`,
-`reopen_folder`, `set_folder_album`, `undo_folder_edit`.
+`reopen_folder`, `set_folder_album`, `undo_folder_edit`, `folder_tags`,
+`edit_tags`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every
@@ -783,7 +807,7 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 - **An agent's decision is not the owner's** (rule 4). **Adding a by-a-person
   outcome means adding its twin to `ByCaller`**, or the agent path throws.
 - **Not offered:** the tag write at any scope, trash/move/upload, Qobuz. Undo
-  is, recorded as the agent's (the owner's choice).
+  and the tag editor are, recorded as the agent's (the owner's choice).
 - **`Fonoteca:McpToken` empty is a 404, read per request.** `Guard` is middleware
   rather than a filter so it sits in front of whatever `MapMcp` maps. It locks
   `/mcp` and nothing else: every `/api` route is as open as the port.
