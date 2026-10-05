@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -108,6 +109,28 @@ public sealed class IdentifyEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal("Small Album", folder.Tags.Album);
         Assert.Equal(Guid.Parse(Release), folder.Tags.Release);
         Assert.Equal(2, folder.Tags.Agreeing);
+    }
+
+    /// <summary>
+    /// A file whose recording is settled — as a download's is — and whose audio
+    /// AcoustID does not know is offered for its attribution refusal, not its audio.
+    /// </summary>
+    [Fact]
+    public async Task ASettledFileIsOfferedForItsAttributionRefusal()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH.");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(file => file.Path == $"{Tagged}/02 Second Song.flac", Token);
+            row.IdentityDecidedUtc = DateTimeOffset.Parse("2026-02-02T10:00:00Z", CultureInfo.InvariantCulture);
+            row.AttributionOutcome = ReleaseAttributionOutcome.NoCandidate;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var folder = await FolderAsync(Tagged);
+
+        Assert.Equal("NoCandidate", Assert.Single(folder.Items, item => item.Name == "02 Second Song.flac").Reason);
     }
 
     [Fact]

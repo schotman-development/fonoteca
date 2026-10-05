@@ -263,8 +263,9 @@ public static partial class CatalogueEndpoints
                 length is { } measured ? (int)measured.TotalMilliseconds : null,
 
                 // The first pass that refused, as the worklist and the folder
-                // listing both name it.
-                UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                // listing both name it. A settled recording is no identification
+                // question, whatever AcoustID made of its audio.
+                unidentified && UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
                     ? file.AcoustIdOutcome.ToString()
                     : unidentified
                         ? file.EnrichmentOutcome.ToString()

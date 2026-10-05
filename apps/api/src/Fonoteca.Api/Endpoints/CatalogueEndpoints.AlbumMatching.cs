@@ -527,7 +527,7 @@ public static partial class CatalogueEndpoints
                     // silence would report a consequence instead of a cause.
                     !unanswered
                         ? null
-                        : UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
+                        : unidentified && UnidentifiedOutcomes.Contains(row.AcoustIdOutcome)
                             ? row.AcoustIdOutcome.ToString()
                             : unidentified
                                 ? row.EnrichmentOutcome.ToString()

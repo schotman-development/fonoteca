@@ -855,6 +855,28 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     }
 
     /// <summary>
+    /// A file whose recording is settled — as a download's is — and whose audio
+    /// AcoustID does not know is open on attribution alone, and says so.
+    /// </summary>
+    [Fact]
+    public async Task ASettledFileOpenOnAttributionIsNamedByAttributionNotByItsAudio()
+    {
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await seed.MediaFiles.SingleAsync(file => file.Id == _first, Token);
+            row.IdentityDecidedUtc = DateTimeOffset.Parse("2026-02-02T10:00:00Z", CultureInfo.InvariantCulture);
+            row.AttributionOutcome = ReleaseAttributionOutcome.NoCandidate;
+            await seed.SaveChangesAsync(Token);
+        }
+
+        var listing = await ContentsAsync("Michael Jackson/Off the Wall");
+        var first = Assert.Single(listing.Items, item => item.Name == "01 First.flac");
+
+        Assert.True(first.Open);
+        Assert.Equal(nameof(ReleaseAttributionOutcome.NoCandidate), first.Reason);
+    }
+
+    /// <summary>
     /// A file filed by hand reads back as matched, with the position it was given.
     /// </summary>
     /// <remarks>
