@@ -98,6 +98,11 @@ public static class CatalogueTags
     public const string DiscTotal = "DISCTOTAL";
     public const string Year = "YEAR";
 
+    // Never from the catalogue: only a person sets these. See PersonTags.
+    public const string Genre = "GENRE";
+    public const string Composer = "COMPOSER";
+    public const string Comment = "COMMENT";
+
     public const string RecordingId = "MUSICBRAINZ_TRACKID";
     public const string ReleaseId = "MUSICBRAINZ_ALBUMID";
     public const string ReleaseGroupId = "MUSICBRAINZ_RELEASEGROUPID";

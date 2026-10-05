@@ -137,6 +137,18 @@ public sealed class ReleaseGroup
     /// <summary>The article <see cref="ReviewText"/> was taken from.</summary>
     public string? ReviewUrl { get; set; }
 
+    /// <summary>
+    /// What a person corrected about the album, by field, as JSON — see <c>PersonEdits</c>.
+    /// </summary>
+    /// <remarks>
+    /// The album's own fields — title, billing line, type, first release year,
+    /// review — on the album rather than on whichever edition a page happens to
+    /// display, which changes as pressings are proved and sleeves stored. A
+    /// pressing's own facts stay on <see cref="Release.EditsJson"/>. The tag
+    /// write reads the title, the billing line and the year from here.
+    /// </remarks>
+    public string? EditsJson { get; set; }
+
     /// <summary>When an article was last looked for, answer or not.</summary>
     public DateTimeOffset? ReviewLookupUtc { get; set; }
 
@@ -229,9 +241,9 @@ public sealed class Release
     /// What a person changed on the album page, by field, as JSON.
     /// </summary>
     /// <remarks>
-    /// <see cref="Artist.EditsJson"/>'s counterpart, for the same reason. It
-    /// holds the album-level fields the page edits too — type, first release
-    /// year, review — so an edit made on one edition shows on that edition only.
+    /// <see cref="Artist.EditsJson"/>'s counterpart, for the same reason, and
+    /// only for this pressing's own facts — its date, label, barcode. The
+    /// album's are on <see cref="ReleaseGroup.EditsJson"/>.
     /// </remarks>
     public string? EditsJson { get; set; }
 
@@ -546,6 +558,19 @@ public sealed class MediaFile
 
     /// <summary>The track number the file's own tags carry. See <see cref="TagDiscNumber"/>.</summary>
     public int? TagTrackNumber { get; set; }
+
+    /// <summary>
+    /// The tags a person set on this file, by field, as JSON: a value, or null
+    /// for "this file carries none".
+    /// </summary>
+    /// <remarks>
+    /// Rule 4: the catalogue's answer and a person's are different facts, so
+    /// this sits beside every derived column rather than over one, and no scan
+    /// or pass clears it. The tag write lays it over what the catalogue says,
+    /// and it wins — over the catalogue, and over a tagger that changed the file
+    /// since. See <c>PersonTags</c>.
+    /// </remarks>
+    public string? TagEditsJson { get; set; }
 
     /// <summary>Where the file stands in its folder's own order, from 1; null where the folder has none.</summary>
     /// <remarks>See <c>FolderOrder</c>. A place in the running order, not a track number.</remarks>

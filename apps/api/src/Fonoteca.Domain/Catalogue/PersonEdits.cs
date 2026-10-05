@@ -35,6 +35,23 @@ public static class PersonEdits
         return edits.Count == 0 ? null : JsonSerializer.Serialize(edits);
     }
 
+    /// <summary>
+    /// An album's corrections: its own, over the ones made to the pressing shown.
+    /// </summary>
+    /// <remarks>
+    /// Two rows because they are two subjects — the album's title and year are
+    /// not a pressing's, and the pressing a page shows changes as editions are
+    /// proved — read back as one map so a page asks one question.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string?> Combine(string? album, string? pressing)
+    {
+        var edits = new Dictionary<string, string?>(Read(pressing), StringComparer.Ordinal);
+
+        foreach (var (field, value) in Read(album)) edits[field] = value;
+
+        return edits;
+    }
+
     /// <summary>The value to show: the person's where there is one, the provider's otherwise.</summary>
     public static string? Apply(IReadOnlyDictionary<string, string?> edits, string field, string? provider)
     {

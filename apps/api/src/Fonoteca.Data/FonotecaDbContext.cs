@@ -85,6 +85,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.PrimaryType).HasMaxLength(100);
             e.Property(x => x.SecondaryTypes).HasMaxLength(500);
             e.Property(x => x.ReviewUrl).HasMaxLength(1000);
+            e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
         });
@@ -139,6 +140,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         modelBuilder.Entity<MediaFile>(e =>
         {
             e.HasKey(x => x.Id);
+            e.Property(x => x.TagEditsJson).HasColumnType("jsonb");
 
             // One row per file on disk, enforced by the database rather than by
             // the scanner remembering to check.

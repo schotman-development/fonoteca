@@ -172,33 +172,41 @@ public sealed class MigrationTests(PostgresFixture postgres)
         {
             await db.GetService<IMigrator>().MigrateAsync("20260923094134_AlbumFolderAttribution", token);
 
-            var group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Album" };
-            var release = new Release { Id = ReleaseId.New(), Title = "Album", ReleaseGroupId = group.Id };
-            var recording = new Recording { Id = RecordingId.New(), Title = "Song" };
-            var track = new Track { Id = TrackId.New(), ReleaseId = release.Id, RecordingId = recording.Id, Position = 1 };
+            // Seeded in that migration's own schema, not through today's model,
+            // whose every later column is one these tables do not have yet.
+            var (group, release, recording, track) = (Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7());
+            var sql = db.Database;
 
-            db.AddRange(group, release, recording, track);
+            await sql.ExecuteSqlAsync($$"""INSERT INTO "ReleaseGroups" ("Id", "Title") VALUES ({{group}}, 'Album')""", token);
+            await sql.ExecuteSqlAsync($$"""INSERT INTO "Releases" ("Id", "Title", "ReleaseGroupId") VALUES ({{release}}, 'Album', {{group}})""", token);
+            await sql.ExecuteSqlAsync($$"""INSERT INTO "Recordings" ("Id", "Title") VALUES ({{recording}}, 'Song')""", token);
+            await sql.ExecuteSqlAsync(
+                $$"""INSERT INTO "Tracks" ("Id", "ReleaseId", "RecordingId", "Position", "DiscNumber") VALUES ({{track}}, {{release}}, {{recording}}, 1, 1)""",
+                token);
 
             for (var outcome = 1; outcome <= 12; outcome++)
             {
-                var file = NewFile($"a/{outcome:D2}.flac", recording.Id);
-                file.AttributionOutcome = (ReleaseAttributionOutcome)outcome;
-                file.ReleaseGroupId = group.Id;
-                file.ReleaseId = release.Id;
-                file.TrackId = track.Id;
-                file.EditionAlternatives = 1;
-                file.ReleaseLookupUtc = asked;
-                file.ReleaseDecidedUtc = outcome >= 7 ? decided : null;
-                db.MediaFiles.Add(file);
+                DateTimeOffset? decidedUtc = outcome >= 7 ? decided : null;
+
+                await sql.ExecuteSqlAsync(
+                    $$"""
+                    INSERT INTO "MediaFiles" ("Id", "Path", "SizeBytes", "LastModifiedUtc", "Integrity", "RecordingId", "AttributionOutcome",
+                        "ReleaseGroupId", "ReleaseId", "TrackId", "EditionAlternatives", "ReleaseLookupUtc", "ReleaseDecidedUtc")
+                    VALUES ({{Guid.CreateVersion7()}}, {{$"a/{outcome:D2}.flac"}}, 1024, {{asked}}, 0, {{recording}}, {{outcome}},
+                        {{group}}, {{release}}, {{track}}, 1, {{asked}}, {{decidedUtc}})
+                    """,
+                    token);
             }
 
             foreach (var type in new[] { "tagging.catalogue.written", "matching.folder.unreleased" })
             {
-                db.DomainEvents.Add(Domain.Events.DomainEvent.Create(
-                    type, "file", Guid.CreateVersion7().ToString(), "owner", asked, "{}", "c"));
+                await sql.ExecuteSqlAsync(
+                    $$"""
+                    INSERT INTO "DomainEvents" ("Id", "Type", "SubjectType", "SubjectId", "ActorId", "OccurredAtUtc", "PayloadJson", "CorrelationId")
+                    VALUES ({{Guid.CreateVersion7()}}, {{type}}, 'file', {{Guid.CreateVersion7().ToString()}}, 'owner', {{asked}}, '{}', 'c')
+                    """,
+                    token);
             }
-
-            await db.SaveChangesAsync(token);
         }
 
         await using (var db = PostgresFixture.CreateContext(connection))
