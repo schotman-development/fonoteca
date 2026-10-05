@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace Fonoteca.Integration.Tests;
 
@@ -93,6 +94,10 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     public async ValueTask DisposeAsync()
     {
         foreach (var provider in _providers) await provider.DisposeAsync();
+
+        // Every test has a database of its own, and its pool keeps idle
+        // connections open after it: a hundred of them is PostgreSQL's limit.
+        await using (var connection = new NpgsqlConnection(_connectionString)) NpgsqlConnection.ClearPool(connection);
 
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
 
@@ -2381,7 +2386,16 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     {
         var full = Path.Combine(_root, path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.Copy(path.EndsWith(".mp3", StringComparison.Ordinal) ? Corpus.Mp3 : Corpus.Flac, full, overwrite: true);
+        File.Copy(
+            Path.GetExtension(path) switch
+            {
+                ".mp3" => Corpus.Mp3,
+                ".m4a" => Corpus.M4a,
+                ".ogg" => Corpus.Ogg,
+                _ => Corpus.Flac,
+            },
+            full,
+            overwrite: true);
 
         var facts = new FileInfo(full);
 

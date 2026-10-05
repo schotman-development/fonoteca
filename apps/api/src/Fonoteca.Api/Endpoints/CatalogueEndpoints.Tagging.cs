@@ -59,6 +59,30 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapGet("/folders/tags", GetFolderTags)
+            .WithName("GetFolderTags")
+            .WithSummary("What an album folder's files carry, what the catalogue would write, and what a person set.")
+            .WithDescription(
+                "One row per file and one cell per field the editor sets: the value the tag write "
+                + "would put in the file now (a person's, else the catalogue's, else the file's "
+                + "own), the catalogue's, the file's, and whether a person set it. Where the folder "
+                + "is one album, `album` holds its title, artist and year, which are corrected for "
+                + "the whole album.")
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/folders/tags", SaveFolderTags)
+            .WithName("SaveFolderTags")
+            .WithSummary("Set, take out or forget a person's tags in an album folder, and write the folder.")
+            .WithDescription(
+                "Each change names a file, or none for the album's own title, artist or year where "
+                + "the folder is one album. A value sets the field, a null value takes it out of the "
+                + "file, and `reset` forgets the person's value. The corrections are stored, then "
+                + "the folder is written and renamed as the tag write does, at once; a person's "
+                + "value wins over the catalogue's and over any tagger that changed the file since. "
+                + "One Undo press takes the whole save back.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         group.MapGet("/folders/undo", FolderUndoState)
             .WithName("GetFolderUndo")
             .WithSummary("The edit an undo of this album folder would reverse, if any.")
@@ -135,6 +159,65 @@ public static partial class CatalogueEndpoints
             _ => TypedResults.Problem(
                 title: "The library is busy",
                 detail: "A scan or a pass is running. Undo once it has finished.",
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    internal static async Task<Results<Ok<FolderTags>, ProblemHttpResult>> GetFolderTags(
+        string folder,
+        TagWriteService tags,
+        CancellationToken cancellationToken) =>
+        await tags.FolderTagsAsync(Unslashed(folder), cancellationToken).ConfigureAwait(false) is { } found
+            ? TypedResults.Ok(found)
+            : TypedResults.Problem(
+                title: "Not an album folder",
+                detail: $"\u201c{folder}\u201d holds no catalogued files, or holds more than one album's.",
+                statusCode: StatusCodes.Status404NotFound);
+
+    internal static async Task<Results<Ok<TagEditResult>, ProblemHttpResult>> SaveFolderTags(
+        TagEditRequest request,
+        TagWriteService tags,
+        ICallerContext caller,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrEmpty(request.Folder) || request.Changes is null or { Count: 0 })
+        {
+            return TypedResults.Problem(
+                title: "Nothing to save",
+                detail: "The request body must name a library-relative album `folder` and at least one change.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await tags.SaveTagsAsync(Unslashed(request.Folder), request.Changes, caller, cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.Status switch
+        {
+            TagEditStatus.Saved => TypedResults.Ok(result),
+
+            TagEditStatus.Invalid => TypedResults.Problem(
+                title: "Not saved",
+                detail: string.Join(" ", result.Problems),
+                statusCode: StatusCodes.Status400BadRequest),
+
+            TagEditStatus.NotAnAlbumFolder => TypedResults.Problem(
+                title: "Not an album folder",
+                detail: $"\u201c{request.Folder}\u201d holds no catalogued files, or holds more than one album's.",
+                statusCode: StatusCodes.Status400BadRequest),
+
+            TagEditStatus.NotOnDisk => TypedResults.Problem(
+                title: "The folder is not on disk",
+                detail: $"\u201c{request.Folder}\u201d is not there — the library may be unmounted. Nothing was saved.",
+                statusCode: StatusCodes.Status409Conflict),
+
+            TagEditStatus.MutationOff => TypedResults.Problem(
+                title: "File writing is off",
+                detail: "Fonoteca:AllowFileMutation is false, so no file may be changed and nothing was saved.",
+                statusCode: StatusCodes.Status409Conflict),
+
+            _ => TypedResults.Problem(
+                title: "The library is busy",
+                detail: "A scan or a pass is running. Save once it has finished.",
                 statusCode: StatusCodes.Status409Conflict),
         };
     }
@@ -251,3 +334,7 @@ public sealed record FolderUndoRequest(string Folder);
 /// <param name="WillWrite">Whether <c>Fonoteca:AllowFileMutation</c> is on; with it off nothing may be undone.</param>
 /// <param name="Edit">What an undo would reverse, or null when nothing is left to.</param>
 public sealed record FolderUndoResponse(string Folder, bool WillWrite, FolderEdit? Edit);
+
+/// <param name="Folder">A library-relative album folder.</param>
+/// <param name="Changes">What to set, take out or forget, in order.</param>
+public sealed record TagEditRequest(string Folder, IReadOnlyList<TagEdit> Changes);

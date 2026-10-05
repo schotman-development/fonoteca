@@ -630,7 +630,7 @@ public sealed partial class TagWriteService
         FonotecaDbContext db,
         IEventLog events,
         string correlationId,
-        string actor = Actor)
+        string? actor = null)
     {
         if (IsLink(path)) Unlink(path);
 
@@ -648,7 +648,7 @@ public sealed partial class TagWriteService
         FonotecaDbContext db,
         IEventLog events,
         string correlationId,
-        string actor = Actor,
+        string? actor = null,
         IReadOnlyList<string>? files = null)
     {
         // The album's files, so an undo can tell this link from one to another
@@ -658,7 +658,7 @@ public sealed partial class TagWriteService
                     type,
                     "link",
                     Subject(link),
-                    actor,
+                    actor ?? _actor,
                     clock.UtcNow,
                     files is null ? JsonSerializer.Serialize(new { link, target }) : JsonSerializer.Serialize(new { link, target, files }),
                     correlationId),
@@ -742,8 +742,10 @@ public sealed partial class TagWriteService
         object payload,
         string correlationId,
         string eventType = EventPrefix + ".renamed",
-        string actor = Actor)
+        string? actor = null)
     {
+        actor ??= _actor;
+
         // Through the execution strategy, as FileManagerService.MoveAsync is and
         // for its reason. The retried delegate re-runs the rows; the check
         // before the move keeps a retry from moving twice.
@@ -841,11 +843,17 @@ public sealed partial class TagWriteService
     /// </summary>
     private static Named Naming(PendingTagWrite file)
     {
-        var tags = CatalogueTags.For(file.Describe());
+        var tags = file.Tags();
 
         // Each billed artist once, by their own name: "Bowie" and "David Bowie"
         // are one shelf.
         var billed = file.ReleaseCredits.Select(credit => credit.Own).Distinct(StringComparer.Ordinal).ToList();
+
+        // An album artist a person typed is the shelf, as typed: it names no
+        // artist the catalogue holds, so there is nobody to link it from.
+        var typed = file.Person.TryGetValue(CatalogueTags.AlbumArtist, out var own) ? own : file.AlbumArtistEdit;
+
+        if (typed is not null || file.Person.ContainsKey(CatalogueTags.AlbumArtist)) billed = typed is null ? [] : [typed];
 
         return new Named(
             new NamingFacts(
@@ -859,6 +867,7 @@ public sealed partial class TagWriteService
                 tags.GetValueOrDefault(CatalogueTags.Artist)),
             [.. billed.Skip(1)],
             file.ReleaseCredits
+                .Where(_ => typed is null)
                 .GroupBy(credit => credit.Own, StringComparer.Ordinal)
                 .ToDictionary(
                     artist => artist.Key,

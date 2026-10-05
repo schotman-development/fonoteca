@@ -2509,6 +2509,98 @@
         }
       }
     },
+    "/api/catalogue/folders/tags": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "What an album folder's files carry, what the catalogue would write, and what a person set.",
+        "description": "One row per file and one cell per field the editor sets: the value the tag write would put in the file now (a person's, else the catalogue's, else the file's own), the catalogue's, the file's, and whether a person set it. Where the folder is one album, `album` holds its title, artist and year, which are corrected for the whole album.",
+        "operationId": "GetFolderTags",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderTags"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Set, take out or forget a person's tags in an album folder, and write the folder.",
+        "description": "Each change names a file, or none for the album's own title, artist or year where the folder is one album. A value sets the field, a null value takes it out of the file, and `reset` forgets the person's value. The corrections are stored, then the folder is written and renamed as the tag write does, at once; a person's value wins over the catalogue's and over any tagger that changed the file since. One Undo press takes the whole save back.",
+        "operationId": "SaveFolderTags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagEditResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/folders/undo": {
       "get": {
         "tags": [
@@ -6123,6 +6215,33 @@
           }
         }
       },
+      "FileTags": {
+        "required": [
+          "id",
+          "path",
+          "readable",
+          "cells"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string"
+          },
+          "readable": {
+            "type": "boolean"
+          },
+          "cells": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagCell"
+            }
+          }
+        }
+      },
       "FingerprintContributionResponse": {
         "required": [
           "release",
@@ -6268,7 +6387,8 @@
       "FolderEditKind": {
         "enum": [
           "TagWrite",
-          "Identification"
+          "Identification",
+          "TagEdit"
         ]
       },
       "FolderEntry": {
@@ -6490,6 +6610,54 @@
           },
           "detail": {
             "type": "string"
+          }
+        }
+      },
+      "FolderTags": {
+        "required": [
+          "folder",
+          "willWrite",
+          "albumId",
+          "albumWide",
+          "fields",
+          "album",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "willWrite": {
+            "type": "boolean"
+          },
+          "albumId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "albumWide": {
+            "type": "boolean"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "album": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagCell"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileTags"
+            }
           }
         }
       },
@@ -9002,6 +9170,142 @@
             "$ref": "#/components/schemas/CatalogueCounts"
           }
         }
+      },
+      "TagCell": {
+        "required": [
+          "field",
+          "value",
+          "catalogue",
+          "file",
+          "mine"
+        ],
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "catalogue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "file": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TagEdit": {
+        "required": [
+          "file",
+          "field",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "TagEditRequest": {
+        "required": [
+          "folder",
+          "changes"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagEdit"
+            }
+          }
+        }
+      },
+      "TagEditResult": {
+        "required": [
+          "status",
+          "folder",
+          "written",
+          "unchanged",
+          "notWritten",
+          "renamed",
+          "problems"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TagEditStatus"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "written": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "notWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "renamed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TagEditStatus": {
+        "enum": [
+          "Saved",
+          "Invalid",
+          "NotAnAlbumFolder",
+          "NotOnDisk",
+          "MutationOff",
+          "Busy"
+        ]
       },
       "TagUndoResult": {
         "required": [

@@ -140,12 +140,19 @@ public sealed partial class TagWriteService
                     TagUndoStatus.Incomplete, folder, edit, undo.Restored, 0, 0, 0, 0, 0, undo.Problems);
             }
 
-            if (edit.Kind == FolderEditKind.TagWrite)
+            if (edit.Kind != FolderEditKind.Identification)
             {
                 await MoveBackAsync(db, events, entries, undo).ConfigureAwait(false);
                 await RelinkAsync(db, events, entries, undo).ConfigureAwait(false);
                 await RestoreCoversAsync(events, entries, undo).ConfigureAwait(false);
+            }
 
+            // A person's save: their corrections go back with the files, and the
+            // catalogue's answer was never in question, so nothing is reopened.
+            if (edit.Kind == FolderEditKind.TagEdit) await RestoreCorrectionsAsync(db, entries, undo).ConfigureAwait(false);
+
+            if (edit.Kind == FolderEditKind.TagWrite)
+            {
                 var ids = rows.Select(row => row.Id).ToList();
 
                 var placed = await db.MediaFiles
@@ -254,7 +261,7 @@ public sealed partial class TagWriteService
             if (JsonSerializer.Deserialize<UndonePayload>(marker.PayloadJson)?.Undoes is { } undone) skipped.Add(undone);
         }
 
-        string[] kinds = [WrittenEvent, RenamedEvent, CoverEvent, AcoustIdTagWriter.WrittenEventType];
+        string[] kinds = [WrittenEvent, RenamedEvent, CoverEvent, AcoustIdTagWriter.WrittenEventType, PersonSavedEvent];
 
         var own = await db.DomainEvents
             .AsNoTracking()
@@ -299,7 +306,9 @@ public sealed partial class TagWriteService
 
         return new FolderEdit(
             newest.Correlation,
-            edit.All(entry => entry.Type == AcoustIdTagWriter.WrittenEventType) ? FolderEditKind.Identification : FolderEditKind.TagWrite,
+            edit.Any(entry => entry.Type == PersonSavedEvent) ? FolderEditKind.TagEdit
+                : edit.All(entry => entry.Type == AcoustIdTagWriter.WrittenEventType) ? FolderEditKind.Identification
+                : FolderEditKind.TagWrite,
             edit.Max(entry => entry.At),
             edit.Where(entry => subjects.Contains(entry.Subject)).Select(entry => entry.Subject).Distinct(StringComparer.Ordinal).Count());
     }
@@ -324,7 +333,8 @@ public sealed partial class TagWriteService
                     || (entry.Type == RenamedEvent
                         && (entry.SubjectType == FolderSubjectType || entry.SubjectId.StartsWith(companions)))
                     || entry.Type == LinkedEvent
-                    || entry.Type == UnlinkedEvent))
+                    || entry.Type == UnlinkedEvent
+                    || entry.Type == AlbumSavedEvent))
             .OrderBy(entry => entry.OccurredAtUtc)
             .ThenBy(entry => entry.Id)
             .Select(entry => new UndoEntry(entry.Type, entry.SubjectType, entry.SubjectId, entry.PayloadJson, entry.OccurredAtUtc, entry.CorrelationId!))
@@ -816,6 +826,9 @@ public enum FolderEditKind
 
     /// <summary>Identification, which writes the AcoustID and nothing else.</summary>
     Identification = 1,
+
+    /// <summary>A save in the tag editor: a person's corrections and the write that carried them.</summary>
+    TagEdit = 2,
 }
 
 /// <param name="Id">The journal correlation the edit was made under.</param>

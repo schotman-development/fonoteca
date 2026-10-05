@@ -954,6 +954,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/folders/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What an album folder's files carry, what the catalogue would write, and what a person set.
+         * @description One row per file and one cell per field the editor sets: the value the tag write would put in the file now (a person's, else the catalogue's, else the file's own), the catalogue's, the file's, and whether a person set it. Where the folder is one album, `album` holds its title, artist and year, which are corrected for the whole album.
+         */
+        get: operations["GetFolderTags"];
+        put?: never;
+        /**
+         * Set, take out or forget a person's tags in an album folder, and write the folder.
+         * @description Each change names a file, or none for the album's own title, artist or year where the folder is one album. A value sets the field, a null value takes it out of the file, and `reset` forgets the person's value. The corrections are stored, then the folder is written and renamed as the tag write does, at once; a person's value wins over the catalogue's and over any tagger that changed the file since. One Undo press takes the whole save back.
+         */
+        post: operations["SaveFolderTags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/folders/undo": {
         parameters: {
             query?: never;
@@ -1982,6 +2006,13 @@ export interface components {
             name: string;
             value: string;
         };
+        FileTags: {
+            /** Format: uuid */
+            id: string;
+            path: string;
+            readable: boolean;
+            cells: components["schemas"]["TagCell"][];
+        };
         FingerprintContributionResponse: {
             /** Format: uuid */
             release: string;
@@ -2026,7 +2057,7 @@ export interface components {
             files: number;
         };
         /** @enum {unknown} */
-        FolderEditKind: "TagWrite" | "Identification";
+        FolderEditKind: "TagWrite" | "Identification" | "TagEdit";
         FolderEntry: {
             name: string;
             path: string;
@@ -2082,6 +2113,16 @@ export interface components {
             /** Format: int32 */
             reopened: number;
             detail: string;
+        };
+        FolderTags: {
+            folder: string;
+            willWrite: boolean;
+            /** Format: uuid */
+            albumId: null | string;
+            albumWide: boolean;
+            fields: string[];
+            album: components["schemas"]["TagCell"][];
+            files: components["schemas"]["FileTags"][];
         };
         FolderUndoRequest: {
             folder: string;
@@ -2713,6 +2754,40 @@ export interface components {
             fileMutationAllowed: boolean;
             counts: components["schemas"]["CatalogueCounts"];
         };
+        TagCell: {
+            field: string;
+            value: null | string;
+            catalogue: null | string;
+            file: null | string;
+            mine: boolean;
+        };
+        TagEdit: {
+            /** Format: uuid */
+            file: null | string;
+            field: string;
+            value: null | string;
+            /** @default false */
+            reset: boolean;
+        };
+        TagEditRequest: {
+            folder: string;
+            changes: components["schemas"]["TagEdit"][];
+        };
+        TagEditResult: {
+            status: components["schemas"]["TagEditStatus"];
+            folder: string;
+            /** Format: int32 */
+            written: number;
+            /** Format: int32 */
+            unchanged: number;
+            /** Format: int32 */
+            notWritten: number;
+            /** Format: int32 */
+            renamed: number;
+            problems: string[];
+        };
+        /** @enum {unknown} */
+        TagEditStatus: "Saved" | "Invalid" | "NotAnAlbumFolder" | "NotOnDisk" | "MutationOff" | "Busy";
         TagUndoResult: {
             status: components["schemas"]["TagUndoStatus"];
             folder: string;
@@ -4850,6 +4925,79 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetFolderTags: {
+        parameters: {
+            query: {
+                folder: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderTags"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SaveFolderTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagEditRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagEditResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

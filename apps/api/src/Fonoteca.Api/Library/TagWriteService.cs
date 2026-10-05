@@ -140,6 +140,10 @@ public sealed partial class TagWriteService(
 
     private CancellationTokenSource? _cancellation;
     private volatile TagWriteProgress? _progress;
+
+    /// <summary>Who the running pass's journal says did it: the owner, or an agent saving tags.</summary>
+    /// <remarks>A field rather than a parameter on every step, because the gate admits one run at a time.</remarks>
+    private volatile string _actor = Actor;
     private volatile TagWriteSummary? _lastCompleted;
     private volatile string? _lastError;
     private Task? _pass;
@@ -178,9 +182,10 @@ public sealed partial class TagWriteService(
     /// </remarks>
     public static IQueryable<MediaFile> Writable(IQueryable<MediaFile> files) =>
         files.Where(file =>
-            file.RecordingId != null
-            && ((file.ReleaseId != null && file.TrackId != null)
-                || (file.ReleaseId == null && file.ReleaseGroupId != null)));
+            file.TagEditsJson != null
+            || (file.RecordingId != null
+                && ((file.ReleaseId != null && file.TrackId != null)
+                    || (file.ReleaseId == null && file.ReleaseGroupId != null))));
 
     /// <summary>How many files one scope would consider.</summary>
     public async Task<int> CountAsync(TagWriteScope scope, CancellationToken cancellationToken = default)
@@ -316,6 +321,12 @@ public sealed partial class TagWriteService(
     {
         var files = Writable(db.MediaFiles.AsNoTracking());
 
+        if (scope.Folder is { } folder)
+        {
+            var prefix = folder + "/";
+            return files.Where(file => file.Path.StartsWith(prefix));
+        }
+
         if (scope.Album is { } album)
         {
             return files.Where(file => file.ReleaseGroupId == album);
@@ -333,9 +344,32 @@ public sealed partial class TagWriteService(
         return files;
     }
 
+    /// <param name="actor">Who the journal says did it.</param>
+    /// <param name="correlation">The run's journal correlation, where the caller needs to know it.</param>
     private async Task<TagWriteSummary> RunAsync(
         string jobId,
         TagWriteScope scope,
+        CancellationToken cancellationToken,
+        string actor = Actor,
+        string? correlation = null)
+    {
+        _actor = actor;
+
+        try
+        {
+            return await PassAsync(jobId, scope, correlation ?? Guid.CreateVersion7().ToString("N")[..12], cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _actor = Actor;
+        }
+    }
+
+    private async Task<TagWriteSummary> PassAsync(
+        string jobId,
+        TagWriteScope scope,
+        string correlationId,
         CancellationToken cancellationToken)
     {
         var startedAt = clock.UtcNow;
@@ -343,7 +377,6 @@ public sealed partial class TagWriteService(
         var counts = new Tally();
         var covers = new CoverRun(clock.UtcNow);
         var portraits = new PortraitRun(scope.Artist, clock.UtcNow);
-        var correlationId = Guid.CreateVersion7().ToString("N")[..12];
 
         var pending = await CountAsync(scope, cancellationToken).ConfigureAwait(false);
 
@@ -539,6 +572,9 @@ public sealed partial class TagWriteService(
                 file.ReleaseGroup!.Mbid,
                 file.Release != null ? file.Release.ReleasedYear : file.ReleaseGroup!.FirstReleaseYear,
                 file.Recording.Work!.Mbid,
+                file.TagEditsJson,
+                file.ReleaseGroup!.EditsJson,
+                file.Release!.EditsJson,
                 file.Recording.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new PendingCredit(
@@ -709,8 +745,10 @@ public sealed partial class TagWriteService(
             // rather than returning: they have to agree about what is in a file
             // before it is changed. The backstop in RunAsync counts it and
             // moves on.
+            var person = file.Person;
+
             var plan = await writer
-                .PlanAsync(path, CatalogueTags.For(file.Describe()), cancellationToken)
+                .PlanAsync(path, CatalogueTags.For(file.Describe()), person, cancellationToken)
                 .ConfigureAwait(false);
 
             // Held to its album alone, a file keeps the track number and the date
@@ -722,6 +760,8 @@ public sealed partial class TagWriteService(
             // moves; the journal is what tells the two apart. No track number is
             // written beside a disc number, or "disc 2" reads "track 14". A date
             // only TagLib# can read ("17/08/1959") is still the file's own.
+            // A number or a year a person set — on the file, or the album's year —
+            // is theirs, not the file's to keep.
             if (file.ReleaseId is null && plan is not null)
             {
                 var track = CatalogueTagFields.Spell(path, CatalogueTags.TrackNumber);
@@ -740,21 +780,24 @@ public sealed partial class TagWriteService(
                     ? await FilledAsync(db, file.Id, cancellationToken).ConfigureAwait(false)
                     : new Dictionary<string, string?>();
 
+                bool Mine(TagFieldChange change) => file.Typed(change.Field);
+
                 bool Theirs(TagFieldChange change) =>
-                    !string.IsNullOrWhiteSpace(change.From)
+                    !Mine(change)
+                    && !string.IsNullOrWhiteSpace(change.From)
                     && !(filled.TryGetValue(change.Field, out var ours) && ours == change.From);
 
                 plan = plan with
                 {
-                    Changes = [.. plan.Changes.Where(change =>
-                        !((change.Field == year && (dated || Theirs(change)))
+                    Changes = [.. plan.Changes.Where(change => Mine(change)
+                        || !((change.Field == year && (dated || Theirs(change)))
                             || (change.Field == track && (sided || Theirs(change)))))],
                 };
             }
 
             var write = await writer
                 .ApplyAsync(
-                    plan, file.Id.ToString(), correlationId, Actor, EventPrefix, cancellationToken)
+                    plan, file.Id.ToString(), correlationId, _actor, EventPrefix, cancellationToken)
                 .ConfigureAwait(false);
 
             switch (write.Status)
@@ -1000,7 +1043,7 @@ public sealed partial class TagWriteService(
                         $"{EventPrefix}.cover",
                         TagWriter.FileSubject,
                         file.Id.ToString(),
-                        Actor,
+                        _actor,
                         clock.UtcNow,
                         payload,
                         correlationId),
@@ -1332,7 +1375,7 @@ public sealed partial class TagWriteService(
                         $"{EventPrefix}.portrait",
                         TagWriter.FileSubject,
                         file.Id.ToString(),
-                        Actor,
+                        _actor,
                         clock.UtcNow,
                         payload,
                         correlationId),
@@ -1622,20 +1665,52 @@ public sealed partial class TagWriteService(
         ReleaseGroupId? AlbumId,
         AcoustId? AcoustId,
         string? TrackTitle,
-        string RecordingTitle,
+        string? RecordingTitle,
         Mbid? RecordingMbid,
         int? TrackNumber,
         int? TrackTotal,
         int? DiscNumber,
         int? DiscCount,
-        string AlbumTitle,
+        string? AlbumTitle,
         Mbid? ReleaseMbid,
         Mbid? ReleaseGroupMbid,
         int? Year,
         Mbid? WorkMbid,
+        string? TagEditsJson,
+        string? AlbumEditsJson,
+        string? PressingEditsJson,
         List<PendingCredit> RecordingCredits,
         List<PendingCredit> ReleaseCredits)
     {
+        /// <summary>The tags a person set on the file, over everything else.</summary>
+        public IReadOnlyDictionary<string, string?> Person => PersonEdits.Read(TagEditsJson);
+
+        /// <summary>
+        /// The billing line a person gave the album, which is then the album
+        /// artist and the folder it is shelved under, as typed.
+        /// </summary>
+        public string? AlbumArtistEdit => PersonEdits.Read(AlbumEditsJson).GetValueOrDefault("credit");
+
+        /// <summary>
+        /// Whether a person set this field: on the file, or — its year — on the
+        /// album or pressing the file is held to.
+        /// </summary>
+        public bool Typed(string field) =>
+            Person.ContainsKey(field)
+            || (field == CatalogueTags.Year
+                && PersonEdits.Read(ReleaseId is null ? AlbumEditsJson : PressingEditsJson)
+                    .ContainsKey(ReleaseId is null ? "firstReleaseYear" : "releasedYear"));
+
+        /// <summary>The tags the file is to carry: the catalogue's, a person's over them.</summary>
+        public Dictionary<string, string?> Tags()
+        {
+            var tags = CatalogueTags.For(Describe()).ToDictionary(tag => tag.Key, string? (tag) => tag.Value, StringComparer.Ordinal);
+
+            foreach (var (field, value) in Person) tags[field] = value;
+
+            return tags;
+        }
+
         /// <summary>
         /// Where no pressing is filed, the album's display edition: the one whose
         /// sleeve the album page draws, and so the one written beside the folder.
@@ -1651,15 +1726,22 @@ public sealed partial class TagWriteService(
             TrackTotal = TrackTotal,
             DiscNumber = DiscNumber,
             DiscTotal = DiscCount,
-            AlbumTitle = AlbumTitle,
+
+            // A person's corrections to the album: its title and billing line
+            // for every file of it, its year where the file is held to the
+            // album, the pressing's year where it is filed under a pressing.
+            AlbumTitle = PersonEdits.Apply(PersonEdits.Read(AlbumEditsJson), "title", AlbumTitle),
             ReleaseMbid = ReleaseMbid,
             ReleaseGroupMbid = ReleaseGroupMbid,
-            Year = Year,
+            Year = Edited(
+                ReleaseId is null ? AlbumEditsJson : PressingEditsJson,
+                ReleaseId is null ? "firstReleaseYear" : "releasedYear",
+                Year),
             WorkMbid = WorkMbid,
             AcoustId = AcoustId,
             ArtistCredit = Line(RecordingCredits),
             ArtistMbids = Mbids(RecordingCredits),
-            AlbumArtistCredit = Line(ReleaseCredits),
+            AlbumArtistCredit = AlbumArtistEdit ?? Line(ReleaseCredits),
             AlbumArtistMbids = Mbids(ReleaseCredits),
         };
 
@@ -1673,6 +1755,11 @@ public sealed partial class TagWriteService(
         /// </remarks>
         private static string? Line(List<PendingCredit> credits) =>
             CatalogueEndpoints.CreditLine(credits.Select(credit => (credit.Name, credit.JoinPhrase)));
+
+        private static int? Edited(string? edits, string field, int? stated) =>
+            PersonEdits.Read(edits).TryGetValue(field, out var value)
+                ? int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year) ? year : null
+                : stated;
 
         private static IReadOnlyList<Mbid> Mbids(List<PendingCredit> credits) =>
             [.. credits.Where(credit => credit.Mbid != null).Select(credit => credit.Mbid!.Value)];
@@ -1688,9 +1775,12 @@ public sealed partial class TagWriteService(
 /// on eight thousand. The same background pass, the same gate, the same progress
 /// frames and the same status endpoint serve all three.
 /// </remarks>
-public sealed record TagWriteScope(ReleaseGroupId? Album, ArtistId? Artist, string Label)
+public sealed record TagWriteScope(ReleaseGroupId? Album, ArtistId? Artist, string Label, string? Folder = null)
 {
     public static TagWriteScope Library => new(null, null, "the whole library");
+
+    /// <summary>One album folder: what saving its tags in the editor writes.</summary>
+    public static TagWriteScope ForFolder(string folder) => new(null, null, folder, folder);
 
     public static TagWriteScope ForAlbum(ReleaseGroupId album, string title) =>
         new(album, null, title);

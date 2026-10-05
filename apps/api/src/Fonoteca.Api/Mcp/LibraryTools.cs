@@ -438,6 +438,48 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
                 cancellationToken)
             .ConfigureAwait(false));
 
+    [McpServerTool(Name = "folder_tags")]
+    [Description(
+        "The tags of an album folder's files as the editor shows them: per file and field, the value "
+        + "the tag write would put in the file, the catalogue's, the file's own, and whether a person "
+        + "or agent set it. Where the folder is one album, `album` holds its title, artist and year.")]
+    public async Task<string> FolderTags(string folder, CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints.GetFolderTags(folder, Get<TagWriteService>(), cancellationToken).ConfigureAwait(false));
+
+    [McpServerTool(Name = "edit_tags")]
+    [Description(
+        "Set one tag on files of an album folder and write them at once, as the tag editor does. "
+        + "`field` is one of TITLE, ARTIST, ALBUM, ALBUMARTIST, YEAR, TRACKNUMBER, TRACKTOTAL, "
+        + "DISCNUMBER, DISCTOTAL, GENRE, COMPOSER, COMMENT. `value` null takes the field out of the "
+        + "files; `reset` forgets the value set before. `files` are file names or paths in the folder, "
+        + "or omitted for all of them — and for ALBUM, ALBUMARTIST and YEAR where the folder is one "
+        + "album: the title and artist are corrected for the whole album, the year for every file of "
+        + "the folder. Refused while file writing is off. "
+        + "Recorded as an agent's; undo_folder_edit takes it back. Show the owner the change first.")]
+    public async Task<string> EditTags(
+        string folder,
+        string field,
+        string? value,
+        [Description("File names or library-relative paths in the folder; omitted for every file.")] string[]? files = null,
+        bool reset = false,
+        CancellationToken cancellationToken = default)
+    {
+        var tags = Get<TagWriteService>();
+        var state = await tags.FolderTagsAsync(folder.TrimEnd('/'), cancellationToken).ConfigureAwait(false);
+
+        if (state is null) return Answer(await CatalogueEndpoints.GetFolderTags(folder, tags, cancellationToken).ConfigureAwait(false));
+
+        List<TagEdit> changes = state.AlbumWide && files is null && Domain.Catalogue.PersonTags.AlbumFields.Contains(field)
+            ? [new TagEdit(null, field, value, reset)]
+            : [.. state.Files
+                .Where(file => files is null || files.Any(name => file.Path == name || file.Path.EndsWith("/" + name, StringComparison.Ordinal)))
+                .Select(file => new TagEdit(file.Id, field, value, reset))];
+
+        return Answer(await CatalogueEndpoints
+            .SaveFolderTags(new TagEditRequest(folder, changes), tags, Agent, cancellationToken)
+            .ConfigureAwait(false));
+    }
+
     [McpServerTool(Name = "undo_folder_edit")]
     [Description(
         "Step one album folder back by one edit to its files, newest first: a tag write's tags, "
