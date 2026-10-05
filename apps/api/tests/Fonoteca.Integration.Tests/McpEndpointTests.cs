@@ -169,6 +169,7 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 
         Assert.Equal(AcoustIdOutcome.UnreleasedByAgent, row.AcoustIdOutcome);
         Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.AcoustIdDecidedUtc);
 
         var actors = await check.DomainEvents.Select(entry => entry.ActorId).Distinct().ToListAsync(Cancel);
 

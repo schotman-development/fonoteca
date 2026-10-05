@@ -70,6 +70,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
+            e.Property(x => x.Isrc).HasMaxLength(20);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
             e.HasOne(x => x.Work)
@@ -189,7 +190,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // would sweep up every file somebody had already answered and hand
             // it back to the rule that could not answer it.
             e.HasIndex(x => x.Id, "IX_MediaFiles_AcoustIdPending")
-                .HasFilter("\"AcoustIdCheckedUtc\" IS NULL AND \"IdentityDecidedUtc\" IS NULL");
+                .HasFilter("\"AcoustIdCheckedUtc\" IS NULL AND \"AcoustIdDecidedUtc\" IS NULL");
 
             // Identified, but the file itself does not say so yet — exactly what
             // a run with Fonoteca:AllowFileMutation off leaves behind. The run

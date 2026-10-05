@@ -125,7 +125,7 @@ public sealed class IdentificationService(
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
             return await db.MediaFiles
-                .Where(f => f.AcoustIdCheckedUtc == null && f.IdentityDecidedUtc == null)
+                .Where(f => f.AcoustIdCheckedUtc == null && f.AcoustIdDecidedUtc == null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -353,7 +353,7 @@ public sealed class IdentificationService(
 
                 page = await db.MediaFiles
                     .AsNoTracking()
-                    .Where(f => f.AcoustIdCheckedUtc == null && f.IdentityDecidedUtc == null)
+                    .Where(f => f.AcoustIdCheckedUtc == null && f.AcoustIdDecidedUtc == null)
                     .OrderBy(f => f.Id)
                     .Select(f => new PendingFile(f.Id, f.Path, f.Fingerprint, f.FingerprintDuration))
                     .Take(PageSize)

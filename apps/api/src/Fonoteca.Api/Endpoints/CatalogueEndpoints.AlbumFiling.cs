@@ -573,6 +573,7 @@ public static partial class CatalogueEndpoints
 
             row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.IdentifiedByPerson);
             row.IdentityDecidedUtc = now;
+            row.AcoustIdDecidedUtc = now;
 
             row.EnrichmentOutcome = ByCaller(caller, EnrichmentOutcome.LinkedByPerson);
             row.RecordingLookupUtc = now;

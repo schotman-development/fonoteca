@@ -60,6 +60,16 @@ public sealed class Recording
     public WorkId? WorkId { get; set; }
     public Work? Work { get; set; }
 
+    /// <summary>
+    /// The recording's ISRC as the shop that delivered it stated it, or null.
+    /// </summary>
+    /// <remarks>
+    /// Stored for one use: a recording minted from a download has no MBID, and
+    /// the ISRC is what a later look at MusicBrainz finds it by when the barcode
+    /// finds no release (ADR 0011). MusicBrainz's own are not copied here.
+    /// </remarks>
+    public string? Isrc { get; set; }
+
     /// <summary>Every file that holds this recording — the version set for dedupe.</summary>
     public ICollection<MediaFile> Files { get; init; } = [];
 
@@ -456,7 +466,8 @@ public sealed class MediaFile
     public DateTimeOffset? RecordingCandidatesUtc { get; set; }
 
     /// <summary>
-    /// When a person settled this file's identity by hand, if one ever did.
+    /// When this file's recording was settled by a person, an agent or the
+    /// provider that delivered it, if it ever was.
     /// </summary>
     /// <remarks>
     /// <b>A guard, not a display column.</b> Every worklist in this application
@@ -468,9 +479,15 @@ public sealed class MediaFile
     /// re-ask would quietly overwrite the decision with the same refusal the
     /// person was answering, and there would be no trace that it had.
     ///
-    /// So the two passes exclude rows carrying this, in the query and in the
-    /// partial index behind it. Clearing it is how a person changes their mind,
-    /// and it has to be as deliberate as the decision was.
+    /// So enrichment excludes rows carrying this, in the query and in the
+    /// partial index behind it, and so does every open question. Clearing it is
+    /// how a person changes their mind, and it has to be as deliberate as the
+    /// decision was.
+    ///
+    /// <b>Identification reads <see cref="AcoustIdDecidedUtc"/> instead</b>
+    /// (ADR 0011). A download names the recording, so this is set, but it says
+    /// nothing about the audio, so that one is not, and the file is still
+    /// fingerprinted. Every person's decision writes both.
     ///
     /// Separate from <see cref="AcoustIdOutcome"/> even though the outcome
     /// already names the two person-made verdicts, for the reason
@@ -481,6 +498,21 @@ public sealed class MediaFile
     /// outcome is added.
     /// </remarks>
     public DateTimeOffset? IdentityDecidedUtc { get; set; }
+
+    /// <summary>
+    /// When a person or an agent settled this file's AcoustID question by hand,
+    /// if one ever did — identification's guard, as
+    /// <see cref="IdentityDecidedUtc"/> is everyone else's.
+    /// </summary>
+    /// <remarks>
+    /// Split from <see cref="IdentityDecidedUtc"/> by ADR 0011, because one
+    /// stamp gated two passes and a download settles only one of their
+    /// questions: what the recording is, which the shop said, and not what the
+    /// audio fingerprints to, which nobody has. Rather than stamp
+    /// <c>AcoustIdCheckedUtc</c> on a file AcoustID was never asked about — a
+    /// lie in the column that means "we asked" — the pass excludes this.
+    /// </remarks>
+    public DateTimeOffset? AcoustIdDecidedUtc { get; set; }
 
     /// <summary>
     /// When this file was last asked what recording it holds.
@@ -838,6 +870,18 @@ public enum EnrichmentOutcome
 
     /// <summary>An agent said this audio was never released. See <see cref="AcoustIdOutcome.IdentifiedByAgent"/>.</summary>
     UnreleasedByAgent = 8,
+
+    /// <summary>
+    /// The shop that delivered the file said which recording it is, at the
+    /// moment it delivered it (ADR 0011).
+    /// </summary>
+    /// <remarks>
+    /// A third authority beside a rule and a person: no threshold was cleared and
+    /// nobody read a shortlist, so a report on either would miscount it as one of
+    /// theirs. The artist graph is the shop's credits, written at download, so
+    /// nothing goes on to fetch it.
+    /// </remarks>
+    LinkedByProvider = 9,
 }
 
 /// <summary>What was decided about a file, and how firmly.</summary>
@@ -953,6 +997,13 @@ public enum ReleaseAttributionOutcome
 
     /// <summary>An agent named the folder's album. See <see cref="AlbumByPerson"/>.</summary>
     AlbumByAgent = 16,
+
+    /// <summary>
+    /// The shop that delivered the files said which album and which slot each
+    /// is, at the moment it delivered them (ADR 0011). See
+    /// <see cref="EnrichmentOutcome.LinkedByProvider"/>.
+    /// </summary>
+    AttributedByProvider = 17,
 }
 
 /// <summary>What the files' own order says against the album's editions.</summary>

@@ -142,6 +142,7 @@ public sealed class CandidateWarmService(
                 .AsNoTracking()
                 .Where(file => (file.AcoustIdOutcome == AcoustIdOutcome.Ambiguous
                         || file.AcoustIdOutcome == AcoustIdOutcome.BelowThreshold)
+                    && file.IdentityDecidedUtc == null
                     && file.Fingerprint != null
                     && file.FingerprintDuration != null)
                 .OrderBy(file => file.Path)

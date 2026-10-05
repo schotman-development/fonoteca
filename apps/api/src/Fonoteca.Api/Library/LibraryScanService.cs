@@ -302,13 +302,15 @@ public sealed class LibraryScanService(
                 // is not a decision about the audio that is.
                 //
                 // Leaving it is worse than losing it, and specifically: both
-                // passes' worklists exclude IdentityDecidedUtc, and the reset
+                // passes' worklists exclude a decided stamp (identification
+                // AcoustIdDecidedUtc, enrichment IdentityDecidedUtc), and the reset
                 // above sets AcoustIdOutcome to NotAttempted, which the worklist
                 // of refusals deliberately does not count as a question. A file
                 // keeping this stamp through a replacement would be invisible to
                 // every pass and to the screen at once, with nothing in the
                 // application able to reach it again.
                 row.IdentityDecidedUtc = null;
+                row.AcoustIdDecidedUtc = null;
 
                 // And the evidence, which is the sharpest of these. It is
                 // believed for a week, and the candidates endpoint checks that

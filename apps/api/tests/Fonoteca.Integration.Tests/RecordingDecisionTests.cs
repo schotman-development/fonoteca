@@ -126,6 +126,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(AcoustIdOutcome.IdentifiedByPerson, row.AcoustIdOutcome);
         Assert.Equal(EnrichmentOutcome.Linked, row.EnrichmentOutcome);
         Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.AcoustIdDecidedUtc);
         Assert.NotNull(row.RecordingLookupUtc);
         Assert.NotNull(row.AcoustIdTaggedUtc);
 
@@ -218,6 +219,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.Equal(AcoustIdOutcome.RejectedByPerson, row.AcoustIdOutcome);
         Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.AcoustIdDecidedUtc);
         Assert.Null(row.RecordingId);
         Assert.Null(row.AcoustId);
 
@@ -259,6 +261,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.Equal(AcoustIdOutcome.Ambiguous, row.AcoustIdOutcome);
         Assert.Null(row.IdentityDecidedUtc);
+        Assert.Null(row.AcoustIdDecidedUtc);
     }
 
     /// <summary>
@@ -298,6 +301,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(new AcoustId(ChosenCluster), row.AcoustId);
         Assert.NotNull(row.RecordingId);
         Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.AcoustIdDecidedUtc);
         Assert.Null(row.AcoustIdTaggedUtc);
 
         Assert.Equal(
@@ -412,6 +416,42 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
+    /// A recording settled without its audio being — as a download settles it
+    /// (ADR 0011) — is still fingerprinted, and is no open question meanwhile.
+    /// </summary>
+    [Fact]
+    public async Task ARecordingSettledWithoutItsAudioIsStillFingerprinted()
+    {
+        SkipWithoutTools();
+
+        var id = await SeedAsync("Downloads/01 Settled.flac");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.MediaFiles
+                .Where(file => file.Id == id)
+                .ExecuteUpdateAsync(
+                    update => update
+                        .SetProperty(file => file.IdentityDecidedUtc, DateTimeOffset.UtcNow)
+                        .SetProperty(file => file.AcoustId, new AcoustId(Guid.Parse("3f2b0c11-0000-4000-8000-000000000002")))
+                        .SetProperty(file => file.AcoustIdCheckedUtc, (DateTimeOffset?)null)
+                        .SetProperty(file => file.RecordingLookupUtc, (DateTimeOffset?)null),
+                    Token);
+        }
+
+        await using var factory = FactoryWith(allowMutation: false);
+        using var scope = factory.Services.CreateScope();
+
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<IdentificationService>().CountPendingAsync(Token));
+        Assert.Equal(0, (await scope.ServiceProvider.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Files);
+        Assert.DoesNotContain(await QuestionsAsync(factory), question => question.Id == $"recording:{id.Value}");
+
+        // Nor are its candidates warmed: there is no question to warm them for.
+        var warm = factory.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>().OfType<CandidateWarmService>().Single();
+        Assert.Equal(0, await warm.SweepAsync(Token));
+    }
+
+    /// <summary>
     /// An answer is refused while a pass holds the gate.
     /// </summary>
     /// <remarks>
@@ -445,6 +485,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         var row = await db.MediaFiles.SingleAsync(file => file.Id == id, Token);
 
         Assert.Null(row.IdentityDecidedUtc);
+        Assert.Null(row.AcoustIdDecidedUtc);
     }
 
     /// <summary>
@@ -474,6 +515,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         var row = await db.MediaFiles.SingleAsync(file => file.Id == id, Token);
 
         Assert.Null(row.IdentityDecidedUtc);
+        Assert.Null(row.AcoustIdDecidedUtc);
         Assert.Null(row.RecordingId);
     }
 
@@ -504,6 +546,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.Equal(AcoustIdOutcome.Ambiguous, row.AcoustIdOutcome);
         Assert.Null(row.IdentityDecidedUtc);
+        Assert.Null(row.AcoustIdDecidedUtc);
         Assert.Null(row.RecordingId);
     }
 
@@ -767,6 +810,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
             var before = await decided.MediaFiles.SingleAsync(file => file.Id == id, Token);
 
             Assert.NotNull(before.IdentityDecidedUtc);
+            Assert.NotNull(before.AcoustIdDecidedUtc);
             Assert.NotNull(before.AcoustIdMatchesJson);
             Assert.NotNull(before.RecordingCandidatesJson);
         }
@@ -785,6 +829,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         var row = await db.MediaFiles.SingleAsync(file => file.Id == id, Token);
 
         Assert.Null(row.IdentityDecidedUtc);
+        Assert.Null(row.AcoustIdDecidedUtc);
         Assert.Null(row.AcoustIdMatchesJson);
         Assert.Null(row.AcoustIdMatchesUtc);
         Assert.Null(row.RecordingCandidatesJson);
@@ -849,6 +894,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         var row = await db.MediaFiles.SingleAsync(file => file.Id == id, Token);
 
         Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.AcoustIdDecidedUtc);
         Assert.NotNull(row.AcoustIdMatchesJson);
         Assert.NotNull(row.RecordingCandidatesJson);
         Assert.NotNull(row.RecordingId);

@@ -88,6 +88,44 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
     }
 
     /// <summary>
+    /// A file whose recording is settled but whose audio is not — as a
+    /// download leaves it (ADR 0011) — is fingerprinted and identified, and
+    /// keeps its recording and its settled stamp.
+    /// </summary>
+    [Fact]
+    public async Task ASettledRecordingStillHasItsAudioIdentified()
+    {
+        SkipWithoutTools();
+        Copy(Corpus.Flac, "track.flac");
+
+        var services = Build(allowMutation: false, Answering(0.97));
+        await ScanAsync(services);
+
+        var settled = DateTimeOffset.Parse("2026-10-02T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var recording = new Recording { Id = RecordingId.New(), Title = "Shop's title" };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Recordings.Add(recording);
+            var row = await db.MediaFiles.SingleAsync(Token);
+            row.RecordingId = recording.Id;
+            row.IdentityDecidedUtc = settled;
+            row.EnrichmentOutcome = EnrichmentOutcome.LinkedByProvider;
+            await db.SaveChangesAsync(Token);
+        }
+
+        await IdentifyAsync(services);
+
+        var identified = await RowAsync("track.flac");
+
+        Assert.Equal(AcoustIdOutcome.Identified, identified.AcoustIdOutcome);
+        Assert.Equal(new AcoustId(Cluster), identified.AcoustId);
+        Assert.Equal(recording.Id, identified.RecordingId);
+        Assert.Equal(settled, identified.IdentityDecidedUtc);
+        Assert.Equal(EnrichmentOutcome.LinkedByProvider, identified.EnrichmentOutcome);
+    }
+
+    /// <summary>
     /// The loop this feature would otherwise create, and the reason for the test.
     /// </summary>
     /// <remarks>

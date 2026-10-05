@@ -504,6 +504,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         // The person-filed file is still the person's.
         var filed = files.Single(file => file.Id != seated && file.Id != ruleOwned && file.Id != albumByHand);
         Assert.NotNull(filed.IdentityDecidedUtc);
+        Assert.NotNull(filed.AcoustIdDecidedUtc);
 
         Assert.False(await db.ArtistCredits.AnyAsync(c => c.Artist!.Name == "Old credit", Token));
         Assert.False(await db.Relationships.AnyAsync(r => r.ArtistId == db.Artists.Single(a => a.Name == "Old credit").Id, Token));
@@ -605,7 +606,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     /// A file as the by-hand album screen leaves it: an identity off a release
     /// track list, a lookup stamp, a decision stamp, and no cluster.
     /// </summary>
-    private async Task SeedPersonFiledAsync(string path)
+    private async Task SeedPersonFiledAsync(string path, bool byShop = false)
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
@@ -625,9 +626,10 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             SizeBytes = 1024,
             LastModifiedUtc = DateTimeOffset.UtcNow,
             RecordingId = recording.Id,
-            RecordingLookupUtc = DateTimeOffset.UtcNow,
+            RecordingLookupUtc = byShop ? null : DateTimeOffset.UtcNow,
             IdentityDecidedUtc = DateTimeOffset.UtcNow,
-            EnrichmentOutcome = EnrichmentOutcome.LinkedByPerson,
+            AcoustIdDecidedUtc = byShop ? null : DateTimeOffset.UtcNow,
+            EnrichmentOutcome = byShop ? EnrichmentOutcome.LinkedByProvider : EnrichmentOutcome.LinkedByPerson,
         });
 
         await db.SaveChangesAsync(Token);

@@ -725,6 +725,7 @@ public static partial class CatalogueEndpoints
             // it — see the type's remarks and `EnrichmentOutcome.LinkedByPerson`.
             row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.IdentifiedByPerson);
             row.IdentityDecidedUtc = now;
+            row.AcoustIdDecidedUtc = now;
 
             row.EnrichmentOutcome = ByCaller(caller, EnrichmentOutcome.LinkedByPerson);
             row.RecordingLookupUtc = now;
@@ -848,11 +849,9 @@ public static partial class CatalogueEndpoints
         // what that screen shows under this path, which is the only definition
         // that cannot surprise the person who pressed the button.
         //
-        // Note what is deliberately *not* here: the filing endpoint narrows its
-        // set with `IdentityDecidedUtc == null` and this must not, because the
-        // worklist does not either. A file already decided on identity and still
-        // refused on enrichment is on the screen, and a set that skipped it would
-        // leave a row the button appeared to cover and then 404 on.
+        // Like `loose`, a file whose recording is settled — by a person, an
+        // agent or the shop that delivered it (ADR 0011) — is no question, and
+        // is not closed here, whatever identification made of its audio since.
         //
         // The attribution leg is included for the folder's sake: a folder holding
         // files the attribution pass refused comes back as a component question
@@ -860,8 +859,9 @@ public static partial class CatalogueEndpoints
         // not closing it.
         var rows = await db.MediaFiles
             .Where(file => file.Path.StartsWith(prefix)
-                && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
-                    || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)
+                && ((file.IdentityDecidedUtc == null
+                        && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                            || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)))
                     || (file.ReleaseDecidedUtc == null
                         && UnattributedOutcomes.Contains(file.AttributionOutcome))))
             .ToListAsync(cancellationToken)
@@ -897,6 +897,7 @@ public static partial class CatalogueEndpoints
                 // would misreport when the provider was last consulted.
                 row.AcoustIdCheckedUtc ??= now;
                 row.IdentityDecidedUtc = now;
+                row.AcoustIdDecidedUtc = now;
             }
 
             if (UnlinkedOutcomes.Contains(row.EnrichmentOutcome))
@@ -909,6 +910,7 @@ public static partial class CatalogueEndpoints
                 // — but the decided stamp is what keeps enrichment's own worklist
                 // off it, so it is written here too.
                 row.IdentityDecidedUtc ??= now;
+                row.AcoustIdDecidedUtc ??= now;
             }
 
             if (row.ReleaseDecidedUtc == null
@@ -1083,6 +1085,7 @@ public static partial class CatalogueEndpoints
         row.OrderOutcome = FolderOrderOutcome.NotChecked;
 
         row.IdentityDecidedUtc = null;
+        row.AcoustIdDecidedUtc = null;
         row.ReleaseDecidedUtc = null;
 
         row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.ReopenedByPerson);
@@ -1612,12 +1615,10 @@ public sealed record FolderContentsResponse(
 /// own predicate, which is the useful one for a row that offers a tick: what
 /// this claims and what a filing will actually accept cannot drift apart.
 ///
-/// It is one condition narrower than the worklist's, which does not exclude
-/// <see cref="MediaFile.IdentityDecidedUtc"/>. Nothing reaches that difference
-/// today — every path that stamps it also moves the file out of the enrichment
-/// refusals — but if one ever did, this would call the file matched while the
-/// worklist went on asking about it, and the tick is the half that has to be
-/// honest.
+/// The worklist's own, now that it too excludes
+/// <see cref="MediaFile.IdentityDecidedUtc"/>: a download settles a recording
+/// and identification may still refuse its audio (ADR 0011), and neither the
+/// worklist nor this calls that a question.
 /// </param>
 /// <param name="Reason">The refusal, when it is open. Null when it is not.</param>
 /// <param name="AlbumId">The album (release group) the file is held to, whether or not a pressing is claimed.</param>

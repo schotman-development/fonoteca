@@ -274,6 +274,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         // the lookup stamps to re-ask after a rule change — from handing this
         // file back to the rule that could not answer it.
         Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.AcoustIdDecidedUtc);
         Assert.NotNull(row.ReleaseDecidedUtc);
 
         using var client = _factory!.CreateClient();
@@ -405,6 +406,16 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     [Fact]
     public async Task MarkingAFolderUnreleasedClosesItsOpenFilesAndLeavesTheSettledOneAlone()
     {
+        // Its recording settled — as a download's is — and its audio unknown to
+        // AcoustID: no question, so nothing to close.
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await seed.MediaFiles.SingleAsync(file => file.Id == _settled, Token);
+            row.IdentityDecidedUtc = DateTimeOffset.Parse("2026-02-02T10:00:00Z", CultureInfo.InvariantCulture);
+            row.AcoustIdOutcome = AcoustIdOutcome.Unknown;
+            await seed.SaveChangesAsync(Token);
+        }
+
         using var client = _factory!.CreateClient();
 
         var response = await client.PostAsJsonAsync(
@@ -429,6 +440,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
 
             Assert.Equal(AcoustIdOutcome.Unreleased, row.AcoustIdOutcome);
             Assert.NotNull(row.IdentityDecidedUtc);
+            Assert.NotNull(row.AcoustIdDecidedUtc);
 
             // The stamp that was already there is the one AcoustID was asked at,
             // not the one somebody answered at.
@@ -445,6 +457,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(EnrichmentOutcome.Unreleased, unlinked.EnrichmentOutcome);
         Assert.Equal(AcoustIdOutcome.Identified, unlinked.AcoustIdOutcome);
         Assert.NotNull(unlinked.IdentityDecidedUtc);
+        Assert.NotNull(unlinked.AcoustIdDecidedUtc);
         Assert.NotNull(unlinked.AcoustId);
 
         // Open on attribution and nowhere else — the leg the worklist prints
@@ -460,10 +473,10 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
 
         var settled = await db.MediaFiles.SingleAsync(file => file.Id == _settled, Token);
 
-        Assert.Equal(AcoustIdOutcome.Identified, settled.AcoustIdOutcome);
+        Assert.Equal(AcoustIdOutcome.Unknown, settled.AcoustIdOutcome);
         Assert.Equal(EnrichmentOutcome.Linked, settled.EnrichmentOutcome);
         Assert.Equal(ReleaseAttributionOutcome.Attributed, settled.AttributionOutcome);
-        Assert.Null(settled.IdentityDecidedUtc);
+        Assert.Null(settled.AcoustIdDecidedUtc);
         Assert.NotNull(settled.RecordingId);
     }
 
@@ -929,6 +942,15 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
     [Fact]
     public async Task ReopeningAFolderTakesBackWhatAPassDecidedAndLeavesTheOpenFilesAlone()
     {
+        // Settled on both questions, as a person's decision leaves a file.
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await seed.MediaFiles.SingleAsync(file => file.Id == _settled, Token);
+            row.IdentityDecidedUtc = row.AcoustIdDecidedUtc =
+                DateTimeOffset.Parse("2026-02-02T10:00:00Z", CultureInfo.InvariantCulture);
+            await seed.SaveChangesAsync(Token);
+        }
+
         var result = await ReopenAsync("Michael Jackson/Off the Wall");
 
         // The two rows with a derived recording on them: the one attribution
@@ -944,6 +966,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
         Assert.Null(settled.TrackId);
         Assert.Null(settled.ReleaseGroupId);
         Assert.Null(settled.IdentityDecidedUtc);
+        Assert.Null(settled.AcoustIdDecidedUtc);
         Assert.Null(settled.ReleaseDecidedUtc);
         Assert.Equal(AcoustIdOutcome.ReopenedByPerson, settled.AcoustIdOutcome);
         Assert.Equal(EnrichmentOutcome.NotAttempted, settled.EnrichmentOutcome);
@@ -1307,6 +1330,7 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             Assert.Equal(EnrichmentOutcome.LinkedByPerson, file.EnrichmentOutcome);
             Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
             Assert.NotNull(file.IdentityDecidedUtc);
+            Assert.NotNull(file.AcoustIdDecidedUtc);
             Assert.NotNull(file.ReleaseDecidedUtc);
             Assert.Null(file.ReleaseLookupUtc);
 

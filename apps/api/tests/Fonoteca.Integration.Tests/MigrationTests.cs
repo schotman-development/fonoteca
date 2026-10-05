@@ -260,6 +260,45 @@ public sealed class MigrationTests(PostgresFixture postgres)
             await check.DomainEvents.Select(entry => entry.Type).ToListAsync(token));
     }
 
+    /// <summary>
+    /// Every decision before the split was a person's or an agent's, which
+    /// answer the AcoustID question too, so each keeps identification away.
+    /// </summary>
+    [Fact]
+    public async Task ADecisionMadeBeforeTheSplitStillKeepsIdentificationAway()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var connection = await postgres.CreateDatabaseAsync(token);
+        var decided = DateTimeOffset.Parse("2026-09-01T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var (answered, open) = (Guid.CreateVersion7(), Guid.CreateVersion7());
+
+        await using (var db = PostgresFixture.CreateContext(connection))
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261002090600_PersonTagEdits", token);
+
+            foreach (var (id, path, stamp) in new[] { (answered, "a/01.flac", (DateTimeOffset?)decided), (open, "a/02.flac", null) })
+            {
+                await db.Database.ExecuteSqlAsync(
+                    $$"""
+                    INSERT INTO "MediaFiles" ("Id", "Path", "SizeBytes", "LastModifiedUtc", "Integrity", "IdentityDecidedUtc")
+                    VALUES ({{id}}, {{path}}, 1024, {{decided}}, 0, {{stamp}})
+                    """,
+                    token);
+            }
+        }
+
+        await using (var db = PostgresFixture.CreateContext(connection))
+        {
+            await db.Database.MigrateAsync(token);
+        }
+
+        await using var check = PostgresFixture.CreateContext(connection);
+        var rows = await check.MediaFiles.ToDictionaryAsync(file => file.Id.Value, token);
+
+        Assert.Equal(decided, rows[answered].AcoustIdDecidedUtc);
+        Assert.Null(rows[open].AcoustIdDecidedUtc);
+    }
+
     private static MediaFile NewFile(string path, RecordingId? recordingId = null, AudioQuality? quality = null) =>
         new()
         {

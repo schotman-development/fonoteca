@@ -2480,10 +2480,14 @@ public static partial class CatalogueEndpoints
             .ThenBy(component => component.DecidedUtc)
             .ToList();
 
+        // A settled recording is no question, whatever identification later
+        // made of its audio: a download names the recording and still has its
+        // AcoustID asked (ADR 0011).
         var loose = db.MediaFiles
             .AsNoTracking()
-            .Where(file => UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
-                || UnlinkedOutcomes.Contains(file.EnrichmentOutcome));
+            .Where(file => file.IdentityDecidedUtc == null
+                && (UnidentifiedOutcomes.Contains(file.AcoustIdOutcome)
+                    || UnlinkedOutcomes.Contains(file.EnrichmentOutcome)));
 
         // Counted by reason rather than merely counted, because the reason is
         // what a worklist of this length has to be read by. Four hundred rows
@@ -3323,6 +3327,7 @@ public static partial class CatalogueEndpoints
             // answered would misreport when the provider was last consulted.
             row.AcoustIdCheckedUtc ??= now;
             row.IdentityDecidedUtc = now;
+            row.AcoustIdDecidedUtc = now;
 
             await Journal(events, row, null, null, caller, now, correlationId, cancellationToken)
                 .ConfigureAwait(false);
@@ -3449,6 +3454,7 @@ public static partial class CatalogueEndpoints
         row.AcoustIdCheckedUtc ??= now;
         row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.IdentifiedByPerson);
         row.IdentityDecidedUtc = now;
+        row.AcoustIdDecidedUtc = now;
 
         var tag = NotTagged;
 
