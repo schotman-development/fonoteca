@@ -1,6 +1,6 @@
 # 0011 — A provider is an authority, and a download is where it is believed
 
-**Status:** proposed, 2026-09-04
+**Status:** accepted, 2026-09-04; built 2026-10-02 (see *As built*, at the end)
 
 ## Context
 
@@ -88,6 +88,11 @@ the row state the first without claiming the second.
 
 Every existing person-decision writes **both** new stamps, so nothing changes
 for them; the migration is a rename plus `RecordingDecidedUtc = IdentityDecidedUtc`.
+
+*As built:* the existing column kept its name — `IdentityDecidedUtc` is the
+recording stamp every reader but identification uses — and the new
+`AcoustIdDecidedUtc` guards identification alone, backfilled from it. Same
+split, half the rename.
 
 **A provider-sourced release is keyed on its UPC, in `Releases.Barcode`.** Every
 `Mbid` in the graph is nullable and `Tracks` has no MBID column at all — a track
@@ -206,7 +211,7 @@ Separate change, bounded, and this ADR is what makes it worth making.
 
 **Nothing reconciles a provider fact against MusicBrainz later.** When this
 compilation is eventually added, nothing goes looking. The barcode key makes the
-sweep possible; the sweep is not in scope here.
+sweep possible; the sweep is not in scope here. *(Built after all — see below.)*
 
 **`StagedFileName` still strips the colon, and that is a separate defect.**
 `Illegal` contains `:`, so *Essential Brahms, Volume 1: 50 Tracks…* became
@@ -227,3 +232,28 @@ justify the `SourceProvider`/`SourceId` columns rejected above.
 "came straight from Qobuz, therefore fact". A mislabelled album that a pass would
 have caught, filed confidently and off every worklist, is the failure this trades
 for — `ReopenedByPerson` is the escape hatch and the thing to watch.
+
+## As built
+
+The decision stands; these are where the code differs from the text above,
+each the owner's choice or forced by what the code turned out to be.
+
+- **The stamp kept its name.** `IdentityDecidedUtc` is the recording stamp every
+  reader but identification uses, and `AcoustIdDecidedUtc` is identification's.
+- **Filed once per album, not per track.** A download replacing a held album
+  lands in a hidden folder and reaches its final paths only once the
+  replacement is decided, so the claim is made after the last byte, in one
+  save (`DownloadFiling`). A download with a track still missing is not filed
+  until a later request completes it.
+- **Tags through `TagWriteService.WriteFolderAsync`**, the download's folder
+  only, under the download's lease on the gate — not the album scope, which
+  renames every folder of an album.
+- **MusicBrainz is asked by barcode at download and weekly after**
+  (`MusicBrainzCatchUp`), and by ISRC where the barcode finds nothing; naming a
+  download's album by hand re-files it at once. The release a download minted
+  is removed once MusicBrainz's takes its files.
+- **A credited artist is linked only where exactly one answers to the name**,
+  else minted with no MBID; only billed, conductor, ensemble and writer are
+  kept, as for a MusicBrainz recording.
+- **A replacement deletes the archived files' rows**, and one replacing an album
+  MusicBrainz knows is filed only under a release its barcode names.

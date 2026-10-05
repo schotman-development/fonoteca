@@ -30,7 +30,8 @@ Five are a `POST`/`GET`/`DELETE` trio under `/api/library` taking
 guards itself with a private interlocked flag rather than the gate — so a scan
 can arrive in the middle of anything. Nothing chains one pass into another
 except `Fonoteca:IdentifyAfterScan`. The tag write is the only one nobody may
-automate.
+automate — but a download writes its own album folder (ADR 0011, the owner's
+choice).
 
 **Still missing: hashing** — the last of the original list, and what a dedupe
 key would be made of.
@@ -43,7 +44,7 @@ the rest.
 1. **A worklist keys on "we asked", never on "we have an answer".**
    `AcoustIdCheckedUtc`, `RecordingLookupUtc`, `ReleaseLookupUtc`,
    `Artists.LookupUtc`, `PortraitLookupUtc`, `DiscographyLookupUtc`,
-   `LastVerifiedUtc`. A library is full of things the provider has never heard
+   `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -72,7 +73,9 @@ the rest.
    `…ByAgent` twin for `/mcp`, all listed in `ByCaller`. `IdentityDecidedUtc` and
    `ReleaseDecidedUtc` are separate *columns* from the outcome, because clearing
    a lookup stamp by hand must not hand answered files back to the rule that
-   could not answer them.
+   could not answer them. `AcoustIdDecidedUtc` guards identification alone, so a
+   download can settle the recording and still have its audio fingerprinted
+   (ADR 0011); every person's decision writes both.
 
 5. **Rules are pure and live in `Fonoteca.Domain`; a rule a screen also needs
    gets a `.ts` twin beside the page.** Those import no React and no stylesheet
@@ -619,11 +622,45 @@ nothing that a person has just named.
 ## Acquisition
 
 **The only part that spends money, and the only part that can take music away.**
-ADR 0011 is the design record and is **proposed, not built**: a download today
-copies bytes and writes nothing to the catalogue or the event log, so a Qobuz
-album is found by the next scan and goes through all six passes. **Read the ADR
-before touching this** — most of what looks like an oversight is written up there
-as the next piece of work.
+ADR 0011 is the design record: **a download is filed where it lands, as the
+shop described it** (`Acquisition/DownloadFiling.cs`), and its album folder's
+tags are written at once. **Read the ADR before touching this** — most of what
+looks like an oversight is written up there.
+
+- **The shop is an authority about the album, not the audio.** Files are linked
+  to a release minted from the shop's facts and keyed on its barcode (one minted
+  from an earlier download of that barcode is found again), outcomes
+  `LinkedByProvider`/`AttributedByProvider`, recording and release settled —
+  but not `AcoustIdDecidedUtc` and no lookup stamp, so identification still
+  fingerprints the audio and nobody claims MusicBrainz was asked. The shop's
+  credit string gives the four roles the catalogue keeps (`ProviderCredits`);
+  a credited artist is linked only where exactly one answers to the name, else
+  minted with no MBID (the owner's choice). No badge marks a download's album.
+- **A download takes `LibraryWorkGate`**, and a busy gate refuses it (409) —
+  the owner's choice, over waiting. **Its tags are written** under that lease
+  through `TagWriteService.WriteFolderAsync`, the one tag write that is not a
+  person's own click on Write tags: the owner's choice, for files that arrive
+  untagged. That folder only, and renamed as any album is. Undo treats it as
+  any tag write: the folder is reopened and the shop's filing goes with it
+  (the owner's choice).
+- **A replacement deletes the archived files' rows** (the owner's choice) and
+  files the new album in their place — unless the old one was filed under an
+  album MusicBrainz knows and the barcode names no release of it, which the
+  passes are left to file again. A download with tracks still missing is not
+  filed or tagged until a later request completes it, or asking again could
+  not find what landed to resume it.
+- **MusicBrainz is asked whenever it could name the album**
+  (`MusicBrainzCatchUp`). At download by the shop's barcode: exactly one
+  release printing the shop's track list slot for slot (`ProviderMatch`) takes
+  the files, else the shop's own is minted. Then weekly (`ProviderCatchUpService`,
+  the owner's choice) for every album still the shop's: a release the barcode
+  names takes its files whole and the shop's release goes; where it names none,
+  a recording MusicBrainz holds under exactly one ISRC gains that MBID, or is
+  folded into the row already holding it. Naming such a folder's album by hand
+  re-files it at once — each file takes the recording the named release prints
+  at its disc and position, so attribution can prove a pressing. A download
+  under MusicBrainz's recordings joins enrichment's person-filed worklist until
+  asked once, its outcome staying the shop's.
 
 - **No staging directory for a new album, and removing it was the point** — only
   a download replacing a held album is fetched aside first, below. Bytes go to a `.part`
@@ -669,9 +706,8 @@ as the next piece of work.
   Qobuz advertises is a ceiling, and this is the last place to take a provider's
   word for anything when the consequence is deleting music.
 - **Files move to `Fonoteca:ReplacedPath`, outside the library root**, or the
-  scan catalogues the archive. **The catalogue is not touched**: removing rows
-  for missing files is exactly what the scan does, and a second copy of that logic
-  here would be a worse one. It refuses to archive anything it just wrote.
+  scan catalogues the archive. The archived files' rows are deleted as they go,
+  above. It refuses to archive anything it just wrote.
 - **`AllowFileReplacement` is deliberately not `AllowFileMutation`.** Somebody
   who turned the first on to get their files tagged has not agreed to "may take
   an album away". With the flag off a download of a held album is refused before
