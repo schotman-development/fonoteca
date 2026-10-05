@@ -163,7 +163,10 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
         var standard = await db.Releases.SingleAsync(release => release.Id == new ReleaseId(_seed.Standard), Token);
         var edits = PersonEdits.Read(standard.EditsJson);
 
-        Assert.Equal("Unforgettable (edited)", edits["title"]);
+        // The album's title on the album, so it stays when the page shows another edition.
+        var album = await db.ReleaseGroups.SingleAsync(group => group.Id == standard.ReleaseGroupId, Token);
+        Assert.Equal("Unforgettable (edited)", PersonEdits.Read(album.EditsJson)["title"]);
+        Assert.False(edits.ContainsKey("title"));
         Assert.Equal("Capitol (corrected)", edits["label"]);
         Assert.Equal("US", edits["country"]);
         Assert.Equal("0077778", PersonEdits.Apply(edits, "barcode", standard.Barcode));

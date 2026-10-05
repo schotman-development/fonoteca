@@ -112,6 +112,12 @@ public static partial class CatalogueEndpoints
         "status", "label", "catalogNumber", "barcode", "formats",
     ];
 
+    /// <summary>The fields of an album's form that belong to the album, stored on its group.</summary>
+    internal static readonly string[] AlbumFields =
+    [
+        "title", "credit", "primaryType", "secondaryTypes", "firstReleaseYear", "review",
+    ];
+
     internal static async Task<Results<Ok<EditResponse>, ProblemHttpResult>> EditRelease(
         Guid id,
         ReleaseEditRequest request,
@@ -190,7 +196,16 @@ public static partial class CatalogueEndpoints
 
         var edits = PersonEdits.Diff(wanted, provider);
 
-        release.EditsJson = PersonEdits.Write(edits);
+        // The album's own fields on the album, so they stay put when the page
+        // starts showing another of its editions; a pressing's on the pressing.
+        release.EditsJson = PersonEdits.Write(
+            edits.Where(edit => !AlbumFields.Contains(edit.Key)).ToDictionary(StringComparer.Ordinal));
+
+        if (release.ReleaseGroup is { } album)
+        {
+            album.EditsJson = PersonEdits.Write(
+                edits.Where(edit => AlbumFields.Contains(edit.Key)).ToDictionary(StringComparer.Ordinal));
+        }
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
@@ -261,9 +276,8 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>The album list's and the album page's summary, with a person's corrections laid over it.</summary>
-    private static AlbumSummary WithEdits(AlbumSummary summary, string? editsJson)
+    private static AlbumSummary WithEdits(AlbumSummary summary, IReadOnlyDictionary<string, string?> edits)
     {
-        var edits = PersonEdits.Read(editsJson);
         if (edits.Count == 0) return summary;
 
         return summary with

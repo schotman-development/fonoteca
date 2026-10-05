@@ -126,6 +126,8 @@ public static partial class SubsonicEndpoints
 
                 Created = row.Files.Min(file => file.LastModifiedUtc),
 
+                row.EditsJson,
+
                 Credits = row.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new
@@ -148,7 +150,7 @@ public static partial class SubsonicEndpoints
             .Select(row =>
             {
                 var display = CatalogueEndpoints.DisplayEdition(editions[row.Id]);
-                var edits = PersonEdits.Read(display?.EditsJson);
+                var edits = PersonEdits.Combine(row.EditsJson, display?.EditsJson);
 
                 var billed = display is { Artists.Count: > 0 }
                     ? display.Artists.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.Name, credit.JoinPhrase)).ToList()
@@ -247,6 +249,7 @@ public static partial class SubsonicEndpoints
                 file.ReleaseGroup != null ? file.ReleaseGroup.Title : null,
                 file.ReleaseGroup != null ? file.ReleaseGroup.FirstReleaseYear : null,
                 file.Release != null ? file.Release.ReleasedYear : null,
+                file.ReleaseGroup != null ? file.ReleaseGroup.EditsJson : null,
                 file.Release != null ? file.Release.EditsJson : null,
                 // No ternary on the navigation: a null one yields an empty
                 // collection through the join EF writes, where `new List<>()`
@@ -304,7 +307,7 @@ public static partial class SubsonicEndpoints
     /// </remarks>
     private static Song Describe(SongRow row)
     {
-        var edits = PersonEdits.Read(row.AlbumEdits);
+        var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
         // The pressing's billing line where one is claimed, the album's own
         // otherwise.
@@ -372,6 +375,7 @@ public static partial class SubsonicEndpoints
         int? AlbumYear,
         int? PressingYear,
         string? AlbumEdits,
+        string? PressingEdits,
         List<CreditRow> AlbumCredits,
         List<CreditRow> GroupCredits,
         List<CreditRow> RecordingCredits);

@@ -1459,7 +1459,8 @@ public static partial class CatalogueEndpoints
                         credit.CreditedAs,
                         credit.JoinPhrase,
                         credit.Artist!.LatinName ?? credit.Artist!.Name))
-                    .ToList()))
+                    .ToList(),
+                g.EditsJson))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -1588,7 +1589,8 @@ public static partial class CatalogueEndpoints
                             credit.CreditedAs,
                             credit.JoinPhrase,
                             credit.Artist!.LatinName ?? credit.Artist!.Name))
-                        .ToList()),
+                        .ToList(),
+                    g.EditsJson),
                 g.PrimaryType,
                 g.SecondaryTypes,
                 g.Monitored,
@@ -1960,7 +1962,7 @@ public static partial class CatalogueEndpoints
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        var edits = PersonEdits.Read(display?.EditsJson);
+        var edits = PersonEdits.Combine(album.Facts.EditsJson, display?.EditsJson);
         string? Field(string field, string? provider) => PersonEdits.Apply(edits, field, provider);
 
         // A person's correction to a pressing's fact is still a fact about that
@@ -2036,7 +2038,8 @@ public static partial class CatalogueEndpoints
         int Held,
         List<ReleaseAttributionOutcome> Outcomes,
         int Alternatives,
-        List<EditionCredit> Artists);
+        List<EditionCredit> Artists,
+        string? EditsJson);
 
     /// <summary>One stored edition of an album, as the album list and page read it.</summary>
     internal sealed record EditionFacts(
@@ -2190,7 +2193,7 @@ public static partial class CatalogueEndpoints
             Weakest(album.Outcomes).ToString(),
             album.Alternatives);
 
-        return WithEdits(summary, display?.EditsJson);
+        return WithEdits(summary, PersonEdits.Combine(album.EditsJson, display?.EditsJson));
     }
 
     /// <summary>One track's credits, by artist, for <see cref="AlbumCredits"/>.</summary>
