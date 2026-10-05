@@ -68,6 +68,20 @@ export const CERTAINTY: Readonly<
   },
 
   /*
+    A download's, filed as the shop described it (ADR 0011). `ok`, so it
+    carries no badge — the owner's choice — and reads as plainly as a rule's
+    certain answer wherever the outcome is spelled out.
+  */
+  AttributedByProvider: {
+    label: 'As the shop described it',
+    short: 'From the shop',
+    tone: 'ok',
+    note:
+      'These files were filed as they were downloaded, under the album, disc and track the shop ' +
+      'delivered them as. Their audio is still identified like any other file.',
+  },
+
+  /*
     The two a person writes. `AttributedByPerson` is not `Attributed` and the
     difference is the point of printing it: one means a rule cleared its gates
     and the other means it did not and somebody decided anyway. On the folder

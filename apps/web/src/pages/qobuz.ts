@@ -161,6 +161,36 @@ export function downloadSummary(result: {
 }
 
 /**
+ * What filing a download in the catalogue did, in a sentence (ADR 0011): how
+ * many files were filed, and whether their tags were written — or, where
+ * nothing was filed, why not.
+ */
+export function filingSummary(filing: {
+  readonly filed: number
+  readonly kept: number
+  readonly tagsWritten: number
+  readonly tagsNotWritten: number
+  readonly why: string | null
+}): string {
+  if (filing.filed === 0) return filing.why ?? 'Nothing was filed in the catalogue.'
+
+  const parts = [`Filed in the catalogue: ${filing.filed} file${filing.filed === 1 ? '' : 's'}.`]
+
+  if (filing.kept > 0) {
+    parts.push(`${filing.kept} kept as ${filing.kept === 1 ? 'it was' : 'they were'}.`)
+  }
+
+  if (filing.why !== null) parts.push(filing.why)
+  else if (filing.tagsNotWritten > 0) {
+    parts.push(
+      `Tags written to ${filing.tagsWritten}, not to ${filing.tagsNotWritten} — the log says why.`,
+    )
+  } else parts.push(`Tags written to ${filing.tagsWritten}.`)
+
+  return parts.join(' ')
+}
+
+/**
  * Every row not wanting a missing record has to change: the one shown and every
  * other shop product folded into it (`also`) — a hi-res and a CD-quality edition
  * of one record are two rows underneath, and turning off only the first would

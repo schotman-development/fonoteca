@@ -1,16 +1,25 @@
 import type { components } from '@fonoteca/api-client'
 import { describeError } from '@fonoteca/api-client'
 import { Badge, Button, Dialog, Stack, Table, TableCell, TableHeaderCell, Text } from '@fonoteca/ui'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './QobuzAlbumDialog.module.css'
-import { downloadSummary, duration, fileSize, OUTCOMES, qualityLabel } from './qobuz.ts'
+import {
+  downloadSummary,
+  duration,
+  fileSize,
+  filingSummary,
+  OUTCOMES,
+  qualityLabel,
+} from './qobuz.ts'
 
 type QobuzAlbumSummary = components['schemas']['QobuzAlbumSummary']
 type AlbumDownload = components['schemas']['AlbumDownload']
 type AlbumReplacement = components['schemas']['AlbumReplacement']
+type AlbumFiling = components['schemas']['AlbumFiling']
 
 /** The album this download is meant to replace, when it was launched from one. */
 export type Replacing = {
@@ -27,6 +36,7 @@ type DownloadState =
       readonly status: 'done'
       readonly result: AlbumDownload | null
       readonly replacement: AlbumReplacement | null
+      readonly filing: AlbumFiling | null
     }
   | { readonly status: 'error'; readonly message: string }
 
@@ -84,7 +94,12 @@ export function QobuzAlbumDialog({
               json: { folder: replacing.folder, files: replacing.files, confirmed },
             })
 
-      setDownload({ status: 'done', result: upgrade.download, replacement: upgrade.replacement })
+      setDownload({
+        status: 'done',
+        result: upgrade.download,
+        replacement: upgrade.replacement,
+        filing: upgrade.filing,
+      })
     } catch (cause: unknown) {
       setDownload({ status: 'error', message: describeError(cause) })
     }
@@ -244,8 +259,12 @@ export function QobuzAlbumDialog({
             <Stack direction="column" gap={12}>
               {download.result !== null ? <Result result={download.result} /> : null}
               {download.replacement !== null ? (
-                <ReplacementResult replacement={download.replacement} />
+                <ReplacementResult
+                  replacement={download.replacement}
+                  filed={(download.filing?.filed ?? 0) > 0}
+                />
               ) : null}
+              {download.filing !== null ? <FilingResult filing={download.filing} /> : null}
             </Stack>
           ) : null}
         </div>
@@ -437,7 +456,13 @@ function Result({ result }: { readonly result: AlbumDownload }) {
  * shown verbatim rather than re-worded here: it is the only place that knows
  * which of the four refusals happened and with what numbers.
  */
-function ReplacementResult({ replacement }: { readonly replacement: AlbumReplacement }) {
+function ReplacementResult({
+  replacement,
+  filed,
+}: {
+  readonly replacement: AlbumReplacement
+  readonly filed: boolean
+}) {
   const replaced = replacement.archived > 0
 
   return (
@@ -451,13 +476,35 @@ function ReplacementResult({ replacement }: { readonly replacement: AlbumReplace
       {replaced ? (
         <Text size="sm" tone="tertiary">
           The old album is at <code>{replacement.archivedTo}</code>, keeping its folders — move it
-          back to undo this. Run a library scan to catalogue what replaced it.
+          back to undo this.{filed ? null : ' Run a library scan to catalogue what replaced it.'}
         </Text>
       ) : (
         <Text size="sm" tone="tertiary">
           {replacement.detail}
         </Text>
       )}
+    </Stack>
+  )
+}
+
+/**
+ * Where the download went in the catalogue (ADR 0011): filed under the album
+ * the shop named, with its tags written — or why it was left for the passes.
+ */
+function FilingResult({ filing }: { readonly filing: AlbumFiling }) {
+  return (
+    <Stack direction="column" gap={4} align="start">
+      <Text size="sm">{filingSummary(filing)}</Text>
+      <Stack gap={8} align="center" wrap>
+        <Text size="xs" tone="tertiary" family="mono">
+          {filing.folder}
+        </Text>
+        {filing.albumId !== null && filing.filed > 0 ? (
+          <Link to="/library/albums/$albumId" params={{ albumId: filing.albumId }}>
+            <Text size="sm">Open the album</Text>
+          </Link>
+        ) : null}
+      </Stack>
     </Stack>
   )
 }

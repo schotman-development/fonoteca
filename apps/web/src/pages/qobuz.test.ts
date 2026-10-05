@@ -18,6 +18,7 @@ import {
   downloadSummary,
   duration,
   fileSize,
+  filingSummary,
   formatLabel,
   qualityLabel,
   readiness,
@@ -138,4 +139,30 @@ test('a record that folds nothing changes only itself', () => {
   } as never
 
   assert.deepEqual(unwantedRows(record), ['only'])
+})
+
+test('a filed download says how many files and whether their tags were written', () => {
+  const filed = { filed: 2, kept: 0, tagsWritten: 2, tagsNotWritten: 0, why: null }
+
+  assert.equal(filingSummary(filed), 'Filed in the catalogue: 2 files. Tags written to 2.')
+  assert.equal(
+    filingSummary({ ...filed, tagsWritten: 1, tagsNotWritten: 1, kept: 1 }),
+    'Filed in the catalogue: 2 files. 1 kept as it was. Tags written to 1, not to 1 — the log says why.',
+  )
+  assert.equal(
+    filingSummary({
+      ...filed,
+      tagsWritten: 0,
+      why: 'File writing is off, so the tags were not written.',
+    }),
+    'Filed in the catalogue: 2 files. File writing is off, so the tags were not written.',
+  )
+  assert.equal(
+    filingSummary({
+      ...filed,
+      filed: 0,
+      why: 'MusicBrainz knows the album this replaced, so the passes will file it.',
+    }),
+    'MusicBrainz knows the album this replaced, so the passes will file it.',
+  )
 })
