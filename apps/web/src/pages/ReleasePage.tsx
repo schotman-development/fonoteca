@@ -22,6 +22,7 @@ import { type FormEvent, useCallback, useEffect, useId, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { api, apiBaseUrl } from '../api.ts'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
+import { UndoFolderButton } from '../components/UndoFolderButton.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { countryName } from './artistFacts.ts'
 import { CoverDialog } from './CoverDialog.tsx'
@@ -31,6 +32,7 @@ import { contentUrl, parentOf } from './files.ts'
 import styles from './Profile.module.css'
 import { blank, Edited, list, Prose, stamp, Value, year } from './profile.tsx'
 import { ALBUM_FOLDER_DEPTH, albumFolderOf } from './seating.ts'
+import { undoOutcome } from './tagUndo.ts'
 import { workGroups } from './workGroups.ts'
 
 type Detail = components['schemas']['AlbumDetailResponse']
@@ -184,6 +186,7 @@ function Album({
   // Bumped after a change so the header asks for the new picture at once.
   const [coverVersion, setCoverVersion] = useState(0)
   const playback = usePlayback()
+  const navigate = useNavigate()
   const id = useId()
 
   const edited = (field: string) => about.edited.includes(field)
@@ -431,6 +434,22 @@ function Album({
                   >
                     <Stack direction="column" gap={12}>
                       <FolderFiles files={folder.files} />
+                      {/*
+                        Undoing a tag write reopens the folder, which takes it off
+                        this album: where it went is on the Files screen.
+                      */}
+                      <UndoFolderButton
+                        folder={folder.path}
+                        onUndone={(result) => {
+                          // Said before the page moves on, since neither the
+                          // reload nor the Files screen can say it afterwards.
+                          if (result.problems.length > 0) window.alert(undoOutcome(result))
+
+                          if (result.edit?.kind === 'TagWrite') {
+                            void navigate({ to: '/files', search: { path: result.folder } })
+                          } else onChanged()
+                        }}
+                      />
                       <NotThisAlbum
                         folder={folder.path}
                         albumId={releaseId}

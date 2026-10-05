@@ -152,6 +152,10 @@ export function TagWritePanel({
     )
   }
 
+  // With file writing off no button that would change a file is shown, and an
+  // album's or an artist's panel is nothing but its button.
+  if (scope !== undefined && !status.willWrite) return null
+
   const processed = live?.processed ?? status.processed
   const total = live?.total ?? status.total
   const summary = status.lastCompleted
@@ -163,18 +167,20 @@ export function TagWritePanel({
   return (
     <Stack direction="column" gap={12}>
       <Stack gap={8} align="center" wrap>
-        <Button
-          variant={scope === undefined ? 'primary' : 'secondary'}
-          size={size}
-          onClick={() => void write()}
-          disabled={busy || running}
-        >
-          {running
-            ? 'Writing…'
-            : scope === undefined
-              ? 'Write tags'
-              : `Write tags to ${label ?? 'these files'}`}
-        </Button>
+        {status.willWrite ? (
+          <Button
+            variant={scope === undefined ? 'primary' : 'secondary'}
+            size={size}
+            onClick={() => void write()}
+            disabled={busy || running}
+          >
+            {running
+              ? 'Writing…'
+              : scope === undefined
+                ? 'Write tags'
+                : `Write tags to ${label ?? 'these files'}`}
+          </Button>
+        ) : null}
 
         {running ? (
           <Button size="sm" variant="danger" onClick={() => void cancel()}>
@@ -189,7 +195,7 @@ export function TagWritePanel({
         */}
         {!status.willWrite ? (
           <Badge tone="info" size="sm">
-            Mutation is off
+            File writing is off
           </Badge>
         ) : null}
       </Stack>

@@ -16,6 +16,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { type ChangeEvent, useId, useState } from 'react'
 
 import { api, apiBaseUrl } from '../api.ts'
+import { UndoFolderButton } from '../components/UndoFolderButton.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { FilePreviewPane } from './FilePreviewPane.tsx'
 import styles from './FilesPage.module.css'
@@ -23,10 +24,11 @@ import { breadcrumbs, destinationFor, matchSummary, parentOf, uploadName } from 
 import { FolderIdentify } from './IdentifyPage.tsx'
 import { fileSize } from './qobuz.ts'
 import { ALBUM_FOLDER_DEPTH } from './seating.ts'
+import { undoOutcome } from './tagUndo.ts'
 
 type FolderEntry = components['schemas']['FolderEntry']
 
-type Notice = { readonly tone: 'success' | 'danger'; readonly message: string }
+type Notice = { readonly tone: 'success' | 'warning' | 'danger'; readonly message: string }
 
 /**
  * The library as it actually sits on disk.
@@ -68,6 +70,11 @@ export function FilesPage() {
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  // A notice about a folder that moved, to show once the page is there.
+  const [carried, setCarried] = useState<{
+    readonly folder: string
+    readonly notice: Notice
+  } | null>(null)
 
   const state = useApiQuery(
     () => api.get('/api/files', { params: { query: { path: folder } } }),
@@ -109,7 +116,8 @@ export function FilesPage() {
     setShown(folder)
     setSelected(new Set())
     setCurrent(null)
-    setNotice(null)
+    setNotice(carried?.folder === folder ? carried.notice : null)
+    setCarried(null)
   }
 
   const run = async (work: () => Promise<Notice>) => {
@@ -247,6 +255,26 @@ export function FilesPage() {
         onTrash={() => setConfirming(true)}
         onUpload={upload}
         onScan={scan}
+      />
+
+      {/* Hidden unless this is an album folder with an edit to its files left to undo. */}
+      <UndoFolderButton
+        key={`${folder}:${attempt}`}
+        folder={folder}
+        onUndone={(result) => {
+          const said: Notice = {
+            tone: result.problems.length === 0 ? 'success' : 'warning',
+            message: undoOutcome(result),
+          }
+
+          if (result.folder === folder) {
+            setNotice(said)
+            refresh()
+          } else {
+            setCarried({ folder: result.folder, notice: said })
+            void open(result.folder)
+          }
+        }}
       />
 
       {notice ? (
