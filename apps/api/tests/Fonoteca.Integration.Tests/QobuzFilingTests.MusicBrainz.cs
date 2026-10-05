@@ -143,6 +143,41 @@ public sealed partial class QobuzFilingTests
     }
 
     [Fact]
+    public async Task NamingTheAlbumByHandReFilesADownloadAtOnce()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var musicBrainz = new StubMusicBrainz();
+        var factory = Factory(mutation: false, musicBrainz);
+        await DownloadAsync(factory);
+
+        // A pressing the barcode search never finds, named by a person.
+        musicBrainz.Releases.Add(Rumours() with { Barcode = null });
+
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/folders/album", UriKind.Relative),
+            new FolderAlbumRequest("Fleetwood Mac/Rumours", RumoursRelease.Value),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var files = await db.MediaFiles.Include(file => file.Recording).OrderBy(file => file.Path).ToListAsync(Token);
+
+        Assert.Equal([TheChain, Dreams], files.Select(file => file.Recording!.Mbid!.Value));
+        Assert.All(files, file =>
+        {
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.Equal(EnrichmentOutcome.LinkedByPerson, file.EnrichmentOutcome);
+            Assert.Null(file.ReleaseLookupUtc);
+        });
+
+        Assert.Empty(await db.Releases.Where(release => release.Mbid == null).ToListAsync(Token));
+        Assert.Empty(await db.Recordings.Where(recording => recording.Mbid == null).ToListAsync(Token));
+    }
+
+    [Fact]
     public async Task TwoTracksAnIsrcNamesAsOneRecordingShareIt()
     {
         Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
@@ -174,6 +209,41 @@ public sealed partial class QobuzFilingTests
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
         Assert.All(await db.Recordings.ToListAsync(Token), recording => Assert.Null(recording.Mbid));
+    }
+
+    [Fact]
+    public async Task ANamedReleaseThatLacksATrackLeavesTheDownloadsRecordings()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var musicBrainz = new StubMusicBrainz();
+        var factory = Factory(mutation: false, musicBrainz);
+        await DownloadAsync(factory);
+
+        // Prints The Chain and not Dreams: no file is seated, rather than one.
+        musicBrainz.Releases.Add(Rumours() with
+        {
+            Barcode = null,
+            Tracks = [new MusicBrainzTrack(1, 1, "1", "The Chain", TimeSpan.FromSeconds(270), TheChain, [])],
+        });
+
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/folders/album", UriKind.Relative),
+            new FolderAlbumRequest("Fleetwood Mac/Rumours", RumoursRelease.Value),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var files = await db.MediaFiles.Include(file => file.Recording).ToListAsync(Token);
+
+        Assert.All(files, file =>
+        {
+            Assert.Null(file.Recording!.Mbid);
+            Assert.Equal(ReleaseAttributionOutcome.AlbumByPerson, file.AttributionOutcome);
+            Assert.Equal(EnrichmentOutcome.LinkedByProvider, file.EnrichmentOutcome);
+        });
     }
 
     [Fact]

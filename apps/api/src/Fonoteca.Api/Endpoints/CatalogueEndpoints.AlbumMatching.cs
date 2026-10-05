@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Library;
 using Fonoteca.Api.Matching;
 using Fonoteca.Data;
@@ -1231,6 +1232,38 @@ public static partial class CatalogueEndpoints
         var now = StoreTime.ToStorePrecision(clock.UtcNow);
         var correlationId = Guid.CreateVersion7().ToString("N")[..12];
 
+        // A download's files are re-filed at once (ADR 0011, the owner's
+        // choice): each takes the recording the named release prints at the
+        // disc and position the shop delivered it as, so the pass can prove a
+        // pressing from recordings MusicBrainz knows. Only where the release
+        // prints every one; otherwise they keep the shop's recordings and only
+        // the album is the person's.
+        var shop = rows
+            .Where(row => row.AttributionOutcome == ReleaseAttributionOutcome.AttributedByProvider && row.TrackId is not null)
+            .ToList();
+        var shopReleases = shop.Select(row => row.ReleaseId).OfType<ReleaseId>().Distinct().ToList();
+        var seats = new List<(MediaFile Row, RecordingId Recording)>();
+
+        if (shop.Count > 0)
+        {
+            var tracks = shop.Select(row => row.TrackId!.Value).ToList();
+            var slots = await db.Tracks
+                .Where(track => tracks.Contains(track.Id))
+                .ToDictionaryAsync(track => track.Id, track => (track.DiscNumber, track.Position), cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var row in shop)
+            {
+                if (slots.TryGetValue(row.TrackId!.Value, out var slot)
+                    && writer.RecordingIdAt(written.Release, slot.DiscNumber, slot.Position) is { } recording)
+                {
+                    seats.Add((row, recording));
+                }
+            }
+
+            if (seats.Count != shop.Count) seats.Clear();
+        }
+
         foreach (var row in rows)
         {
             row.ReleaseGroupId = album;
@@ -1244,6 +1277,14 @@ public static partial class CatalogueEndpoints
 
             // Cleared so the pass proves the pressing, within this album only.
             row.ReleaseLookupUtc = null;
+        }
+
+        foreach (var (row, recording) in seats)
+        {
+            row.RecordingId = recording;
+            row.IdentityDecidedUtc = now;
+            row.EnrichmentOutcome = ByCaller(caller, EnrichmentOutcome.LinkedByPerson);
+            row.RecordingLookupUtc = now;
         }
 
         var title = release.ReleaseGroupTitle ?? release.Title;
@@ -1268,6 +1309,9 @@ public static partial class CatalogueEndpoints
             cancellationToken).ConfigureAwait(false);
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        // What the download minted and no file is filed under any more.
+        await MusicBrainzCatchUp.ForgetAsync(db, shopReleases, cancellationToken).ConfigureAwait(false);
 
         return TypedResults.Ok(new FolderAlbumResponse(
             folder,
