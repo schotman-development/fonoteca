@@ -2509,6 +2509,98 @@
         }
       }
     },
+    "/api/catalogue/folders/undo": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The edit an undo of this album folder would reverse, if any.",
+        "description": "`edit` is null when nothing written to the folder's files is left to undo, or when `folder` is not an album folder. `willWrite` is Fonoteca:AllowFileMutation; with it off an undo is refused, as every file write is.",
+        "operationId": "GetFolderUndo",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderUndoResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Step an album folder back by one edit to its files.",
+        "description": "The newest edit not yet undone: a tag write's tags, renames, links and sleeve together, or identification's AcoustID. Tags go back to what they held before it even where another tagger has changed them since; a move never goes over anything, so a name since taken is reported and left. Undoing a tag write also reopens the folder, so the next tag write leaves it alone until its album is answered again. Press again to step further back.",
+        "operationId": "UndoFolder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderUndoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagUndoResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/matching/folders/seed": {
       "get": {
         "tags": [
@@ -6148,6 +6240,37 @@
           }
         }
       },
+      "FolderEdit": {
+        "required": [
+          "id",
+          "kind",
+          "at",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FolderEditKind"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "FolderEditKind": {
+        "enum": [
+          "TagWrite",
+          "Identification"
+        ]
+      },
       "FolderEntry": {
         "required": [
           "name",
@@ -6367,6 +6490,43 @@
           },
           "detail": {
             "type": "string"
+          }
+        }
+      },
+      "FolderUndoRequest": {
+        "required": [
+          "folder"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          }
+        }
+      },
+      "FolderUndoResponse": {
+        "required": [
+          "folder",
+          "willWrite",
+          "edit"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "willWrite": {
+            "type": "boolean"
+          },
+          "edit": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FolderEdit"
+              }
+            ]
           }
         }
       },
@@ -8842,6 +9002,80 @@
             "$ref": "#/components/schemas/CatalogueCounts"
           }
         }
+      },
+      "TagUndoResult": {
+        "required": [
+          "status",
+          "folder",
+          "edit",
+          "restored",
+          "moved",
+          "unlinked",
+          "relinked",
+          "covers",
+          "reopened",
+          "problems"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TagUndoStatus"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "edit": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FolderEdit"
+              }
+            ]
+          },
+          "restored": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "moved": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unlinked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "relinked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "covers": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reopened": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TagUndoStatus": {
+        "enum": [
+          "Undone",
+          "NothingToUndo",
+          "NotAnAlbumFolder",
+          "MutationOff",
+          "Busy",
+          "Incomplete",
+          "NotOnDisk"
+        ]
       },
       "TagWriteStartedResponse": {
         "required": [

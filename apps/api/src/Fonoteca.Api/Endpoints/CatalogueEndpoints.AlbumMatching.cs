@@ -1053,47 +1053,10 @@ public static partial class CatalogueEndpoints
         var now = StoreTime.ToStorePrecision(clock.UtcNow);
         var correlationId = Guid.CreateVersion7().ToString("N")[..12];
 
-        foreach (var row in rows)
-        {
-            row.RecordingId = null;
-            row.TrackId = null;
-            row.ReleaseId = null;
-            row.ReleaseGroupId = null;
-            row.EditionAlternatives = 0;
-            row.FolderPosition = null;
-            row.OrderOutcome = FolderOrderOutcome.NotChecked;
+        foreach (var row in rows) Reopen(row, caller);
 
-            row.IdentityDecidedUtc = null;
-            row.ReleaseDecidedUtc = null;
-
-            row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.ReopenedByPerson);
-
-            // Both of the later legs go back to "no answer", which is what they
-            // now are: the recording they were about is gone. They are not moved
-            // to a refusal — no pass refused anything here — and NotAttempted is
-            // not on any worklist, which is right. The question is the
-            // identification one, asked once for the folder, and answering it
-            // through `matching/files/release` writes all three legs again.
-            row.EnrichmentOutcome = EnrichmentOutcome.NotAttempted;
-            row.AttributionOutcome = ReleaseAttributionOutcome.NotAttempted;
-        }
-
-        await events.AppendAsync(
-            DomainEvent.Create(
-                FolderReopenedEventType,
-                FolderSubject,
-                Fit(folder),
-                caller.ActorId,
-                now,
-                JsonSerializer.Serialize(
-                    new FolderReopenedPayload
-                    {
-                        Folder = folder,
-                        Reopened = rows.Count,
-                    },
-                    MatchingJson.Default.FolderReopenedPayload),
-                correlationId),
-            cancellationToken).ConfigureAwait(false);
+        await events.AppendAsync(FolderReopened(folder, rows.Count, caller, now, correlationId), cancellationToken)
+            .ConfigureAwait(false);
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
@@ -1104,6 +1067,57 @@ public static partial class CatalogueEndpoints
             + "the recording and album a pass chose, and are now one question for you. No pass "
             + "will answer them again. Nothing on disk was touched."));
     }
+
+    /// <summary>One placed file given back as a question, by <see cref="ReopenFolder"/>'s rule.</summary>
+    /// <remarks><c>internal</c> for the tag write's undo, which reopens what it un-writes while holding the gate.</remarks>
+    internal static void Reopen(MediaFile row, ICallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        row.RecordingId = null;
+        row.TrackId = null;
+        row.ReleaseId = null;
+        row.ReleaseGroupId = null;
+        row.EditionAlternatives = 0;
+        row.FolderPosition = null;
+        row.OrderOutcome = FolderOrderOutcome.NotChecked;
+
+        row.IdentityDecidedUtc = null;
+        row.ReleaseDecidedUtc = null;
+
+        row.AcoustIdOutcome = ByCaller(caller, AcoustIdOutcome.ReopenedByPerson);
+
+        // Both of the later legs go back to "no answer", which is what they
+        // now are: the recording they were about is gone. They are not moved
+        // to a refusal — no pass refused anything here — and NotAttempted is
+        // not on any worklist, which is right. The question is the
+        // identification one, asked once for the folder, and answering it
+        // through `matching/files/release` writes all three legs again.
+        row.EnrichmentOutcome = EnrichmentOutcome.NotAttempted;
+        row.AttributionOutcome = ReleaseAttributionOutcome.NotAttempted;
+    }
+
+    /// <summary>The journal entry a reopened folder gets.</summary>
+    internal static DomainEvent FolderReopened(
+        string folder,
+        int reopened,
+        ICallerContext caller,
+        DateTimeOffset now,
+        string correlationId) =>
+        DomainEvent.Create(
+            FolderReopenedEventType,
+            FolderSubject,
+            Fit(folder),
+            caller.ActorId,
+            now,
+            JsonSerializer.Serialize(
+                new FolderReopenedPayload
+                {
+                    Folder = folder,
+                    Reopened = reopened,
+                },
+                MatchingJson.Default.FolderReopenedPayload),
+            correlationId);
 
     /// <summary>
     /// One person's claim about which album a folder is, committed.

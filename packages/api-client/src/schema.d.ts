@@ -954,6 +954,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/folders/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The edit an undo of this album folder would reverse, if any.
+         * @description `edit` is null when nothing written to the folder's files is left to undo, or when `folder` is not an album folder. `willWrite` is Fonoteca:AllowFileMutation; with it off an undo is refused, as every file write is.
+         */
+        get: operations["GetFolderUndo"];
+        put?: never;
+        /**
+         * Step an album folder back by one edit to its files.
+         * @description The newest edit not yet undone: a tag write's tags, renames, links and sleeve together, or identification's AcoustID. Tags go back to what they held before it even where another tagger has changed them since; a move never goes over anything, so a name since taken is reported and left. Undoing a tag write also reopens the folder, so the next tag write leaves it alone until its album is answered again. Press again to step further back.
+         */
+        post: operations["UndoFolder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/matching/folders/seed": {
         parameters: {
             query?: never;
@@ -1993,6 +2017,16 @@ export interface components {
             folder: string;
             albums: components["schemas"]["AttributionShare"][];
         };
+        FolderEdit: {
+            id: string;
+            kind: components["schemas"]["FolderEditKind"];
+            /** Format: date-time */
+            at: string;
+            /** Format: int32 */
+            files: number;
+        };
+        /** @enum {unknown} */
+        FolderEditKind: "TagWrite" | "Identification";
         FolderEntry: {
             name: string;
             path: string;
@@ -2048,6 +2082,14 @@ export interface components {
             /** Format: int32 */
             reopened: number;
             detail: string;
+        };
+        FolderUndoRequest: {
+            folder: string;
+        };
+        FolderUndoResponse: {
+            folder: string;
+            willWrite: boolean;
+            edit: null | components["schemas"]["FolderEdit"];
         };
         FolderUnreleasedRequest: {
             folder: string;
@@ -2671,6 +2713,26 @@ export interface components {
             fileMutationAllowed: boolean;
             counts: components["schemas"]["CatalogueCounts"];
         };
+        TagUndoResult: {
+            status: components["schemas"]["TagUndoStatus"];
+            folder: string;
+            edit: null | components["schemas"]["FolderEdit"];
+            /** Format: int32 */
+            restored: number;
+            /** Format: int32 */
+            moved: number;
+            /** Format: int32 */
+            unlinked: number;
+            /** Format: int32 */
+            relinked: number;
+            /** Format: int32 */
+            covers: number;
+            /** Format: int32 */
+            reopened: number;
+            problems: string[];
+        };
+        /** @enum {unknown} */
+        TagUndoStatus: "Undone" | "NothingToUndo" | "NotAnAlbumFolder" | "MutationOff" | "Busy" | "Incomplete" | "NotOnDisk";
         TagWriteStartedResponse: {
             jobId: string;
             scope: string;
@@ -4784,6 +4846,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagWriteStartedResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetFolderUndo: {
+        parameters: {
+            query: {
+                folder: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderUndoResponse"];
+                };
+            };
+        };
+    };
+    UndoFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagUndoResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Not Found */

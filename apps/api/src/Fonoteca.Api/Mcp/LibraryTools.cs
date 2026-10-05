@@ -438,6 +438,17 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
                 cancellationToken)
             .ConfigureAwait(false));
 
+    [McpServerTool(Name = "undo_folder_edit")]
+    [Description(
+        "Step one album folder back by one edit to its files, newest first: a tag write's tags, "
+        + "renames, links and sleeve together, or identification's AcoustID. Undoing a tag write "
+        + "also reopens the folder as a question. Call again to step further back. Refused while "
+        + "file writing is off. Recorded as an agent's. Show the owner the folder before calling this.")]
+    public async Task<string> UndoFolderEdit(string folder, CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .UndoFolder(new FolderUndoRequest(folder), Get<TagWriteService>(), Agent, cancellationToken)
+            .ConfigureAwait(false));
+
     [McpServerTool(Name = "set_folder_album")]
     [Description(
         "Say which album (release group) an album folder is: every file in it is filed under the "

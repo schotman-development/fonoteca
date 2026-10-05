@@ -65,6 +65,30 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 
+    /// <summary>
+    /// With file writing off — the default — an undo is offered nowhere and refused if asked.
+    /// </summary>
+    [Fact]
+    public async Task UndoIsRefusedWhileFileWritingIsOff()
+    {
+        using var client = _factory!.CreateClient();
+
+        var state = await client.GetFromJsonAsync<FolderUndoResponse>(
+            new Uri("/api/catalogue/folders/undo?folder=Miles%20Davis%2FKind%20of%20Blue", UriKind.Relative), Token);
+
+        Assert.False(state!.WillWrite);
+
+        using var refused = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/folders/undo", UriKind.Relative), new FolderUndoRequest("Miles Davis/Kind of Blue"), Token);
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+
+        using var unnamed = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/folders/undo", UriKind.Relative), new FolderUndoRequest(string.Empty), Token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, unnamed.StatusCode);
+    }
+
     [Fact]
     public async Task ArtistsAreListedBySortNameWithTheirTrackCounts()
     {

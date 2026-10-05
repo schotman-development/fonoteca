@@ -640,6 +640,12 @@ internal static partial class Log
     public static partial void TagWriteBusy(ILogger logger, string activeKind);
 
     [LoggerMessage(
+        EventId = 1312,
+        Level = LogLevel.Information,
+        Message = "Undid edit {Edit} to {Folder}: {Restored} files' tags put back, {Moved} moves reversed, {Problems} things left as they were")]
+    public static partial void TagsUndone(ILogger logger, string folder, string edit, int restored, int moved, int problems);
+
+    [LoggerMessage(
         EventId = 1303,
         Level = LogLevel.Warning,
         Message = "Tag write stopped early: {Reason}")]

@@ -57,6 +57,7 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         "search_releases",
         "set_folder_album",
         "start_pass",
+        "undo_folder_edit",
     ];
 
     private string _connectionString = string.Empty;

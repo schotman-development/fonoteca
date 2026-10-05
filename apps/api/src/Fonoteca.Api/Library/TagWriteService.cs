@@ -574,11 +574,15 @@ public sealed partial class TagWriteService(
         CancellationToken cancellationToken)
     {
         var subject = file.ToString();
-        var type = EventPrefix + ".written";
+
+        // An undo's writes are links in the same chain: one that took a fill
+        // back out leaves the field nobody's, and one that put an earlier fill
+        // back leaves it ours again.
+        string[] types = [EventPrefix + ".written", UndoPrefix + ".written"];
 
         var payloads = await db.DomainEvents
             .AsNoTracking()
-            .Where(entry => entry.SubjectId == subject && entry.Type == type)
+            .Where(entry => entry.SubjectId == subject && types.Contains(entry.Type))
             .OrderBy(entry => entry.OccurredAtUtc)
             .Select(entry => entry.PayloadJson)
             .ToListAsync(cancellationToken)

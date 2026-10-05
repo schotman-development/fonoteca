@@ -293,7 +293,7 @@ public sealed partial class TagWriteService
                             token => FileManagerService.RewritePathsAsync(db, folder, target, token),
                             "folder",
                             folder,
-                            new { from = folder, to = target },
+                            new { from = folder, to = target, files = rows.Select(row => row.Id.ToString()).ToArray() },
                             correlationId)
                         .ConfigureAwait(false);
 
@@ -420,7 +420,8 @@ public sealed partial class TagWriteService
             foreach (var directory in emptied) store.PruneEmptyDirectories(new LibraryPath(directory));
 
             await LinkAsync(
-                    root, source, target, named.Values.First(), pattern, links, counts, mutate, db, events, correlationId)
+                    root, source, target, named.Values.First(), pattern, links, counts, mutate, db, events, correlationId,
+                    [.. rows.Select(row => row.Id.ToString())])
                 .ConfigureAwait(false);
         }
     }
@@ -555,7 +556,8 @@ public sealed partial class TagWriteService
         bool mutate,
         FonotecaDbContext db,
         IEventLog events,
-        string correlationId)
+        string correlationId,
+        IReadOnlyList<string> files)
     {
         var absolute = Path.Combine(root, target);
 
@@ -611,7 +613,7 @@ public sealed partial class TagWriteService
                 // Journalled, because the journal is how a later run knows the
                 // link is its own to move or remove — a person's link of the same
                 // shape is never touched.
-                await JournalLinkAsync(LinkedEvent, link, target, db, events, correlationId).ConfigureAwait(false);
+                await JournalLinkAsync(LinkedEvent, link, target, db, events, correlationId, files: files).ConfigureAwait(false);
 
                 if (!links.TryGetValue(absolute, out var found)) links[absolute] = found = [];
                 found.Add(path);
@@ -627,7 +629,8 @@ public sealed partial class TagWriteService
         Dictionary<string, List<string>> links,
         FonotecaDbContext db,
         IEventLog events,
-        string correlationId)
+        string correlationId,
+        string actor = Actor)
     {
         if (IsLink(path)) Unlink(path);
 
@@ -635,7 +638,7 @@ public sealed partial class TagWriteService
 
         foreach (var found in links.Values) found.Remove(path);
 
-        await JournalLinkAsync(UnlinkedEvent, Relative(root, path), null, db, events, correlationId).ConfigureAwait(false);
+        await JournalLinkAsync(UnlinkedEvent, Relative(root, path), null, db, events, correlationId, actor).ConfigureAwait(false);
     }
 
     private async Task JournalLinkAsync(
@@ -644,16 +647,20 @@ public sealed partial class TagWriteService
         string? target,
         FonotecaDbContext db,
         IEventLog events,
-        string correlationId)
+        string correlationId,
+        string actor = Actor,
+        IReadOnlyList<string>? files = null)
     {
+        // The album's files, so an undo can tell this link from one to another
+        // album since put at the same path.
         await events.AppendAsync(
                 DomainEvent.Create(
                     type,
                     "link",
                     Subject(link),
-                    Actor,
+                    actor,
                     clock.UtcNow,
-                    JsonSerializer.Serialize(new { link, target }),
+                    files is null ? JsonSerializer.Serialize(new { link, target }) : JsonSerializer.Serialize(new { link, target, files }),
                     correlationId),
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -733,7 +740,9 @@ public sealed partial class TagWriteService
         string subjectType,
         string subject,
         object payload,
-        string correlationId)
+        string correlationId,
+        string eventType = EventPrefix + ".renamed",
+        string actor = Actor)
     {
         // Through the execution strategy, as FileManagerService.MoveAsync is and
         // for its reason. The retried delegate re-runs the rows; the check
@@ -768,10 +777,10 @@ public sealed partial class TagWriteService
                     {
                         await events.AppendAsync(
                                 DomainEvent.Create(
-                                    $"{EventPrefix}.renamed",
+                                    eventType,
                                     subjectType,
                                     Subject(subject),
-                                    Actor,
+                                    actor,
                                     clock.UtcNow,
                                     JsonSerializer.Serialize(payload),
                                     correlationId),

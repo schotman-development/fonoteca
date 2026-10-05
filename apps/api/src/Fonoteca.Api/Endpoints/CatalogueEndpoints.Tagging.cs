@@ -1,5 +1,6 @@
 using Fonoteca.Api.Library;
 using Fonoteca.Data;
+using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
@@ -57,7 +58,89 @@ public static partial class CatalogueEndpoints
                 + "automatic.")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/folders/undo", FolderUndoState)
+            .WithName("GetFolderUndo")
+            .WithSummary("The edit an undo of this album folder would reverse, if any.")
+            .WithDescription(
+                "`edit` is null when nothing written to the folder's files is left to undo, or when "
+                + "`folder` is not an album folder. `willWrite` is Fonoteca:AllowFileMutation; with "
+                + "it off an undo is refused, as every file write is.");
+
+        group.MapPost("/folders/undo", UndoFolder)
+            .WithName("UndoFolder")
+            .WithSummary("Step an album folder back by one edit to its files.")
+            .WithDescription(
+                "The newest edit not yet undone: a tag write's tags, renames, links and sleeve "
+                + "together, or identification's AcoustID. Tags go back to what they held before "
+                + "it even where another tagger has changed them since; a move never goes over "
+                + "anything, so a name since taken is reported and left. Undoing a tag write also "
+                + "reopens the folder, so the next tag write leaves it alone until its album is "
+                + "answered again. Press again to step further back.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
     }
+
+    internal static async Task<Ok<FolderUndoResponse>> FolderUndoState(
+        string folder,
+        TagWriteService tags,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(new FolderUndoResponse(
+            folder,
+            tags.MutationAllowed,
+            await tags.LastEditAsync(Unslashed(folder), cancellationToken).ConfigureAwait(false)));
+
+    internal static async Task<Results<Ok<TagUndoResult>, ProblemHttpResult>> UndoFolder(
+        FolderUndoRequest request,
+        TagWriteService tags,
+        ICallerContext caller,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrEmpty(request.Folder))
+        {
+            return TypedResults.Problem(
+                title: "Nothing to undo",
+                detail: "The request body must name a library-relative album `folder`.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await tags.UndoAsync(Unslashed(request.Folder), caller, cancellationToken).ConfigureAwait(false);
+
+        return result.Status switch
+        {
+            TagUndoStatus.Undone or TagUndoStatus.Incomplete => TypedResults.Ok(result),
+
+            TagUndoStatus.NotOnDisk => TypedResults.Problem(
+                title: "The folder is not on disk",
+                detail: $"\u201c{request.Folder}\u201d is not there — the library may be unmounted. Nothing was touched.",
+                statusCode: StatusCodes.Status409Conflict),
+
+            TagUndoStatus.NotAnAlbumFolder => TypedResults.Problem(
+                title: "Not an album folder",
+                detail: $"\u201c{request.Folder}\u201d holds no files, or holds more than one album's. "
+                    + "An undo steps back one album folder at a time.",
+                statusCode: StatusCodes.Status400BadRequest),
+
+            TagUndoStatus.NothingToUndo => TypedResults.Problem(
+                title: "Nothing to undo",
+                detail: $"Nothing written to the files in \u201c{request.Folder}\u201d is left to undo.",
+                statusCode: StatusCodes.Status404NotFound),
+
+            TagUndoStatus.MutationOff => TypedResults.Problem(
+                title: "File writing is off",
+                detail: "Fonoteca:AllowFileMutation is false, so no file may be changed, an undo included.",
+                statusCode: StatusCodes.Status409Conflict),
+
+            _ => TypedResults.Problem(
+                title: "The library is busy",
+                detail: "A scan or a pass is running. Undo once it has finished.",
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    /// <summary>Without a trailing slash; untrimmed otherwise, since a folder name may end in a space.</summary>
+    private static string Unslashed(string folder) => folder.EndsWith('/') ? folder[..^1] : folder;
 
     private static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
         WriteAlbumTags(
@@ -161,3 +244,10 @@ public sealed record TagWriteStartedResponse(
     string Scope,
     int Files,
     bool WillWrite);
+
+/// <param name="Folder">A library-relative album folder, as the album page lists it.</param>
+public sealed record FolderUndoRequest(string Folder);
+
+/// <param name="WillWrite">Whether <c>Fonoteca:AllowFileMutation</c> is on; with it off nothing may be undone.</param>
+/// <param name="Edit">What an undo would reverse, or null when nothing is left to.</param>
+public sealed record FolderUndoResponse(string Folder, bool WillWrite, FolderEdit? Edit);

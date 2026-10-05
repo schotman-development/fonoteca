@@ -40,7 +40,7 @@ namespace Fonoteca.Integration.Tests;
 /// was supposed to preserve it.
 /// </remarks>
 [Collection(nameof(PostgresCollection))]
-public sealed class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
+public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly Mbid RecordingMbid = Mb("11111111-1111-4111-8111-111111111111");
     private static readonly Mbid ReleaseMbid = Mb("22222222-2222-4222-8222-222222222222");
