@@ -421,6 +421,29 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   loose file or a folder naming two albums stays put. A file under a track's
   name (`01.lrc`) goes with it, and an artist folder only respelled takes its
   pictures along.
+- **Undo steps one album folder back by one edit** (`TagWriteService.Undo.cs`,
+  `POST /api/catalogue/folders/undo`): the newest journal correlation that
+  touched it — a tag write's tags, renames, links and sleeve together, or
+  identification's AcoustID — found by file id, a folder move by its `to` and a
+  link by its `target`. Each press writes `tagging.undo.undone` per file, which
+  is how the next press skips it and steps further back. Tags go back even over
+  another tagger's change since (the owner's choice); moves never go over
+  anything. Undoing a tag write **reopens the folder**, or the next library run
+  would redo it. It writes through `TagWriter` like any write (`PlanRestoreAsync`,
+  where a null value removes a field — ATL reads null on a typed property as
+  "leave it" and empty as "remove"), under the `tagging.undo` prefix, which
+  `FilledAsync` reads as part of the same chain. **A file whose tags will not go
+  back stops it** (`Incomplete`): nothing moves, nothing is reopened, the edit is
+  not marked, so the next press retries; an unmounted folder is `NotOnDisk`. A
+  path is not an album, so a folder move or link counts only where the folder's
+  files vouch for it — named in its `files`, or written by the same run. **Totals
+  pair with numbers:** ATL writes no total without its number, and before
+  `TotalsVerified` the journal said "no total" where ATL misread a doubled
+  `TRACKTOTAL`/`TOTALTRACKS`, so an older entry's missing total is believed only
+  when its number goes too. Not restored: a date cut to a year, a dropped ID3
+  prefix, the ID3 version and ID3v1 trailer, repairs, a shelf's carried pictures.
+- **With `AllowFileMutation` off no button that writes a file is shown** — Write
+  tags and Undo alike (the owner's choice); the endpoints refuse as well.
 
 ## The by-hand screens
 
@@ -745,13 +768,13 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Twenty-two tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Twenty-three tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
 `list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
 `release_slots`, `start_pass`, `cancel_pass`, `decide_recording`,
 `decide_component`, `file_under_release`, `mark_folder_unreleased`,
-`reopen_folder`, `set_folder_album`.
+`reopen_folder`, `set_folder_album`, `undo_folder_edit`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every
@@ -759,7 +782,8 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
   this file keeps warning about.
 - **An agent's decision is not the owner's** (rule 4). **Adding a by-a-person
   outcome means adding its twin to `ByCaller`**, or the agent path throws.
-- **Not offered:** the tag write at any scope, trash/move/upload, Qobuz.
+- **Not offered:** the tag write at any scope, trash/move/upload, Qobuz. Undo
+  is, recorded as the agent's (the owner's choice).
 - **`Fonoteca:McpToken` empty is a 404, read per request.** `Guard` is middleware
   rather than a filter so it sits in front of whatever `MapMcp` maps. It locks
   `/mcp` and nothing else: every `/api` route is as open as the port.
