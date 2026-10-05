@@ -314,6 +314,33 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         return matches ?? [];
     }
 
+    public async Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(
+        string isrc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(isrc);
+
+        var found = await LookupAsync<IReadOnlyList<Mbid>>(
+            "isrc",
+            null,
+            async token =>
+            {
+                try
+                {
+                    var answer = await _query.LookupIsrcAsync(isrc, Include.None, token).ConfigureAwait(false);
+                    return [.. (answer.Recordings ?? []).Select(recording => new Mbid(recording.Id))];
+                }
+                catch (HttpError error) when (error.Status == HttpStatusCode.NotFound)
+                {
+                    // An answer: MusicBrainz knows no recording by this code.
+                    return [];
+                }
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return found ?? [];
+    }
+
     public async Task<IReadOnlyList<MusicBrainzReleaseGroupMatch>> SearchReleaseGroupsAsync(
         string query,
         int limit,

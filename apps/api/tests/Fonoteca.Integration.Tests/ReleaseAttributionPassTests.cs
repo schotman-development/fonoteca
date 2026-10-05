@@ -1597,6 +1597,9 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzArtist?>(null);
 
+        public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Mbid>>([]);
+
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(
                 "Attribution does not look up works; nothing here should call this.");

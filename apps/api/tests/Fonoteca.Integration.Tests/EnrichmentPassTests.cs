@@ -2666,6 +2666,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             throw new InvalidOperationException(
                 "Enrichment does not attribute releases; nothing here should call this.");
 
+        public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Mbid>>([]);
+
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _workCalls);

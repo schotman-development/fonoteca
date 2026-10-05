@@ -360,6 +360,26 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         Assert.Null(await catalogue.GetArtistAsync(PettyId, Token));
     }
 
+    /// <summary>
+    /// The recordings filed under an ISRC, and none — not a failure — where
+    /// MusicBrainz knows no recording by it.
+    /// </summary>
+    [Fact]
+    public async Task AnIsrcNamesItsRecordingsAndAnUnknownOneNone()
+    {
+        var (catalogue, stub) = Build(request => request.Uri.AbsolutePath.EndsWith("/USWB10101367", StringComparison.Ordinal)
+            ? StubHttpHandler.Json(
+                HttpStatusCode.OK,
+                """{"isrc":"USWB10101367","recordings":[{"id":"3c0e5b8a-1b2d-4c56-9a8e-2f6d5e4c3b21","title":"Dreams"}]}""")
+            : StubHttpHandler.Json(HttpStatusCode.NotFound, """{"error":"Not Found"}"""));
+
+        Assert.Equal(
+            [new Mbid(Guid.Parse("3c0e5b8a-1b2d-4c56-9a8e-2f6d5e4c3b21"))],
+            await catalogue.RecordingsForIsrcAsync("USWB10101367", Token));
+        Assert.Empty(await catalogue.RecordingsForIsrcAsync("XXXX00000000", Token));
+        Assert.Contains(stub.Requests, request => request.Uri.AbsolutePath.EndsWith("/isrc/USWB10101367", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task AWorkNamesWhoWroteIt()
     {

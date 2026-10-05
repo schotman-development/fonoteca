@@ -146,6 +146,19 @@ public interface IMusicBrainzCatalogue
         Mbid id,
         CancellationToken cancellationToken = default);
 
+    /// <summary>The recordings MusicBrainz holds under one ISRC.</summary>
+    /// <remarks>
+    /// Asked about a recording a download minted with no MBID, where the
+    /// album's barcode found no release (ADR 0011). Usually one; more than one
+    /// is MusicBrainz saying the code was reused, and no answer.
+    /// </remarks>
+    /// <returns>Empty where MusicBrainz knows no recording by it.</returns>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">The request was refused.</exception>
+    Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(
+        string isrc,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// One artist, as MusicBrainz describes them rather than as a sleeve billed them.
     /// </summary>

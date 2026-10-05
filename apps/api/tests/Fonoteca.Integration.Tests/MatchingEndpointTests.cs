@@ -836,6 +836,9 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzArtist?>(null);
 
+        public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Mbid>>([]);
+
         public Task<MusicBrainzWork?> GetWorkAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>
@@ -952,6 +955,9 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
             Mbid id,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzArtist?>(null);
+
+        public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Mbid>>([]);
 
         public Task<MusicBrainzWork?> GetWorkAsync(
             Mbid id,

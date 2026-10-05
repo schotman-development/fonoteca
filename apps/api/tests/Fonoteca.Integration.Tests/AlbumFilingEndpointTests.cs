@@ -1776,6 +1776,9 @@ public sealed class AlbumFilingEndpointTests(PostgresFixture postgres) : IAsyncL
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzArtist?>(null);
 
+        public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Mbid>>([]);
+
         public Task<MusicBrainzWork?> GetWorkAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>
