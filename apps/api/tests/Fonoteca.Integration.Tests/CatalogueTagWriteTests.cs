@@ -161,6 +161,66 @@ public sealed class CatalogueTagWriteTests : IDisposable
     }
 
     /// <summary>
+    /// A write is put back field by field from what its plan recorded: the
+    /// fields it added are gone again and the ones it replaced hold their old values.
+    /// </summary>
+    /// <remarks>
+    /// Read back by ffprobe as well as by ours, because a removal that left an
+    /// empty frame behind satisfies a reader that treats empty as absent and
+    /// shows up in every player that does not.
+    /// </remarks>
+    [Theory]
+    [InlineData("flac")]
+    [InlineData("mp3")]
+    [InlineData("m4a")]
+    [InlineData("ogg")]
+    [InlineData("artwork")]
+    [InlineData("tagged")]
+    public async Task AWriteIsPutBackFromWhatItsPlanRecorded(string source)
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(source switch
+        {
+            "ogg" => Corpus.Ogg,
+            "artwork" => Corpus.FlacWithArtwork,
+            "tagged" => Corpus.AlreadyTaggedFlac,
+            _ => SourceFor(source),
+        });
+
+        // Ogg keeps its comments on the stream, not the container.
+        var stream = source == "ogg";
+        var before = TagsReportedByFfprobe(path, stream);
+        var written = await Write(writer, path);
+
+        Assert.Equal(TagWriteStatus.Written, written.Status);
+
+        var restore = await writer.PlanRestoreAsync(
+            path,
+            [.. written.Plan!.Changes.Select(change => KeyValuePair.Create(change.Field, change.From))],
+            Token);
+
+        var undone = await writer.ApplyAsync(restore, "file-1", "undo", "owner", "tagging.undo", Token);
+
+        Assert.True(undone.Status == TagWriteStatus.Written, undone.Detail);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root)).ReadAsync(path, cancellationToken: Token);
+
+        foreach (var change in written.Plan.Changes)
+        {
+            Assert.Equal(change.From, reading.Find(change.Field));
+        }
+
+        // Keys case-folded: ATL uppercases a Vorbis key on every save it makes,
+        // "encoder" included, and that is the container's spelling, not a value.
+        Assert.NotEmpty(TagsReportedByFfprobe(path, stream));
+        Assert.Equal(Folded(before), Folded(TagsReportedByFfprobe(path, stream)));
+
+        static string[] Folded(Dictionary<string, string> tags) =>
+            [.. tags.Select(tag => $"{tag.Key.ToUpperInvariant()}={tag.Value}").Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
     /// The property everything else rests on: the audio is not touched.
     /// </summary>
     /// <remarks>
@@ -1093,12 +1153,12 @@ public sealed class CatalogueTagWriteTests : IDisposable
         RunTool("ffmpeg", ["-v", "error", "-i", Path.Combine(_root, path.Value), "-f", "s16le", "-"], binary: true);
 
     /// <summary>Every tag ffprobe can see, by the name it sees it under.</summary>
-    private Dictionary<string, string> TagsReportedByFfprobe(LibraryPath path)
+    private Dictionary<string, string> TagsReportedByFfprobe(LibraryPath path, bool stream = false)
     {
         var output = RunTool(
             "ffprobe",
             [
-                "-v", "error", "-show_entries", "format_tags",
+                "-v", "error", "-show_entries", stream ? "stream_tags" : "format_tags",
                 "-of", "default=noprint_wrappers=1", Path.Combine(_root, path.Value),
             ],
             binary: false);

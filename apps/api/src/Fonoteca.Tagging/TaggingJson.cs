@@ -36,6 +36,17 @@ public sealed record TagWritePayload
 
     /// <inheritdoc cref="Writer"/>
     public required string Verifier { get; init; }
+
+    /// <summary>
+    /// Whether a total's previous value is TagLib#'s reading where ATL read none.
+    /// </summary>
+    /// <remarks>
+    /// ATL reads a total as none from a Vorbis comment holding <c>TRACKTOTAL</c>
+    /// and <c>TOTALTRACKS</c> together, and merges the two keys when it writes. An
+    /// entry without this says "no total before" when there was one, so an undo
+    /// may not take its absence at its word.
+    /// </remarks>
+    public bool TotalsVerified { get; init; }
 }
 
 /// <summary>One field, as this container spells it, and what became of it.</summary>

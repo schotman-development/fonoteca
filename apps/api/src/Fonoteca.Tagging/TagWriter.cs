@@ -149,6 +149,37 @@ public sealed class TagWriter(
         return new TagWritePlan(path, changes, before);
     }
 
+    /// <summary>
+    /// What putting fields back to the values a journal recorded would change.
+    /// </summary>
+    /// <param name="fields">
+    /// Field names as the journal spells them — already the container's, since
+    /// they came out of a plan for this file — to the value each should hold.
+    /// Null removes the field: unlike <see cref="PlanAsync"/>, this is how an
+    /// undo says "the write added this", and only an undo calls it.
+    /// </param>
+    public async Task<TagWritePlan?> PlanRestoreAsync(
+        LibraryPath path,
+        IReadOnlyList<KeyValuePair<string, string?>> fields,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        if (AcoustIdTagField.For(path) is null) return null;
+
+        var before = await _reader.ReadAsync(path, null, cancellationToken).ConfigureAwait(false);
+
+        TagFieldChange[] changes =
+        [
+            .. fields
+                .OrderBy(field => field.Key, StringComparer.Ordinal)
+                .Select(field => new TagFieldChange(field.Key, before.Find(field.Key), field.Value))
+                .Where(change => !string.Equals(change.From, change.To, StringComparison.Ordinal)),
+        ];
+
+        return new TagWritePlan(path, changes, before);
+    }
+
     /// <summary>ATL's name for the ID3v2 frame MusicBrainz's recording id lives in.</summary>
     private const string UfidField = "UFID";
 
@@ -245,7 +276,7 @@ public sealed class TagWriter(
             {
                 await JournalAsync(
                     plan, $"{eventPrefix}.aborted", subjectId, correlationId, actorId, rendered,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken, stored).ConfigureAwait(false);
 
                 return new TagWriteResult(plan, TagWriteStatus.VerificationFailed, rendered);
             }
@@ -267,7 +298,7 @@ public sealed class TagWriter(
             {
                 await JournalAsync(
                     plan, $"{eventPrefix}.aborted", subjectId, correlationId, actorId, problem,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken, stored).ConfigureAwait(false);
 
                 // Falling out of the await using without committing deletes the
                 // staged file and leaves the original exactly as it was.
@@ -275,7 +306,7 @@ public sealed class TagWriter(
             }
 
             var undoId = await JournalAsync(
-                plan, $"{eventPrefix}.written", subjectId, correlationId, actorId, null, cancellationToken)
+                plan, $"{eventPrefix}.written", subjectId, correlationId, actorId, null, cancellationToken, stored)
                 .ConfigureAwait(false);
 
             await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -363,19 +394,32 @@ public sealed class TagWriter(
 
         switch (change.Field)
         {
-            case CatalogueTags.Title: track.Title = value; break;
-            case CatalogueTags.Artist: track.Artist = value; break;
-            case CatalogueTags.Album: track.Album = value; break;
-            case CatalogueTags.AlbumArtist: track.AlbumArtist = value; break;
-            case CatalogueTags.TrackNumber: track.TrackNumber = Count(value); break;
-            case CatalogueTags.TrackTotal: track.TrackTotal = Count(value); break;
-            case CatalogueTags.DiscNumber: track.DiscNumber = Count(value); break;
-            case CatalogueTags.DiscTotal: track.DiscTotal = Count(value); break;
+            // ATL reads null on a typed property as "leave it", and an empty
+            // value as "remove it" — the second is what a null here means.
+            case CatalogueTags.Title: track.Title = value ?? string.Empty; break;
+            case CatalogueTags.Artist: track.Artist = value ?? string.Empty; break;
+            case CatalogueTags.Album: track.Album = value ?? string.Empty; break;
+            case CatalogueTags.AlbumArtist: track.AlbumArtist = value ?? string.Empty; break;
+            case CatalogueTags.TrackNumber: track.TrackNumber = value is null ? 0 : Count(value); break;
+            case CatalogueTags.TrackTotal: track.TrackTotal = value is null ? 0 : Count(value); break;
+            case CatalogueTags.DiscNumber: track.DiscNumber = value is null ? 0 : Count(value); break;
+            case CatalogueTags.DiscTotal: track.DiscTotal = value is null ? 0 : Count(value); break;
 
             // The year, never a date. ATL's Date is a DateTime and cannot hold
             // "1969" without inventing the first of January — see
             // CatalogueTagSource.Year.
-            case CatalogueTags.Year: track.Year = Count(value); break;
+            case CatalogueTags.Year: track.Year = value is null ? 0 : Count(value); break;
+
+            // Gone, under every spelling of the key, as below.
+            case var _ when value is null:
+                foreach (var key in track.AdditionalFields.Keys
+                             .Where(key => key.Equals(change.Field, StringComparison.OrdinalIgnoreCase))
+                             .ToList())
+                {
+                    track.AdditionalFields.Remove(key);
+                }
+
+                break;
 
             default:
                 // Every spelling of the key. A file carrying an APE tag beside
@@ -596,6 +640,14 @@ public sealed class TagWriter(
         return [.. plan.Before.FieldsLostIn(written).Where(field => !intended.Contains(field))];
     }
 
+    /// <summary>A total TagLib# read where ATL read none — see <see cref="TagWritePayload.TotalsVerified"/>.</summary>
+    private static string? Total(string field, TagSnapshot? stored) => field switch
+    {
+        CatalogueTags.TrackTotal => stored?.TrackTotal?.ToString(CultureInfo.InvariantCulture),
+        CatalogueTags.DiscTotal => stored?.DiscTotal?.ToString(CultureInfo.InvariantCulture),
+        _ => null,
+    };
+
     /// <summary>A value PostgreSQL's <c>jsonb</c> will store.</summary>
     /// <remarks>
     /// <c>jsonb</c> refuses <c>\u0000</c> outright, and a <c>UFID</c> is an owner
@@ -613,7 +665,8 @@ public sealed class TagWriter(
         string correlationId,
         string actorId,
         string? reason,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TagSnapshot? stored = null)
     {
         var payload = JsonSerializer.Serialize(
             new TagWritePayload
@@ -625,10 +678,11 @@ public sealed class TagWriter(
                         new TagFieldWrite
                         {
                             Field = change.Field,
-                            Previous = Storable(change.From),
+                            Previous = Storable(change.From ?? Total(change.Field, stored)),
                             Written = Storable(change.To),
                         }),
                 ],
+                TotalsVerified = stored is not null,
                 Reason = Storable(reason),
                 Pictures = plan.Before.PictureCount,
                 PictureDigests = plan.Before.PictureDigests,
