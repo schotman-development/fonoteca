@@ -64,6 +64,9 @@ public static class CatalogueTagFields
         CatalogueTags.DiscNumber,
         CatalogueTags.DiscTotal,
         CatalogueTags.Year,
+        CatalogueTags.Genre,
+        CatalogueTags.Composer,
+        CatalogueTags.Comment,
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
@@ -89,6 +92,24 @@ public static class CatalogueTagFields
 
     /// <summary>Whether ATL has a typed property for this fact.</summary>
     public static bool IsStandard(string canonical) => Standard.Contains(canonical);
+
+    /// <summary>
+    /// How this container spells a field a person named, or null when it cannot carry one.
+    /// </summary>
+    /// <remarks>
+    /// As named: a Vorbis comment and an APE item take the name itself, ID3v2 a
+    /// <c>TXXX</c> described by it, MP4 a freeform atom called it — which is
+    /// what ATL makes of a name it does not know, and what the verifier reads.
+    /// </remarks>
+    public static string? Custom(LibraryPath path, string name) =>
+        AcoustIdTagField.For(path) is null || !PersonTags.IsCustom(name) ? null : name;
+
+    /// <summary>Whether a field, as a container spells it, is a person's own rather than the catalogue's.</summary>
+    public static bool IsCustom(string field) =>
+        !Standard.Contains(field)
+        && !TitleCased.ContainsKey(field)
+        && !TitleCased.Values.Contains(field, StringComparer.OrdinalIgnoreCase)
+        && PersonTags.IsCustom(field);
 
     /// <summary>
     /// How this container spells <paramref name="canonical"/>, or null when it

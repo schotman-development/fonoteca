@@ -154,6 +154,41 @@ public sealed class TagReader(IAudioFileStore files)
         }
     }
 
+    /// <summary>
+    /// Fields a person named, as TagLib# reads them from where each container keeps them.
+    /// </summary>
+    /// <inheritdoc cref="ReadAsync(LibraryPath, LibraryPath?, CancellationToken)" path="/param"/>
+    public async Task<IReadOnlyDictionary<string, string?>> ReadCustomWithVerifierAsync(
+        LibraryPath path,
+        LibraryPath? containerAs,
+        IReadOnlyList<string> names,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        var container = containerAs ?? path;
+
+        var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
+        await using (stream.ConfigureAwait(false))
+        {
+            try
+            {
+                using var file = TagLib.File.Create(new StreamFileAbstraction(container.Value, stream));
+                return names.Distinct(StringComparer.Ordinal).ToDictionary(name => name, name => VerifierReading.Custom(file, name, name, name));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // As in ReadWithVerifierAsync.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                throw new TagReadFailedException(path, "TagLib#", cause);
+            }
+        }
+    }
+
     /// <summary>Reads the field, tolerating the case-folding each format applies.</summary>
     internal static string? Lookup(Track track, string field)
     {

@@ -122,11 +122,21 @@ internal static partial class VerifierReading
     private static partial System.Text.RegularExpressions.Regex SwappedDay();
 
     /// <summary>The AcoustID, from whichever tag system this container actually uses.</summary>
-    private static string? ReadAcoustId(File file)
+    private static string? ReadAcoustId(File file) =>
+        Custom(file, AcoustIdTagField.Uppercase, AcoustIdTagField.TitleCase, AcoustIdTagField.Uppercase);
+
+    /// <summary>
+    /// A field outside the common set, from whichever tag system this container
+    /// uses, under the name that system spells it with.
+    /// </summary>
+    /// <param name="vorbis">The Vorbis comment's name.</param>
+    /// <param name="described">The ID3v2 <c>TXXX</c> description and the MP4 freeform atom's name.</param>
+    /// <param name="key">The APE item's key.</param>
+    public static string? Custom(File file, string vorbis, string described, string key)
     {
         if (file.GetTag(TagTypes.Xiph, create: false) is XiphComment xiph)
         {
-            var values = xiph.GetField(AcoustIdTagField.Uppercase);
+            var values = xiph.GetField(vorbis);
             if (values.Length > 0) return values[0];
         }
 
@@ -134,7 +144,7 @@ internal static partial class VerifierReading
         {
             foreach (var frame in id3.GetFrames<TagLib.Id3v2.UserTextInformationFrame>())
             {
-                if (!string.Equals(frame.Description, AcoustIdTagField.TitleCase, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(frame.Description, described, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -148,13 +158,13 @@ internal static partial class VerifierReading
             // The freeform atom, spelled out: ---- / mean=com.apple.iTunes /
             // name=Acoustid Id. ATL writes the prefix itself, so this is where we
             // confirm it actually did.
-            var dash = apple.GetDashBox(ITunesMean, AcoustIdTagField.TitleCase);
+            var dash = apple.GetDashBox(ITunesMean, described);
             if (!string.IsNullOrEmpty(dash)) return dash;
         }
 
         if (file.GetTag(TagTypes.Ape, create: false) is TagLib.Ape.Tag ape)
         {
-            var item = ape.GetItem(AcoustIdTagField.Uppercase);
+            var item = ape.GetItem(key);
             if (item is not null && item.ToStringArray().Length > 0) return item.ToStringArray()[0];
         }
 

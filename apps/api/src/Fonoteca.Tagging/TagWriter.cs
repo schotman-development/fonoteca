@@ -105,9 +105,22 @@ public sealed class TagWriter(
     /// dictionary's own order, two identical writes produce two different
     /// payloads and nothing downstream can compare them.
     /// </remarks>
+    public Task<TagWritePlan?> PlanAsync(
+        LibraryPath path,
+        IReadOnlyDictionary<string, string> desired,
+        CancellationToken cancellationToken = default) =>
+        PlanAsync(path, desired, null, cancellationToken);
+
+    /// <inheritdoc cref="PlanAsync(LibraryPath, IReadOnlyDictionary{string, string}, CancellationToken)"/>
+    /// <param name="person">
+    /// What a person set, over <paramref name="desired"/> and winning over it:
+    /// canonical names to values, null meaning "this file carries none". The one
+    /// way a removal enters a write, because it is the one source that can mean it.
+    /// </param>
     public async Task<TagWritePlan?> PlanAsync(
         LibraryPath path,
         IReadOnlyDictionary<string, string> desired,
+        IReadOnlyDictionary<string, string?>? person,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(desired);
@@ -119,15 +132,17 @@ public sealed class TagWriter(
         var before = await _reader.ReadAsync(path, null, cancellationToken).ConfigureAwait(false);
 
         var changes = new List<TagFieldChange>();
+        var mine = person ?? new Dictionary<string, string?>();
 
-        foreach (var canonical in desired.Keys.OrderBy(name => name, StringComparer.Ordinal))
+        foreach (var canonical in desired.Keys.Union(mine.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
         {
-            var field = CatalogueTagFields.Spell(path, canonical);
+            var field = CatalogueTagFields.Spell(path, canonical)
+                ?? (mine.ContainsKey(canonical) ? CatalogueTagFields.Custom(path, canonical) : null);
 
             if (field is null) continue;
 
             var current = before.Find(field);
-            var value = desired[canonical];
+            var value = mine.TryGetValue(canonical, out var set) ? set : desired[canonical];
 
             if (!string.Equals(current, value, StringComparison.Ordinal))
             {
@@ -400,6 +415,9 @@ public sealed class TagWriter(
             case CatalogueTags.Artist: track.Artist = value ?? string.Empty; break;
             case CatalogueTags.Album: track.Album = value ?? string.Empty; break;
             case CatalogueTags.AlbumArtist: track.AlbumArtist = value ?? string.Empty; break;
+            case CatalogueTags.Genre: track.Genre = value ?? string.Empty; break;
+            case CatalogueTags.Composer: track.Composer = value ?? string.Empty; break;
+            case CatalogueTags.Comment: track.Comment = value ?? string.Empty; break;
             case CatalogueTags.TrackNumber: track.TrackNumber = value is null ? 0 : Count(value); break;
             case CatalogueTags.TrackTotal: track.TrackTotal = value is null ? 0 : Count(value); break;
             case CatalogueTags.DiscNumber: track.DiscNumber = value is null ? 0 : Count(value); break;
@@ -532,6 +550,26 @@ public sealed class TagWriter(
         if (!written.AgreesWith(verified))
         {
             return "The two tag libraries disagree about the file they just read.";
+        }
+
+        // A field a person named is held to TagLib#'s native reading as the
+        // AcoustID is: in the comment, the TXXX frame, the freeform atom or the
+        // APE item the container defines — not merely somewhere under the name.
+        var named = plan.Changes.Where(change => CatalogueTagFields.IsCustom(change.Field)).ToList();
+
+        if (named.Count > 0)
+        {
+            var witnessed = await _reader
+                .ReadCustomWithVerifierAsync(stagedPath, plan.Path, [.. named.Select(change => change.Field)], cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var change in named)
+            {
+                if (!string.Equals(witnessed.GetValueOrDefault(change.Field), change.To, StringComparison.Ordinal))
+                {
+                    return $"TagLib# reads {change.Field} as '{witnessed.GetValueOrDefault(change.Field) ?? "none"}' rather than '{change.To ?? "none"}'.";
+                }
+            }
         }
 
         // As a set: TagLib# counts a cover twice when an ID3 tag in front of a
