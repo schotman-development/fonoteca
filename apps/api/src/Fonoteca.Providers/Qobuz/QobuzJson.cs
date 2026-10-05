@@ -72,6 +72,22 @@ internal sealed record QobuzAlbumBody
     /// </remarks>
     [JsonPropertyName("upc")]
     public string? Upc { get; init; }
+
+    [JsonPropertyName("label")]
+    public QobuzLabelBody? Label { get; init; }
+
+    /// <summary>
+    /// The album's artists by name, each whole — the one place a name with a
+    /// comma in it ("Tyler, The Creator") is not run into its roles.
+    /// </summary>
+    [JsonPropertyName("artists")]
+    public IReadOnlyList<QobuzArtistBody>? Artists { get; init; }
+}
+
+internal sealed record QobuzLabelBody
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
 }
 
 internal sealed record QobuzArtistBody
@@ -186,6 +202,24 @@ internal sealed record QobuzTrackBody
 
     [JsonPropertyName("streamable")]
     public bool? Streamable { get; init; }
+
+    [JsonPropertyName("isrc")]
+    public string? Isrc { get; init; }
+
+    /// <summary>
+    /// Everyone credited on the track, with their roles, as one string:
+    /// <c>Name, Role, Role - Name, Role</c>.
+    /// </summary>
+    /// <remarks>
+    /// Read apart by <c>ProviderCredits</c> in the domain, where the rules are.
+    /// Kept verbatim here — the spelling varies within one album ("Jasha" and
+    /// "Jascha" Heifetz on adjacent tracks), and a tidied copy would hide it.
+    /// </remarks>
+    [JsonPropertyName("performers")]
+    public string? Performers { get; init; }
+
+    [JsonPropertyName("composer")]
+    public QobuzArtistBody? Composer { get; init; }
 }
 
 internal sealed record QobuzSearchBody

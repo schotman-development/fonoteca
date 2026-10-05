@@ -627,7 +627,10 @@ public sealed class QobuzClient(
                 item.TrackNumber,
                 item.Performer?.Name,
                 item.Duration is { } seconds ? TimeSpan.FromSeconds(seconds) : null,
-                item.Streamable ?? true));
+                item.Streamable ?? true,
+                NullIfBlank(item.Isrc),
+                NullIfBlank(item.Performers),
+                NullIfBlank(item.Composer?.Name)));
         }
 
         return new QobuzAlbum(
@@ -649,7 +652,9 @@ public sealed class QobuzClient(
             // the wiring — see QobuzAlbumBody.Upc. It is the only key an album
             // with no MBID has, so leaving it unread would make every
             // provider-sourced release unmatchable against MusicBrainz forever.
-            NullIfBlank(body.Upc));
+            NullIfBlank(body.Upc),
+            NullIfBlank(body.Label?.Name),
+            [.. (body.Artists ?? []).Select(artist => NullIfBlank(artist.Name)).OfType<string>()]);
     }
 
     /// <summary>A trimmed value, or null where the service sent nothing usable.</summary>
@@ -718,6 +723,7 @@ public sealed record QobuzArtist(string Name, string? ImageUrl, int AlbumCount, 
 /// <summary>One album as an acquisition sees it.</summary>
 /// <param name="TrackCount">Qobuz's own count. Higher than <c>Tracks.Count</c> means the list was cut.</param>
 /// <param name="Streamable">Whether the account may play it at all — region and tier.</param>
+/// <param name="Artists">The album's artists by name, whole, where the shop lists them.</param>
 /// <param name="Upc">
 /// The barcode, or null. The one key a provider-sourced release has — see
 /// <c>QobuzAlbumBody.Upc</c> and ADR 0011 — and the only field here that can
@@ -736,7 +742,9 @@ public sealed record QobuzAlbum(
     bool Streamable,
     string? CoverUrl,
     IReadOnlyList<QobuzTrack> Tracks,
-    string? Upc = null);
+    string? Upc = null,
+    string? Label = null,
+    IReadOnlyList<string>? Artists = null);
 
 /// <summary>An artist's records, and how many of them there were.</summary>
 /// <param name="Albums">The page that came back, oldest-to-newest as Qobuz order them.</param>
@@ -749,6 +757,7 @@ public sealed record QobuzAlbum(
 public sealed record QobuzArtistAlbums(IReadOnlyList<QobuzAlbum> Albums, int Total);
 
 /// <param name="Performer">The track's own credit, which on a compilation is not the album's.</param>
+/// <param name="Performers">Everyone credited, with roles, verbatim — see <c>QobuzTrackBody.Performers</c>.</param>
 public sealed record QobuzTrack(
     long Id,
     string Title,
@@ -756,7 +765,10 @@ public sealed record QobuzTrack(
     int TrackNumber,
     string? Performer,
     TimeSpan? Duration,
-    bool Streamable);
+    bool Streamable,
+    string? Isrc = null,
+    string? Performers = null,
+    string? Composer = null);
 
 /// <summary>
 /// Either a signed URL, or the reason Qobuz will not serve this track.

@@ -194,6 +194,43 @@ public sealed class QobuzClientTests : IDisposable
         Assert.Equal("Rock with You", Assert.Single(album.Tracks).Title);
     }
 
+    /// <summary>
+    /// What ADR 0011 files a download by, read off two live responses: the
+    /// barcode, the label, and per track the ISRC, the composer and the credit
+    /// string — verbatim, misspellings included.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumCarriesItsBarcodeLabelAndEachTracksIsrcAndCredits()
+    {
+        var (brahms, _) = Build(_ => Ok(ReadFixture("qobuz-album-essential-brahms.json")));
+        var album = await brahms.GetAlbumAsync("r8atsj1g7hcvb", Token);
+
+        Assert.NotNull(album);
+        Assert.Equal("0888002932631", album.Upc);
+        Assert.Equal("Classical Expressions", album.Label);
+        Assert.Equal(50, album.Tracks.Count);
+
+        var first = album.Tracks[0];
+        Assert.Equal("USA371627410", first.Isrc);
+        Assert.Equal("Johannes Brahms", first.Composer);
+        Assert.Equal(
+            "Various Artists, MainArtist - Johannes Brahms, Composer - William Steinberg, Conductor - Pittsburgh Symphony Orchestra, Orchestra",
+            first.Performers);
+        Assert.Contains("Jasha Heifetz", album.Tracks[24].Performers, StringComparison.Ordinal);
+        Assert.Contains("Jascha Heifetz", album.Tracks[25].Performers, StringComparison.Ordinal);
+
+        var (rumours, _) = Build(_ => Ok(ReadFixture("qobuz-album-rumours.json")));
+        var band = await rumours.GetAlbumAsync("0603497941032", Token);
+
+        Assert.NotNull(band);
+        Assert.Equal("Rhino/Warner Records", band.Label);
+        Assert.Equal(["Fleetwood Mac"], band.Artists);
+        Assert.Empty(album.Artists!);
+        Assert.Equal("USWB10101367", band.Tracks[0].Isrc);
+        Assert.Null(band.Tracks[0].Composer);
+        Assert.StartsWith("Fleetwood Mac, MainArtist - ", band.Tracks[0].Performers, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ATruncatedTrackListIsVisibleRatherThanSilent()
     {
@@ -282,6 +319,18 @@ public sealed class QobuzClientTests : IDisposable
         }
 
         return fields;
+    }
+
+    private static string ReadFixture(string name)
+    {
+        var assembly = typeof(QobuzClientTests).Assembly;
+        var resource = $"{assembly.GetName().Name}.Responses.{name}";
+
+        using var stream = assembly.GetManifestResourceStream(resource)
+            ?? throw new InvalidOperationException($"Missing embedded fixture '{resource}'.");
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     /// <summary>The real registration, with both sockets replaced and the backoff collapsed.</summary>
