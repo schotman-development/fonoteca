@@ -142,6 +142,10 @@ builder.Services.AddSingleton<ProbeService>();
 // only from a button because of what it does.
 builder.Services.AddSingleton<TagWriteService>();
 builder.Services.AddScoped<AlbumReplacementService>();
+builder.Services.AddScoped<DownloadFiling>();
+builder.Services.AddScoped<Acquiring>();
+builder.Services.AddSingleton<MusicBrainzCatchUp>();
+builder.Services.AddHostedService<ProviderCatchUpService>();
 builder.Services.AddScoped<FileManagerService>();
 
 // Registered as a hosted service as well as a singleton, so shutdown cancels a

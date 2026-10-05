@@ -351,7 +351,7 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     /// thing; storing the raw name would make the browse query re-derive that
     /// decision in SQL, in a second place, where it would drift.
     /// </remarks>
-    private static string RoleName(CreditRole role) => role switch
+    internal static string RoleName(CreditRole role) => role switch
     {
         CreditRole.Conductor => "conductor",
         CreditRole.Ensemble => "ensemble",

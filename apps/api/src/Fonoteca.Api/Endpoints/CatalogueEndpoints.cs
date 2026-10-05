@@ -2135,6 +2135,7 @@ public static partial class CatalogueEndpoints
     private static readonly ReleaseAttributionOutcome[] StrongestFirst =
     [
         ReleaseAttributionOutcome.Attributed,
+        ReleaseAttributionOutcome.AttributedByProvider,
         ReleaseAttributionOutcome.AttributedAmbiguously,
         ReleaseAttributionOutcome.GroupOnly,
         ReleaseAttributionOutcome.AttributedByPerson,

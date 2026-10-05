@@ -758,4 +758,28 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "'{Path}' would not move: {Reason}")]
     public static partial void FilesTrashRefused(ILogger logger, string path, string reason);
+
+    [LoggerMessage(
+        EventId = 1500,
+        Level = LogLevel.Information,
+        Message = "MusicBrainz was not asked about release {Release}, filed from a download: {Reason}")]
+    public static partial void CatchUpNotAsked(ILogger logger, Guid release, string reason);
+
+    [LoggerMessage(
+        EventId = 1501,
+        Level = LogLevel.Warning,
+        Message = "The MusicBrainz catch-up for downloads failed; the next sweep tries again.")]
+    public static partial void CatchUpSweepFailed(ILogger logger, Exception cause);
+
+    [LoggerMessage(
+        EventId = 1502,
+        Level = LogLevel.Information,
+        Message = "Downloads caught up with MusicBrainz: {Albums} albums moved onto it, {Recordings} recordings given its ids")]
+    public static partial void CaughtUp(ILogger logger, int albums, int recordings);
+
+    [LoggerMessage(
+        EventId = 1503,
+        Level = LogLevel.Information,
+        Message = "MusicBrainz was not asked about Qobuz album {Album} at download, which is filed as the shop described it: {Reason}")]
+    public static partial void DownloadNotLookedUp(ILogger logger, string album, string reason);
 }

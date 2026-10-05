@@ -231,6 +231,18 @@ public sealed class Release
     public string? CatalogNumber { get; set; }
     public string? Barcode { get; set; }
 
+    /// <summary>
+    /// When MusicBrainz was last asked about a release a download minted with no
+    /// MBID (ADR 0011), by its barcode and its recordings' ISRCs.
+    /// </summary>
+    /// <remarks>
+    /// Rule 1: keyed on "we asked", stamped when the answer was nothing, and
+    /// asked again after a week (<c>MusicBrainzCatchUp.AskAgainAfter</c>), since
+    /// MusicBrainz gains releases. A release found there stops being one of
+    /// these: its files move to MusicBrainz's and it is removed.
+    /// </remarks>
+    public DateTimeOffset? ProviderCheckedUtc { get; set; }
+
     /// <summary>Expected track count, for detecting an incomplete rip.</summary>
     public int? TrackCount { get; set; }
 

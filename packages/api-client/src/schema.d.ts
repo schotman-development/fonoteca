@@ -1445,6 +1445,20 @@ export interface components {
             skipped: number;
             detail: string;
         };
+        AlbumFiling: {
+            /** Format: uuid */
+            albumId: null | string;
+            folder: string;
+            /** Format: int32 */
+            filed: number;
+            /** Format: int32 */
+            kept: number;
+            /** Format: int32 */
+            tagsWritten: number;
+            /** Format: int32 */
+            tagsNotWritten: number;
+            why: null | string;
+        };
         AlbumFilingPair: {
             /** Format: uuid */
             file: string;
@@ -1599,6 +1613,7 @@ export interface components {
         AlbumUpgrade: {
             download: null | components["schemas"]["AlbumDownload"];
             replacement: null | components["schemas"]["AlbumReplacement"];
+            filing: null | components["schemas"]["AlbumFiling"];
         };
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];

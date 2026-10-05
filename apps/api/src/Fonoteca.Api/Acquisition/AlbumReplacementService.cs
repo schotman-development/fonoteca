@@ -482,6 +482,14 @@ public sealed class AlbumReplacementService(
 
         var moved = Archive(config, trimmed, destination, [.. old.Select(file => file.Path)]);
 
+        // The archived files' rows go with them, the owner's choice, rather
+        // than wait for a scan: the new album is about to be filed at the same
+        // paths, and an old row there would be found and kept.
+        await db.MediaFiles
+            .Where(file => moved.Contains(file.Path))
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+
         if (fetched) MoveInto(root, download, trimmed);
 
         // The folders the move emptied, disc folders first. One copy of this

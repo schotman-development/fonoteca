@@ -296,10 +296,15 @@ public sealed class AlbumReplacementTests(PostgresFixture postgres) : IAsyncLife
         Assert.NotNull(one.ArchivedTo);
         Assert.StartsWith(_archive, one.ArchivedTo, StringComparison.Ordinal);
 
-        // The same album comes back — a different rip at the same path. Only the
-        // file: the catalogue row survived the first replacement untouched,
-        // which is the design (the scan is what reconciles rows against disk).
-        Directory.CreateDirectory(Path.Combine(_root, "Old Artist", "Old Album (2003)"));
+        // The archived file's row went with it.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.False(await db.MediaFiles.AnyAsync(file => file.Path == $"{OldFolder}/01 Track.mp3", Token));
+        }
+
+        // The same album comes back — a different rip at the same path, found
+        // by a scan as any file is.
+        await GivenHeldAsync(Mp3(), $"{OldFolder}/01 Track.mp3");
         await File.WriteAllTextAsync(
             Path.Combine(_root, "Old Artist", "Old Album (2003)", "01 Track.mp3"),
             "the second rip", Token);

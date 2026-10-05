@@ -1006,8 +1006,9 @@ public static class QobuzEndpoints
         IOptions<QobuzOptions> qobuzOptions,
         QobuzDownloadService downloads,
         AlbumReplacementService replacements,
+        Acquiring acquiring,
         CancellationToken cancellationToken) =>
-        AcquireAsync(albumId, null, confirmed == true, separate == true, qobuz, qobuzOptions, downloads, replacements, cancellationToken);
+        AcquireAsync(albumId, null, confirmed == true, separate == true, qobuz, qobuzOptions, downloads, replacements, acquiring, cancellationToken);
 
     /// <summary>
     /// <see cref="DownloadAlbum"/>, replacing the folder a row named rather than
@@ -1020,6 +1021,7 @@ public static class QobuzEndpoints
         IOptions<QobuzOptions> qobuzOptions,
         QobuzDownloadService downloads,
         AlbumReplacementService replacements,
+        Acquiring acquiring,
         CancellationToken cancellationToken)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Folder))
@@ -1062,6 +1064,7 @@ public static class QobuzEndpoints
             qobuzOptions,
             downloads,
             replacements,
+            acquiring,
             cancellationToken);
     }
 
@@ -1074,8 +1077,22 @@ public static class QobuzEndpoints
         IOptions<QobuzOptions> qobuzOptions,
         QobuzDownloadService downloads,
         AlbumReplacementService replacements,
+        Acquiring acquiring,
         CancellationToken cancellationToken)
     {
+        // ADR 0011: the download writes rows and tags, the kind of thing a pass
+        // holds in an in-flight page, so it waits for none — it is refused, the
+        // owner's choice, and asked again later.
+        if (!acquiring.Gate.TryEnter(Acquiring.Kind, out var lease))
+        {
+            return TypedResults.Problem(
+                "A library pass is running. Download the album again once it has finished. Nothing was downloaded.",
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The library is busy");
+        }
+
+        using var leased = lease;
+
         try
         {
             var album = await qobuz.GetAlbumAsync(albumId, cancellationToken).ConfigureAwait(false)
@@ -1112,7 +1129,10 @@ public static class QobuzEndpoints
                 var download = await downloads.DownloadAlbumAsync(album, replacing: false, cancellationToken)
                     .ConfigureAwait(false);
 
-                return TypedResults.Ok(new AlbumUpgrade(download, null));
+                var filing = await acquiring.FileAsync(album, download, download.Folder, moved: false, replacedKnown: false, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return TypedResults.Ok(new AlbumUpgrade(download, null, filing));
             }
 
             // One replacement at a time, from the offer to the move in: two tabs
@@ -1128,7 +1148,7 @@ public static class QobuzEndpoints
 
             try
             {
-                return await ReplaceAsync(album, held, confirmed, qobuzOptions, downloads, replacements, cancellationToken)
+                return await ReplaceAsync(album, held, confirmed, qobuzOptions, downloads, replacements, acquiring, cancellationToken)
                     .ConfigureAwait(false);
             }
             finally
@@ -1174,6 +1194,7 @@ public static class QobuzEndpoints
         IOptions<QobuzOptions> qobuzOptions,
         QobuzDownloadService downloads,
         AlbumReplacementService replacements,
+        Acquiring acquiring,
         CancellationToken cancellationToken)
     {
         if (await replacements
@@ -1183,7 +1204,7 @@ public static class QobuzEndpoints
             // A download kept from an earlier attempt to resume is not
             // wanted by an offer that is no longer an upgrade.
             downloads.Discard(album);
-            return TypedResults.Ok(new AlbumUpgrade(null, refused));
+            return TypedResults.Ok(new AlbumUpgrade(null, refused, null));
         }
 
         AlbumDownload fetched;
@@ -1201,11 +1222,20 @@ public static class QobuzEndpoints
             throw;
         }
 
+        // Asked before the old rows go with the old files.
+        var known = await acquiring.Filing.KnownToMusicBrainzAsync(held.Folder, cancellationToken).ConfigureAwait(false);
+
         var replacement = await replacements
             .ReplaceAsync(held.Folder, held.Files, fetched, cancellationToken)
             .ConfigureAwait(false);
 
-        return TypedResults.Ok(new AlbumUpgrade(fetched, replacement));
+        // Filed only where the download took the old album's place.
+        var filing = replacement.ArchivedTo is null
+            ? null
+            : await acquiring.FileAsync(album, fetched, replacement.DownloadedTo, moved: true, replacedKnown: known, cancellationToken)
+                .ConfigureAwait(false);
+
+        return TypedResults.Ok(new AlbumUpgrade(fetched, replacement, filing));
     }
 
     /// <summary>
@@ -1288,7 +1318,26 @@ public sealed record UpgradeRequest(string Folder, int Files, bool Confirmed = f
 /// </remarks>
 /// <param name="Download">Null when the offer was refused and nothing was fetched.</param>
 /// <param name="Replacement">Null when the library held no copy of the album.</param>
-public sealed record AlbumUpgrade(AlbumDownload? Download, AlbumReplacement? Replacement);
+/// <param name="Filing">What was filed in the catalogue, where the download landed in the library.</param>
+public sealed record AlbumUpgrade(AlbumDownload? Download, AlbumReplacement? Replacement, AlbumFiling? Filing);
+
+/// <summary>A download filed in the catalogue as the shop described it, and its tags written (ADR 0011).</summary>
+/// <param name="AlbumId">The album it was filed under, or null where nothing was.</param>
+/// <param name="Folder">Where the album is now; writing its tags may have renamed it.</param>
+/// <param name="Kept">Files left as they were: a person had answered them, or they had gone.</param>
+/// <param name="TagsWritten">Files whose tags were written. None while file writing is off.</param>
+/// <param name="Why">Why nothing was filed, or why the tags were not written.</param>
+public sealed record AlbumFiling(
+    Guid? AlbumId,
+    string Folder,
+    int Filed,
+    int Kept,
+    int TagsWritten,
+    int TagsNotWritten,
+    string? Why)
+{
+    internal static AlbumFiling Left(string folder, string why) => new(null, folder, 0, 0, 0, 0, why);
+}
 
 /// <param name="DurationSeconds">Qobuz's stated length, which is a claim and not a measurement.</param>
 public sealed record QobuzTrackResponse(

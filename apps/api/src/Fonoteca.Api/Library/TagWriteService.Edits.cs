@@ -271,18 +271,7 @@ public sealed partial class TagWriteService
 
             await db.SaveChangesAsync(token).ConfigureAwait(false);
 
-            var jobId = Guid.CreateVersion7().ToString("N")[..12];
-
-            TagWriteSummary summary;
-
-            try
-            {
-                summary = await RunAsync(jobId, TagWriteScope.ForFolder(folder), token, caller.ActorId, run).ConfigureAwait(false);
-            }
-            finally
-            {
-                _progress = null;
-            }
+            var summary = await WriteFolderAsync(folder, caller.ActorId, run, token).ConfigureAwait(false);
 
             var here = await db.MediaFiles
                 .AsNoTracking()
@@ -299,6 +288,32 @@ public sealed partial class TagWriteService
                 summary.Refused + summary.Failed + summary.Unsupported,
                 summary.Renamed,
                 []);
+        }
+    }
+
+    /// <summary>
+    /// Writes one album folder now, as the tag write writes any — its tags,
+    /// then its name — under a lease on the gate the caller already holds: a
+    /// person's save, or a download's (ADR 0011).
+    /// </summary>
+    /// <param name="correlation">The journal correlation, where the caller needs to know it; else a new one.</param>
+    public async Task<TagWriteSummary> WriteFolderAsync(
+        string folder,
+        string actor,
+        string? correlation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+
+        var jobId = Guid.CreateVersion7().ToString("N")[..12];
+
+        try
+        {
+            return await RunAsync(jobId, TagWriteScope.ForFolder(folder), cancellationToken, actor, correlation).ConfigureAwait(false);
+        }
+        finally
+        {
+            _progress = null;
         }
     }
 

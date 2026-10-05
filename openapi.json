@@ -4028,6 +4028,52 @@
           }
         }
       },
+      "AlbumFiling": {
+        "required": [
+          "albumId",
+          "folder",
+          "filed",
+          "kept",
+          "tagsWritten",
+          "tagsNotWritten",
+          "why"
+        ],
+        "type": "object",
+        "properties": {
+          "albumId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "filed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "kept": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tagsWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tagsNotWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "why": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "AlbumFilingPair": {
         "required": [
           "file",
@@ -4624,7 +4670,8 @@
       "AlbumUpgrade": {
         "required": [
           "download",
-          "replacement"
+          "replacement",
+          "filing"
         ],
         "type": "object",
         "properties": {
@@ -4645,6 +4692,16 @@
               },
               {
                 "$ref": "#/components/schemas/AlbumReplacement"
+              }
+            ]
+          },
+          "filing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlbumFiling"
               }
             ]
           }
