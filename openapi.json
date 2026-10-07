@@ -9556,6 +9556,7 @@
           "failed",
           "skipped",
           "coversWritten",
+          "motionWritten",
           "portraitsWritten",
           "renamed",
           "notRenamed",
@@ -9611,6 +9612,10 @@
             "format": "int32"
           },
           "coversWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "motionWritten": {
             "type": "integer",
             "format": "int32"
           },

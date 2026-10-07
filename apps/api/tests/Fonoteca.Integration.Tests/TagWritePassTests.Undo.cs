@@ -164,6 +164,59 @@ public sealed partial class TagWritePassTests
     }
 
     [Fact]
+    public async Task UndoTrashesTheMotionArtworkItWroteAndPutsBackWhatItDisplaced()
+    {
+        SkipWithoutTools();
+        await SeedAsync(($"{Album}/01 track.flac", 1));
+        await SeedMotionAsync(SquareVideo, TallVideo);
+
+        var stale = new byte[] { 0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 9 };
+        await File.WriteAllBytesAsync(Path.Combine(_root, Album, "square_animated_artwork.mp4"), stale, Token);
+
+        var services = Build();
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).MotionWritten);
+
+        // The trash is stamped to the second, and the video the write displaced
+        // has the name the undo trashes; a press in the same second would collide.
+        await Task.Delay(TimeSpan.FromSeconds(1.1), Token);
+
+        var undone = await UndoAsync(services, Album);
+
+        Assert.Equal(TagUndoStatus.Undone, undone.Status);
+        Assert.Empty(undone.Problems);
+        Assert.Equal(
+            ["square_animated_artwork.mp4"],
+            Directory.EnumerateFiles(Path.Combine(_root, Album), "*.mp4").Select(Path.GetFileName).ToArray());
+        Assert.Equal(stale, await File.ReadAllBytesAsync(Path.Combine(_root, Album, "square_animated_artwork.mp4"), Token));
+
+        // Trashed, never deleted.
+        Assert.Single(Directory.EnumerateFiles(_root + "-trash", "tall_animated_artwork.mp4", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task AnEditThatOnlyWroteMotionArtworkIsTheOneUndone()
+    {
+        SkipWithoutTools();
+        await SeedAsync(($"{Album}/01 track.flac", 1));
+
+        var services = Build();
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Written);
+        var tagged = await TagsAsync($"{Album}/01 track.flac");
+
+        await SeedMotionAsync(SquareVideo, TallVideo);
+
+        var videos = await RunAsync(TagWriteScope.Library, services);
+        Assert.Equal(0, videos.Written);
+        Assert.Equal(1, videos.MotionWritten);
+
+        var undone = await UndoAsync(services, Album);
+
+        Assert.Equal(TagUndoStatus.Undone, undone.Status);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, Album), "*.mp4"));
+        Assert.Equal(tagged.Fields, (await TagsAsync($"{Album}/01 track.flac")).Fields);
+    }
+
+    [Fact]
     public async Task EachPressStepsOneEditFurtherBack()
     {
         SkipWithoutTools();

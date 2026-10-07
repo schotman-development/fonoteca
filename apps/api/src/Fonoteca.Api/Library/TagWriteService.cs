@@ -495,6 +495,7 @@ public sealed partial class TagWriteService(
             Failed: counts.Failed,
             Skipped: counts.Missing,
             CoversWritten: counts.CoversWritten,
+            MotionWritten: counts.MotionWritten,
             PortraitsWritten: counts.PortraitsWritten,
             Renamed: counts.Renamed,
             NotRenamed: counts.NotRenamed,
@@ -851,6 +852,10 @@ public sealed partial class TagWriteService(
             await EnsureCoverAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Its motion artwork, the same way and for the same reasons.
+            await EnsureMotionAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
+                .ConfigureAwait(false);
+
             // The artist's photograph, once per shelf. Same scope, same reason.
             await EnsurePortraitAsync(
                     file, counts, portraits, db, provider, correlationId, cancellationToken)
@@ -1053,6 +1058,146 @@ public sealed partial class TagWriteService(
         // Not a cancellation: the caller's `SaveChanges` takes the same token
         // and would throw on it anyway, so swallowing it here buys nothing and
         // costs a warning line naming a cover problem that is a stopped pass.
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            Log.CoverNotWritten(logger, target, Because(cause));
+        }
+    }
+
+    /// <summary>The names motion artwork is written under, square then tall.</summary>
+    /// <remarks>
+    /// The names the most-used Apple Music downloader writes, so a player that
+    /// learns to read one library's reads this one's. Never <c>cover.*</c>: a
+    /// player globbing for the sleeve would find a video.
+    /// </remarks>
+    internal static readonly string[] MotionNames = ["square_animated_artwork.mp4", "tall_animated_artwork.mp4"];
+
+    /// <summary>
+    /// The album's motion artwork, written once beside the music as two MP4s.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EnsureCoverAsync"/>'s rules throughout — once per album folder,
+    /// nothing with mutation off, whatever is in the way displaced to the trash
+    /// rather than overwritten, journalled so Undo takes it back, and a failure
+    /// a motion problem rather than a tagging one — with two differences.
+    ///
+    /// <b>It is the album's</b>, keyed on the release group rather than an
+    /// edition, because the shop sells one video per record.
+    ///
+    /// <b>A video already there is recognised by its length</b>, the way Undo
+    /// recognises a sleeve it wrote, rather than read and compared: a row holds
+    /// up to two 25 MB videos, and a second run over the library would otherwise
+    /// read every one of them from the database and the disk to write nothing.
+    /// </remarks>
+    private async Task EnsureMotionAsync(
+        PendingTagWrite file,
+        Tally counts,
+        CoverRun covers,
+        FonotecaDbContext db,
+        IServiceProvider provider,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (file.AlbumId is not { } album) return;
+
+        var folder = AlbumFolder.Of(file.Path);
+
+        if (!covers.MotionFolders.Add(folder)) return;
+
+        var target = folder;
+
+        try
+        {
+            var lengths = await db.AlbumMotions
+                .AsNoTracking()
+                .Where(motion => motion.ReleaseGroupId == album)
+                .Select(motion => new[]
+                {
+                    motion.Square == null ? (int?)null : motion.Square.Length,
+                    motion.Tall == null ? (int?)null : motion.Tall.Length,
+                })
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (lengths is null) return;
+
+            var written = false;
+
+            for (var shape = 0; shape < MotionNames.Length; shape++)
+            {
+                if (lengths[shape] is not { } length) continue;
+
+                target = folder.Length == 0 ? MotionNames[shape] : $"{folder}/{MotionNames[shape]}";
+
+                // Inside the try: `Resolve` refuses a path reaching outside the
+                // root or through a directory symlink.
+                var absolute = store.AbsolutePathFor(new LibraryPath(target));
+
+                if (File.Exists(absolute) && !IsLink(absolute) && new FileInfo(absolute).Length == length) continue;
+
+                if (!writerOptions.AllowFileMutation)
+                {
+                    Log.CoverNotWritten(logger, target, "file mutation is off");
+                    continue;
+                }
+
+                var square = shape == 0;
+
+                var bytes = await db.AlbumMotions
+                    .AsNoTracking()
+                    .Where(motion => motion.ReleaseGroupId == album)
+                    .Select(motion => square ? motion.Square : motion.Tall)
+                    .FirstAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (bytes is null) continue;
+
+                List<string> displaced = File.Exists(absolute) ? [Displace(target, absolute, covers.Stamp)] : [];
+
+                var staged = await store
+                    .OpenForCreateAsync(new LibraryPath(target), bytes.Length, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await using (staged.ConfigureAwait(false))
+                {
+                    await staged.Content.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                    await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                written = true;
+
+                Log.CoverWritten(
+                    logger,
+                    target,
+                    displaced.Count == 0 ? string.Empty : $", displacing {string.Join(", ", displaced)}");
+
+                // The sleeve's entry in every field, so Undo's sleeve step puts
+                // this back the same way; keyed by the file whose folder got it.
+                var payload = JsonSerializer.Serialize(new
+                {
+                    path = target,
+                    mediaType = "video/mp4",
+                    bytes = bytes.Length,
+                    displaced = displaced.Count == 0 ? null : displaced,
+                });
+
+                await provider.GetRequiredService<IEventLog>()
+                    .AppendAsync(
+                        DomainEvent.Create(
+                            MotionEvent,
+                            TagWriter.FileSubject,
+                            file.Id.ToString(),
+                            _actor,
+                            clock.UtcNow,
+                            payload,
+                            correlationId),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (written) counts.MotionWritten++;
+        }
+        // Not a cancellation, for EnsureCoverAsync's reason.
         catch (Exception cause) when (cause is not OperationCanceledException)
         {
             Log.CoverNotWritten(logger, target, Because(cause));
@@ -1521,6 +1666,9 @@ public sealed partial class TagWriteService(
         /// <summary>Album folders that got a sleeve. Counted per folder, unlike everything above.</summary>
         public int CoversWritten;
 
+        /// <summary>Album folders that got motion artwork, either shape or both. Per folder too.</summary>
+        public int MotionWritten;
+
         /// <summary>Artist folders that got a photograph. Per folder too, and there is rarely more than one.</summary>
         public int PortraitsWritten;
 
@@ -1556,6 +1704,9 @@ public sealed partial class TagWriteService(
         public HashSet<string> Folders { get; } = new(StringComparer.Ordinal);
 
         public Dictionary<ReleaseId, StoredCover?> Sleeves { get; } = [];
+
+        /// <summary>Album folders whose motion artwork this run has already considered.</summary>
+        public HashSet<string> MotionFolders { get; } = new(StringComparer.Ordinal);
     }
 
     /// <summary>A chosen cover as the catalogue holds it.</summary>
@@ -1825,6 +1976,11 @@ public sealed record TagWriteProgress(
 /// zero</b>: only the artist button writes these, and it writes to the one shelf
 /// named for that artist.
 /// </param>
+/// <param name="MotionWritten">
+/// Album folders that got their motion artwork written beside the music, as
+/// <c>square_animated_artwork.mp4</c> and <c>tall_animated_artwork.mp4</c>. Per
+/// folder like the covers.
+/// </param>
 /// <param name="Renamed">
 /// Files moved to where <c>Fonoteca:FileNaming</c> puts them, with their album
 /// folder or on their own. With <c>Fonoteca:AllowFileMutation</c> off, the files
@@ -1852,6 +2008,7 @@ public sealed record TagWriteSummary(
     int Failed,
     int Skipped,
     int CoversWritten,
+    int MotionWritten,
     int PortraitsWritten,
     int Renamed,
     int NotRenamed,
