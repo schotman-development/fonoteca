@@ -291,6 +291,17 @@ public sealed class FonotecaOptions : IValidatableObject
     /// </remarks>
     public int DiscographyRecheckDays { get; init; } = 7;
 
+    /// <summary>
+    /// A second Apple Music shop to look an album's motion artwork up in, as a
+    /// two-letter country code. Empty asks the US shop alone.
+    /// </summary>
+    /// <remarks>
+    /// Asked only where the US shop identified no record at all: a pressing sold
+    /// in one country is listed in that country's shop only, while a video is the
+    /// same in every shop that sells the record. See <c>AppleMusicOptions</c>.
+    /// </remarks>
+    public string AppleMusicFallbackStorefront { get; init; } = string.Empty;
+
     /// <summary>Settings for the acquisition providers, which are nested rather than flat.</summary>
     /// <remarks>
     /// The odd one out in this file, and deliberately so. Every other setting
@@ -413,6 +424,17 @@ public sealed class FonotecaOptions : IValidatableObject
                     + "album and decision on them lost. Put it beside the library, not in it.",
                     [nameof(TrashPath)]);
             }
+        }
+
+        // Sent as a path segment and a query value, so it is held to what a
+        // country code is rather than escaped into something Apple then refuses.
+        if (AppleMusicFallbackStorefront.Length > 0
+            && !(AppleMusicFallbackStorefront.Length == 2 && AppleMusicFallbackStorefront.All(char.IsAsciiLetterLower)))
+        {
+            yield return new ValidationResult(
+                $"Fonoteca:AppleMusicFallbackStorefront must be a two-letter lowercase country code "
+                + $"such as 'nl', or empty; got '{AppleMusicFallbackStorefront}'.",
+                [nameof(AppleMusicFallbackStorefront)]);
         }
 
         if (!Uri.TryCreate(MusicBrainzServer, UriKind.Absolute, out var server)

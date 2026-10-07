@@ -1150,6 +1150,154 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>
+    /// An album's motion artwork is kept with where it came from, and an album
+    /// with none is stamped all the same.
+    /// </summary>
+    /// <remarks>
+    /// Rule 1 for the motion stage: most of a library has no video anywhere, and
+    /// keyed on the video it would be asked about on every run. The album is
+    /// asked about as its display edition — its title, billing line and barcode
+    /// — with every other edition's barcode alongside.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumsMotionArtworkIsKeptAndAnAlbumWithNoneIsStampedToo()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+        await SeedBilledArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var karajan = await db.Releases
+                .SingleAsync(release => release.Files.Any(file => file.Path.StartsWith("Karajan/")), Token);
+            karajan.Barcode = "0028941502124";
+
+            db.Releases.Add(new Release
+            {
+                Id = ReleaseId.New(),
+                Title = "Mozart: Symphony no. 40 (remastered)",
+                ReleaseGroupId = karajan.ReleaseGroupId,
+                Barcode = "0028947760012",
+            });
+
+            // A record nobody holds, as a discography browse mints them: no folder to write a video into.
+            db.ReleaseGroups.Add(new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Unheld", Mbid = Unheld });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var motions = new StubMotions(("0028941502124", new AlbumMotionFound("1440", "us", "barcode", [1, 2], [3, 4, 5])));
+
+        var services = Build(
+            Answering(Recording),
+            new StubCatalogue(recording: null, work: null, artist: null),
+            motions: motions);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, motions.Asked.Count);
+
+        var asked = motions.Asked.Single(album => album.Barcode == "0028941502124");
+        Assert.Equal("Mozart: Symphony no. 40", asked.Title);
+        Assert.Equal("Karajan", asked.Artist);
+        Assert.Equal(new[] { "0028947760012" }, asked.Editions);
+
+        Assert.Equal(1, services.GetRequiredService<EnrichmentService>().LastCompleted!.AlbumsAnimated);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var rows = await db.AlbumMotions.AsNoTracking().ToListAsync(Token);
+
+            Assert.Equal(2, rows.Count);
+
+            var found = rows.Single(row => row.Square is not null);
+            Assert.Equal(new byte[] { 3, 4, 5 }, found.Tall);
+            Assert.Equal("1440", found.AppleAlbumId);
+            Assert.Equal("us", found.Storefront);
+            Assert.Equal("barcode", found.MatchedBy);
+
+            var none = rows.Single(row => row.Square is null);
+            Assert.Null(none.Tall);
+            Assert.Null(none.AppleAlbumId);
+        }
+
+        Assert.Equal(0, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Motion);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, motions.Asked.Count);
+    }
+
+    /// <summary>
+    /// An album nobody had a video of is asked about again a week later; one
+    /// whose video was found never is.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumWithNoMotionArtworkIsAskedAgainAfterAWeek()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+
+        var motions = new StubMotions();
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), motions: motions);
+        var enrichment = services.GetRequiredService<EnrichmentService>();
+
+        await EnrichAsync(services);
+
+        Assert.Single(motions.Asked);
+
+        var settled = await enrichment.CountPendingAsync(Token);
+        Assert.Equal(0, settled.Motion);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.AlbumMotions.ExecuteUpdateAsync(
+                setters => setters.SetProperty(motion => motion.SavedUtc, DateTimeOffset.UtcNow.AddDays(-8)),
+                Token);
+        }
+
+        var stale = await enrichment.CountPendingAsync(Token);
+        Assert.Equal(1, stale.Motion);
+
+        // In the total too, which is what enables the button.
+        Assert.Equal(settled.Total + 1, stale.Total);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, motions.Asked.Count);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.AlbumMotions.ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(motion => motion.Square, new byte[] { 1 })
+                    .SetProperty(motion => motion.SavedUtc, DateTimeOffset.UtcNow.AddDays(-30)),
+                Token);
+        }
+
+        Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Motion);
+    }
+
+    /// <summary>An outage stamps nothing: not knowing is not "none".</summary>
+    [Fact]
+    public async Task AFailedMotionLookupStampsNothing()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+        await SeedBilledArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        var motions = new StubMotions { Unavailable = true };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), motions: motions);
+
+        await EnrichAsync(services);
+
+        // The first album's outage ended the stage; the second was never asked.
+        Assert.Single(motions.Asked);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Empty(await db.AlbumMotions.AsNoTracking().ToListAsync(Token));
+        Assert.Equal(2, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Motion);
+    }
+
+    /// <summary>
     /// Only an artist a release is billed to is asked for a banner.
     /// </summary>
     /// <remarks>
@@ -2356,7 +2504,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         IArtistPortraits? thumbnails = null,
         IReleaseDiscovery? releases = null,
         IEncyclopedia? encyclopedia = null,
-        IArtistBanners? banners = null)
+        IArtistBanners? banners = null,
+        IAlbumMotions? motions = null)
     {
         var services = new ServiceCollection();
 
@@ -2401,6 +2550,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         // Find nothing unless a test says otherwise, like the pictures.
         services.AddSingleton(encyclopedia ?? new StubEncyclopedia());
         services.AddSingleton(banners ?? new StubBanners());
+        services.AddSingleton(motions ?? new StubMotions());
 
         services.Configure<WikidataOptions>(options => options.BatchSize = 2);
         services.AddSingleton<LibraryWorkGate>();
@@ -2500,6 +2650,23 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
                     article => new Article(article.Text, new Uri($"https://en.wikipedia.org/wiki/{article.Id.Value:N}")));
 
             return Task.FromResult(found);
+        }
+    }
+
+    /// <summary>Answers motion artwork for the barcodes it was told about, and records the asking.</summary>
+    private sealed class StubMotions(params (string Barcode, AlbumMotionFound Found)[] videos) : IAlbumMotions
+    {
+        public bool Unavailable { get; init; }
+
+        public List<AlbumToAnimate> Asked { get; } = [];
+
+        public Task<AlbumMotionFound?> FindAsync(AlbumToAnimate album, CancellationToken cancellationToken = default)
+        {
+            lock (Asked) Asked.Add(album);
+
+            if (Unavailable) throw new ProviderUnavailableException("stub", "Apple Music is down.");
+
+            return Task.FromResult(videos.FirstOrDefault(video => video.Barcode == album.Barcode).Found);
         }
     }
 

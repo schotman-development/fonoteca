@@ -38,6 +38,7 @@ function pendingSentence(status: {
   readonly pendingDiscographies: number
   readonly pendingArticles: number
   readonly pendingBanners: number
+  readonly pendingMotion: number
 }): string {
   const parts: string[] = []
 
@@ -99,6 +100,16 @@ function pendingSentence(status: {
     parts.push(
       `${status.pendingBanners.toLocaleString()} banner${
         status.pendingBanners === 1 ? '' : 's'
+      } to look for`,
+    )
+  }
+
+  // Seventh: Apple Music's looping album videos. Named as videos, because the
+  // rows are albums the cover pass already knows and the work is not a picture.
+  if (status.pendingMotion > 0) {
+    parts.push(
+      `${status.pendingMotion.toLocaleString()} album video${
+        status.pendingMotion === 1 ? '' : 's'
       } to look for`,
     )
   }
@@ -275,6 +286,13 @@ function Result({ summary }: { readonly summary: Summary }) {
           {summary.noRecording === 1 ? "'s cluster is" : "s' clusters are"} not linked to any
           MusicBrainz recording. Ordinary rather than broken — linking a fingerprint cluster to
           MusicBrainz is a separate act of curation, and nobody has done it for that audio.
+        </Text>
+      ) : null}
+
+      {summary.albumsAnimated > 0 ? (
+        <Text size="xs" tone="tertiary">
+          {summary.albumsAnimated.toLocaleString()} album
+          {summary.albumsAnimated === 1 ? '' : 's'} got motion artwork from Apple Music.
         </Text>
       ) : null}
 

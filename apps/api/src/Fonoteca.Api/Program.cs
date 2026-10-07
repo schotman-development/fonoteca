@@ -214,6 +214,15 @@ builder.Services.AddAudioDbPortraits(options =>
     if (!string.IsNullOrWhiteSpace(audioDb.ApiKey)) options.ApiKey = audioDb.ApiKey;
 });
 
+// Album motion artwork, from Apple Music's public pages. Like TheAudioDB it
+// needs no credential, so it works on a fresh install; the contact is
+// MusicBrainz's for the reason Wikidata's is. ADR 0014.
+builder.Services.AddAppleMusic(options =>
+{
+    options.Contact = fonoteca.MusicBrainzContact;
+    options.FallbackStorefront = fonoteca.AppleMusicFallbackStorefront;
+});
+
 // Manual acquisition. Registered unconditionally like the other two, so an
 // unconfigured instance answers "not configured" from the endpoint rather than
 // failing to resolve a service. Nothing here runs on its own: no hosted

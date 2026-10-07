@@ -1146,6 +1146,46 @@ public sealed class ReleaseCover
 }
 
 /// <summary>
+/// An album's motion artwork — the looping video a shop shows in place of its
+/// sleeve — kept until the tag write puts it beside the music.
+/// </summary>
+/// <remarks>
+/// <b><see cref="ReleaseCover"/>'s shape, keyed on the album rather than an
+/// edition</b>, because the source sells one video per record and the files
+/// it is written beside are the album folder's.
+///
+/// <b>A row with neither video is a stamp</b> saying the source was asked and
+/// had none; it expires after <c>EnrichmentService.NothingFoundRetryAfter</c>.
+/// <b>A row with either never expires.</b> An outage writes no row at all.
+///
+/// The provenance stays on the row, so a video matched by title can be traced
+/// to the record it came from — the one kind here chosen by matching rather
+/// than by an identifier.
+/// </remarks>
+public sealed class AlbumMotion
+{
+    public required ReleaseGroupId ReleaseGroupId { get; init; }
+
+    /// <summary>The square video, H.264 in MP4.</summary>
+    public byte[]? Square { get; set; }
+
+    /// <summary>The tall (3:4) video, H.264 in MP4.</summary>
+    public byte[]? Tall { get; set; }
+
+    /// <summary>The shop's id for the record the videos came from.</summary>
+    public string? AppleAlbumId { get; set; }
+
+    /// <summary>The country whose shop answered.</summary>
+    public string? Storefront { get; set; }
+
+    /// <summary>How the record was recognised: barcode, another edition's barcode, or title.</summary>
+    public string? MatchedBy { get; set; }
+
+    /// <summary>When the source was last asked, or the videos last changed.</summary>
+    public required DateTimeOffset SavedUtc { get; set; }
+}
+
+/// <summary>
 /// A picture a person chose for an artist, as bytes this catalogue holds.
 /// </summary>
 /// <remarks>

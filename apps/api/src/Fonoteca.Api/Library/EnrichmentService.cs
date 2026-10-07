@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Fonoteca.Api.Configuration;
+using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Logging;
 using Fonoteca.Api.Matching;
 using Fonoteca.Api.Realtime;
@@ -72,6 +73,7 @@ public sealed class EnrichmentService(
     [FromKeyedServices(ReleaseDiscoverySources.Qobuz)] IReleaseDiscovery qobuzReleases,
     IEncyclopedia encyclopedia,
     IArtistBanners banners,
+    IAlbumMotions motions,
     IOptions<WikidataOptions> portraitOptions,
     IOptions<FonotecaOptions> options,
     IHubContext<JobsHub, IJobsClient> hub,
@@ -191,8 +193,12 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var motion = await UnanimatedAlbums(db, NothingFoundCutoff)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             return new EnrichmentPending(
-                unasked + personFiled, artists, portraits, discographies, articles, banners);
+                unasked + personFiled, artists, portraits, discographies, articles, banners, motion);
         }
     }
 
@@ -384,6 +390,16 @@ public sealed class EnrichmentService(
                 token => BannersAsync(BannerBatchSize, token),
                 counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
+            // Eighth, after everything else that describes what is here and
+            // before the discographies, which only add records nobody owns. Last
+            // of the describing stages because it is the slowest of them by far:
+            // a few gated requests per album, and two videos to download where
+            // there is anything to find.
+            await BatchesAsync(
+                "album motion art",
+                token => MotionAsync(MotionBatchSize, counts, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
             // Fifth, and last — and the reason changed out from under this line
             // when the worklist widened past the followed set. It used to be
             // last because it was the cheapest thing here: a handful of followed
@@ -427,6 +443,7 @@ public sealed class EnrichmentService(
             Artists: memo.Artists.Count,
             ArtistsDescribed: counts.ArtistsDescribed,
             ArtistsPictured: counts.ArtistsPictured,
+            AlbumsAnimated: counts.AlbumsAnimated,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.EnrichmentCompleted(
@@ -1835,6 +1852,125 @@ public sealed class EnrichmentService(
         return page.Count;
     }
 
+    /// <summary>Albums asked about per batch: few, because one can be minutes of downloads and a failure ends the stage.</summary>
+    private const int MotionBatchSize = 5;
+
+    /// <summary>
+    /// Albums the library holds whose motion artwork nobody has looked for, or
+    /// found none of a week ago.
+    /// </summary>
+    /// <remarks>
+    /// <b>A query rather than an expression</b>, because the stamp is a row in
+    /// another table rather than a column on the album, and an expression over
+    /// <see cref="ReleaseGroup"/> cannot reach it. Held only, as the articles
+    /// are: a video of a record nobody owns has no folder to be written into.
+    /// </remarks>
+    private static IQueryable<ReleaseGroup> UnanimatedAlbums(FonotecaDbContext db, DateTimeOffset cutoff) =>
+        db.ReleaseGroups.Where(group => group.Files.Any()
+            && !db.AlbumMotions.Any(motion => motion.ReleaseGroupId == group.Id
+                && (motion.Square != null || motion.Tall != null || motion.SavedUtc >= cutoff)));
+
+    /// <summary>
+    /// Asks the shop for one batch of albums' motion artwork, writing each answer as it comes.
+    /// </summary>
+    /// <remarks>
+    /// <b>The album is asked about as its display edition</b> — the title,
+    /// year, billing line and barcode the album page shows, which are the ones
+    /// the cover is fetched by — with every other edition's barcode alongside.
+    ///
+    /// <b>Saved one album at a time</b>, so an outage part way through a batch
+    /// keeps what was answered before it; the throw then ends the stage with the
+    /// rest unstamped, because nothing is known about them. A row that already
+    /// holds a video is never claimed, so the upsert below only ever replaces a
+    /// stamp.
+    /// </remarks>
+    private async Task<int> MotionAsync(int size, Tally counts, CancellationToken cancellationToken)
+    {
+        List<AlbumToAnimate> asks = [];
+        List<ReleaseGroupId> page;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var albums = await UnanimatedAlbums(db, NothingFoundCutoff)
+                .AsNoTracking()
+                .OrderBy(group => group.Id)
+                .Select(group => new { group.Id, group.Title, group.FirstReleaseYear })
+                .Take(size)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (albums.Count == 0) return 0;
+
+            page = albums.ConvertAll(album => album.Id);
+
+            var editions = await CatalogueEndpoints.EditionFactsAsync(db, page, cancellationToken)
+                .ConfigureAwait(false);
+
+            var keys = page.Select(id => (ReleaseGroupId?)id).ToList();
+
+            var barcodes = (await db.Releases
+                    .AsNoTracking()
+                    .Where(release => keys.Contains(release.ReleaseGroupId) && release.Barcode != null)
+                    .OrderBy(release => release.Id)
+                    .Select(release => new { release.Id, release.ReleaseGroupId, release.Barcode })
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false))
+                .ToLookup(release => release.ReleaseGroupId!.Value);
+
+            foreach (var album in albums)
+            {
+                var display = CatalogueEndpoints.DisplayEdition(editions[album.Id]);
+                List<CatalogueEndpoints.EditionCredit> billed = display?.Artists ?? [];
+
+                asks.Add(new AlbumToAnimate(
+                    display?.Title ?? album.Title,
+                    CatalogueEndpoints.CreditLine(billed.Select(credit => (credit.CreditedAs ?? credit.Name, credit.JoinPhrase))),
+                    [.. billed.Select(credit => credit.CreditedAs ?? credit.Name)],
+                    display?.Year ?? album.FirstReleaseYear,
+                    barcodes[album.Id].FirstOrDefault(release => release.Id == display?.Id)?.Barcode,
+                    [.. barcodes[album.Id].Where(release => release.Id != display?.Id).Select(release => release.Barcode!)]));
+            }
+        }
+
+        for (var index = 0; index < page.Count; index++)
+        {
+            var found = await motions.FindAsync(asks[index], cancellationToken).ConfigureAwait(false);
+
+            var save = scopeFactory.CreateAsyncScope();
+            await using (save.ConfigureAwait(false))
+            {
+                var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+                var id = page[index];
+
+                var row = await db.AlbumMotions
+                    .FirstOrDefaultAsync(motion => motion.ReleaseGroupId == id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (row is null)
+                {
+                    row = new AlbumMotion { ReleaseGroupId = id, SavedUtc = default };
+                    db.AlbumMotions.Add(row);
+                }
+
+                row.Square = found?.Square;
+                row.Tall = found?.Tall;
+                row.AppleAlbumId = found?.AlbumId;
+                row.Storefront = found?.Storefront;
+                row.MatchedBy = found?.MatchedBy;
+                row.SavedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (found is not null) counts.AlbumsAnimated++;
+        }
+
+        return page.Count;
+    }
+
     /// <summary>
     /// The per-artist picture sources, best first.
     /// </summary>
@@ -2341,6 +2477,8 @@ public sealed class EnrichmentService(
 
         public int ArtistsPictured;
 
+        public int AlbumsAnimated;
+
         /// <summary>
         /// Rows a shop named that this run had not written down before.
         /// </summary>
@@ -2492,13 +2630,15 @@ public enum EnrichmentStatus
 /// number for both, because it is one kind of work: a batched query per 250.
 /// </param>
 /// <param name="Banners">Album artists nobody has looked for a banner of.</param>
+/// <param name="Motion">Held albums nobody has looked for motion artwork of, or found none of a week ago.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
     int Portraits,
     int Discographies,
     int Articles,
-    int Banners)
+    int Banners,
+    int Motion)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -2508,7 +2648,7 @@ public sealed record EnrichmentPending(
     /// zero and the button is disabled — a stage left out of this total is a
     /// stage that can never be reached.
     /// </remarks>
-    public int Total => Files + Artists + Portraits + Discographies + Articles + Banners;
+    public int Total => Files + Artists + Portraits + Discographies + Articles + Banners + Motion;
 }
 
 /// <summary>Where a running pass has got to.</summary>
@@ -2578,5 +2718,8 @@ public sealed record EnrichmentSummary(
     /// that quarter look like a failure of the artist stage.
     /// </remarks>
     int ArtistsPictured,
+
+    /// <summary>Albums whose motion artwork was found this run.</summary>
+    int AlbumsAnimated,
 
     bool Cancelled);

@@ -29,6 +29,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
 
     public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
     public DbSet<ReleaseCover> ReleaseCovers => Set<ReleaseCover>();
+    public DbSet<AlbumMotion> AlbumMotions => Set<AlbumMotion>();
     public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
     public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
 
@@ -460,6 +461,18 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasOne<Release>()
                 .WithOne()
                 .HasForeignKey<ReleaseCover>(x => x.ReleaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AlbumMotion>(e =>
+        {
+            e.HasKey(x => x.ReleaseGroupId);
+            e.Property(x => x.AppleAlbumId).HasMaxLength(32);
+            e.Property(x => x.Storefront).HasMaxLength(8);
+            e.Property(x => x.MatchedBy).HasMaxLength(40);
+            e.HasOne<ReleaseGroup>()
+                .WithOne()
+                .HasForeignKey<AlbumMotion>(x => x.ReleaseGroupId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
