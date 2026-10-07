@@ -195,6 +195,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | files & previews | `Domain/Catalogue/FolderRollup.cs`, `FilePreview.cs` | `Api/Library/FileManagerService.cs` |
 | covers | — | `Providers/CoverArt/`, `Api/Endpoints/CatalogueEndpoints.Cover.cs` |
 | motion artwork | — | `Providers/AppleMusic/AppleMusicMotions.cs`, `EnrichmentService.MotionAsync`, `TagWriteService.EnsureMotionAsync` |
+| booklets | — | `Providers/CoverArt/AlbumBooklets.cs`, `EnrichmentService.BookletsAsync`, `TagWriteService.EnsureBookletAsync` |
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
@@ -615,6 +616,16 @@ puts them beside the album as `square_animated_artwork.mp4` and
 `tall_animated_artwork.mp4`, journalled as `tagging.motion` and undone with the
 sleeve. **A page that changes shape stops the stage instead of answering
 "none"**, so a redesign cannot stamp the whole library. Nothing serves them yet.
+
+**Album booklets** are ADR 0015 — booklets only, never backs, discs or trays
+(the owner's choice). An enrichment stage lists every edition on the Cover Art
+Archive and keeps the fullest edition's `Booklet` pages whole, full size, the
+display edition winning a tie; Qobuz's digital booklet (a PDF "goodie" on
+`album/get`, matched by `QobuzCovers.Match`) is kept beside it. Stored in
+`AlbumBooklets`/`AlbumBookletFiles` on the same stamp rules, written by the tag
+write beside the tracks as `booklet-01.jpg`… and `booklet.pdf`, journalled as
+`tagging.booklet`. **Any other `booklet*` file in the folder is a person's and
+wins**: nothing is written for that album.
 
 **`…/folders/seed`** hands a folder to MusicBrainz's own "add release" form,
 prefilled. Fonoteca writes nothing to MusicBrainz and cannot — their `/ws/2`
