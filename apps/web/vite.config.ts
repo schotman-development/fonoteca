@@ -8,6 +8,10 @@ export default defineConfig({
     // from a phone or another machine on the LAN. The API must be reachable
     // too — see VITE_API_BASE_URL in api.ts and Fonoteca__CorsOrigins.
     host: true,
+    // Off the LAN the UI is opened over NetBird by name — <anything>.dev.internal,
+    // or fonoteca.schotman.app through the NetBird proxy — and Vite refuses host
+    // names it was not told about.
+    allowedHosts: ['.dev.internal', 'fonoteca.schotman.app'],
     port: 5173,
     strictPort: true,
   },

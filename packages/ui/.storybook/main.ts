@@ -22,6 +22,9 @@ const config: StorybookConfig = {
   core: {
     // Self-hosted project; nothing about this build needs to leave the machine.
     disableTelemetry: true,
+    // Off the LAN Storybook is opened over NetBird by name (<anything>.dev.internal);
+    // its host check refuses any other name.
+    allowedHosts: ['.dev.internal'],
   },
   typescript: {
     // react-docgen (not react-docgen-typescript) reads props with its own
