@@ -25,8 +25,12 @@ public sealed class AudioDbOptions
     /// no account and buys nothing that costs money — so unlike
     /// <c>AcoustIdApiKey</c> a missing one is not worth refusing the lookup
     /// over. There is a working default; there is no way to be anonymous here.
+    ///
+    /// <b>The test key changes.</b> It was <c>2</c> until TheAudioDB retired it:
+    /// on 2026-10-07 every request under it answered 404 <c>{"Message":"Not
+    /// found"}</c>, which ended the banner stage on its first request every run.
     /// </remarks>
-    public string ApiKey { get; set; } = "2";
+    public string ApiKey { get; set; } = "123";
 
     /// <summary>
     /// Least time between requests.

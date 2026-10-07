@@ -156,7 +156,7 @@ public sealed class AudioDbPortraitsTests : IDisposable
 
         await portraits.FindAsync([new ArtistToPicture(Shostakovich, "Anyone")], Token);
 
-        Assert.Contains("/api/v1/json/2/", Assert.Single(stub.Requests).Uri.AbsolutePath, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/json/123/", Assert.Single(stub.Requests).Uri.AbsolutePath, StringComparison.Ordinal);
     }
 
     /// <summary>
