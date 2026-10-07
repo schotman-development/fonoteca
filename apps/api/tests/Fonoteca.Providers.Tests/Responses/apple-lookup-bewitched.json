@@ -1,0 +1,10 @@
+
+
+
+{
+ "resultCount":1,
+ "results": [
+{"wrapperType":"collection", "collectionType":"Album", "artistId":1504424880, "collectionId":1690607869, "artistName":"Laufey", "collectionName":"Bewitched", "collectionCensoredName":"Bewitched", "artistViewUrl":"https://music.apple.com/us/artist/laufey/1504424880?uo=4", "collectionViewUrl":"https://music.apple.com/us/album/bewitched/1690607869?uo=4", "artworkUrl60":"https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/1f/de/6c/1fde6cb4-9703-c214-cdc6-8ecf7d0f0aa0/197189040030.jpg/60x60bb.jpg", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/1f/de/6c/1fde6cb4-9703-c214-cdc6-8ecf7d0f0aa0/197189040030.jpg/100x100bb.jpg", "collectionPrice":9.99, "collectionExplicitness":"notExplicit", "trackCount":14, "copyright":"℗ 2023 Vingolf Recordings under exclusive license to AWAL Recordings America, Inc.", "country":"USA", "currency":"USD", "releaseDate":"2023-09-08T07:00:00Z", "primaryGenreName":"Jazz"}]
+}
+
+

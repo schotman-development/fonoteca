@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Providers.AcoustId;
+using Fonoteca.Providers.AppleMusic;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.CoverArt;
 using Fonoteca.Providers.MusicBrainz;
@@ -339,6 +340,78 @@ public static class ProviderServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>Registers <see cref="IAlbumMotions"/> over Apple Music and the three clients behind it.</summary>
+    /// <remarks>
+    /// <b>Three clients</b>, <see cref="AddQobuz"/>'s split taken one step
+    /// further. The search API and the album pages each get the standard
+    /// treatment under a gate of their own, since Apple documents a limit for
+    /// one and not the other. The video CDN gets neither gate nor retries: a
+    /// retry of a 25 MB body re-downloads what already arrived, and an attempt
+    /// timeout sized for JSON fails a video on a slow line. Its own overall
+    /// timeout is generous rather than infinite, because unlike a download a
+    /// person asked for, nobody is watching this one to press Stop.
+    /// </remarks>
+    public static IServiceCollection AddAppleMusic(
+        this IServiceCollection services,
+        Action<AppleMusicOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(AppleMusicOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<AppleMusicOptions>(provider).MinimumRequestInterval));
+
+        var search = services.AddHttpClient(AppleMusicOptions.HttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = AppleMusicOptions.SearchServer;
+            http.DefaultRequestHeaders.Add("User-Agent", AppleUserAgent(provider));
+            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
+        search.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+        });
+
+        AddResilienceThenGate(search, AppleMusicOptions.HttpClientName);
+
+        services.AddKeyedSingleton(AppleMusicOptions.PageHttpClientName, (provider, _) =>
+            new RequestGate(Options<AppleMusicOptions>(provider).PageRequestInterval));
+
+        var pages = services.AddHttpClient(AppleMusicOptions.PageHttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = AppleMusicOptions.PageServer;
+            http.DefaultRequestHeaders.Add("User-Agent", AppleUserAgent(provider));
+        });
+
+        // A page is about 400 KB of HTML, most of it the JSON this reads. The
+        // bare album URL redirects to its slugged one on the same host.
+        pages.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+        });
+
+        AddResilienceThenGate(pages, AppleMusicOptions.PageHttpClientName);
+
+        var video = services.AddHttpClient(AppleMusicOptions.VideoHttpClientName, (provider, http) =>
+        {
+            http.Timeout = TimeSpan.FromMinutes(5);
+            http.DefaultRequestHeaders.Add("User-Agent", AppleUserAgent(provider));
+        });
+
+        // No decompression: the body is already-compressed video.
+        video.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler());
+
+        services.AddSingleton<IAlbumMotions, AppleMusicMotions>();
+
+        return services;
+    }
+
+    private static string AppleUserAgent(IServiceProvider provider) =>
+        $"Fonoteca/0.1 ( {Options<AppleMusicOptions>(provider).Contact} )";
 
     /// <summary>How this application introduces itself to Wikimedia.</summary>
     /// <remarks>

@@ -12,6 +12,7 @@ namespace Fonoteca.Providers.Logging;
 ///   1350-1399  MusicBrainz
 ///   1400-1449  Qobuz
 ///   1450-1499  Wikidata
+///   1500-1549  Apple Music
 ///
 /// Deliberately sparse. An identification pass makes one of these calls per
 /// file, so anything logged per lookup is logged 100,000 times — Debug is where
@@ -174,4 +175,45 @@ internal static partial class ProviderLog
         Level = LogLevel.Information,
         Message = "Wikidata has a picture for {Found} of {Asked} artists")]
     public static partial void WikidataPortraitsFound(ILogger logger, int found, int asked);
+
+    /// <remarks>
+    /// The provenance, for <c>QobuzCoverMatched</c>'s reason: a video matched by
+    /// title is the one kind here a wrong answer needs explaining by.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1500,
+        Level = LogLevel.Information,
+        Message = "Apple Music album {Album} ({Storefront}) supplies the motion artwork for "
+            + "{Artist} - {Title}, matched by {How}")]
+    public static partial void AppleMotionFound(
+        ILogger logger,
+        string album,
+        string storefront,
+        string? artist,
+        string title,
+        string how);
+
+    [LoggerMessage(
+        EventId = 1501,
+        Level = LogLevel.Debug,
+        Message = "Apple Music has no motion artwork for {Artist} - {Title}")]
+    public static partial void AppleMotionNotFound(ILogger logger, string? artist, string title);
+
+    /// <remarks>
+    /// A warning: one page without the header every album page has is that page
+    /// being odd, and read as no video — but every page without it is the reader
+    /// gone stale, and this line is how somebody notices which it is.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1502,
+        Level = LogLevel.Warning,
+        Message = "Apple Music's page for album {Album} has no header section; read as no motion artwork")]
+    public static partial void AppleMotionNoHeader(ILogger logger, long album);
+
+    [LoggerMessage(
+        EventId = 1503,
+        Level = LogLevel.Warning,
+        Message = "Apple Music offered {Url} as motion artwork, which is not a video this application "
+            + "will keep: {Reason}")]
+    public static partial void AppleMotionRejected(ILogger logger, string url, string reason);
 }

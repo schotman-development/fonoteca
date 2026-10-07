@@ -37,6 +37,8 @@
   -->
   <ItemGroup>
     <EmbeddedResource Include="Responses/*.json" />
+    <EmbeddedResource Include="Responses/*.html" />
+    <EmbeddedResource Include="Responses/*.m3u8" />
   </ItemGroup>
 
   <ItemGroup>
