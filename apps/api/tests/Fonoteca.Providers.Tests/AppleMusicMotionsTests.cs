@@ -34,7 +34,7 @@ public sealed class AppleMusicMotionsTests : IDisposable
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static AlbumToAnimate Bewitched(
+    private static AlbumToFind Bewitched(
         string? barcode = OwnBarcode,
         string[]? editions = null,
         string? artist = "Laufey",

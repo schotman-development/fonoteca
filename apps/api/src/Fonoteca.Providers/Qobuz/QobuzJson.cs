@@ -82,6 +82,33 @@ internal sealed record QobuzAlbumBody
     /// </summary>
     [JsonPropertyName("artists")]
     public IReadOnlyList<QobuzArtistBody>? Artists { get; init; }
+
+    /// <summary>
+    /// What the shop sells with the album beyond the audio: a digital booklet
+    /// ("Livret numérique") as a PDF, on <c>album/get</c> only — a search row
+    /// leaves the field out.
+    /// </summary>
+    [JsonPropertyName("goodies")]
+    public IReadOnlyList<QobuzGoodyBody>? Goodies { get; init; }
+}
+
+internal sealed record QobuzGoodyBody
+{
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+
+    /// <summary>21 is a PDF, the only kind seen.</summary>
+    [JsonPropertyName("file_format_id")]
+    public int? FileFormatId { get; init; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+
+    [JsonPropertyName("url")]
+    public string? Url { get; init; }
+
+    [JsonPropertyName("original_url")]
+    public string? OriginalUrl { get; init; }
 }
 
 internal sealed record QobuzLabelBody

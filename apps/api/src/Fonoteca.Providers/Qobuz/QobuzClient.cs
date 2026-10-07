@@ -411,6 +411,21 @@ public sealed class QobuzClient(
     /// </remarks>
     public async Task<CoverArtBytes> DownloadImageAsync(
         Uri url,
+        CancellationToken cancellationToken = default) =>
+        await DownloadAsync(url, ImageTimeout, cancellationToken).ConfigureAwait(false)
+        ?? throw new ProviderUnavailableException(ProviderName, $"Qobuz has no image at {url}.");
+
+    /// <summary>
+    /// <see cref="DownloadImageAsync"/> with a limit of the caller's — a
+    /// digital booklet is megabytes where a cover is kilobytes.
+    /// </summary>
+    /// <returns>
+    /// Null where the file is gone (403, 404, 410): an answer about that file,
+    /// where anything else that fails is the CDN not answering.
+    /// </returns>
+    public async Task<CoverArtBytes?> DownloadAsync(
+        Uri url,
+        TimeSpan limit,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(url);
@@ -418,11 +433,16 @@ public sealed class QobuzClient(
         var http = clients.CreateClient(ContentHttpClientName);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(ImageTimeout);
+        timeout.CancelAfter(limit);
 
         try
         {
             using var response = await http.GetAsync(url, timeout.Token).ConfigureAwait(false);
+
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.Gone)
+            {
+                return null;
+            }
 
             if (!response.IsSuccessStatusCode)
             {
@@ -448,7 +468,7 @@ public sealed class QobuzClient(
             // The caller's token is not the one that fired, so this is the
             // timeout above — worth trying again later, unlike an abandoned page.
             throw new ProviderUnavailableException(
-                ProviderName, $"Qobuz image download timed out after {ImageTimeout}.", cause);
+                ProviderName, $"Qobuz image download timed out after {limit}.", cause);
         }
     }
 
@@ -654,7 +674,12 @@ public sealed class QobuzClient(
             // provider-sourced release unmatchable against MusicBrainz forever.
             NullIfBlank(body.Upc),
             NullIfBlank(body.Label?.Name),
-            [.. (body.Artists ?? []).Select(artist => NullIfBlank(artist.Name)).OfType<string>()]);
+            [.. (body.Artists ?? []).Select(artist => NullIfBlank(artist.Name)).OfType<string>()],
+            [.. (body.Goodies ?? [])
+                .Select(goody => Uri.TryCreate(NullIfBlank(goody.Url) ?? goody.OriginalUrl, UriKind.Absolute, out var url)
+                    ? new QobuzGoody(goody.Id, goody.FileFormatId ?? 0, NullIfBlank(goody.Name), url)
+                    : null)
+                .OfType<QobuzGoody>()]);
     }
 
     /// <summary>A trimmed value, or null where the service sent nothing usable.</summary>
@@ -744,7 +769,12 @@ public sealed record QobuzAlbum(
     IReadOnlyList<QobuzTrack> Tracks,
     string? Upc = null,
     string? Label = null,
-    IReadOnlyList<string>? Artists = null);
+    IReadOnlyList<string>? Artists = null,
+    IReadOnlyList<QobuzGoody>? Goodies = null);
+
+/// <summary>Something the shop sells with an album beyond the audio — in practice a PDF booklet.</summary>
+/// <param name="FileFormatId">21 is a PDF.</param>
+public sealed record QobuzGoody(long Id, int FileFormatId, string? Name, Uri Url);
 
 /// <summary>An artist's records, and how many of them there were.</summary>
 /// <param name="Albums">The page that came back, oldest-to-newest as Qobuz order them.</param>

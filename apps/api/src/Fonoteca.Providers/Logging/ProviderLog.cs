@@ -1,3 +1,4 @@
+using Fonoteca.Domain.Catalogue;
 using Microsoft.Extensions.Logging;
 
 namespace Fonoteca.Providers.Logging;
@@ -13,6 +14,7 @@ namespace Fonoteca.Providers.Logging;
 ///   1400-1449  Qobuz
 ///   1450-1499  Wikidata
 ///   1500-1549  Apple Music
+///   1550-1599  Album booklets
 ///
 /// Deliberately sparse. An identification pass makes one of these calls per
 /// file, so anything logged per lookup is logged 100,000 times — Debug is where
@@ -216,4 +218,34 @@ internal static partial class ProviderLog
         Message = "Apple Music offered {Url} as motion artwork, which is not a video this application "
             + "will keep: {Reason}")]
     public static partial void AppleMotionRejected(ILogger logger, string url, string reason);
+
+    [LoggerMessage(
+        EventId = 1550,
+        Level = LogLevel.Information,
+        Message = "Booklet for {Artist} - {Title}: {Pages} pages from archive release {Edition}, "
+            + "{Pdfs} digital booklets from Qobuz album {Album}")]
+    public static partial void BookletFound(
+        ILogger logger,
+        string? artist,
+        string title,
+        int pages,
+        Mbid? edition,
+        int pdfs,
+        string? album);
+
+    [LoggerMessage(
+        EventId = 1551,
+        Level = LogLevel.Warning,
+        Message = "{Source} offered {Id} as a booklet, which is not a file this application will keep: {Reason}")]
+    public static partial void BookletRejected(ILogger logger, string source, string id, string reason);
+
+    /// <remarks>
+    /// A warning, because it can repeat: one release whose storage node fails
+    /// every time is left out of its album's booklet on every run.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1552,
+        Level = LogLevel.Warning,
+        Message = "The Cover Art Archive could not give release {Edition}, left out of its album's booklet: {Reason}")]
+    public static partial void BookletEditionUnavailable(ILogger logger, Mbid edition, string reason);
 }

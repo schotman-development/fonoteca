@@ -13,7 +13,7 @@ namespace Fonoteca.Domain.Abstractions;
 /// </remarks>
 public interface IAlbumMotions
 {
-    Task<AlbumMotionFound?> FindAsync(AlbumToAnimate album, CancellationToken cancellationToken = default);
+    Task<AlbumMotionFound?> FindAsync(AlbumToFind album, CancellationToken cancellationToken = default);
 }
 
 /// <param name="Title">The display edition's title.</param>
@@ -22,7 +22,7 @@ public interface IAlbumMotions
 /// <param name="Year">The display edition's year, which narrows a title match.</param>
 /// <param name="Barcode">The display edition's barcode — the key, where there is one.</param>
 /// <param name="Editions">The barcodes of the album's other editions.</param>
-public sealed record AlbumToAnimate(
+public sealed record AlbumToFind(
     string Title,
     string? Artist,
     IReadOnlyCollection<string> Credited,

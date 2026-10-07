@@ -336,6 +336,24 @@ public static class ProviderServiceCollectionExtensions
 
         AddResilienceThenGate(client, CoverArtArchiveOptions.HttpClientName);
 
+        var originals = services.AddHttpClient(CoverArtArchiveOptions.OriginalsHttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = CoverArtArchiveOptions.Server;
+            http.DefaultRequestHeaders.Add(
+                "User-Agent",
+                $"Fonoteca/0.1 ( {Options<CoverArtArchiveOptions>(provider).Contact} )");
+        });
+
+        // Retried, because archive.org answered one original 500 while it was
+        // being measured and the next request for it 200. No gate: the
+        // listing client's is zero, for the reason above.
+        originals.AddStandardResilienceHandler(options =>
+        {
+            options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(2);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(4);
+        });
+
         services.AddSingleton<ICoverArtArchive, CoverArtArchiveClient>();
 
         return services;
@@ -409,6 +427,14 @@ public static class ProviderServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>Registers <see cref="IAlbumBooklets"/>.</summary>
+    /// <remarks>
+    /// After <see cref="AddCoverArtArchive"/> and <see cref="AddQobuz"/>, whose
+    /// clients it asks; it has no client of its own.
+    /// </remarks>
+    public static IServiceCollection AddAlbumBooklets(this IServiceCollection services) =>
+        services.AddSingleton<IAlbumBooklets, AlbumBooklets>();
 
     private static string AppleUserAgent(IServiceProvider provider) =>
         $"Fonoteca/0.1 ( {Options<AppleMusicOptions>(provider).Contact} )";

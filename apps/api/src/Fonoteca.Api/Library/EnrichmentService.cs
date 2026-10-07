@@ -1886,7 +1886,7 @@ public sealed class EnrichmentService(
     /// </remarks>
     private async Task<int> MotionAsync(int size, Tally counts, CancellationToken cancellationToken)
     {
-        List<AlbumToAnimate> asks = [];
+        List<AlbumToFind> asks = [];
         List<ReleaseGroupId> page;
 
         var claim = scopeFactory.CreateAsyncScope();
@@ -1925,7 +1925,7 @@ public sealed class EnrichmentService(
                 var display = CatalogueEndpoints.DisplayEdition(editions[album.Id]);
                 List<CatalogueEndpoints.EditionCredit> billed = display?.Artists ?? [];
 
-                asks.Add(new AlbumToAnimate(
+                asks.Add(new AlbumToFind(
                     display?.Title ?? album.Title,
                     CatalogueEndpoints.CreditLine(billed.Select(credit => (credit.CreditedAs ?? credit.Name, credit.JoinPhrase))),
                     [.. billed.Select(credit => credit.CreditedAs ?? credit.Name)],

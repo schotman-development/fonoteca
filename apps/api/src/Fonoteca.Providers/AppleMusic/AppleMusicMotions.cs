@@ -67,7 +67,7 @@ public sealed partial class AppleMusicMotions(
     private static readonly string[] KindSuffixes = [" - Single", " - EP"];
 
     public async Task<AlbumMotionFound?> FindAsync(
-        AlbumToAnimate album,
+        AlbumToFind album,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(album);
@@ -101,7 +101,7 @@ public sealed partial class AppleMusicMotions(
 
     /// <summary>The video one shop has for this album, and whether it identified a record at all.</summary>
     private async Task<(AlbumMotionFound? Found, bool Identified)> FindInAsync(
-        AlbumToAnimate album,
+        AlbumToFind album,
         string storefront,
         CancellationToken cancellationToken)
     {

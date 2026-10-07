@@ -349,5 +349,12 @@ public sealed class ReleaseCoverEndpointTests(PostgresFixture postgres) : IAsync
             Downloads++;
             return Task.FromResult(new CoverArtBytes([(byte)imageId], "image/jpeg"));
         }
+
+        public Task<CoverArtBytes?> DownloadOriginalAsync(
+            Mbid release,
+            long imageId,
+            long maxBytes,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("A cover is the 500px rendition.");
     }
 }

@@ -13,6 +13,13 @@ public sealed class CoverArtArchiveOptions
     /// <summary>Name of the configured <c>HttpClient</c>.</summary>
     public const string HttpClientName = "coverartarchive";
 
+    /// <summary>
+    /// Name of the <c>HttpClient</c> full-size originals are fetched through:
+    /// a booklet scan runs to 14 MB, which the listing client's 30 seconds
+    /// cannot be trusted with.
+    /// </summary>
+    public const string OriginalsHttpClientName = "coverartarchive-originals";
+
     public static readonly Uri Server = new("https://coverartarchive.org/");
 
     /// <summary>Sent in the User-Agent; the MusicBrainz contact, since it is their service.</summary>
@@ -93,6 +100,85 @@ public sealed class CoverArtArchiveClient(IHttpClientFactory clients) : ICoverAr
             bytes,
             response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
     }
+
+    public async Task<CoverArtBytes?> DownloadOriginalAsync(
+        Mbid release,
+        long imageId,
+        long maxBytes,
+        CancellationToken cancellationToken = default)
+    {
+        var http = clients.CreateClient(CoverArtArchiveOptions.OriginalsHttpClientName);
+
+        // The body has no timeout of its own once the headers are in, and an
+        // archive.org node that stalls mid-file would hold the stage forever.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(OriginalTimeout);
+
+        try
+        {
+            // `.jpg` whatever the original is: the archive redirects an image id to
+            // the file as uploaded, PNG and PDF included.
+            using var response = await http
+                .GetAsync(
+                    $"release/{release.Value:D}/{imageId}.jpg",
+                    HttpCompletionOption.ResponseHeadersRead,
+                    timeout.Token)
+                .ConfigureAwait(false);
+
+            // Gone or withheld is an answer about this one image; anything else
+            // failing is the archive not answering.
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.Gone)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw Unavailable($"the original answered {(int)response.StatusCode}", cause: null);
+            }
+
+            if (response.Content.Headers.ContentLength > maxBytes) return null;
+
+            var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+
+            await using (stream.ConfigureAwait(false))
+            {
+                using var buffer = new MemoryStream();
+                var chunk = new byte[81_920];
+                int read;
+
+                while ((read = await stream.ReadAsync(chunk, timeout.Token).ConfigureAwait(false)) > 0)
+                {
+                    if (buffer.Length + read > maxBytes) return null;
+
+                    buffer.Write(chunk, 0, read);
+                }
+
+                return new CoverArtBytes(
+                    buffer.ToArray(),
+                    response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream");
+            }
+        }
+        catch (HttpRequestException cause)
+        {
+            throw Unavailable(cause.Message, cause);
+        }
+        catch (IOException cause)
+        {
+            throw Unavailable(cause.Message, cause);
+        }
+        catch (OperationCanceledException cause) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw Unavailable($"the original took longer than {OriginalTimeout}", cause);
+        }
+        catch (ExecutionRejectedException cause)
+        {
+            throw Unavailable(cause.Message, cause);
+        }
+    }
+
+    /// <summary>How long one original may take, headers to last byte.</summary>
+    private static readonly TimeSpan OriginalTimeout = TimeSpan.FromMinutes(5);
 
     private async Task<HttpResponseMessage> SendAsync(string path, CancellationToken cancellationToken)
     {

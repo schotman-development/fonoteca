@@ -2658,9 +2658,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     {
         public bool Unavailable { get; init; }
 
-        public List<AlbumToAnimate> Asked { get; } = [];
+        public List<AlbumToFind> Asked { get; } = [];
 
-        public Task<AlbumMotionFound?> FindAsync(AlbumToAnimate album, CancellationToken cancellationToken = default)
+        public Task<AlbumMotionFound?> FindAsync(AlbumToFind album, CancellationToken cancellationToken = default)
         {
             lock (Asked) Asked.Add(album);
 

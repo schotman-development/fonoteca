@@ -27,6 +27,15 @@ public interface ICoverArtArchive
         Mbid release,
         long imageId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>One image as it was uploaded, whatever its type: a full scan, a PNG, a PDF.</summary>
+    /// <returns>Null when it is larger than <paramref name="maxBytes"/>, or gone or withheld (403, 404, 410).</returns>
+    /// <exception cref="ProviderUnavailableException">The archive could not be reached.</exception>
+    Task<CoverArtBytes?> DownloadOriginalAsync(
+        Mbid release,
+        long imageId,
+        long maxBytes,
+        CancellationToken cancellationToken = default);
 }
 
 /// <param name="Front">Whether this is the one the archive itself calls the front.</param>
