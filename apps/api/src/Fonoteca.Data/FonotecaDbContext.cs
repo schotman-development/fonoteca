@@ -30,6 +30,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
     public DbSet<ReleaseCover> ReleaseCovers => Set<ReleaseCover>();
     public DbSet<AlbumMotion> AlbumMotions => Set<AlbumMotion>();
+    public DbSet<AlbumBooklet> AlbumBooklets => Set<AlbumBooklet>();
+    public DbSet<AlbumBookletFile> AlbumBookletFiles => Set<AlbumBookletFile>();
     public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
     public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
 
@@ -474,6 +476,28 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .WithOne()
                 .HasForeignKey<AlbumMotion>(x => x.ReleaseGroupId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AlbumBooklet>(e =>
+        {
+            e.HasKey(x => x.ReleaseGroupId);
+            e.Property(x => x.QobuzAlbumId).HasMaxLength(32);
+            e.HasOne<ReleaseGroup>()
+                .WithOne()
+                .HasForeignKey<AlbumBooklet>(x => x.ReleaseGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Files)
+                .WithOne()
+                .HasForeignKey(x => x.ReleaseGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AlbumBookletFile>(e =>
+        {
+            e.HasKey(x => new { x.ReleaseGroupId, x.Position });
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.SourceId).HasMaxLength(32);
+            e.Property(x => x.MediaType).HasMaxLength(100);
         });
 
         modelBuilder.Entity<ArtistImage>(e =>

@@ -378,6 +378,7 @@ public static class LibraryEndpoints
             PendingArticles: pending.Articles,
             PendingBanners: pending.Banners,
             PendingMotion: pending.Motion,
+            PendingBooklets: pending.Booklets,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -615,6 +616,9 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Held albums with no motion artwork looked for yet, or none found a week ago.</summary>
     int PendingMotion,
+
+    /// <summary>Held albums with no booklets looked for yet, or none found a week ago.</summary>
+    int PendingBooklets,
 
     EnrichmentSummary? LastCompleted);
 

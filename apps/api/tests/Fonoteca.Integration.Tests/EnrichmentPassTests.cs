@@ -1276,6 +1276,169 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Motion);
     }
 
+    /// <summary>
+    /// An album's booklets are kept with where they came from, the display
+    /// edition is offered first, and an album with none is stamped all the same.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumsBookletIsKeptAndAnAlbumWithNoneIsStampedToo()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+        await SeedBilledArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        var other = new Mbid(Guid.CreateVersion7());
+        Mbid held;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var karajan = await db.Releases
+                .SingleAsync(release => release.Files.Any(file => file.Path.StartsWith("Karajan/")), Token);
+            held = karajan.Mbid!.Value;
+
+            // An edition nobody holds, minted earlier so only the rule puts the held one first.
+            db.Releases.Add(new Release
+            {
+                Id = new ReleaseId(Guid.CreateVersion7(DateTimeOffset.UnixEpoch)),
+                Mbid = other,
+                Title = "Mozart: Symphony no. 40 (remastered)",
+                ReleaseGroupId = karajan.ReleaseGroupId,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var found = new AlbumBookletFound(
+            other,
+            [new BookletFile("11", [1, 1], "image/jpeg"), new BookletFile("12", [2, 2, 2], "image/png")],
+            "0794881950324",
+            [new BookletFile("82536", "%PDF-"u8.ToArray(), "application/pdf")]);
+
+        var booklets = new StubBooklets((held, found));
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, booklets.Asked.Count);
+
+        var asked = booklets.Asked.Single(ask => ask.Editions.Contains(held));
+        Assert.Equal(new[] { held, other }, asked.Editions);
+        Assert.Equal("Karajan", asked.Album.Artist);
+
+        Assert.Equal(1, services.GetRequiredService<EnrichmentService>().LastCompleted!.AlbumsWithBooklets);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var rows = await db.AlbumBooklets.AsNoTracking().Include(booklet => booklet.Files).ToListAsync(Token);
+
+            Assert.Equal(2, rows.Count);
+
+            var kept = rows.Single(row => row.Files.Count > 0);
+            Assert.Equal(other, kept.ArchiveRelease);
+            Assert.Equal("0794881950324", kept.QobuzAlbumId);
+            Assert.Equal(
+                new[] { (1, AlbumBookletFile.Archive, "11"), (2, AlbumBookletFile.Archive, "12"), (3, AlbumBookletFile.Qobuz, "82536") },
+                kept.Files.OrderBy(file => file.Position).Select(file => (file.Position, file.Source, file.SourceId)).ToArray());
+
+            var none = rows.Single(row => row.Files.Count == 0);
+            Assert.Null(none.ArchiveRelease);
+            Assert.Null(none.QobuzAlbumId);
+        }
+
+        var enrichment = services.GetRequiredService<EnrichmentService>();
+        Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Booklets);
+
+        await EnrichAsync(services);
+        Assert.Equal(2, booklets.Asked.Count);
+
+        // A week on, only the album with none is asked again, and it counts towards the button.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.AlbumBooklets.ExecuteUpdateAsync(
+                setters => setters.SetProperty(booklet => booklet.SavedUtc, DateTimeOffset.UtcNow.AddDays(-8)),
+                Token);
+        }
+
+        var stale = await enrichment.CountPendingAsync(Token);
+        Assert.Equal(1, stale.Booklets);
+        Assert.Equal(stale.Motion + stale.Banners + stale.Articles + stale.Discographies + stale.Portraits + stale.Artists + stale.Files + 1, stale.Total);
+
+        await EnrichAsync(services);
+        Assert.Equal(3, booklets.Asked.Count);
+    }
+
+    /// <summary>
+    /// Where two pressings are held, the one the album page shows — here the
+    /// one with a stored sleeve — is offered first, whatever their order.
+    /// </summary>
+    [Fact]
+    public async Task TheDisplayEditionIsOfferedFirstAmongHeldPressings()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+
+        var shown = new Mbid(Guid.CreateVersion7());
+        Mbid first;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var karajan = await db.Releases.SingleAsync(Token);
+            first = karajan.Mbid!.Value;
+
+            // Minted later, so ordered by id it would come second.
+            var release = new Release
+            {
+                Id = ReleaseId.New(),
+                Mbid = shown,
+                Title = "Mozart: Symphony no. 40",
+                ReleaseGroupId = karajan.ReleaseGroupId,
+            };
+
+            db.Releases.Add(release);
+            db.ReleaseCovers.Add(new ReleaseCover
+            {
+                ReleaseId = release.Id,
+                Bytes = [0xFF, 0xD8, 0xFF],
+                MediaType = "image/jpeg",
+                SavedUtc = DateTimeOffset.UtcNow,
+            });
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Karajan/Symphony 40 (other pressing)/01.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                ReleaseId = release.Id,
+                ReleaseGroupId = karajan.ReleaseGroupId,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var booklets = new StubBooklets();
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets));
+
+        Assert.Equal(new[] { shown, first }, Assert.Single(booklets.Asked).Editions);
+    }
+
+    /// <summary>An outage stamps nothing, for the motion stage's reason.</summary>
+    [Fact]
+    public async Task AFailedBookletLookupStampsNothing()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+        await SeedBilledArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        var booklets = new StubBooklets { Unavailable = true };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
+
+        await EnrichAsync(services);
+
+        Assert.Single(booklets.Asked);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        Assert.Empty(await db.AlbumBooklets.AsNoTracking().ToListAsync(Token));
+        Assert.Equal(2, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Booklets);
+    }
+
     /// <summary>An outage stamps nothing: not knowing is not "none".</summary>
     [Fact]
     public async Task AFailedMotionLookupStampsNothing()
@@ -2505,7 +2668,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         IReleaseDiscovery? releases = null,
         IEncyclopedia? encyclopedia = null,
         IArtistBanners? banners = null,
-        IAlbumMotions? motions = null)
+        IAlbumMotions? motions = null,
+        IAlbumBooklets? booklets = null)
     {
         var services = new ServiceCollection();
 
@@ -2551,6 +2715,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         services.AddSingleton(encyclopedia ?? new StubEncyclopedia());
         services.AddSingleton(banners ?? new StubBanners());
         services.AddSingleton(motions ?? new StubMotions());
+        services.AddSingleton(booklets ?? new StubBooklets());
 
         services.Configure<WikidataOptions>(options => options.BatchSize = 2);
         services.AddSingleton<LibraryWorkGate>();
@@ -2667,6 +2832,27 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             if (Unavailable) throw new ProviderUnavailableException("stub", "Apple Music is down.");
 
             return Task.FromResult(videos.FirstOrDefault(video => video.Barcode == album.Barcode).Found);
+        }
+    }
+
+    /// <summary>Answers a booklet where an album's editions include the one it was told about.</summary>
+    private sealed class StubBooklets(params (Mbid Edition, AlbumBookletFound Found)[] booklets) : IAlbumBooklets
+    {
+        public bool Unavailable { get; init; }
+
+        public List<(AlbumToFind Album, IReadOnlyList<Mbid> Editions)> Asked { get; } = [];
+
+        public Task<AlbumBookletFound> FindAsync(
+            AlbumToFind album,
+            IReadOnlyList<Mbid> editions,
+            CancellationToken cancellationToken = default)
+        {
+            lock (Asked) Asked.Add((album, editions));
+
+            if (Unavailable) throw new ProviderUnavailableException("stub", "The archive is down.");
+
+            return Task.FromResult(
+                booklets.FirstOrDefault(booklet => editions.Contains(booklet.Edition)).Found ?? AlbumBookletFound.None);
         }
     }
 

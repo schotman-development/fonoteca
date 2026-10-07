@@ -245,6 +245,10 @@ builder.Services.AddQobuz(options =>
         TimeSpan.FromMilliseconds(Math.Clamp(qobuz.MinRequestIntervalMs, 0, 60_000));
 });
 
+// An album's booklets: the archive's scanned pages and Qobuz's PDF, read by an
+// enrichment stage. After both of the clients it asks.
+builder.Services.AddAlbumBooklets();
+
 // Singleton, because the one-at-a-time semaphore in it has to be one semaphore.
 builder.Services.AddSingleton<QobuzDownloadService>();
 

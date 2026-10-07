@@ -1944,6 +1944,8 @@ export interface components {
             pendingBanners: number;
             /** Format: int32 */
             pendingMotion: number;
+            /** Format: int32 */
+            pendingBooklets: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {
@@ -1976,6 +1978,8 @@ export interface components {
             artistsPictured: number;
             /** Format: int32 */
             albumsAnimated: number;
+            /** Format: int32 */
+            albumsWithBooklets: number;
             cancelled: boolean;
         };
         FileOperation: {

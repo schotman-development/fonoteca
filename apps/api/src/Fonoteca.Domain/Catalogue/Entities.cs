@@ -1186,6 +1186,55 @@ public sealed class AlbumMotion
 }
 
 /// <summary>
+/// An album's booklets — the archive's scanned pages and the shop's digital
+/// booklet — kept until the tag write puts them beside the music.
+/// </summary>
+/// <remarks>
+/// <b><see cref="AlbumMotion"/>'s rules, with the files in a table of their
+/// own</b> because there can be thirty of them. A row with no files is a stamp
+/// that expires after <c>EnrichmentService.NothingFoundRetryAfter</c>; a row
+/// with any never expires; an outage writes no row.
+/// </remarks>
+public sealed class AlbumBooklet
+{
+    public required ReleaseGroupId ReleaseGroupId { get; init; }
+
+    /// <summary>The edition the archive's pages are from — the provenance.</summary>
+    public Mbid? ArchiveRelease { get; set; }
+
+    /// <summary>The shop's album the digital booklets are from — matched, so the provenance matters.</summary>
+    public string? QobuzAlbumId { get; set; }
+
+    /// <summary>When the sources were last asked.</summary>
+    public required DateTimeOffset SavedUtc { get; set; }
+
+    public List<AlbumBookletFile> Files { get; init; } = [];
+}
+
+/// <summary>One file of an album's booklets: a scanned page, or a digital booklet.</summary>
+public sealed class AlbumBookletFile
+{
+    public const string Archive = "archive";
+
+    public const string Qobuz = "qobuz";
+
+    public required ReleaseGroupId ReleaseGroupId { get; init; }
+
+    /// <summary>From 1, the archive's pages in its order and then the shop's booklets.</summary>
+    public required int Position { get; init; }
+
+    /// <summary><see cref="Archive"/> or <see cref="Qobuz"/>.</summary>
+    public required string Source { get; init; }
+
+    /// <summary>The archive's image id, or the shop's id for the booklet.</summary>
+    public required string SourceId { get; init; }
+
+    public required string MediaType { get; init; }
+
+    public required byte[] Bytes { get; init; }
+}
+
+/// <summary>
 /// A picture a person chose for an artist, as bytes this catalogue holds.
 /// </summary>
 /// <remarks>

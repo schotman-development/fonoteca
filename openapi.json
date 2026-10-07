@@ -5935,6 +5935,7 @@
           "pendingArticles",
           "pendingBanners",
           "pendingMotion",
+          "pendingBooklets",
           "lastCompleted"
         ],
         "type": "object",
@@ -5994,6 +5995,10 @@
             "type": "integer",
             "format": "int32"
           },
+          "pendingBooklets": {
+            "type": "integer",
+            "format": "int32"
+          },
           "lastCompleted": {
             "oneOf": [
               {
@@ -6023,6 +6028,7 @@
           "artistsDescribed",
           "artistsPictured",
           "albumsAnimated",
+          "albumsWithBooklets",
           "cancelled"
         ],
         "type": "object",
@@ -6083,6 +6089,10 @@
             "format": "int32"
           },
           "albumsAnimated": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "albumsWithBooklets": {
             "type": "integer",
             "format": "int32"
           },

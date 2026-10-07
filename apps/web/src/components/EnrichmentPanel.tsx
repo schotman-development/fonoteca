@@ -39,6 +39,7 @@ function pendingSentence(status: {
   readonly pendingArticles: number
   readonly pendingBanners: number
   readonly pendingMotion: number
+  readonly pendingBooklets: number
 }): string {
   const parts: string[] = []
 
@@ -110,6 +111,15 @@ function pendingSentence(status: {
     parts.push(
       `${status.pendingMotion.toLocaleString()} album video${
         status.pendingMotion === 1 ? '' : 's'
+      } to look for`,
+    )
+  }
+
+  // Eighth: every booklet, the archive's scans and the shop's PDF.
+  if (status.pendingBooklets > 0) {
+    parts.push(
+      `${status.pendingBooklets.toLocaleString()} album booklet${
+        status.pendingBooklets === 1 ? '' : 's'
       } to look for`,
     )
   }
@@ -293,6 +303,13 @@ function Result({ summary }: { readonly summary: Summary }) {
         <Text size="xs" tone="tertiary">
           {summary.albumsAnimated.toLocaleString()} album
           {summary.albumsAnimated === 1 ? '' : 's'} got motion artwork from Apple Music.
+        </Text>
+      ) : null}
+
+      {summary.albumsWithBooklets > 0 ? (
+        <Text size="xs" tone="tertiary">
+          {summary.albumsWithBooklets.toLocaleString()} album
+          {summary.albumsWithBooklets === 1 ? '' : 's'} got a booklet.
         </Text>
       ) : null}
 
