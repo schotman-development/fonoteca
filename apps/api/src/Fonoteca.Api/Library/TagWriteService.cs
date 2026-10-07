@@ -496,6 +496,7 @@ public sealed partial class TagWriteService(
             Skipped: counts.Missing,
             CoversWritten: counts.CoversWritten,
             MotionWritten: counts.MotionWritten,
+            BookletsWritten: counts.BookletsWritten,
             PortraitsWritten: counts.PortraitsWritten,
             Renamed: counts.Renamed,
             NotRenamed: counts.NotRenamed,
@@ -856,6 +857,10 @@ public sealed partial class TagWriteService(
             await EnsureMotionAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Its booklets, the same way again.
+            await EnsureBookletAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
+                .ConfigureAwait(false);
+
             // The artist's photograph, once per shelf. Same scope, same reason.
             await EnsurePortraitAsync(
                     file, counts, portraits, db, provider, correlationId, cancellationToken)
@@ -1196,6 +1201,188 @@ public sealed partial class TagWriteService(
             }
 
             if (written) counts.MotionWritten++;
+        }
+        // Not a cancellation, for EnsureCoverAsync's reason.
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            Log.CoverNotWritten(logger, target, Because(cause));
+        }
+    }
+
+    /// <summary>
+    /// The names an album's booklet files are written under, in order; null
+    /// for a type with no name.
+    /// </summary>
+    /// <remarks>
+    /// The archive's pages numbered from <c>01</c> — three digits past 99, so
+    /// they sort as they read — and the shop's digital booklet
+    /// <c>booklet.pdf</c>, numbered only when it sells more than one. Never a
+    /// name a player globs for the sleeve.
+    /// </remarks>
+    internal static string?[] BookletNames(IReadOnlyList<(string Source, string MediaType)> files)
+    {
+        var pages = files.Count(file => file.Source == AlbumBookletFile.Archive);
+        var pdfs = files.Count - pages;
+        var digits = pages > 99 ? "000" : "00";
+        int page = 0, pdf = 0;
+
+        return
+        [
+            .. files.Select(file =>
+            {
+                var extension = string.Equals(file.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase)
+                    ? "pdf"
+                    : FilePreview.ImageExtensionFor(file.MediaType);
+
+                if (extension is null) return null;
+
+                if (file.Source == AlbumBookletFile.Archive)
+                {
+                    return $"booklet-{(++page).ToString(digits, CultureInfo.InvariantCulture)}.{extension}";
+                }
+
+                return pdfs == 1 ? $"booklet.{extension}" : $"booklet-{++pdf}.{extension}";
+            }),
+        ];
+    }
+
+    /// <summary>
+    /// The album's booklets, written once beside the music.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EnsureMotionAsync"/>'s rules — once per album folder, nothing
+    /// with mutation off, journalled so Undo takes it back with the sleeve, a
+    /// file recognised as already written by its name and length, and a failure
+    /// a booklet problem rather than a tagging one — with one difference, the
+    /// owner's choice: <b>a booklet a person put there wins.</b> A
+    /// <c>booklet*</c> file that is not one of these by name and length is
+    /// theirs, and then nothing is written: not beside it, which would be the
+    /// same booklet twice, and not over it. So nothing is displaced here.
+    ///
+    /// Known and accepted: a booklet written by an earlier run whose stored
+    /// files have since been replaced by hand reads as a person's, and stops
+    /// the album being written until it is moved out of the way.
+    /// </remarks>
+    private async Task EnsureBookletAsync(
+        PendingTagWrite file,
+        Tally counts,
+        CoverRun covers,
+        FonotecaDbContext db,
+        IServiceProvider provider,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (file.AlbumId is not { } album) return;
+
+        var folder = AlbumFolder.Of(file.Path);
+
+        if (!covers.BookletFolders.Add(folder)) return;
+
+        var target = folder;
+
+        try
+        {
+            var stored = await db.AlbumBookletFiles
+                .AsNoTracking()
+                .Where(booklet => booklet.ReleaseGroupId == album)
+                .OrderBy(booklet => booklet.Position)
+                .Select(booklet => new { booklet.Position, booklet.Source, booklet.MediaType, booklet.Bytes.Length })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (stored.Count == 0) return;
+
+            var names = BookletNames([.. stored.Select(booklet => (booklet.Source, booklet.MediaType))]);
+
+            var planned = stored
+                .Select((booklet, index) => (booklet.Position, booklet.MediaType, booklet.Length, Name: names[index]))
+                .Where(booklet => booklet.Name is not null)
+                .ToList();
+
+            if (planned.Count == 0) return;
+
+            string Target(string name) => folder.Length == 0 ? name : $"{folder}/{name}";
+
+            // Inside the try: `Resolve` refuses a path reaching outside the root
+            // or through a directory symlink.
+            var directory = Path.GetDirectoryName(store.AbsolutePathFor(new LibraryPath(Target(planned[0].Name!))))!;
+
+            var ours = planned.ToDictionary(booklet => booklet.Name!, booklet => booklet.Length, StringComparer.OrdinalIgnoreCase);
+
+            var present = Directory.Exists(directory)
+                ? Directory.GetFiles(directory, "booklet*", CoverGlob)
+                : [];
+
+            foreach (var existing in present)
+            {
+                if (IsLink(existing)
+                    || !ours.TryGetValue(Path.GetFileName(existing), out var length)
+                    || new FileInfo(existing).Length != length)
+                {
+                    Log.CoverNotWritten(logger, Target(Path.GetFileName(existing)), "the folder has a booklet of its own");
+                    return;
+                }
+            }
+
+            var there = present.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = planned.Where(booklet => !there.Contains(booklet.Name)).ToList();
+
+            if (missing.Count == 0) return;
+
+            if (!writerOptions.AllowFileMutation)
+            {
+                Log.CoverNotWritten(logger, Target(missing[0].Name!), "file mutation is off");
+                return;
+            }
+
+            foreach (var booklet in missing)
+            {
+                target = Target(booklet.Name!);
+
+                var bytes = await db.AlbumBookletFiles
+                    .AsNoTracking()
+                    .Where(row => row.ReleaseGroupId == album && row.Position == booklet.Position)
+                    .Select(row => row.Bytes)
+                    .FirstAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                var staged = await store
+                    .OpenForCreateAsync(new LibraryPath(target), bytes.Length, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await using (staged.ConfigureAwait(false))
+                {
+                    await staged.Content.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                    await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                Log.CoverWritten(logger, target, string.Empty);
+
+                // The sleeve's entry in every field, so Undo's sleeve step takes
+                // it back; keyed by the file whose folder got it.
+                var payload = JsonSerializer.Serialize(new
+                {
+                    path = target,
+                    mediaType = booklet.MediaType,
+                    bytes = bytes.Length,
+                    displaced = (string[]?)null,
+                });
+
+                await provider.GetRequiredService<IEventLog>()
+                    .AppendAsync(
+                        DomainEvent.Create(
+                            BookletEvent,
+                            TagWriter.FileSubject,
+                            file.Id.ToString(),
+                            _actor,
+                            clock.UtcNow,
+                            payload,
+                            correlationId),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            counts.BookletsWritten++;
         }
         // Not a cancellation, for EnsureCoverAsync's reason.
         catch (Exception cause) when (cause is not OperationCanceledException)
@@ -1669,6 +1856,9 @@ public sealed partial class TagWriteService(
         /// <summary>Album folders that got motion artwork, either shape or both. Per folder too.</summary>
         public int MotionWritten;
 
+        /// <summary>Album folders that got booklets. Per folder too.</summary>
+        public int BookletsWritten;
+
         /// <summary>Artist folders that got a photograph. Per folder too, and there is rarely more than one.</summary>
         public int PortraitsWritten;
 
@@ -1707,6 +1897,9 @@ public sealed partial class TagWriteService(
 
         /// <summary>Album folders whose motion artwork this run has already considered.</summary>
         public HashSet<string> MotionFolders { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Album folders whose booklets this run has already considered.</summary>
+        public HashSet<string> BookletFolders { get; } = new(StringComparer.Ordinal);
     }
 
     /// <summary>A chosen cover as the catalogue holds it.</summary>
@@ -1981,6 +2174,10 @@ public sealed record TagWriteProgress(
 /// <c>square_animated_artwork.mp4</c> and <c>tall_animated_artwork.mp4</c>. Per
 /// folder like the covers.
 /// </param>
+/// <param name="BookletsWritten">
+/// Album folders that got their booklets written beside the music, as
+/// <c>booklet-01.jpg</c> onwards and <c>booklet.pdf</c>. Per folder like the covers.
+/// </param>
 /// <param name="Renamed">
 /// Files moved to where <c>Fonoteca:FileNaming</c> puts them, with their album
 /// folder or on their own. With <c>Fonoteca:AllowFileMutation</c> off, the files
@@ -2009,6 +2206,7 @@ public sealed record TagWriteSummary(
     int Skipped,
     int CoversWritten,
     int MotionWritten,
+    int BookletsWritten,
     int PortraitsWritten,
     int Renamed,
     int NotRenamed,

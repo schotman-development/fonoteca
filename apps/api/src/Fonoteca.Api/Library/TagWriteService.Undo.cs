@@ -57,6 +57,9 @@ public sealed partial class TagWriteService
     /// <summary>Motion artwork written beside an album; undone exactly as a sleeve is.</summary>
     private const string MotionEvent = EventPrefix + ".motion";
 
+    /// <summary>A booklet file written beside the album; undone with the sleeve.</summary>
+    private const string BookletEvent = EventPrefix + ".booklet";
+
     private const string FolderSubjectType = "folder";
 
     /// <summary>The edit an undo of this album folder would reverse, or null when there is none.</summary>
@@ -264,7 +267,7 @@ public sealed partial class TagWriteService
             if (JsonSerializer.Deserialize<UndonePayload>(marker.PayloadJson)?.Undoes is { } undone) skipped.Add(undone);
         }
 
-        string[] kinds = [WrittenEvent, RenamedEvent, CoverEvent, MotionEvent, AcoustIdTagWriter.WrittenEventType, PersonSavedEvent];
+        string[] kinds = [WrittenEvent, RenamedEvent, CoverEvent, MotionEvent, BookletEvent, AcoustIdTagWriter.WrittenEventType, PersonSavedEvent];
 
         var own = await db.DomainEvents
             .AsNoTracking()
@@ -699,7 +702,7 @@ public sealed partial class TagWriteService
     {
         var stamp = clock.UtcNow.ToString("yyyy-MM-dd HHmmss", CultureInfo.InvariantCulture);
 
-        foreach (var entry in entries.Where(entry => (entry.Type is CoverEvent or MotionEvent) && entry.SubjectType == TagWriter.FileSubject))
+        foreach (var entry in entries.Where(entry => (entry.Type is CoverEvent or MotionEvent or BookletEvent) && entry.SubjectType == TagWriter.FileSubject))
         {
             try
             {

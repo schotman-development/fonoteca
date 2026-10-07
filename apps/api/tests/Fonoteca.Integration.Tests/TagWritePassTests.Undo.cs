@@ -194,6 +194,50 @@ public sealed partial class TagWritePassTests
     }
 
     [Fact]
+    public async Task UndoTrashesTheBookletItWrote()
+    {
+        SkipWithoutTools();
+        await SeedAsync(($"{Album}/01 track.flac", 1));
+        await SeedBookletAsync();
+
+        var services = Build();
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).BookletsWritten);
+
+        var undone = await UndoAsync(services, Album);
+
+        Assert.Equal(TagUndoStatus.Undone, undone.Status);
+        Assert.Empty(undone.Problems);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, Album), "booklet*"));
+
+        // Trashed, never deleted.
+        Assert.Single(Directory.EnumerateFiles(_root + "-trash", "booklet.pdf", SearchOption.AllDirectories));
+        Assert.Single(Directory.EnumerateFiles(_root + "-trash", "booklet-02.png", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task AnEditThatOnlyWroteBookletsIsTheOneUndone()
+    {
+        SkipWithoutTools();
+        await SeedAsync(($"{Album}/01 track.flac", 1));
+
+        var services = Build();
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Written);
+        var tagged = await TagsAsync($"{Album}/01 track.flac");
+
+        await SeedBookletAsync();
+
+        var booklets = await RunAsync(TagWriteScope.Library, services);
+        Assert.Equal(0, booklets.Written);
+        Assert.Equal(1, booklets.BookletsWritten);
+
+        var undone = await UndoAsync(services, Album);
+
+        Assert.Equal(TagUndoStatus.Undone, undone.Status);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, Album), "booklet*"));
+        Assert.Equal(tagged.Fields, (await TagsAsync($"{Album}/01 track.flac")).Fields);
+    }
+
+    [Fact]
     public async Task AnEditThatOnlyWroteMotionArtworkIsTheOneUndone()
     {
         SkipWithoutTools();

@@ -299,6 +299,11 @@ function Result({ summary }: { readonly summary: Summary }) {
               summary.motionWritten === 1 ? '' : 's'
             } got motion artwork`
           : ''}
+        {summary.bookletsWritten > 0
+          ? ` · ${summary.bookletsWritten.toLocaleString()} album${
+              summary.bookletsWritten === 1 ? '' : 's'
+            } got a booklet`
+          : ''}
         {/* Only the artist button writes one, and only onto the shelf named for
             them, so this is 1 or nothing rather than a count worth spelling. */}
         {summary.portraitsWritten > 0 ? ' · the artist got a picture' : ''}

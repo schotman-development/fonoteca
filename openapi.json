@@ -9567,6 +9567,7 @@
           "skipped",
           "coversWritten",
           "motionWritten",
+          "bookletsWritten",
           "portraitsWritten",
           "renamed",
           "notRenamed",
@@ -9626,6 +9627,10 @@
             "format": "int32"
           },
           "motionWritten": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bookletsWritten": {
             "type": "integer",
             "format": "int32"
           },

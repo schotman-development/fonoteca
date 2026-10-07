@@ -134,6 +134,40 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         await db.SaveChangesAsync(Token);
     }
 
+    /// <summary>Two stand-in booklet pages and a digital booklet, all different lengths.</summary>
+    private static readonly byte[] PageOne = [0xFF, 0xD8, 0xFF, 1];
+
+    private static readonly byte[] PageTwo = [0x89, (byte)'P', (byte)'N', (byte)'G', 2, 2];
+
+    private static readonly byte[] DigitalBooklet = "%PDF-1.7 booklet"u8.ToArray();
+
+    /// <summary>The seeded album's booklets: two archive pages, then the shop's PDF.</summary>
+    private async Task SeedBookletAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var album = await db.ReleaseGroups
+            .Where(candidate => candidate.Mbid == GroupMbid)
+            .Select(candidate => candidate.Id)
+            .SingleAsync(Token);
+
+        db.AlbumBooklets.Add(new AlbumBooklet
+        {
+            ReleaseGroupId = album,
+            ArchiveRelease = Mb("44444444-4444-4444-8444-444444444444"),
+            QobuzAlbumId = "0794881950324",
+            SavedUtc = DateTimeOffset.UtcNow,
+            Files =
+            [
+                new() { ReleaseGroupId = album, Position = 1, Source = AlbumBookletFile.Archive, SourceId = "11", MediaType = "image/jpeg", Bytes = PageOne },
+                new() { ReleaseGroupId = album, Position = 2, Source = AlbumBookletFile.Archive, SourceId = "12", MediaType = "image/png", Bytes = PageTwo },
+                new() { ReleaseGroupId = album, Position = 3, Source = AlbumBookletFile.Qobuz, SourceId = "82536", MediaType = "application/pdf", Bytes = DigitalBooklet },
+            ],
+        });
+
+        await db.SaveChangesAsync(Token);
+    }
+
     /// <summary>
     /// A cover for the seeded release, as choosing one in the app leaves it.
     /// </summary>
@@ -1834,6 +1868,121 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
 
         Assert.Equal(0, (await RunAsync(TagWriteScope.Library)).MotionWritten);
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, "Miles Davis/Kind of Blue"), "*.mp4"));
+    }
+
+    /// <summary>
+    /// The album's booklets are written beside it once, pages numbered in the
+    /// archive's order and the shop's PDF as <c>booklet.pdf</c>, and a second
+    /// run leaves them alone.
+    /// </summary>
+    [Fact]
+    public async Task TheAlbumsBookletIsWrittenBesideItOnce()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(
+            ("Miles Davis/Kind of Blue/CD 01/01 track.flac", 1),
+            ("Miles Davis/Kind of Blue/CD 02/02 track.flac", 2));
+
+        await SeedBookletAsync();
+
+        var services = Build();
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).BookletsWritten);
+
+        var folder = Path.Combine(_root, "Miles Davis/Kind of Blue");
+
+        Assert.Equal(PageOne, await File.ReadAllBytesAsync(Path.Combine(folder, "booklet-01.jpg"), Token));
+        Assert.Equal(PageTwo, await File.ReadAllBytesAsync(Path.Combine(folder, "booklet-02.png"), Token));
+        Assert.Equal(DigitalBooklet, await File.ReadAllBytesAsync(Path.Combine(folder, "booklet.pdf"), Token));
+
+        var stamped = File.GetLastWriteTimeUtc(Path.Combine(folder, "booklet-01.jpg"));
+
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library, services)).BookletsWritten);
+        Assert.Equal(stamped, File.GetLastWriteTimeUtc(Path.Combine(folder, "booklet-01.jpg")));
+    }
+
+    /// <summary>
+    /// A booklet a person put in the folder wins: none of the catalogue's is
+    /// written beside it, and theirs is not touched.
+    /// </summary>
+    [Fact]
+    public async Task AFolderWithABookletOfItsOwnGetsNoneWritten()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedBookletAsync();
+
+        var theirs = new byte[] { 0xFF, 0xD8, 0xFF, 9, 9, 9, 9, 9, 9 };
+        var folder = Path.Combine(_root, "Miles Davis/Kind of Blue");
+        await File.WriteAllBytesAsync(Path.Combine(folder, "Booklet-01.JPG"), theirs, Token);
+
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library)).BookletsWritten);
+
+        Assert.Equal(
+            ["Booklet-01.JPG"],
+            Directory.EnumerateFiles(folder, "booklet*", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive })
+                .Select(Path.GetFileName)
+                .ToArray());
+        Assert.Equal(theirs, await File.ReadAllBytesAsync(Path.Combine(folder, "Booklet-01.JPG"), Token));
+    }
+
+    /// <summary>
+    /// The same booklet already there under its name is taken as written, and
+    /// only what is missing is added.
+    /// </summary>
+    [Fact]
+    public async Task ABookletFileAlreadyThereIsNotWrittenAgain()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedBookletAsync();
+
+        var folder = Path.Combine(_root, "Miles Davis/Kind of Blue");
+        var pdf = Path.Combine(folder, "booklet.pdf");
+        await File.WriteAllBytesAsync(pdf, DigitalBooklet, Token);
+        var stamped = File.GetLastWriteTimeUtc(pdf);
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library)).BookletsWritten);
+
+        Assert.Equal(stamped, File.GetLastWriteTimeUtc(pdf));
+        Assert.Equal(PageOne, await File.ReadAllBytesAsync(Path.Combine(folder, "booklet-01.jpg"), Token));
+        Assert.Equal(PageTwo, await File.ReadAllBytesAsync(Path.Combine(folder, "booklet-02.png"), Token));
+    }
+
+    /// <summary>
+    /// A link under a booklet's name is somebody's, whatever it points at, and
+    /// nothing is written beside it.
+    /// </summary>
+    [Fact]
+    public async Task ALinkUnderABookletsNameIsTakenAsAPersons()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedBookletAsync();
+
+        var folder = Path.Combine(_root, "Miles Davis/Kind of Blue");
+        var elsewhere = Path.Combine(_root, "elsewhere.jpg");
+        await File.WriteAllBytesAsync(elsewhere, PageOne, Token);
+        File.CreateSymbolicLink(Path.Combine(folder, "booklet-01.jpg"), elsewhere);
+
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library)).BookletsWritten);
+        Assert.False(File.Exists(Path.Combine(folder, "booklet-02.png")));
+        Assert.False(File.Exists(Path.Combine(folder, "booklet.pdf")));
+    }
+
+    [Fact]
+    public async Task NoBookletIsWrittenWithMutationOff()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedBookletAsync();
+
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library, Build(allowMutation: false))).BookletsWritten);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, "Miles Davis/Kind of Blue"), "booklet*"));
     }
 
     /// <summary>

@@ -2881,6 +2881,8 @@ export interface components {
             /** Format: int32 */
             motionWritten: number;
             /** Format: int32 */
+            bookletsWritten: number;
+            /** Format: int32 */
             portraitsWritten: number;
             /** Format: int32 */
             renamed: number;
