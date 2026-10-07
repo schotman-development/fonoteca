@@ -153,7 +153,7 @@ Fonoteca.Api        minimal API, OpenAPI, SignalR, health
 Fonoteca.Domain     PURE — entities, matching, quality ranking
 Fonoteca.Ingest     walk, probe, fingerprint
 Fonoteca.Tagging    read/write, dry-run diff, undo journal
-Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb
+Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic
 Fonoteca.Jobs       empty — Hangfire refs, a reference to Domain, no source
 Fonoteca.Data       EF Core, migrations
 ```
@@ -194,6 +194,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | by-hand matching | `web/src/pages/seating.ts`, `identify.ts` | `Api/Endpoints/CatalogueEndpoints.{AlbumMatching,Identify}.cs` |
 | files & previews | `Domain/Catalogue/FolderRollup.cs`, `FilePreview.cs` | `Api/Library/FileManagerService.cs` |
 | covers | — | `Providers/CoverArt/`, `Api/Endpoints/CatalogueEndpoints.Cover.cs` |
+| motion artwork | — | `Providers/AppleMusic/AppleMusicMotions.cs`, `EnrichmentService.MotionAsync`, `TagWriteService.EnsureMotionAsync` |
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
@@ -603,6 +604,17 @@ same raster allowlist with SVG refused.
   cover the shop supplied is nobody's upload, and the dialog says which it is.
   This is the one caller of `QobuzClient` that is not a person choosing an album,
   so what bounds it is written on both.
+
+**Album motion artwork** — Apple Music's looping album videos — is ADR 0014.
+An enrichment stage reads it from Apple's *public* pages (barcode lookup,
+the album page's header JSON, the best H.264 rung of each HLS ladder as one
+MP4), never the web player's private API and its scraped token; it keeps the
+square and the tall video in `AlbumMotions`, a row per album shaped like
+`ReleaseCovers` (no video = a stamp that expires in a week), and the tag write
+puts them beside the album as `square_animated_artwork.mp4` and
+`tall_animated_artwork.mp4`, journalled as `tagging.motion` and undone with the
+sleeve. **A page that changes shape stops the stage instead of answering
+"none"**, so a redesign cannot stamp the whole library. Nothing serves them yet.
 
 **`…/folders/seed`** hands a folder to MusicBrainz's own "add release" form,
 prefilled. Fonoteca writes nothing to MusicBrainz and cannot — their `/ws/2`
