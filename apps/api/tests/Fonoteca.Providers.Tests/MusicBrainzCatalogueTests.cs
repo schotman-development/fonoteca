@@ -72,6 +72,18 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     private static readonly Mbid DireStraitsId =
         new(Guid.Parse("614e3804-7d34-41ba-857f-811bad7c2b7a"));
 
+    /// <summary>A movement, linked to a conductor, an orchestra, a violinist and a producer.</summary>
+    private static readonly Mbid InTheSummerRecordingId =
+        new(Guid.Parse("09a01037-b98f-4816-893a-9a51d70a87a7"));
+
+    /// <summary>Its work, a part of the suite it belongs to.</summary>
+    private static readonly Mbid InTheSummerWorkId =
+        new(Guid.Parse("e4152bad-1c25-4f69-b859-3a3dce87580c"));
+
+    /// <summary>An album with two genres, tied on one vote each.</summary>
+    private static readonly Mbid GraceId =
+        new(Guid.Parse("b30763c4-e994-4787-a674-ca7fbc85b2fd"));
+
     private readonly List<ServiceProvider> _providers = [];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -115,6 +127,106 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         Assert.Contains("release-groups", query, StringComparison.Ordinal);
         Assert.Contains("media", query, StringComparison.Ordinal);
         Assert.Contains("isrcs", query, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The genres ride the recording lookup, and every qualifier on a player's
+    /// link arrives, not only the first.
+    /// </summary>
+    [Fact]
+    public async Task ARecordingCarriesItsGenresAndEveryQualifierOnItsLinks()
+    {
+        var (catalogue, stub) = Build(Recorded("recording-in-the-summer.json"));
+
+        var recording = await catalogue.GetRecordingAsync(InTheSummerRecordingId, Token);
+
+        Assert.NotNull(recording);
+        Assert.Equal(["classical", "orchestral"], recording.Genres);
+        Assert.Contains("genres", Assert.Single(stub.Requests).Uri.Query, StringComparison.Ordinal);
+
+        Assert.Equal(
+            ["conductor", "instrument", "performing orchestra", "producer"],
+            recording.Relations.Select(relation => relation.Type));
+
+        var violin = recording.Relations.Single(relation => relation.Type == "instrument");
+        Assert.Equal("Esther Yoo", violin.Name);
+        Assert.Equal(["violin"], violin.Attributes);
+    }
+
+    /// <summary>
+    /// A movement names the work it is a part of; <c>parts</c> read from the
+    /// movement's side is backward, and that is the only direction taken.
+    /// </summary>
+    [Fact]
+    public async Task AMovementNamesTheWorkItIsAPartOf()
+    {
+        var (catalogue, stub) = Build(Recorded("work-in-the-summer.json"));
+
+        var work = await catalogue.GetWorkAsync(InTheSummerWorkId, Token);
+
+        Assert.NotNull(work);
+        Assert.Equal(new Mbid(Guid.Parse("27bca9c5-495c-4148-ab7e-a89a71d298ad")), work.ParentId);
+        Assert.Equal("Suite for Violin and String Orchestra, JS 185", work.ParentTitle);
+        Assert.Equal("composer", Assert.Single(work.Relations).Type);
+        Assert.Contains("work-rels", Assert.Single(stub.Requests).Uri.Query, StringComparison.Ordinal);
+    }
+
+    /// <summary>An artist's pages elsewhere arrive on the lookup already made, Discogs among them.</summary>
+    [Fact]
+    public async Task AnArtistCarriesTheirLinks()
+    {
+        var (catalogue, stub) = Build(Recorded("artist-mark-knopfler-links.json"));
+
+        var artist = await catalogue.GetArtistAsync(KnopflerId, Token);
+
+        Assert.NotNull(artist);
+        Assert.NotNull(artist.Links);
+        Assert.Contains(
+            new MusicBrainzLink("discogs", new Uri("https://www.discogs.com/artist/236897")),
+            artist.Links);
+        Assert.Contains("url-rels", Assert.Single(stub.Requests).Uri.Query, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Only web pages are kept as links: a page puts them in an <c>href</c>,
+    /// where any other scheme runs script.
+    /// </summary>
+    /// <remarks>A hand-written document, because the case is one MusicBrainz should never send.</remarks>
+    [Fact]
+    public async Task AnArtistLinkThatIsNotAWebPageIsDropped()
+    {
+        const string body = """
+            {"id":"e49f69da-17d5-4c5c-bac0-dadcb0e588f5","name":"Mark Knopfler","sort-name":"Knopfler, Mark",
+             "relations":[
+               {"type":"official homepage","target-type":"url","direction":"forward","attributes":[],
+                "url":{"id":"11111111-1111-4111-8111-111111111111","resource":"javascript:alert(1)"}},
+               {"type":"discogs","target-type":"url","direction":"forward","attributes":[],
+                "url":{"id":"22222222-2222-4222-8222-222222222222","resource":"https://www.discogs.com/artist/236897"}}]}
+            """;
+
+        var (catalogue, _) = Build(_ => StubHttpHandler.Json(HttpStatusCode.OK, body));
+
+        var artist = await catalogue.GetArtistAsync(KnopflerId, Token);
+
+        Assert.NotNull(artist);
+        var link = Assert.Single(artist.Links!);
+        Assert.Equal("discogs", link.Type);
+    }
+
+    /// <summary>An album's genres are a lookup of the release group, asked for nothing else.</summary>
+    [Fact]
+    public async Task AnAlbumsGenresAreItsReleaseGroupsMostVotedFirst()
+    {
+        var (catalogue, stub) = Build(Recorded("release-group-grace.json"));
+
+        var genres = await catalogue.GetReleaseGroupGenresAsync(GraceId, Token);
+
+        Assert.Equal(["pop", "rock"], genres);
+
+        var request = Assert.Single(stub.Requests);
+        Assert.Contains("/release-group/", request.Uri.AbsolutePath, StringComparison.Ordinal);
+        Assert.Contains("genres", request.Uri.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("releases", request.Uri.Query, StringComparison.Ordinal);
     }
 
     [Fact]

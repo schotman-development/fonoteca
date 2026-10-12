@@ -1597,6 +1597,11 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzArtist?>(null);
 
+        public Task<IReadOnlyList<string>?> GetReleaseGroupGenresAsync(Mbid id, CancellationToken cancellationToken = default) =>
+
+            Task.FromResult<IReadOnlyList<string>?>([]);
+
+
         public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Mbid>>([]);
 

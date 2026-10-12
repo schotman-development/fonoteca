@@ -339,6 +339,11 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         public Task<MusicBrainzArtist?> GetArtistAsync(Mbid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzArtist?>(null);
 
+        public Task<IReadOnlyList<string>?> GetReleaseGroupGenresAsync(Mbid id, CancellationToken cancellationToken = default) =>
+
+            Task.FromResult<IReadOnlyList<string>?>([]);
+
+
         public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Mbid>>([]);
 

@@ -41,15 +41,70 @@ internal static class MusicBrainzMapper
             Appearances: ToAppearances(source),
             Relations: ToRelations(source.Relationships),
             WorkId: performance is null ? null : new Mbid(performance.Id),
-            WorkTitle: NullIfBlank(performance?.Title));
+            WorkTitle: NullIfBlank(performance?.Title),
+            Genres: ToGenres(source.Genres));
     }
 
-    public static MusicBrainzWork ToWork(IWork source) =>
-        new(
+    public static MusicBrainzWork ToWork(IWork source)
+    {
+        var parent = ParentWork(source.Relationships);
+
+        return new(
             Id: new Mbid(source.Id),
             Title: source.Title ?? string.Empty,
             Type: NullIfBlank(source.Type),
-            Relations: ToRelations(source.Relationships));
+            Relations: ToRelations(source.Relationships),
+            ParentId: parent is null ? null : new Mbid(parent.Id),
+            ParentTitle: NullIfBlank(parent?.Title));
+    }
+
+    /// <summary>The work this one is a part of, if MusicBrainz says so.</summary>
+    /// <remarks>
+    /// <c>parts</c> is stated once, on the whole, and served from both ends:
+    /// <c>backward</c> from the movement with the symphony on the far end,
+    /// <c>forward</c> from the symphony with each movement there. Only the
+    /// backward one names a parent; reading the forward ones would make a
+    /// symphony a part of its own first movement.
+    /// </remarks>
+    private static IWork? ParentWork(IReadOnlyList<IRelationship>? relationships)
+    {
+        foreach (var relationship in relationships ?? [])
+        {
+            if (relationship.Work is { } work
+                && string.Equals(relationship.Type, "parts", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(relationship.Direction, "backward", StringComparison.OrdinalIgnoreCase))
+            {
+                return work;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>An album's genres, most-voted first.</summary>
+    public static IReadOnlyList<string> ToReleaseGroupGenres(IReleaseGroup source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        return ToGenres(source.Genres);
+    }
+
+    /// <summary>Curated genres, most-voted first.</summary>
+    /// <remarks>
+    /// MusicBrainz sends them alphabetically and a page prints the first few.
+    /// The sort is stable, so a tie keeps MusicBrainz's alphabetical order and
+    /// a rerun over unchanged votes stores the identical string.
+    /// </remarks>
+    private static List<string> ToGenres(IReadOnlyList<IGenre>? source)
+    {
+        var genres = new List<string>();
+
+        foreach (var genre in (source ?? []).OrderByDescending(g => g.VoteCount))
+        {
+            if (NullIfBlank(genre.Name) is { } name) genres.Add(name);
+        }
+
+        return genres;
+    }
 
     /// <summary>
     /// An artist, flattened to the fields a credit line cannot carry.
@@ -66,15 +121,6 @@ internal static class MusicBrainzMapper
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        var genres = new List<string>();
-
-        // Ordered by votes, most first, because MusicBrainz sends them
-        // alphabetically and a page prints the first two or three of them.
-        foreach (var genre in (source.Genres ?? []).OrderByDescending(g => g.VoteCount))
-        {
-            if (NullIfBlank(genre.Name) is { } name) genres.Add(name);
-        }
-
         return new MusicBrainzArtist(
             Id: new Mbid(source.Id),
             Name: source.Name ?? string.Empty,
@@ -89,9 +135,30 @@ internal static class MusicBrainzMapper
             // Absent means "not known to have ended", which is how MusicBrainz
             // means it and what a living artist's document looks like.
             HasEnded: source.LifeSpan?.Ended ?? false,
-            Genres: genres,
+            Genres: ToGenres(source.Genres),
             Bands: ToBands(source.Id, source.Relationships),
-            Aliases: ToAliases(source.Aliases));
+            Aliases: ToAliases(source.Aliases),
+            Links: ToLinks(source.Relationships));
+    }
+
+    /// <summary>Every link to a page elsewhere, in MusicBrainz's order.</summary>
+    /// <remarks>Web pages only: a page puts these in an <c>href</c>, where any other scheme is a script.</remarks>
+    private static List<MusicBrainzLink> ToLinks(IReadOnlyList<IRelationship>? relationships)
+    {
+        var links = new List<MusicBrainzLink>();
+
+        foreach (var relationship in relationships ?? [])
+        {
+            if (relationship.Url?.Resource is not { IsAbsoluteUri: true } url
+                || (url.Scheme != Uri.UriSchemeHttps && url.Scheme != Uri.UriSchemeHttp))
+            {
+                continue;
+            }
+
+            links.Add(new MusicBrainzLink(NullIfBlank(relationship.Type) ?? "other", url));
+        }
+
+        return links;
     }
 
     /// <summary>The artist's other names, flattened to what picks a Latin one.</summary>
@@ -365,10 +432,10 @@ internal static class MusicBrainzMapper
     /// its boundary, and a relation with no artist has nothing the catalogue can
     /// store. The work link is read separately by <see cref="FirstWorkLink"/>.
     ///
-    /// Only the first attribute is kept. MusicBrainz allows several — "guitar"
-    /// and "guest" on one performer link — and the catalogue's
-    /// <c>Relationship.Attribute</c> is a single column; the rest are recoverable
-    /// from MusicBrainz and nothing reads them yet.
+    /// <see cref="MusicBrainzRelation.Attribute"/> is the first attribute, which
+    /// is what <c>Relationship.Attribute</c>'s single column stores;
+    /// <see cref="MusicBrainzRelation.Attributes"/> is all of them — "guitar"
+    /// and "guest" on one performer link — which is what a contribution prints.
     /// </remarks>
     private static List<MusicBrainzRelation> ToRelations(IReadOnlyList<IRelationship>? relationships)
     {
@@ -393,7 +460,8 @@ internal static class MusicBrainzMapper
                 Name: NullIfBlank(relationship.TargetCredit) ?? artist.Name ?? string.Empty,
                 SortName: NullIfBlank(artist.SortName),
                 ArtistType: NullIfBlank(artist.Type),
-                Disambiguation: NullIfBlank(artist.Disambiguation)));
+                Disambiguation: NullIfBlank(artist.Disambiguation),
+                Attributes: [.. (relationship.Attributes ?? []).Select(NullIfBlank).OfType<string>()]));
         }
 
         return mapped;

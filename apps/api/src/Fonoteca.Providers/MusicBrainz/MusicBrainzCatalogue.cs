@@ -49,16 +49,20 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         // unfindable under anyone who actually played it. The work link is a
         // stub; its composer needs the separate lookup below.
         | Include.ArtistRelationships
-        | Include.WorkRelationships;
+        | Include.WorkRelationships
+        // Rides the same request: the votes on this performance, which the
+        // album's genres stand in for where nobody has voted on the album.
+        | Include.Genres;
 
     /// <summary>
-    /// A work is asked only for who wrote it.
+    /// A work is asked for who wrote it, and what it is a part of.
     /// </summary>
     /// <remarks>
     /// No <c>Include.Recordings</c>: a popular work has thousands, they arrive
-    /// paginated, and the question here is the composer.
+    /// paginated, and the question here is the composer. <c>WorkRelationships</c>
+    /// carries <c>parts</c>, which names the symphony a movement belongs to.
     /// </remarks>
-    private const Include WorkIncludes = Include.ArtistRelationships;
+    private const Include WorkIncludes = Include.ArtistRelationships | Include.WorkRelationships;
 
     /// <summary>
     /// An artist is asked only for what describes them.
@@ -91,8 +95,13 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// feature costs no request that was not already being made. See
     /// <c>LatinNames</c> for which of them wins.
     /// </remarks>
+    /// <remarks>
+    /// <c>UrlRelationships</c> is the fourth rider: the artist's pages elsewhere,
+    /// Discogs among them, which is how a later source finds the same artist by
+    /// identity rather than by name.
+    /// </remarks>
     private const Include ArtistIncludes =
-        Include.Genres | Include.ArtistRelationships | Include.Aliases;
+        Include.Genres | Include.ArtistRelationships | Include.Aliases | Include.UrlRelationships;
 
     private const Include ReleaseIncludes =
         Include.Artists
@@ -202,6 +211,17 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
             id,
             async token => MusicBrainzMapper.ToRelease(
                 await _query.LookupReleaseAsync(id.Value, ReleaseIncludes, token)
+                    .ConfigureAwait(false)),
+            cancellationToken);
+
+    public Task<IReadOnlyList<string>?> GetReleaseGroupGenresAsync(
+        Mbid id,
+        CancellationToken cancellationToken = default) =>
+        LookupAsync<IReadOnlyList<string>>(
+            "release group",
+            id,
+            async token => MusicBrainzMapper.ToReleaseGroupGenres(
+                await _query.LookupReleaseGroupAsync(id.Value, Include.Genres, cancellationToken: token)
                     .ConfigureAwait(false)),
             cancellationToken);
 

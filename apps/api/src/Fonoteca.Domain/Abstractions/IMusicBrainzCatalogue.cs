@@ -205,6 +205,19 @@ public interface IMusicBrainzCatalogue
         Mbid id,
         CancellationToken cancellationToken = default);
 
+    /// <summary>An album's genres, most-voted first.</summary>
+    /// <remarks>
+    /// A lookup of its own because nothing else asks about the release group:
+    /// attribution reaches it through releases, and a release's own genres are
+    /// a different, far sparser vote. One request per held album.
+    /// </remarks>
+    /// <returns>Null when MusicBrainz has no such release group; empty when nobody has voted.</returns>
+    /// <exception cref="ProviderUnavailableException">The service did not answer.</exception>
+    /// <exception cref="ProviderRejectedException">The request was refused.</exception>
+    Task<IReadOnlyList<string>?> GetReleaseGroupGenresAsync(
+        Mbid id,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Every release group MusicBrainz credits to this artist.
     /// </summary>
@@ -360,7 +373,10 @@ public sealed record MusicBrainzRecording(
     /// </remarks>
     Mbid? WorkId,
 
-    string? WorkTitle);
+    string? WorkTitle,
+
+    /// <summary>MusicBrainz's curated genres for this recording, most-voted first.</summary>
+    IReadOnlyList<string>? Genres = null);
 
 /// <summary>A composition and the people credited with writing it.</summary>
 public sealed record MusicBrainzWork(
@@ -370,7 +386,17 @@ public sealed record MusicBrainzWork(
     /// <summary>Song, Symphony, Opera. Free text, mirroring MusicBrainz work types.</summary>
     string? Type,
 
-    IReadOnlyList<MusicBrainzRelation> Relations);
+    IReadOnlyList<MusicBrainzRelation> Relations,
+
+    /// <summary>The work this one is a part of — the symphony a movement belongs to.</summary>
+    /// <remarks>
+    /// One level up only. An aria's parent is its act and the act's is the
+    /// opera; reaching the top would cost a lookup per level, and the album page
+    /// groups consecutive tracks, where the nearest parent is the useful one.
+    /// </remarks>
+    Mbid? ParentId = null,
+
+    string? ParentTitle = null);
 
 /// <summary>One name an artist is also known by.</summary>
 /// <remarks>
@@ -416,12 +442,12 @@ public sealed record MusicBrainzAlias(string Name, string? Locale, bool Primary,
 
 /// <summary>An artist as MusicBrainz describes them, rather than as a credit line does.</summary>
 /// <remarks>
-/// Narrower than the WS/2 response on purpose. IPIs, ISNIs, areas and URL
-/// relations all arrive in the same document and none of them has a reader:
-/// there is no catalogue search for them to feed, and no screen with an
-/// external link on it. Widening this is one <c>Include</c> and one field the day
-/// something wants them — which is what <see cref="MusicBrainzArtist.Aliases"/>
-/// was, the day a browse list had to print a Latin name.
+/// Narrower than the WS/2 response on purpose. IPIs, ISNIs and areas arrive in
+/// the same document and none of them has a reader. Widening this is one
+/// <c>Include</c> and one field the day something wants them — which is what
+/// <see cref="MusicBrainzArtist.Aliases"/> was, the day a browse list had to
+/// print a Latin name, and <see cref="MusicBrainzArtist.Links"/> the day the
+/// artist page wanted its external links.
 /// </remarks>
 public sealed record MusicBrainzArtist(
     Mbid Id,
@@ -518,7 +544,21 @@ public sealed record MusicBrainzArtist(
     /// to the artists whose name is not Latin: on this library that is 22 rows
     /// rather than 3,051.
     /// </remarks>
-    IReadOnlyList<MusicBrainzAlias> Aliases);
+    IReadOnlyList<MusicBrainzAlias> Aliases,
+
+    /// <summary>
+    /// The artist's pages elsewhere — Discogs, an official site, Bandcamp — as MusicBrainz lists them.
+    /// </summary>
+    /// <remarks>
+    /// Kept whole, every type, because each is how another source finds this
+    /// artist again by identity rather than by name: a Discogs link carries the
+    /// Discogs id.
+    /// </remarks>
+    IReadOnlyList<MusicBrainzLink>? Links = null);
+
+/// <summary>One external page MusicBrainz links an entity to.</summary>
+/// <param name="Type">MusicBrainz's relationship type: "discogs", "official homepage", "bandcamp".</param>
+public sealed record MusicBrainzLink(string Type, Uri Url);
 
 /// <summary>One typed link from an entity to an artist.</summary>
 /// <remarks>
@@ -551,7 +591,13 @@ public sealed record MusicBrainzRelation(
     /// <summary>Person, Group, Orchestra, Choir.</summary>
     string? ArtistType,
 
-    string? Disambiguation);
+    string? Disambiguation,
+
+    /// <summary>
+    /// Every qualifier, where <see cref="Attribute"/> is only the first —
+    /// "guitar", "bass guitar" and "guest" on one performer.
+    /// </summary>
+    IReadOnlyList<string>? Attributes = null);
 
 /// <summary>An artist's credit, in billing order, as printed.</summary>
 /// <remarks>

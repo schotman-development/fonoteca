@@ -326,6 +326,11 @@ public sealed partial class QobuzFilingTests
             return Task.FromResult(Releases.FirstOrDefault(release => release.Id == id));
         }
 
+        public Task<IReadOnlyList<string>?> GetReleaseGroupGenresAsync(Mbid id, CancellationToken cancellationToken = default) =>
+
+            Task.FromResult<IReadOnlyList<string>?>([]);
+
+
         public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default)
         {
             Asked();

@@ -3174,6 +3174,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         private int _workCalls;
         private int _artistCalls;
         private int _browseCalls;
+        private int _genreCalls;
 
         public int RecordingCalls => Volatile.Read(ref _recordingCalls);
 
@@ -3182,6 +3183,11 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         public int ArtistCalls => Volatile.Read(ref _artistCalls);
 
         public int BrowseCalls => Volatile.Read(ref _browseCalls);
+
+        public int GenreCalls => Volatile.Read(ref _genreCalls);
+
+        /// <summary>What every album's genres come back as; empty is "nobody has voted".</summary>
+        public IReadOnlyList<string> AlbumGenres { get; set; } = [];
 
         /// <summary>False models a mirror mid-replication, whose browse ends short.</summary>
         public bool BrowseComplete { get; set; } = true;
@@ -3263,6 +3269,15 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
         public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Mbid>>([]);
+
+        public Task<IReadOnlyList<string>?> GetReleaseGroupGenresAsync(Mbid id, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _genreCalls);
+
+            if (unavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
+
+            return Task.FromResult<IReadOnlyList<string>?>(AlbumGenres);
+        }
 
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default)
         {
