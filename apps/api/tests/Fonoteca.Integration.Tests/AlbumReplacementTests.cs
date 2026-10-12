@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Configuration;
@@ -133,6 +134,49 @@ public sealed class AlbumReplacementTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal(ReplacementVerdict.NotBetter, result.Verdict);
         Assert.Equal(0, result.Archived);
         Assert.True(File.Exists(Path.Combine(_root, "Old Artist", "Old Album (2003)", "01 Track.flac")));
+    }
+
+    /// <summary>
+    /// A 24-bit FLAC the analysis found holding 16-bit audio is held as the CD
+    /// rip it is, so a real 24-bit copy replaces it where its header calls them equal.
+    /// </summary>
+    [Fact]
+    public async Task APaddedAlbumIsHeldAsTheBitsItUses()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var source = Directory.CreateTempSubdirectory("fonoteca-padded-").FullName;
+
+        try
+        {
+            var hiRes = Path.Combine(source, "hires.flac");
+
+            using (var ffmpeg = Process.Start(new ProcessStartInfo(
+                "ffmpeg",
+                ["-v", "error", "-y", "-f", "lavfi", "-i", "anoisesrc=d=2:a=0.3", "-ar", "44100", "-sample_fmt", "s32", "-c:a", "flac", hiRes]))!)
+            {
+                await ffmpeg.WaitForExitAsync(Token);
+                Assert.Equal(0, ffmpeg.ExitCode);
+            }
+
+            await GivenHeldAsync(null, [$"{OldFolder}/01 Track.flac"], hiRes);
+            await MeasureHeldAsync($"{OldFolder}/01 Track.flac");
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                var row = await db.MediaFiles.SingleAsync(file => file.Path == $"{OldFolder}/01 Track.flac", Token);
+                row.Measurement = new AudioMeasurement { EffectiveBitDepth = 16 };
+                await db.SaveChangesAsync(Token);
+            }
+
+            var result = await Service().ReplaceAsync(OldFolder, 0, GivenDownloaded(hiRes, $"{NewFolder}/01 Track.flac"), Token);
+
+            Assert.Equal(ReplacementVerdict.Replace, result.Verdict);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
     }
 
     [Fact]

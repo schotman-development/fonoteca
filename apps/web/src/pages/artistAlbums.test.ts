@@ -12,7 +12,13 @@ const track = (over: Partial<Parameters<typeof albumsOf>[0][number]>) => ({
   album: null,
   folder: 'An Artist/An Album',
   files: [
-    { path: 'An Artist/An Album/01.flac', sizeBytes: 1, quality: null, integrity: 'Unchecked' },
+    {
+      path: 'An Artist/An Album/01.flac',
+      sizeBytes: 1,
+      quality: null,
+      integrity: 'Unchecked',
+      analysis: null,
+    },
   ],
   performers: null,
   ...over,
@@ -50,8 +56,8 @@ test('tracks of one release become one album, files and roles summed', () => {
       album: album(),
       roles: ['conductor'],
       files: [
-        { path: 'a.flac', sizeBytes: 1, quality: null, integrity: 'Unchecked' },
-        { path: 'a.mp3', sizeBytes: 1, quality: null, integrity: 'Unchecked' },
+        { path: 'a.flac', sizeBytes: 1, quality: null, integrity: 'Unchecked', analysis: null },
+        { path: 'a.mp3', sizeBytes: 1, quality: null, integrity: 'Unchecked', analysis: null },
       ],
     }),
   ])

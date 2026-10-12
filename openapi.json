@@ -4231,7 +4231,8 @@
           "editionId",
           "edition",
           "order",
-          "files"
+          "files",
+          "dynamicRange"
         ],
         "type": "object",
         "properties": {
@@ -4259,6 +4260,13 @@
             "items": {
               "$ref": "#/components/schemas/AlbumFileRow"
             }
+          },
+          "dynamicRange": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -6380,6 +6388,59 @@
           }
         }
       },
+      "FileAnalysis": {
+        "required": [
+          "dynamicRange",
+          "lufs",
+          "truePeak",
+          "realBitDepth",
+          "leadingSilence",
+          "trailingSilence",
+          "clipped"
+        ],
+        "type": "object",
+        "properties": {
+          "dynamicRange": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "lufs": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "truePeak": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "realBitDepth": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "leadingSilence": {
+            "type": "number",
+            "format": "double"
+          },
+          "trailingSilence": {
+            "type": "number",
+            "format": "double"
+          },
+          "clipped": {
+            "type": "boolean"
+          }
+        }
+      },
       "FileOperation": {
         "required": [
           "applied",
@@ -6530,7 +6591,8 @@
           "path",
           "sizeBytes",
           "quality",
-          "integrity"
+          "integrity",
+          "analysis"
         ],
         "type": "object",
         "properties": {
@@ -6553,6 +6615,16 @@
           },
           "integrity": {
             "type": "string"
+          },
+          "analysis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FileAnalysis"
+              }
+            ]
           }
         }
       },

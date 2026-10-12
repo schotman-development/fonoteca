@@ -813,6 +813,7 @@ public static partial class CatalogueEndpoints
                         f.SizeBytes,
                         f.Quality,
                         f.Integrity,
+                        f.Measurement,
                         f.ReleaseId,
                         f.ReleaseGroupId,
                         AlbumTitle = f.ReleaseGroup == null ? null : f.ReleaseGroup.Title,
@@ -929,7 +930,7 @@ public static partial class CatalogueEndpoints
                     })
                     .FirstOrDefault(),
                 Folder: FolderOf(row.Files[0].Path),
-                Files: [.. row.Files.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
+                Files: [.. row.Files.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity, file.Measurement))],
                 Performers: Performers(row.OthersBilled, row.Players.Select(player => (player.Type, player.Name)))))
             .ToList();
 
@@ -1135,7 +1136,8 @@ public static partial class CatalogueEndpoints
         string path,
         long sizeBytes,
         AudioQuality? quality,
-        IntegrityState integrity) =>
+        IntegrityState integrity,
+        AudioMeasurement? measurement) =>
         new(
             path,
             sizeBytes,
@@ -1147,7 +1149,17 @@ public static partial class CatalogueEndpoints
                     quality.BitDepth,
                     quality.SampleRateHz,
                     (int)(quality.BitrateBps / 1000)),
-            integrity.ToString());
+            integrity.ToString(),
+            measurement is null
+                ? null
+                : new FileAnalysis(
+                    AudioAnalysis.DynamicRange(measurement),
+                    measurement.IntegratedLufs,
+                    measurement.TruePeakDbtp,
+                    AudioAnalysis.RealBitDepth(quality, measurement),
+                    measurement.LeadingSilenceSeconds,
+                    measurement.TrailingSilenceSeconds,
+                    AudioAnalysis.Clipped(measurement)));
 
     /// <summary>Follow or unfollow an artist the catalogue already holds.</summary>
     internal static async Task<Results<Ok<ArtistFollowResponse>, ProblemHttpResult>> SetArtistFollowed(
@@ -1712,6 +1724,7 @@ public static partial class CatalogueEndpoints
                 file.SizeBytes,
                 file.Quality,
                 file.Integrity,
+                file.Measurement,
                 file.RecordingId,
                 file.ReleaseId,
                 Recording = file.Recording == null ? null : file.Recording.Title,
@@ -1811,7 +1824,7 @@ public static partial class CatalogueEndpoints
                     Format(row.Slot.Length),
                     row.Slot.Recording.Value,
                     row.Held,
-                    [.. mine.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity))],
+                    [.. mine.Select(file => FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity, file.Measurement))],
                     // Only where it says something the album's line does not:
                     // a guest on one song, a compilation's own artist.
                     own is not null && own != credit ? own : null,
@@ -1827,7 +1840,7 @@ public static partial class CatalogueEndpoints
             .OrderBy(file => AlbumFolder.SortKey(file.Path), StringComparer.Ordinal)
             .ThenBy(file => file.Path, StringComparer.Ordinal)
             .Select(file => new AlbumFileRow(
-                FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity),
+                FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity, file.Measurement),
                 file.Recording,
                 null,
                 null,
@@ -1866,12 +1879,13 @@ public static partial class CatalogueEndpoints
                         .ThenBy(file => AlbumFolder.SortKey(file.Path), StringComparer.Ordinal)
                         .ThenBy(file => file.Path, StringComparer.Ordinal)
                         .Select(file => new AlbumFileRow(
-                            FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity),
+                            FileRowOf(file.Path, file.SizeBytes, file.Quality, file.Integrity, file.Measurement),
                             file.Recording,
                             edition is null ? null : file.Disc,
                             edition is null ? null : file.Position,
                             file.TagDiscNumber,
-                            file.TagTrackNumber))]);
+                            file.TagTrackNumber))],
+                    AudioAnalysis.AlbumDynamicRange(folder.Select(file => file.Measurement)));
             })
             .ToList();
 
@@ -5358,7 +5372,23 @@ public sealed record TrackBand(Guid Id, string Name);
 
 /// <param name="Quality">What the probe pass measured, or null until it has decoded the file.</param>
 /// <param name="Integrity">Unchecked, Intact, Corrupt, Truncated or Unreadable.</param>
-public sealed record FileRow(string Path, long SizeBytes, FileQuality? Quality, string Integrity);
+/// <param name="Analysis">What the analysis pass found in the audio, or null before it has run.</param>
+public sealed record FileRow(string Path, long SizeBytes, FileQuality? Quality, string Integrity, FileAnalysis? Analysis);
+
+/// <summary>An analysed file's audio, as much as a file row shows.</summary>
+/// <param name="DynamicRange">The DR figure, rounded as it is quoted; null where the meter could not measure one.</param>
+/// <param name="Lufs">Integrated loudness; null for audio below the gate.</param>
+/// <param name="TruePeak">dBTP; above zero clips on playback.</param>
+/// <param name="RealBitDepth">The bits a lossless file really uses, where fewer than it declares; otherwise null.</param>
+/// <param name="Clipped">Whether the audio sits at full scale, or a lossy decode goes over it.</param>
+public sealed record FileAnalysis(
+    int? DynamicRange,
+    double? Lufs,
+    double? TruePeak,
+    int? RealBitDepth,
+    double LeadingSilence,
+    double TrailingSilence,
+    bool Clipped);
 
 /// <summary>A probed file's format, as much as a badge needs.</summary>
 public sealed record FileQuality(
@@ -5502,12 +5532,14 @@ public sealed record AlbumFileRow(
 /// Its files in the folder's own order: the pressing's, else the order the
 /// attribution pass settled on, else the numbers in their names.
 /// </param>
+/// <param name="DynamicRange">The folder's DR, as the DR database gives an album's: its files' mean, rounded.</param>
 public sealed record AlbumFolderRow(
     string Path,
     Guid? EditionId,
     string? Edition,
     string Order,
-    IReadOnlyList<AlbumFileRow> Files);
+    IReadOnlyList<AlbumFileRow> Files,
+    int? DynamicRange);
 
 /// <summary>Everything the album page shows that the list does not need.</summary>
 /// <param name="GroupId">The release group, which is what "Want" marks.</param>

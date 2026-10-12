@@ -584,6 +584,52 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
         Assert.Equal(["pop", "vocal jazz"], album.About.Genres);
     }
 
+    /// <summary>
+    /// Each analysed file shows its DR, its real bit depth where padded, and
+    /// clipping; each folder its own DR, the mean of its files'.
+    /// </summary>
+    [Fact]
+    public async Task AnalysedFilesShowTheirReportAndEachFolderItsDynamicRange()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var files = await db.MediaFiles
+                .Where(f => f.Path.StartsWith("Nat King Cole/Unforgettable/"))
+                .OrderBy(f => f.Path)
+                .ToListAsync(Token);
+
+            for (var n = 0; n < files.Count; n++)
+            {
+                files[n].Quality = new AudioQuality
+                {
+                    Codec = "flac", SampleRateHz = 44_100, Channels = 2, BitDepth = 24, BitrateBps = 900_000, IsLossless = true,
+                };
+                files[n].Measurement = new AudioMeasurement
+                {
+                    DynamicRange = 9 + n,
+                    EffectiveBitDepth = 16,
+                    SamplePeakDbfs = 0,
+                    PeakCount = n == 0 ? 50 : 1,
+                };
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+        var album = await AlbumAsync(client, _seed.Unforgettable);
+
+        var folder = album.Folders.Single(f => f.Path == "Nat King Cole/Unforgettable");
+        Assert.Equal(10, folder.DynamicRange);
+
+        var first = folder.Files.Select(row => row.File).Single(file => file.Path.EndsWith("01 - Mona Lisa.flac", StringComparison.Ordinal));
+        Assert.Equal(9, first.Analysis!.DynamicRange);
+        Assert.Equal(16, first.Analysis.RealBitDepth);
+        Assert.True(first.Analysis.Clipped);
+
+        Assert.Null(album.Folders.Single(f => f.Path == "Nat King Cole/Unforgettable (Hi-Res)").DynamicRange);
+    }
+
     private static Contribution Contribution(
         RecordingId? recording,
         WorkId? work,

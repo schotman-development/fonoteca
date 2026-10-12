@@ -528,7 +528,7 @@ public sealed class AlbumReplacementService(
         var old = await db.MediaFiles
             .AsNoTracking()
             .Where(file => file.Path.StartsWith(prefix))
-            .Select(file => new HeldFile(file.Path, file.Quality, file.TrackId, file.ReleaseGroupId))
+            .Select(file => new HeldFile(file.Path, file.Quality, file.Measurement, file.TrackId, file.ReleaseGroupId))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -696,7 +696,17 @@ public sealed class AlbumReplacementService(
     private static string LibraryRoot(FonotecaOptions config) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(config.LibraryPath));
 
-    private sealed record HeldFile(string Path, AudioQuality? Quality, TrackId? TrackId, ReleaseGroupId? ReleaseGroupId);
+    /// <param name="Header">What the probe read; <see cref="Quality"/> is what is decided by.</param>
+    private sealed record HeldFile(
+        string Path,
+        AudioQuality? Header,
+        AudioMeasurement? Measurement,
+        TrackId? TrackId,
+        ReleaseGroupId? ReleaseGroupId)
+    {
+        /// <summary>The held copy as it is ranked: its measured bit depth over its header's.</summary>
+        public AudioQuality? Quality => AudioAnalysis.Decided(Header, Measurement);
+    }
 
     /// <summary>What actually landed, read from the bytes rather than the response.</summary>
     /// <remarks>

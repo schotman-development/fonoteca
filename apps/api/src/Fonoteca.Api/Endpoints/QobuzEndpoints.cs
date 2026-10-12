@@ -169,7 +169,7 @@ public static class QobuzEndpoints
         // instant; it is a person-clicked endpoint, not a pass.
         var files = await db.MediaFiles
             .AsNoTracking()
-            .Select(file => new { file.ReleaseGroupId, file.ReleaseId, file.RecordingId, file.Path, file.Quality })
+            .Select(file => new { file.ReleaseGroupId, file.ReleaseId, file.RecordingId, file.Path, Header = file.Quality, file.Measurement })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -190,8 +190,10 @@ public static class QobuzEndpoints
             .Select(file => new Assessed(
                 file.ReleaseGroupId,
                 file.RecordingId,
-                UpgradeScan.Assess(file.Path, file.Quality),
-                UpgradeScan.Format(file.Path, file.Quality),
+                // The measured depth over the header's: 16-bit audio in a
+                // 24-bit FLAC is a CD rip — the owner's choice.
+                UpgradeScan.Assess(file.Path, AudioAnalysis.Decided(file.Header, file.Measurement)),
+                UpgradeScan.Format(file.Path, AudioAnalysis.Decided(file.Header, file.Measurement)),
                 file.Path))
 
             // The album folder, always — never the album's catalogue key, and

@@ -1512,6 +1512,8 @@ export interface components {
             edition: null | string;
             order: string;
             files: components["schemas"]["AlbumFileRow"][];
+            /** Format: int32 */
+            dynamicRange: null | number;
         };
         AlbumListResponse: {
             /** Format: int32 */
@@ -2064,6 +2066,21 @@ export interface components {
             albumsWithBooklets: number;
             cancelled: boolean;
         };
+        FileAnalysis: {
+            /** Format: int32 */
+            dynamicRange: null | number;
+            /** Format: double */
+            lufs: null | number;
+            /** Format: double */
+            truePeak: null | number;
+            /** Format: int32 */
+            realBitDepth: null | number;
+            /** Format: double */
+            leadingSilence: number;
+            /** Format: double */
+            trailingSilence: number;
+            clipped: boolean;
+        };
         FileOperation: {
             applied: boolean;
             /** Format: int32 */
@@ -2106,6 +2123,7 @@ export interface components {
             sizeBytes: number;
             quality: null | components["schemas"]["FileQuality"];
             integrity: string;
+            analysis: null | components["schemas"]["FileAnalysis"];
         };
         FileTagRow: {
             name: string;

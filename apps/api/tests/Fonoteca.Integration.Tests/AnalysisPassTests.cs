@@ -149,6 +149,49 @@ public sealed class AnalysisPassTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.False(await db.MediaFiles.AnyAsync(f => f.MeasuredUtc != null, Token));
     }
 
+    /// <summary>
+    /// A 24-bit FLAC holding 16-bit audio is on the upgrade list as the CD rip
+    /// it is, once analysed; before, its header passes it as hi-res.
+    /// </summary>
+    [Fact]
+    public async Task APaddedFileReachesTheUpgradeListAsTheCdRipItIs()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(f => f.Path == "not-on-disk.flac", Token);
+            row.Path = "Somebody/Padded/01.flac";
+            row.Quality = new AudioQuality
+            {
+                Codec = "flac",
+                SampleRateHz = 44_100,
+                Channels = 2,
+                BitDepth = 24,
+                BitrateBps = 1_000_000,
+                IsLossless = true,
+            };
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var before = await client.GetFromJsonAsync<UpgradeListResponse>(new Uri("/api/qobuz/upgrades", UriKind.Relative), Token);
+        Assert.DoesNotContain(before!.Items, item => item.Reason == "BelowHiRes");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(f => f.Path == "Somebody/Padded/01.flac", Token);
+            row.Measurement = new AudioMeasurement { EffectiveBitDepth = 16 };
+            row.MeasuredUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var after = await client.GetFromJsonAsync<UpgradeListResponse>(new Uri("/api/qobuz/upgrades", UriKind.Relative), Token);
+
+        var padded = Assert.Single(after!.Items, item => item.Reason == "BelowHiRes");
+        Assert.Equal(["FLAC 16/44.1"], padded.Formats);
+    }
+
     private async Task<AnalysisStatusResponse> RunAsync(WebApplicationFactory<Program>? factory = null)
     {
         using var client = (factory ?? _factory!).CreateClient();

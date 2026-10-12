@@ -42,6 +42,7 @@ type AlbumEditionRow = components['schemas']['AlbumEditionRow']
 type AlbumFileRow = components['schemas']['AlbumFileRow']
 type FileRow = components['schemas']['FileRow']
 type FileQuality = components['schemas']['FileQuality']
+type FileAnalysis = components['schemas']['FileAnalysis']
 type AlbumCredit = components['schemas']['AlbumCredit']
 type SearchRow = components['schemas']['ReleaseSearchRow']
 type EditRequest = components['schemas']['ReleaseEditRequest']
@@ -201,7 +202,14 @@ function Album({
   const qualities = [
     ...new Map(
       files.flatMap((file) =>
-        file.quality == null ? [] : [[qualityLabel(file.quality), file.quality] as const],
+        file.quality == null
+          ? []
+          : [
+              [
+                qualityLabel(file.quality, file.analysis),
+                qualityTone(file.quality, file.analysis),
+              ] as const,
+            ],
       ),
     ).entries(),
   ]
@@ -288,8 +296,8 @@ function Album({
                   {release.status}
                 </Badge>
               ) : null}
-              {qualities.map(([label, quality]) => (
-                <Badge key={label} tone={qualityTone(quality)} size="sm" mono>
+              {qualities.map(([label, tone]) => (
+                <Badge key={label} tone={tone} size="sm" mono>
                   {label}
                 </Badge>
               ))}
@@ -433,6 +441,7 @@ function Album({
                           folder.edition ?? 'pressing not known',
                           FOLDER_ORDER[folder.order],
                           folder.files.length,
+                          folder.dynamicRange != null ? `DR${folder.dynamicRange}` : undefined,
                         ]
                           .filter((part) => part !== undefined)
                           .join(' · ')}
@@ -850,16 +859,59 @@ function dateLabel(year: number | null, month: number | null, day: number | null
   })
 }
 
-function qualityLabel(quality: FileQuality): string {
-  return quality.lossless
-    ? `${quality.codec} ${quality.bitDepth ?? '?'}/${quality.sampleRateHz / 1000}`
-    : `${quality.codec} ${quality.bitrateKbps}`
+/**
+ * A file's format, with the depth the analysis measured where a lossless file
+ * uses fewer bits than it declares: "FLAC 24→16/44.1".
+ */
+function qualityLabel(quality: FileQuality, analysis: FileAnalysis | null): string {
+  if (!quality.lossless) return `${quality.codec} ${quality.bitrateKbps}`
+
+  const depth =
+    analysis?.realBitDepth != null
+      ? `${quality.bitDepth}→${analysis.realBitDepth}`
+      : `${quality.bitDepth ?? '?'}`
+
+  return `${quality.codec} ${depth}/${quality.sampleRateHz / 1000}`
 }
 
-/** Above CD in depth or rate is hi-res, as `AudioQuality.Tier` reads it. */
-function qualityTone(quality: FileQuality): BadgeTone {
+/**
+ * Above CD in depth or rate is hi-res, as `AudioQuality.Tier` reads it — by the
+ * measured depth, so a padded file is not shown as hi-res.
+ */
+function qualityTone(quality: FileQuality, analysis: FileAnalysis | null): BadgeTone {
   if (!quality.lossless) return 'warning'
-  return (quality.bitDepth ?? 0) > 16 || quality.sampleRateHz > 48_000 ? 'accent' : 'neutral'
+  const depth = analysis?.realBitDepth ?? quality.bitDepth ?? 0
+  return depth > 16 || quality.sampleRateHz > 48_000 ? 'accent' : 'neutral'
+}
+
+/** Silence at an end shorter than this is a track gap, not worth a badge. */
+const SILENCE_WORTH_SAYING = 3
+
+/** What the analysis found, as badges: the DR figure, clipping, and long silence at either end. */
+function AnalysisBadges({ file }: { readonly file: FileRow }) {
+  const analysis = file.analysis
+  if (analysis == null) return null
+
+  return (
+    <>
+      {analysis.dynamicRange != null ? (
+        <Badge size="sm" mono>
+          {`DR${analysis.dynamicRange}`}
+        </Badge>
+      ) : null}
+      {analysis.clipped ? (
+        <Badge tone="warning" size="sm">
+          clips
+        </Badge>
+      ) : null}
+      {analysis.leadingSilence >= SILENCE_WORTH_SAYING ? (
+        <Badge size="sm">{`${analysis.leadingSilence.toFixed(1)} s silent start`}</Badge>
+      ) : null}
+      {analysis.trailingSilence >= SILENCE_WORTH_SAYING ? (
+        <Badge size="sm">{`${analysis.trailingSilence.toFixed(1)} s silent end`}</Badge>
+      ) : null}
+    </>
+  )
 }
 
 /** A track's printed number, which is not always its position: "A1", "12a". */
@@ -925,9 +977,12 @@ function FileBadges({ files }: { readonly files: readonly FileRow[] }) {
             not probed
           </Text>
         ) : (
-          <Badge key={file.path} tone={qualityTone(file.quality)} size="sm" mono>
-            {qualityLabel(file.quality)}
-          </Badge>
+          <Stack key={file.path} gap={4} wrap>
+            <Badge tone={qualityTone(file.quality, file.analysis)} size="sm" mono>
+              {qualityLabel(file.quality, file.analysis)}
+            </Badge>
+            <AnalysisBadges file={file} />
+          </Stack>
         ),
       )}
       {files
@@ -1120,7 +1175,7 @@ function Files({ files }: { readonly files: readonly FileRow[] }) {
                 <Text size="sm" family="mono">
                   {file.quality == null
                     ? 'not probed'
-                    : `${qualityLabel(file.quality)} · ${file.quality.bitrateKbps} kbps`}
+                    : `${qualityLabel(file.quality, file.analysis)} · ${file.quality.bitrateKbps} kbps`}
                 </Text>
               </TableCell>
               <TableCell>
