@@ -3689,12 +3689,16 @@
           "role",
           "group",
           "tracks",
-          "portrait"
+          "portrait",
+          "key"
         ],
         "type": "object",
         "properties": {
           "artistId": {
-            "type": "string",
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "uuid"
           },
           "name": {
@@ -3721,6 +3725,9 @@
               "null",
               "string"
             ]
+          },
+          "key": {
+            "type": "string"
           }
         }
       },
@@ -4606,7 +4613,8 @@
           "held",
           "files",
           "artist",
-          "on"
+          "on",
+          "partOf"
         ],
         "type": "object",
         "properties": {
@@ -4664,6 +4672,12 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "partOf": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -8394,7 +8408,8 @@
           "reviewLookupUtc",
           "releaseLookupUtc",
           "probedUtc",
-          "edited"
+          "edited",
+          "genres"
         ],
         "type": "object",
         "properties": {
@@ -8544,6 +8559,12 @@
             "format": "date-time"
           },
           "edited": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "genres": {
             "type": "array",
             "items": {
               "type": "string"

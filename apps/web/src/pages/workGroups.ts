@@ -10,13 +10,13 @@
  *
  * **The link points at the movement, not at the symphony, and that is the whole
  * problem this module solves.** `Recording.WorkId` reaches a *leaf* work titled
- * "Sinfonie Nr. 1 c-Moll, op. 68: II. Andante" — the parent piece lives in a
- * work-to-work "parts" relationship the catalogue does not store. Grouped on
- * the leaf, four movements are four distinct works and nothing groups at all:
- * measured against the real library, 6 of 564 albums grouped and Brahms's
- * complete symphonies rendered flat. Grouped on the part of the title before
- * the first ": ", which is how MusicBrainz composes "Parent: Part", it is 23
- * albums and Brahms is four headings of four movements each.
+ * "Sinfonie Nr. 1 c-Moll, op. 68: II. Andante". Grouped on the leaf, four
+ * movements are four distinct works and nothing groups at all: measured against
+ * the real library, 6 of 564 albums grouped and Brahms's complete symphonies
+ * rendered flat. The piece is `partOf`, MusicBrainz's "parts" relation, which
+ * the catalogue stores once a recording has been described again; until then
+ * the part of the work's title before the first ": " — how MusicBrainz
+ * composes "Parent: Part" — stands in, which grouped 23 albums.
  *
  * **Consecutive runs, not a group-by.** A release prints its tracks in an
  * order somebody chose, and a work interleaved with another one on purpose — a
@@ -33,6 +33,8 @@
 export type Performed = {
   readonly title: string
   readonly workTitle?: string | null | undefined
+  /** The piece the work is a part of, where MusicBrainz says so. */
+  readonly partOf?: string | null | undefined
 }
 
 export type WorkGroup<T> = {
@@ -98,6 +100,11 @@ function bare(value: string): string {
  * share, which recovers the subtitle without a parent link.
  */
 function headingFor(track: Performed): Heading | null {
+  const piece = track.partOf?.trim()
+  if (piece != null && piece.length > 0) {
+    return bare(piece) === bare(track.title) ? null : { key: piece, title: piece }
+  }
+
   const work = track.workTitle?.trim()
   if (work == null || work.length === 0) return null
 

@@ -28,6 +28,30 @@ function movement(work: string, part: string) {
   return track(`${work}: ${part}`, `${work}: ${part}`)
 }
 
+test('the piece MusicBrainz names wins over the title, subtitle and all', () => {
+  // The cut at the first ": " shortens a work whose own title has one; the
+  // stored parent does not.
+  const mass = 'The Armed Man: A Mass for Peace'
+  const groups = workGroups([
+    { title: 'Kyrie', workTitle: `${mass}: Kyrie`, partOf: mass },
+    { title: 'Benedictus', workTitle: `${mass}: Benedictus`, partOf: mass },
+  ])
+
+  assert.deepEqual(
+    groups?.map((group) => [group.workTitle, group.tracks.length]),
+    [[mass, 2]],
+  )
+})
+
+test('a track titled as its piece gets no heading above it', () => {
+  const groups = workGroups([
+    { title: 'Boléro', workTitle: 'Boléro', partOf: 'Boléro' },
+    { title: 'Boléro', workTitle: 'Boléro', partOf: 'Boléro' },
+  ])
+
+  assert.equal(groups, null)
+})
+
 test('movements group under the piece, not under themselves', () => {
   // The measured shape. Every workTitle here is distinct, so grouping on the
   // link as stored produces four groups of one and no headings at all.

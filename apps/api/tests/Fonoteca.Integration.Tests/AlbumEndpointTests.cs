@@ -503,6 +503,106 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
         Assert.Equal(6, info!.Counts.Albums);
     }
 
+    /// <summary>
+    /// An album page reads its genres, the piece a track belongs to, and every
+    /// credit MusicBrainz states — a contributor with no artist row included.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumShowsItsGenresItsPiecesAndEveryoneMusicBrainzCredits()
+    {
+        Guid stapleton;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var group = await db.ReleaseGroups.SingleAsync(g => g.Id == new ReleaseGroupId(_seed.Unforgettable), Token);
+            group.Genres = "jazz, vocal jazz";
+
+            var mona = await db.Recordings.SingleAsync(r => r.Title == "Mona Lisa", Token);
+            var guitarist = await db.Artists.SingleAsync(a => a.Name == "Chris Stapleton", Token);
+            stapleton = guitarist.Id.Value;
+
+            var piece = new Work { Id = WorkId.New(), Title = "Songs for Nat", Mbid = new Mbid(Guid.CreateVersion7()) };
+            var song = new Work
+            {
+                Id = WorkId.New(),
+                Title = "Songs for Nat: Mona Lisa",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                ParentId = piece.Id,
+            };
+
+            db.Works.AddRange(piece, song);
+            mona.WorkId = song.Id;
+
+            db.Contributions.AddRange(
+                Contribution(mona.Id, null, 0, "producer", "co", null, "Lee Gillette"),
+                Contribution(mona.Id, null, 1, "instrument", "guitar", guitarist.Mbid, "Chris Stapleton"),
+                Contribution(mona.Id, null, 2, "phonographic copyright", null, null, "Capitol Records"),
+                Contribution(null, song.Id, 0, "lyricist", null, null, "Jay Livingston"));
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+        var album = await AlbumAsync(client, _seed.Unforgettable);
+
+        Assert.Equal(["jazz", "vocal jazz"], album.About.Genres);
+        Assert.Equal("Songs for Nat", album.Tracks.Single(track => track.Title == "Mona Lisa").PartOf);
+
+        var producer = Assert.Single(album.Credits, credit => credit.Group == "Production");
+        Assert.Equal(("Lee Gillette", "producer (co)"), (producer.Name, producer.Role));
+        Assert.Null(producer.ArtistId);
+
+        var guitar = Assert.Single(album.Credits, credit => credit.Role == "guitar");
+        Assert.Equal("Performers", guitar.Group);
+        Assert.Equal(stapleton, guitar.ArtistId);
+
+        Assert.Contains(album.Credits, credit =>
+            credit.Group == "Composition" && credit.Role == "lyricist" && credit.Name == "Jay Livingston");
+
+        // A label's P-line is nobody's credit.
+        Assert.DoesNotContain(album.Credits, credit => credit.Name == "Capitol Records");
+    }
+
+    /// <summary>An album nobody voted on shows the genres most of its tracks carry, as Subsonic lists it.</summary>
+    [Fact]
+    public async Task AnAlbumWithNoGenresOfItsOwnShowsItsTracks()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Recordings
+                .Where(r => r.Title == "Mona Lisa" || r.Title == "Route 66")
+                .ExecuteUpdateAsync(update => update.SetProperty(r => r.Genres, "vocal jazz, pop"), Token);
+
+            await db.Recordings
+                .Where(r => r.Title == "Too Young")
+                .ExecuteUpdateAsync(update => update.SetProperty(r => r.Genres, "pop"), Token);
+        }
+
+        using var client = _factory!.CreateClient();
+        var album = await AlbumAsync(client, _seed.Unforgettable);
+
+        Assert.Equal(["pop", "vocal jazz"], album.About.Genres);
+    }
+
+    private static Contribution Contribution(
+        RecordingId? recording,
+        WorkId? work,
+        int position,
+        string type,
+        string? attributes,
+        Mbid? artist,
+        string name) => new()
+        {
+            Id = Guid.CreateVersion7(),
+            RecordingId = recording,
+            WorkId = work,
+            Position = position,
+            Type = type,
+            Attributes = attributes,
+            ArtistMbid = artist,
+            Name = name,
+        };
+
     private static async Task<AlbumDetailResponse> AlbumAsync(HttpClient client, Guid id)
     {
         var body = await client.GetFromJsonAsync<AlbumDetailResponse>(

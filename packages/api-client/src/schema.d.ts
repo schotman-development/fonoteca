@@ -1360,12 +1360,13 @@ export interface components {
         };
         AlbumCredit: {
             /** Format: uuid */
-            artistId: string;
+            artistId: null | string;
             name: string;
             role: string;
             group: string;
             tracks: null | number[];
             portrait: null | string;
+            key: string;
         };
         AlbumDetailResponse: {
             album: components["schemas"]["AlbumSummary"];
@@ -1609,6 +1610,7 @@ export interface components {
             files: components["schemas"]["FileRow"][];
             artist: null | string;
             on: string[];
+            partOf: null | string;
         };
         AlbumUpgrade: {
             download: null | components["schemas"]["AlbumDownload"];
@@ -2622,6 +2624,7 @@ export interface components {
             /** Format: date-time */
             probedUtc: null | string;
             edited: string[];
+            genres: string[];
         };
         ReleaseCoverOption: {
             /** Format: int64 */

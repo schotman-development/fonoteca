@@ -53,11 +53,8 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key']
 
-/**
- * The groups the credits come in. There is no Production group: the catalogue
- * stores no producers or engineers — see `CatalogueEndpoints.AlbumCredits`.
- */
-const CREDIT_GROUPS = ['Main', 'Performers', 'Composition'] as const
+/** The groups the credits come in, as `CatalogueEndpoints.AlbumCredits` files them. */
+const CREDIT_GROUPS = ['Main', 'Performers', 'Composition', 'Production'] as const
 
 const COVER_SOURCE: Readonly<Record<string, string>> = {
   archive: 'Cover Art Archive, this pressing',
@@ -267,6 +264,11 @@ function Album({
             <Text size="sm" tone="secondary">
               {facts.join(' · ')}
             </Text>
+            {about.genres.length > 0 ? (
+              <Text size="sm" tone="tertiary">
+                {about.genres.join(' · ')}
+              </Text>
+            ) : null}
 
             <Stack gap={8} align="center" wrap>
               {[about.primaryType, ...about.secondaryTypes]
@@ -539,6 +541,10 @@ function Album({
                         />
                         <Edited by={edited('primaryType') || edited('secondaryTypes')} />
                       </dd>
+                      <dt>Genres</dt>
+                      <dd>
+                        <Value value={about.genres.join(' · ') || null} asked={asked} />
+                      </dd>
                       <dt>First released</dt>
                       <dd>
                         <Value value={about.firstReleaseYear?.toString()} asked={asked} />
@@ -772,7 +778,7 @@ function Album({
               ) : null}
               {CREDIT_GROUPS.map((group, index) => {
                 const people = credits.filter((credit) => credit.group === group)
-                const open = people.find((person) => `${group}/${person.artistId}` === picked)
+                const open = people.find((person) => `${group}/${person.key}` === picked)
                 return people.length === 0 ? null : (
                   <section key={group} aria-labelledby={`${id}credits${index}`}>
                     <Stack direction="column" gap={8}>
@@ -785,15 +791,21 @@ function Album({
                         aria-label={`${group}: ${release.title}`}
                       >
                         {people.map((person) => {
-                          const face = artistImageUrl({ id: person.artistId })
-                          const key = `${group}/${person.artistId}`
+                          // A contributor the catalogue keeps no artist row
+                          // for has no face and no page; the card says so by
+                          // showing the placeholder.
+                          const face =
+                            person.artistId != null
+                              ? artistImageUrl({ id: person.artistId })
+                              : undefined
+                          const key = `${group}/${person.key}`
                           return (
                             <CatalogueCard
-                              key={person.artistId}
+                              key={person.key}
                               variant="artist"
                               title={person.name}
                               subtitle={person.role}
-                              image={face}
+                              {...(face != null ? { image: face } : {})}
                               render={(props) => (
                                 <button
                                   {...props}
@@ -1368,13 +1380,15 @@ function Songs({
         <h3 id={`${id}h`} className={styles.heading}>
           {credit.name} on this album
         </h3>
-        <Link
-          to="/library/artists/$artistId"
-          params={{ artistId: credit.artistId }}
-          className={styles.link}
-        >
-          <Text size="sm">Artist page</Text>
-        </Link>
+        {credit.artistId != null ? (
+          <Link
+            to="/library/artists/$artistId"
+            params={{ artistId: credit.artistId }}
+            className={styles.link}
+          >
+            <Text size="sm">Artist page</Text>
+          </Link>
+        ) : null}
       </Stack>
       <Text size="sm" tone="secondary">
         {credit.role} ·{' '}

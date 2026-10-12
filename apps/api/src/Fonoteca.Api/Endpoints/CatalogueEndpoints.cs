@@ -1611,6 +1611,10 @@ public static partial class CatalogueEndpoints
                 g.ReviewText,
                 g.ReviewUrl,
                 g.ReviewLookupUtc,
+                g.Genres,
+                RecordingGenres = g.Files
+                    .Select(file => file.Recording != null ? file.Recording.Genres : null)
+                    .ToList(),
                 LookedUp = g.Files.Max(file => file.ReleaseLookupUtc),
                 Probed = g.Files.Max(file => file.LastVerifiedUtc),
             })
@@ -1653,6 +1657,13 @@ public static partial class CatalogueEndpoints
                 // reads the absence and stays a flat list.
                 WorkTitle = track.Recording!.Work == null ? null : track.Recording.Work.Title,
 
+                // The piece the movement belongs to, where MusicBrainz says so —
+                // what the track list groups under before it falls back to
+                // reading the work's title.
+                PartOf = track.Recording.Work == null || track.Recording.Work.Parent == null
+                    ? null
+                    : track.Recording.Work.Parent.Title,
+
                 // The recording's own billing line and typed links, which the
                 // credits below are rolled up from.
                 Billed = track.Recording.Credits
@@ -1673,6 +1684,20 @@ public static partial class CatalogueEndpoints
                     : track.Recording.Work.Relationships
                         .Where(link => link.ArtistId != null)
                         .Select(link => new { ArtistId = link.ArtistId!.Value, link.Type })
+                        .ToList(),
+
+                // Everybody MusicBrainz links, as it states them — what the
+                // credits read in place of the two lists above once the
+                // recording has been described.
+                Contributions = track.Recording.Contributions
+                    .OrderBy(c => c.Position)
+                    .Select(c => new Contributed(c.ArtistMbid, c.Name, c.Type, c.Attributes))
+                    .ToList(),
+                WorkContributions = track.Recording.Work == null
+                    ? null
+                    : track.Recording.Work.Contributions
+                        .OrderBy(c => c.Position)
+                        .Select(c => new Contributed(c.ArtistMbid, c.Name, c.Type, c.Attributes))
                         .ToList(),
             })
             .ToListAsync(cancellationToken)
@@ -1790,7 +1815,8 @@ public static partial class CatalogueEndpoints
                     // Only where it says something the album's line does not:
                     // a guest on one song, a compilation's own artist.
                     own is not null && own != credit ? own : null,
-                    [.. row.On.Select(edition => edition.Value)]);
+                    [.. row.On.Select(edition => edition.Value)],
+                    facts.PartOf);
             })
             .ToList();
 
@@ -1870,12 +1896,23 @@ public static partial class CatalogueEndpoints
             .Distinct()
             .ToList();
 
-        var people = (await db.Artists
+        // A contribution names its artist by MBID and mints no row; where the
+        // catalogue has a row anyway, the card links to it and shows its face.
+        var contributors = recordings.Values
+            .SelectMany(track => track.Contributions.Concat(track.WorkContributions ?? []))
+            .Select(c => c.ArtistMbid)
+            .OfType<Mbid>()
+            .Distinct()
+            .ToList();
+
+        var known = await db.Artists
             .AsNoTracking()
-            .Where(a => named.Contains(a.Id))
+            .Where(a => named.Contains(a.Id) || (a.Mbid != null && contributors.Contains(a.Mbid.Value)))
             .ToListAsync(cancellationToken)
-            .ConfigureAwait(false))
-            .ToDictionary(a => a.Id, a => Describe(a, 0));
+            .ConfigureAwait(false);
+
+        var people = known.ToDictionary(a => a.Id, a => Describe(a, 0));
+        var byMbid = known.Where(a => a.Mbid is not null).ToDictionary(a => a.Mbid!.Value, a => a.Id);
 
         // Rolled up over the claimed pressing's tracks, or over the tracks held
         // where none is claimed — not over every edition's, which would credit a
@@ -1890,10 +1927,13 @@ public static partial class CatalogueEndpoints
                     ? new TrackCredits(
                         [.. entry.Track.Billed.Select(billed => billed.ArtistId)],
                         [.. entry.Track.Links.Select(link => (link.ArtistId, Role(link.Type, link.Attribute)))],
-                        [.. (entry.Track.Writers ?? []).Select(link => (link.ArtistId, link.Type))])
-                    : new TrackCredits([], [], []))
+                        [.. (entry.Track.Writers ?? []).Select(link => (link.ArtistId, link.Type))],
+                        entry.Track.Contributions,
+                        entry.Track.WorkContributions ?? [])
+                    : new TrackCredits([], [], [], [], []))
                 .ToList(),
-            people);
+            people,
+            byMbid);
 
         var coverId = display?.Id;
         var cover = coverId is not { } covered
@@ -2013,7 +2053,10 @@ public static partial class CatalogueEndpoints
             album.ReviewLookupUtc,
             album.LookedUp,
             album.Probed,
-            [.. edits.Keys.Order(StringComparer.Ordinal)]);
+            [.. edits.Keys.Order(StringComparer.Ordinal)],
+            // The album's own, else the commonest among its tracks — what
+            // Subsonic lists it under, so the page and a player agree.
+            FileGenres.OfAlbum(album.Genres, album.RecordingGenres));
 
         var stored = editions.ToDictionary(edition => edition.Id);
 
@@ -2212,10 +2255,58 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>One track's credits, by artist, for <see cref="AlbumCredits"/>.</summary>
+    /// <param name="Contributions">Every link on the recording, once it has been described; empty before.</param>
+    /// <param name="WorkContributions">Every link on its work, likewise.</param>
     private sealed record TrackCredits(
         IReadOnlyList<ArtistId> Billed,
         IReadOnlyList<(ArtistId Artist, string Role)> Links,
-        IReadOnlyList<(ArtistId Artist, string Role)> Writers);
+        IReadOnlyList<(ArtistId Artist, string Role)> Writers,
+        IReadOnlyList<Contributed> Contributions,
+        IReadOnlyList<Contributed> WorkContributions);
+
+    /// <summary>One <see cref="Contribution"/>, as the album projection reads it.</summary>
+    private sealed record Contributed(Mbid? ArtistMbid, string Name, string Type, string? Attributes);
+
+    /// <summary>Links that name who wrote the piece, rather than who played or made the record.</summary>
+    private static readonly HashSet<string> CompositionTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "composer", "writer", "lyricist", "librettist", "arranger", "orchestrator",
+        "instrument arranger", "vocal arranger", "translator",
+    };
+
+    /// <summary>Links that name who played it.</summary>
+    private static readonly HashSet<string> PerformanceTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "instrument", "vocal", "performer", "performing orchestra", "conductor", "chorus master", "concertmaster",
+    };
+
+    /// <summary>Links about rights rather than people: a label's P-line is nobody's credit.</summary>
+    private static readonly HashSet<string> RightsTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "copyright", "phonographic copyright", "rights society",
+    };
+
+    /// <summary>A contribution's group: Performers, Composition or Production; null for rights.</summary>
+    private static string? GroupOf(string type) =>
+        RightsTypes.Contains(type) ? null
+        : PerformanceTypes.Contains(type) ? "Performers"
+        : CompositionTypes.Contains(type) ? "Composition"
+        : "Production";
+
+    /// <summary>
+    /// A contribution as a person would name the role: the instrument for a
+    /// player, otherwise the link with its qualifiers — "producer (co)".
+    /// </summary>
+    private static string RoleOf(Contributed contribution) =>
+        contribution.Type.ToLowerInvariant() switch
+        {
+            "instrument" or "performer" => contribution.Attributes ?? contribution.Type,
+            "vocal" => contribution.Attributes ?? "vocals",
+            "performing orchestra" => "orchestra",
+            _ => contribution.Attributes is { } qualifiers
+                ? $"{contribution.Type} ({qualifiers})"
+                : contribution.Type,
+        };
 
     /// <summary>A relationship as a person would name the role.</summary>
     /// <remarks>An ensemble's attribute is its artist type, so "Orchestra" reads as "orchestra".</remarks>
@@ -2228,35 +2319,61 @@ public static partial class CatalogueEndpoints
     /// The album's credits, rolled up from its tracks, one card per artist and group.
     /// </summary>
     /// <remarks>
-    /// <b>Only what the catalogue stores</b>: the release's billing line, each
-    /// recording's billing line, the conductors and ensembles linked to a
-    /// recording, and the writers linked to its work. No instruments and no
-    /// production roles — MusicBrainz has them, and nothing here asks for them —
-    /// so there is never a Production group.
+    /// The release's billing line and each recording's are Main and appear
+    /// nowhere else, with whatever roles the tracks give them. Everyone else
+    /// lands in Performers, Composition or Production with the running-order
+    /// places they are credited on, or null where that is every track.
     ///
-    /// The billed artists are Main and appear nowhere else, with whatever roles
-    /// the tracks give them; everyone else lands in Performers or Composition
-    /// with the running-order places they are credited on, or null where that
-    /// is every track.
+    /// <b>A described recording's contributions replace its relationships
+    /// here</b>, because they are the same links stated in full — the
+    /// relationships are the browse index, narrowed to who gets a page and with
+    /// a lyricist filed as a composer. A recording not yet described falls back
+    /// to them, so a library mid-way through the stage loses no credit it had.
+    /// A contributor the catalogue holds no artist row for is keyed on its
+    /// MBID, or its name where it has none, and its card links nowhere.
     /// </remarks>
     private static List<AlbumCredit> AlbumCredits(
         List<ArtistId> main,
         List<TrackCredits> tracks,
-        Dictionary<ArtistId, ArtistSummary> people)
+        Dictionary<ArtistId, ArtistSummary> people,
+        Dictionary<Mbid, ArtistId> byMbid)
     {
-        var roles = new Dictionary<(string Group, ArtistId Artist), (SortedSet<string> Roles, SortedSet<int> Places)>();
+        var roles = new Dictionary<(string Group, string Key), (SortedSet<string> Roles, SortedSet<int> Places)>();
+        var names = new Dictionary<string, (ArtistId? Artist, string Name)>();
 
-        void Add(string group, ArtistId artist, string role, int place)
+        void Add(string group, ArtistId? artist, string key, string name, string role, int place)
         {
-            if (main.Contains(artist)) group = "Main";
+            if (artist is { } id && main.Contains(id)) group = "Main";
 
-            if (!roles.TryGetValue((group, artist), out var entry))
+            names.TryAdd(key, (artist, name));
+
+            if (!roles.TryGetValue((group, key), out var entry))
             {
-                roles[(group, artist)] = entry = (new SortedSet<string>(StringComparer.Ordinal), []);
+                roles[(group, key)] = entry = (new SortedSet<string>(StringComparer.Ordinal), []);
             }
 
             entry.Roles.Add(role);
             entry.Places.Add(place);
+        }
+
+        void AddArtist(string group, ArtistId artist, string role, int place)
+        {
+            if (people.TryGetValue(artist, out var person))
+            {
+                Add(group, artist, artist.Value.ToString(), person.Name, role, place);
+            }
+        }
+
+        void AddContribution(Contributed contribution, int place)
+        {
+            if (GroupOf(contribution.Type) is not { } group) return;
+
+            var artist = contribution.ArtistMbid is { } mbid && byMbid.TryGetValue(mbid, out var row) ? row : (ArtistId?)null;
+            var key = artist?.Value.ToString()
+                ?? (contribution.ArtistMbid is { } id ? $"mbid:{id.Value}" : $"name:{contribution.Name}");
+            var name = artist is { } known && people.TryGetValue(known, out var person) ? person.Name : contribution.Name;
+
+            Add(group, artist, key, name, RoleOf(contribution), place);
         }
 
         for (var index = 0; index < tracks.Count; index++)
@@ -2264,9 +2381,25 @@ public static partial class CatalogueEndpoints
             var place = index + 1;
             var track = tracks[index];
 
-            foreach (var artist in track.Billed) Add("Performers", artist, "credited", place);
-            foreach (var (artist, role) in track.Links) Add("Performers", artist, role, place);
-            foreach (var (artist, role) in track.Writers) Add("Composition", artist, role, place);
+            foreach (var artist in track.Billed) AddArtist("Performers", artist, "credited", place);
+
+            if (track.Contributions.Count > 0)
+            {
+                foreach (var contribution in track.Contributions) AddContribution(contribution, place);
+            }
+            else
+            {
+                foreach (var (artist, role) in track.Links) AddArtist("Performers", artist, role, place);
+            }
+
+            if (track.WorkContributions.Count > 0)
+            {
+                foreach (var contribution in track.WorkContributions) AddContribution(contribution, place);
+            }
+            else
+            {
+                foreach (var (artist, role) in track.Writers) AddArtist("Composition", artist, role, place);
+            }
         }
 
         var credits = new List<AlbumCredit>();
@@ -2275,7 +2408,7 @@ public static partial class CatalogueEndpoints
         {
             if (!people.TryGetValue(artist, out var person)) continue;
 
-            var theirs = roles.GetValueOrDefault(("Main", artist)).Roles?
+            var theirs = roles.GetValueOrDefault(("Main", artist.Value.ToString())).Roles?
                 .Where(role => role != "credited")
                 .ToList() ?? [];
 
@@ -2285,20 +2418,27 @@ public static partial class CatalogueEndpoints
                 theirs.Count == 0 ? "album artist" : string.Join(", ", theirs),
                 "Main",
                 null,
-                person.Portrait));
+                person.Portrait,
+                artist.Value.ToString()));
         }
 
-        foreach (var group in new[] { "Performers", "Composition" })
+        foreach (var group in new[] { "Performers", "Composition", "Production" })
         {
             credits.AddRange(roles
-                .Where(entry => entry.Key.Group == group && people.ContainsKey(entry.Key.Artist))
-                .Select(entry => new AlbumCredit(
-                    entry.Key.Artist.Value,
-                    people[entry.Key.Artist].Name,
-                    string.Join(", ", entry.Value.Roles),
-                    group,
-                    entry.Value.Places.Count == tracks.Count ? null : [.. entry.Value.Places],
-                    people[entry.Key.Artist].Portrait))
+                .Where(entry => entry.Key.Group == group)
+                .Select(entry =>
+                {
+                    var (artist, name) = names[entry.Key.Key];
+
+                    return new AlbumCredit(
+                        artist?.Value,
+                        name,
+                        string.Join(", ", entry.Value.Roles),
+                        group,
+                        entry.Value.Places.Count == tracks.Count ? null : [.. entry.Value.Places],
+                        artist is { } id ? people[id].Portrait : null,
+                        entry.Key.Key);
+                })
                 .OrderBy(credit => credit.Tracks is null ? 0 : 1)
                 .ThenBy(credit => credit.Name, StringComparer.CurrentCulture));
         }
@@ -5406,19 +5546,25 @@ public sealed record ReleaseAbout(
     DateTimeOffset? ReviewLookupUtc,
     DateTimeOffset? ReleaseLookupUtc,
     DateTimeOffset? ProbedUtc,
-    IReadOnlyList<string> Edited);
+    IReadOnlyList<string> Edited,
+
+    /// <summary>The album's genres, else its tracks' commonest (<c>FileGenres.OfAlbum</c>); empty until asked.</summary>
+    IReadOnlyList<string> Genres);
 
 /// <summary>One artist's part in an album.</summary>
-/// <param name="Role">"album artist", "credited", "conductor", "orchestra", "composer" — joined where several.</param>
-/// <param name="Group">Main, Performers or Composition.</param>
+/// <param name="ArtistId">The artist row, or null for a contributor the catalogue keeps no row for.</param>
+/// <param name="Role">"album artist", "credited", "conductor", "violin", "producer (co)" — joined where several.</param>
+/// <param name="Group">Main, Performers, Composition or Production.</param>
 /// <param name="Tracks">1-based places in the running order; null for every track.</param>
+/// <param name="Key">Unique within a group: the artist id, else the MBID, else the name.</param>
 public sealed record AlbumCredit(
-    Guid ArtistId,
+    Guid? ArtistId,
     string Name,
     string Role,
     string Group,
     IReadOnlyList<int>? Tracks,
-    string? Portrait);
+    string? Portrait,
+    string Key);
 
 /// <summary>Another album, as much as a card needs.</summary>
 /// <param name="CoverReleaseId">The edition whose stored sleeve stands for it, or null.</param>
@@ -5444,7 +5590,10 @@ public sealed record AlbumTrackRow(
 
     /// <summary>The recording's own billing line, where it differs from the album's.</summary>
     string? Artist,
-    IReadOnlyList<Guid> On);
+    IReadOnlyList<Guid> On,
+
+    /// <summary>The piece its work is a part of — the symphony of a movement — where MusicBrainz says so.</summary>
+    string? PartOf);
 
 /// <summary>
 /// What the folders make of the attribution.
