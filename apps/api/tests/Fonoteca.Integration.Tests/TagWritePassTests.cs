@@ -251,6 +251,10 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
             recording.Genres = "pop";
             recording.Isrcs = "USSM15900113";
 
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.Measurement = new AudioMeasurement { IntegratedLufs = -12.5, SamplePeakDbfs = -0.5, DurationSeconds = 12, DynamicRange = 9.6 };
+            file.MeasuredUtc = DateTimeOffset.UtcNow;
+
             var work = new Work { Id = WorkId.New(), Title = "So What", Mbid = Mb("66666666-6666-4666-8666-666666666666") };
             db.Works.Add(work);
             recording.WorkId = work.Id;
@@ -276,6 +280,13 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         Assert.Equal("John Coltrane (tenor saxophone)", reading.Find(CatalogueTags.Performer));
         Assert.Equal("Miles Davis", reading.Find(CatalogueTags.Composer));
 
+        // ReplayGain: the track's, and — the folder holding just this file — the album's alike.
+        Assert.Equal("-5.50 dB", reading.Find(CatalogueTags.TrackGain));
+        Assert.Equal("0.944061", reading.Find(CatalogueTags.TrackPeak));
+        Assert.Equal("-5.50 dB", reading.Find(CatalogueTags.AlbumGain));
+        Assert.Equal("10", reading.Find(CatalogueTags.DynamicRange));
+        Assert.Equal("10", reading.Find(CatalogueTags.AlbumDynamicRange));
+
         Assert.Equal(0, (await RunAsync(TagWriteScope.Library, services)).Written);
 
         // The editor shows the two genres as a person reads them, not ATL's separator.
@@ -284,6 +295,99 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
 
         Assert.Equal("jazz; modal jazz", genre.Catalogue);
         Assert.Equal("jazz; modal jazz", genre.File);
+    }
+
+    /// <summary>
+    /// ReplayGain is the audio's and needs no identity: an analysed file the
+    /// catalogue cannot place gets its track gain and none of the answer it is
+    /// waiting for — and, loose under an artist, no album gain.
+    /// </summary>
+    [Fact]
+    public async Task AnAnalysedFileWithNoAnswerGetsItsReplayGainAlone()
+    {
+        SkipWithoutTools();
+        var loose = await SeedUnattributedAsync("Unknown/loose.flac");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.Measurement = new AudioMeasurement { IntegratedLufs = -12.5, SamplePeakDbfs = -0.5, DurationSeconds = 12, DynamicRange = 9.6 };
+            file.MeasuredUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library)).Written);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath(loose), cancellationToken: Token);
+
+        Assert.Equal("-5.50 dB", reading.Find(CatalogueTags.TrackGain));
+        Assert.Null(reading.Find(CatalogueTags.AlbumGain));
+        Assert.Equal("10", reading.Find(CatalogueTags.DynamicRange));
+        Assert.Null(reading.Find(CatalogueTags.AlbumDynamicRange));
+        Assert.Null(reading.Find(CatalogueTags.RecordingId));
+        Assert.NotEqual("Unplaced", reading.Find(CatalogueTags.Title));
+    }
+
+    /// <summary>
+    /// A file there for its ReplayGain and DR alone still takes its album
+    /// folder's DR, which is the mean of every file in the folder.
+    /// </summary>
+    [Fact]
+    public async Task AnAnalysedFileWithNoAnswerTakesItsFoldersDynamicRange()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1), ("Miles Davis/Kind of Blue/02 track.flac", 2));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var files = await db.MediaFiles.OrderBy(file => file.Path).ToListAsync(Token);
+            files[0].TrackId = null;
+
+            for (var n = 0; n < files.Count; n++)
+            {
+                files[n].Measurement = new AudioMeasurement { IntegratedLufs = -12.5, SamplePeakDbfs = -0.5, DurationSeconds = 12, DynamicRange = n == 0 ? 9.6 : 12.1 };
+                files[n].MeasuredUtc = DateTimeOffset.UtcNow;
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(2, (await RunAsync(TagWriteScope.Library)).Written);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        Assert.Null(reading.Find(CatalogueTags.RecordingId));
+        Assert.Equal("10", reading.Find(CatalogueTags.DynamicRange));
+        Assert.Equal("11", reading.Find(CatalogueTags.AlbumDynamicRange));
+    }
+
+    /// <summary>
+    /// A file there for its ReplayGain alone vouches for no album, so no sleeve
+    /// is written beside it — here one filed under a pressing whose track it has lost.
+    /// </summary>
+    [Fact]
+    public async Task AnAnalysedFileWithNoAnswerGetsNoSleeve()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedCoverAsync(ChosenCover);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            file.TrackId = null;
+            file.Measurement = new AudioMeasurement { IntegratedLufs = -12.5, SamplePeakDbfs = -0.5, DurationSeconds = 12 };
+            file.MeasuredUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.Written);
+        Assert.Equal(0, summary.CoversWritten);
+        Assert.False(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue/cover.jpg")));
     }
 
     /// <summary>

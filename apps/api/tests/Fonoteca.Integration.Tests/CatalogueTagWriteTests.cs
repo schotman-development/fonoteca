@@ -73,6 +73,12 @@ public sealed class CatalogueTagWriteTests : IDisposable
             Mixers = ["Mark Wilder"],
             Performers = ["John Coltrane (tenor saxophone)", "Bill Evans (piano)"],
         },
+        TrackGain = -6.23,
+        TrackPeak = 0.988553,
+        AlbumGain = -5.9,
+        AlbumPeak = 0.999,
+        DynamicRange = 13,
+        AlbumDynamicRange = 12,
     };
 
     /// <summary>An MP4 is never planned an ISRC or a conductor; every other container is.</summary>
@@ -117,6 +123,18 @@ public sealed class CatalogueTagWriteTests : IDisposable
     [InlineData("m4a", "PERFORMER", "John Coltrane (tenor saxophone); Bill Evans (piano)")]
     [InlineData("m4a", "LYRICIST", "Eddie Jefferson")]
     [InlineData("m4a", "ISRC", null)]
+    [InlineData("flac", "REPLAYGAIN_TRACK_GAIN", "-6.23 dB")]
+    [InlineData("flac", "REPLAYGAIN_ALBUM_PEAK", "0.999000")]
+    [InlineData("mp3", "REPLAYGAIN_TRACK_GAIN", "-6.23 dB")]
+    [InlineData("mp3", "REPLAYGAIN_ALBUM_GAIN", "-5.90 dB")]
+    [InlineData("m4a", "replaygain_track_peak", "0.988553")]
+    [InlineData("m4a", "replaygain_album_gain", "-5.90 dB")]
+    [InlineData("flac", "DYNAMIC RANGE", "13")]
+    [InlineData("flac", "ALBUM DYNAMIC RANGE", "12")]
+    [InlineData("mp3", "DYNAMIC RANGE", "13")]
+    [InlineData("mp3", "ALBUM DYNAMIC RANGE", "12")]
+    [InlineData("m4a", "DYNAMIC RANGE", "13")]
+    [InlineData("m4a", "ALBUM DYNAMIC RANGE", "12")]
     public async Task GenresAndCreditsLandWhereOtherTaggersPutThem(string extension, string tag, string? expected)
     {
         SkipWithoutTools();
@@ -126,6 +144,42 @@ public sealed class CatalogueTagWriteTests : IDisposable
         Assert.Equal(TagWriteStatus.Written, (await Write(writer, path)).Status);
 
         Assert.Equal(expected, Tag(TagsReportedByFfprobe(path), tag));
+    }
+
+    /// <summary>An MP4's ReplayGain atoms are spelled in lowercase, as every other tagger spells them.</summary>
+    [Fact]
+    public async Task AnMp4sReplayGainIsSpelledInLowercase()
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(SourceFor("m4a"));
+
+        Assert.Equal(TagWriteStatus.Written, (await Write(writer, path)).Status);
+
+        Assert.Contains(TagsReportedByFfprobe(path).Keys, key => key == "replaygain_track_gain");
+    }
+
+    /// <summary>An MP4's DR atoms keep foobar2000's spelling, unlike its ReplayGain's.</summary>
+    [Fact]
+    public async Task AnMp4sDynamicRangeIsSpelledAsFoobarSpellsIt()
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(SourceFor("m4a"));
+
+        Assert.Equal(TagWriteStatus.Written, (await Write(writer, path)).Status);
+
+        Assert.Contains(TagsReportedByFfprobe(path).Keys, key => key == "DYNAMIC RANGE");
+        Assert.Contains(TagsReportedByFfprobe(path).Keys, key => key == "ALBUM DYNAMIC RANGE");
+    }
+
+    /// <summary>An Opus file gets no REPLAYGAIN_* field: RFC 7845 gives it R128_TRACK_GAIN instead.</summary>
+    [Fact]
+    public void AnOpusFileGetsNoReplayGainField()
+    {
+        Assert.Null(CatalogueTagFields.Spell(new LibraryPath("a.opus"), CatalogueTags.TrackGain));
+        Assert.Equal(CatalogueTags.TrackGain, CatalogueTagFields.Spell(new LibraryPath("a.ogg"), CatalogueTags.TrackGain));
+        Assert.Equal(CatalogueTags.DynamicRange, CatalogueTagFields.Spell(new LibraryPath("a.opus"), CatalogueTags.DynamicRange));
     }
 
     /// <summary>
@@ -856,7 +910,11 @@ public sealed class CatalogueTagWriteTests : IDisposable
         Assert.Equal("https://example.org/band", System.Text.Encoding.Latin1.GetString(FrameBody(path, "WXXX")[2..]).TrimEnd('\0'));
     }
 
-    /// <summary>The old ReplayGain frame keeps its bytes beside the new ReplayGain field, as on 2 files here.</summary>
+    /// <summary>
+    /// The old ReplayGain frame keeps its bytes beside the new ReplayGain field,
+    /// as on 2 files here — and the field takes the catalogue's value, which
+    /// replaces a file's own (the owner's choice).
+    /// </summary>
     [Fact]
     public async Task OldAndNewReplayGainBothSurviveAWrite()
     {
@@ -882,9 +940,13 @@ public sealed class CatalogueTagWriteTests : IDisposable
         Assert.Equal(audio, DecodedAudioHash(path));
 
         using var written = TagLib.File.Create(Path.Combine(_root, path.Value));
-        Assert.Contains(
-            ((TagLib.Id3v2.Tag)written.GetTag(TagLib.TagTypes.Id3v2, false)).GetFrames<TagLib.Id3v2.UserTextInformationFrame>(),
-            frame => frame.Description == "replaygain_track_gain" && frame.Text[0] == "-9.30 dB");
+        var gains = ((TagLib.Id3v2.Tag)written.GetTag(TagLib.TagTypes.Id3v2, false))
+            .GetFrames<TagLib.Id3v2.UserTextInformationFrame>()
+            .Where(frame => frame.Description.Equals("replaygain_track_gain", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.NotEmpty(gains);
+        Assert.All(gains, frame => Assert.Equal("-6.23 dB", frame.Text[0]));
     }
 
     /// <summary>An unsynchronised tag holding a file identifier refuses: nothing here can take ATL's NUL off it.</summary>

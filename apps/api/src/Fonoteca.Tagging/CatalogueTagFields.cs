@@ -104,6 +104,19 @@ public static class CatalogueTagFields
         CatalogueTags.Conductor,
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// ReplayGain's four, which every container takes as a field of that name —
+    /// uppercase, except an MP4's freeform atom, which every tagger writes in
+    /// lowercase.
+    /// </summary>
+    private static readonly FrozenSet<string> ReplayGain = new[]
+    {
+        CatalogueTags.TrackGain,
+        CatalogueTags.TrackPeak,
+        CatalogueTags.AlbumGain,
+        CatalogueTags.AlbumPeak,
+    }.ToFrozenSet(StringComparer.Ordinal);
+
     private static readonly FrozenSet<string> Mp4 = new[] { "m4a", "m4b", "aac", "alac" }
         .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
@@ -195,6 +208,12 @@ public static class CatalogueTagFields
         if (IsStandard(canonical)) return canonical;
 
         if (Credits.Contains(canonical)) return canonical;
+
+        // foobar2000's DR Meter's names, as named: a Vorbis comment, a TXXX, a freeform atom.
+        if (canonical is CatalogueTags.DynamicRange or CatalogueTags.AlbumDynamicRange) return canonical;
+
+        // An Opus file states its gain as R128_TRACK_GAIN, and RFC 7845 says not to write these there.
+        if (ReplayGain.Contains(canonical)) return path.Value.EndsWith(".opus", StringComparison.OrdinalIgnoreCase) ? null : IsMp4(path) ? canonical.ToLowerInvariant() : canonical;
 
         if (!TitleCased.TryGetValue(canonical, out var titled)) return null;
 

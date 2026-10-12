@@ -71,6 +71,24 @@ public sealed record CatalogueTagSource
 
     /// <summary>The credits, as <see cref="CreditTags"/> reads them off MusicBrainz's links.</summary>
     public CreditTags Credits { get; init; } = CreditTags.None;
+
+    /// <summary>ReplayGain 2.0 track gain, dB, from the analysis pass's loudness.</summary>
+    public double? TrackGain { get; init; }
+
+    /// <summary>The track's sample peak, linear.</summary>
+    public double? TrackPeak { get; init; }
+
+    /// <summary>The album folder's gain, dB — only where every file in it is analysed.</summary>
+    public double? AlbumGain { get; init; }
+
+    /// <summary>The album folder's highest sample peak, linear.</summary>
+    public double? AlbumPeak { get; init; }
+
+    /// <summary>The track's DR figure, from the analysis pass.</summary>
+    public int? DynamicRange { get; init; }
+
+    /// <summary>The album folder's DR figure — only where every file in it has one.</summary>
+    public int? AlbumDynamicRange { get; init; }
 }
 
 /// <summary>
@@ -121,6 +139,17 @@ public static class CatalogueTags
     public const string Engineer = "ENGINEER";
     public const string Mixer = "MIXER";
     public const string Performer = "PERFORMER";
+
+    // ReplayGain 2.0, under the names every player reads.
+    public const string TrackGain = "REPLAYGAIN_TRACK_GAIN";
+    public const string TrackPeak = "REPLAYGAIN_TRACK_PEAK";
+    public const string AlbumGain = "REPLAYGAIN_ALBUM_GAIN";
+    public const string AlbumPeak = "REPLAYGAIN_ALBUM_PEAK";
+
+    // The DR figures, as a whole number, under foobar2000's DR Meter's names:
+    // no standard names any, and these are the ones already in files here.
+    public const string DynamicRange = "DYNAMIC RANGE";
+    public const string AlbumDynamicRange = "ALBUM DYNAMIC RANGE";
 
     /// <summary>
     /// Between the values of a field that holds several — two genres, three producers.
@@ -191,6 +220,13 @@ public static class CatalogueTags
         Add(tags, Engineer, Values(source.Credits.Engineers));
         Add(tags, Mixer, Values(source.Credits.Mixers));
         Add(tags, Performer, Values(source.Credits.Performers));
+
+        Add(tags, TrackGain, source.TrackGain is { } trackGain ? AudioAnalysis.Gain(trackGain) : null);
+        Add(tags, TrackPeak, source.TrackPeak is { } trackPeak ? AudioAnalysis.Peak(trackPeak) : null);
+        Add(tags, AlbumGain, source.AlbumGain is { } albumGain ? AudioAnalysis.Gain(albumGain) : null);
+        Add(tags, AlbumPeak, source.AlbumPeak is { } albumPeak ? AudioAnalysis.Peak(albumPeak) : null);
+        Add(tags, DynamicRange, Number(source.DynamicRange));
+        Add(tags, AlbumDynamicRange, Number(source.AlbumDynamicRange));
 
         return tags;
     }

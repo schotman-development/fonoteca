@@ -61,7 +61,7 @@ public sealed partial class TagWriteService
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            var catalogue = (await ProjectAsync(db, Writable(db.MediaFiles.AsNoTracking()).Where(file => file.Path.StartsWith(prefix)), cancellationToken)
+            var catalogue = (await ProjectAsync(db, Answered(db.MediaFiles.AsNoTracking()).Where(file => file.Path.StartsWith(prefix)), cancellationToken)
                     .ConfigureAwait(false))
                 .ToDictionary(file => file.Id);
 

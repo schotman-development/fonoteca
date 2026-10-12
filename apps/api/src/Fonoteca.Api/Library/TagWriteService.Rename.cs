@@ -71,7 +71,8 @@ public sealed partial class TagWriteService
         {
             var db = dbScope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
-            var paths = await (await NarrowAsync(db, scope, cancellationToken).ConfigureAwait(false))
+            // Named by the answered: a file there for its ReplayGain and DR alone names nothing.
+            var paths = await Answered(await NarrowAsync(db, scope, cancellationToken).ConfigureAwait(false))
                 .Select(file => file.Path)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -194,7 +195,7 @@ public sealed partial class TagWriteService
 
             var facts = await ProjectAsync(
                     db,
-                    Writable(db.MediaFiles.AsNoTracking()).Where(file => file.Path.StartsWith(prefix)),
+                    Answered(db.MediaFiles.AsNoTracking()).Where(file => file.Path.StartsWith(prefix)),
                     cancellationToken)
                 .ConfigureAwait(false);
 

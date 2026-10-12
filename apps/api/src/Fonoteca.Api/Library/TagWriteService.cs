@@ -175,17 +175,31 @@ public sealed partial class TagWriteService(
     /// <remarks>
     /// A recording and a proven pressing's track, or a recording and an album
     /// with no pressing, for the reason in the class remarks — a file filed under
-    /// a pressing whose track it has lost is neither, and waits. One
-    /// expression, used by the counts the buttons show and by the pass itself,
-    /// because two copies of it would drift and the visible symptom is a button
-    /// offering a number it then does not write.
+    /// a pressing whose track it has lost is neither, and waits.
     /// </remarks>
-    public static IQueryable<MediaFile> Writable(IQueryable<MediaFile> files) =>
+    public static IQueryable<MediaFile> Answered(IQueryable<MediaFile> files) =>
         files.Where(file =>
             file.TagEditsJson != null
             || (file.RecordingId != null
                 && ((file.ReleaseId != null && file.TrackId != null)
                     || (file.ReleaseId == null && file.ReleaseGroupId != null))));
+
+    /// <summary>
+    /// The files a run considers: the answered, and every analysed file, whose
+    /// ReplayGain and DR are the audio's and need no identity.
+    /// </summary>
+    /// <remarks>
+    /// One expression, used by the counts the buttons show and by the pass itself,
+    /// because two copies of it would drift and the visible symptom is a button
+    /// offering a number it then does not write. An analysed file with no answer
+    /// is given its ReplayGain and DR alone (<see cref="PendingTagWrite.Answered"/>).
+    /// </remarks>
+    public static IQueryable<MediaFile> Writable(IQueryable<MediaFile> files)
+    {
+        var answered = Answered(files);
+
+        return files.Where(file => file.MeasuredUtc != null || answered.Any(other => other.Id == file.Id));
+    }
 
     /// <summary>How many files one scope would consider.</summary>
     public async Task<int> CountAsync(TagWriteScope scope, CancellationToken cancellationToken = default)
@@ -553,6 +567,8 @@ public sealed partial class TagWriteService(
         IQueryable<MediaFile> files,
         CancellationToken cancellationToken)
     {
+        var answered = Answered(db.MediaFiles.AsNoTracking());
+
         // A pressing's facts where one is filed, the album's where not: its
         // title and first-release year here, its billing line below.
         var page = await files
@@ -580,6 +596,8 @@ public sealed partial class TagWriteService(
                 file.ReleaseGroup!.Genres,
                 file.Recording.Genres,
                 file.Recording.Isrcs,
+                file.Measurement,
+                answered.Any(other => other.Id == file.Id),
                 file.Recording.Contributions
                     .OrderBy(link => link.Position)
                     .Select(link => new PendingLink(link.Type, link.Attributes, link.Name))
@@ -609,7 +627,13 @@ public sealed partial class TagWriteService(
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return await AlbumOnlyAsync(db, page, cancellationToken).ConfigureAwait(false);
+        var filed = await AlbumOnlyAsync(db, page, cancellationToken).ConfigureAwait(false);
+
+        // Each file's album folder's ReplayGain and DR, which every file of
+        // the folder carries alike — see AlbumLoudness.
+        var albums = await AlbumLoudness.ForAsync(db, filed.Select(file => file.Path), cancellationToken).ConfigureAwait(false);
+
+        return [.. filed.Select(file => file with { AlbumLoudness = albums.GetValueOrDefault(AlbumFolder.Of(file.Path)) })];
     }
 
     /// <summary>
@@ -859,23 +883,27 @@ public sealed partial class TagWriteService(
                 }
             }
 
-            // The album's sleeve, once per folder rather than once per file, and
-            // inside this scope so its journal entry rides the save below.
-            await EnsureCoverAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
-                .ConfigureAwait(false);
+            // A file here for its ReplayGain and DR alone vouches for no album and no shelf.
+            if (file.Answered)
+            {
+                // The album's sleeve, once per folder rather than once per file, and
+                // inside this scope so its journal entry rides the save below.
+                await EnsureCoverAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
+                    .ConfigureAwait(false);
 
-            // Its motion artwork, the same way and for the same reasons.
-            await EnsureMotionAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
-                .ConfigureAwait(false);
+                // Its motion artwork, the same way and for the same reasons.
+                await EnsureMotionAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
+                    .ConfigureAwait(false);
 
-            // Its booklets, the same way again.
-            await EnsureBookletAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
-                .ConfigureAwait(false);
+                // Its booklets, the same way again.
+                await EnsureBookletAsync(file, counts, covers, db, provider, correlationId, cancellationToken)
+                    .ConfigureAwait(false);
 
-            // The artist's photograph, once per shelf. Same scope, same reason.
-            await EnsurePortraitAsync(
-                    file, counts, portraits, db, provider, correlationId, cancellationToken)
-                .ConfigureAwait(false);
+                // The artist's photograph, once per shelf. Same scope, same reason.
+                await EnsurePortraitAsync(
+                        file, counts, portraits, db, provider, correlationId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             // Always, and not only when something was committed.
             // `IEventLog.AppendAsync` does not save itself — that is what makes
@@ -2040,6 +2068,8 @@ public sealed partial class TagWriteService(
         string? AlbumGenres,
         string? RecordingGenres,
         string? Isrcs,
+        AudioMeasurement? Measurement,
+        bool Answered,
         List<PendingLink> RecordingLinks,
         List<PendingLink> WorkLinks,
         List<PendingCredit> RecordingCredits,
@@ -2080,7 +2110,25 @@ public sealed partial class TagWriteService(
         /// </summary>
         public ReleaseId? CoverReleaseId { get; init; }
 
-        public CatalogueTagSource Describe() => new()
+        /// <summary>The album folder's ReplayGain and DR, or null where it has no album folder.</summary>
+        public AlbumLoudness.Figures? AlbumLoudness { get; init; }
+
+        /// <remarks>
+        /// A file the catalogue has not answered is on the worklist for its
+        /// ReplayGain and DR alone, and is given nothing else: what it would otherwise
+        /// carry is the partial answer it is waiting to complete.
+        /// </remarks>
+        public CatalogueTagSource Describe() => Answered ? Catalogued() : new()
+        {
+            TrackGain = AudioAnalysis.TrackGain(Measurement),
+            TrackPeak = AudioAnalysis.TrackPeak(Measurement),
+            AlbumGain = AlbumLoudness?.ReplayGain?.Gain,
+            AlbumPeak = AlbumLoudness?.ReplayGain?.Peak,
+            DynamicRange = AudioAnalysis.DynamicRange(Measurement),
+            AlbumDynamicRange = AlbumLoudness?.DynamicRange,
+        };
+
+        private CatalogueTagSource Catalogued() => new()
         {
             TrackTitle = TrackTitle,
             RecordingTitle = RecordingTitle,
@@ -2109,6 +2157,12 @@ public sealed partial class TagWriteService(
             Genres = FileGenres.Of(AlbumGenres, RecordingGenres),
             Isrcs = FileGenres.Split(Isrcs),
             Credits = CreditTags.From(RecordingLinks.Concat(WorkLinks).Select(link => (link.Type, link.Attributes, link.Name))),
+            TrackGain = AudioAnalysis.TrackGain(Measurement),
+            TrackPeak = AudioAnalysis.TrackPeak(Measurement),
+            AlbumGain = AlbumLoudness?.ReplayGain?.Gain,
+            AlbumPeak = AlbumLoudness?.ReplayGain?.Peak,
+            DynamicRange = AudioAnalysis.DynamicRange(Measurement),
+            AlbumDynamicRange = AlbumLoudness?.DynamicRange,
         };
 
         /// <summary>
