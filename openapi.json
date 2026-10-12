@@ -4904,6 +4904,21 @@
           }
         }
       },
+      "ArtistLink": {
+        "required": [
+          "type",
+          "url"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "ArtistListResponse": {
         "required": [
           "total",
@@ -4938,7 +4953,8 @@
           "discographyLookupUtc",
           "edited",
           "members",
-          "memberOf"
+          "memberOf",
+          "links"
         ],
         "type": "object",
         "properties": {
@@ -5024,6 +5040,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RelatedArtist"
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistLink"
             }
           }
         }

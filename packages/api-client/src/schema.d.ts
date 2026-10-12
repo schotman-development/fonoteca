@@ -1659,6 +1659,10 @@ export interface components {
             id: string;
             following: boolean;
         };
+        ArtistLink: {
+            type: string;
+            url: string;
+        };
         ArtistListResponse: {
             /** Format: int32 */
             total: number;
@@ -1684,6 +1688,7 @@ export interface components {
             edited: string[];
             members: components["schemas"]["RelatedArtist"][];
             memberOf: components["schemas"]["RelatedArtist"][];
+            links: components["schemas"]["ArtistLink"][];
         };
         ArtistSummary: {
             /** Format: uuid */

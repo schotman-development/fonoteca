@@ -1085,7 +1085,8 @@ public static partial class CatalogueEndpoints
             artist.DiscographyLookupUtc,
             [.. edits.Keys.Order(StringComparer.Ordinal)],
             Cards(members),
-            Cards(typed));
+            Cards(typed),
+            [.. ArtistLinks.Read(artist.LinksJson).Select(link => new ArtistLink(link.Type, link.Url))]);
 
         return TypedResults.Ok(new ArtistDetailResponse(
             Describe(artist, rows.Count),

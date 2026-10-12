@@ -474,6 +474,27 @@ function Profile({
                           </Text>
                         )}
                       </dd>
+                      {profile.links.length > 0 ? (
+                        <>
+                          <dt>Elsewhere</dt>
+                          <dd>
+                            <Stack direction="column" gap={4} align="start">
+                              {profile.links.map((link) => (
+                                <a
+                                  key={`${link.type} ${link.url}`}
+                                  className={styles.link}
+                                  href={link.url}
+                                  title={link.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <Text size="sm">{link.type}</Text>
+                                </a>
+                              ))}
+                            </Stack>
+                          </dd>
+                        </>
+                      ) : null}
                       <dt>Picture</dt>
                       <dd>
                         <Stack direction="column" gap={8} align="start">

@@ -433,7 +433,13 @@ public sealed record ArtistProfile(
     DateTimeOffset? DiscographyLookupUtc,
     IReadOnlyList<string> Edited,
     IReadOnlyList<RelatedArtist> Members,
-    IReadOnlyList<RelatedArtist> MemberOf);
+    IReadOnlyList<RelatedArtist> MemberOf,
+
+    /// <summary>The artist's pages elsewhere, as MusicBrainz lists them; empty until the artist stage asks.</summary>
+    IReadOnlyList<ArtistLink> Links);
+
+/// <param name="Type">MusicBrainz's relationship type: "discogs", "official homepage", "bandcamp".</param>
+public sealed record ArtistLink(string Type, string Url);
 
 /// <summary>Prose with its provenance: somebody else's under their licence, or the owner's.</summary>
 /// <param name="Source">"Wikipedia", or "You" for what a person wrote from nothing.</param>
