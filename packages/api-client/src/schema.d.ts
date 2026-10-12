@@ -1946,6 +1946,10 @@ export interface components {
             pendingMotion: number;
             /** Format: int32 */
             pendingBooklets: number;
+            /** Format: int32 */
+            pendingRecordings: number;
+            /** Format: int32 */
+            pendingGenres: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {

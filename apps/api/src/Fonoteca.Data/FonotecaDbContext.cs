@@ -25,6 +25,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<ArtistCredit> ArtistCredits => Set<ArtistCredit>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
+    public DbSet<Contribution> Contributions => Set<Contribution>();
     public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
 
     public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
@@ -67,6 +68,13 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Type).HasMaxLength(100);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
+
+            // Set null: a parent is minted from a stub and owns nothing, so
+            // losing it must not take its movements with it.
+            e.HasOne(x => x.Parent)
+                .WithMany()
+                .HasForeignKey(x => x.ParentId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Recording>(e =>
@@ -74,6 +82,11 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
             e.Property(x => x.Isrc).HasMaxLength(20);
+            e.Property(x => x.Isrcs).HasMaxLength(1000);
+            e.Property(x => x.Genres).HasMaxLength(1000);
+
+            // The recording stage's worklist reads this.
+            e.HasIndex(x => x.DescribedUtc);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
             e.HasOne(x => x.Work)
@@ -89,6 +102,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.PrimaryType).HasMaxLength(100);
             e.Property(x => x.SecondaryTypes).HasMaxLength(500);
             e.Property(x => x.ReviewUrl).HasMaxLength(1000);
+            e.Property(x => x.Genres).HasMaxLength(1000);
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
@@ -284,6 +298,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.PortraitUrl).HasMaxLength(1000);
             e.Property(x => x.BiographyUrl).HasMaxLength(1000);
             e.Property(x => x.BannerUrl).HasMaxLength(1000);
+            e.Property(x => x.LinksJson).HasColumnType("jsonb");
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops");
@@ -393,6 +408,30 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasIndex(x => x.ArtistId);
+        });
+
+        modelBuilder.Entity<Contribution>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Type).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Attributes).HasMaxLength(500);
+            e.Property(x => x.Name).HasMaxLength(1000).IsRequired();
+
+            // Cascade from both ends: a contribution is a statement about one
+            // recording or one work and means nothing once it is gone — and a
+            // bulk delete of recordings relies on the database to follow it.
+            e.HasOne<Recording>()
+                .WithMany(r => r.Contributions)
+                .HasForeignKey(x => x.RecordingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne<Work>()
+                .WithMany(w => w.Contributions)
+                .HasForeignKey(x => x.WorkId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.RecordingId);
+            e.HasIndex(x => x.WorkId);
         });
 
         modelBuilder.Entity<DomainEvent>(e =>

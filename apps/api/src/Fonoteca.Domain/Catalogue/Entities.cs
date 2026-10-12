@@ -34,8 +34,20 @@ public sealed class Work
     /// <summary>e.g. "Symphony", "Song". Free text mirroring MusicBrainz work types.</summary>
     public string? Type { get; set; }
 
+    /// <summary>The work this is a part of — the symphony a movement belongs to — or null.</summary>
+    /// <remarks>
+    /// One level up, as MusicBrainz's <c>parts</c> relation states it. The
+    /// parent row is minted from the stub that relation carries and is never
+    /// described on its own, so it has a title and an MBID and no writers.
+    /// </remarks>
+    public WorkId? ParentId { get; set; }
+    public Work? Parent { get; set; }
+
     public ICollection<Recording> Recordings { get; init; } = [];
     public ICollection<Relationship> Relationships { get; init; } = [];
+
+    /// <summary>Who wrote it, as MusicBrainz states it: composer, lyricist, arranger.</summary>
+    public ICollection<Contribution> Contributions { get; init; } = [];
 }
 
 /// <summary>
@@ -66,9 +78,38 @@ public sealed class Recording
     /// <remarks>
     /// Stored for one use: a recording minted from a download has no MBID, and
     /// the ISRC is what a later look at MusicBrainz finds it by when the barcode
-    /// finds no release (ADR 0011). MusicBrainz's own are not copied here.
+    /// finds no release (ADR 0011). MusicBrainz's own are in <see cref="Isrcs"/>.
     /// </remarks>
     public string? Isrc { get; set; }
+
+    /// <summary>Every ISRC MusicBrainz lists for this recording, comma-separated, or null.</summary>
+    /// <remarks>
+    /// Apart from <see cref="Isrc"/> because the two answer different
+    /// questions: that one is what a shop said and is how a minted recording is
+    /// found again, this one is what MusicBrainz says and is rewritten whenever
+    /// the recording is described.
+    /// </remarks>
+    public string? Isrcs { get; set; }
+
+    /// <summary>MusicBrainz's genres for this performance, most-voted first, or null.</summary>
+    public string? Genres { get; set; }
+
+    /// <summary>
+    /// When MusicBrainz was last asked to describe this recording, answer or not.
+    /// </summary>
+    /// <remarks>
+    /// Rule 1's stamp for the recording stage. A recording that came back with
+    /// no genre is asked again after a week, as every source that gains answers
+    /// over time is; one that found genres is not, because its credits and ISRCs
+    /// arrived in the same answer.
+    /// </remarks>
+    public DateTimeOffset? DescribedUtc { get; set; }
+
+    /// <summary>
+    /// Every artist MusicBrainz links to this performance — producer, engineer,
+    /// each player and their instrument — as it states them.
+    /// </summary>
+    public ICollection<Contribution> Contributions { get; init; } = [];
 
     /// <summary>Every file that holds this recording — the version set for dedupe.</summary>
     public ICollection<MediaFile> Files { get; init; } = [];
@@ -161,6 +202,17 @@ public sealed class ReleaseGroup
 
     /// <summary>When an article was last looked for, answer or not.</summary>
     public DateTimeOffset? ReviewLookupUtc { get; set; }
+
+    /// <summary>MusicBrainz's genres for the album, most-voted first, comma-separated, or null.</summary>
+    /// <remarks>
+    /// On the group because MusicBrainz's votes are: a release's own genres are
+    /// a far sparser vote, and the album page and the tag write want one answer
+    /// for every edition.
+    /// </remarks>
+    public string? Genres { get; set; }
+
+    /// <summary>When the genres were last asked for, answer or not. None found is asked again after a week.</summary>
+    public DateTimeOffset? GenresLookupUtc { get; set; }
 
     public ICollection<Release> Releases { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
@@ -1661,6 +1713,18 @@ public sealed class Artist
     public DateTimeOffset? BannerLookupUtc { get; set; }
 
     /// <summary>
+    /// The artist's pages elsewhere, as MusicBrainz lists them: a JSON array of
+    /// <c>{ "type", "url" }</c>, or null before the artist stage has asked.
+    /// </summary>
+    /// <remarks>
+    /// Every type kept, because each is a way back to this artist by identity —
+    /// a Discogs link carries the Discogs id a later source would look up.
+    /// Rewritten whenever the artist is described. Read with
+    /// <see cref="ArtistLinks"/>.
+    /// </remarks>
+    public string? LinksJson { get; set; }
+
+    /// <summary>
     /// What a person changed on the artist page, by field, as JSON.
     /// </summary>
     /// <remarks>
@@ -1761,4 +1825,44 @@ public sealed class Relationship
     public ArtistId? ArtistId { get; set; }
     public WorkId? WorkId { get; set; }
     public RecordingId? RecordingId { get; set; }
+}
+
+/// <summary>
+/// One artist MusicBrainz links to a recording or a work, exactly as it states the link.
+/// </summary>
+/// <remarks>
+/// <b>Not a <see cref="Relationship"/>, and the split is the point.</b> Those
+/// rows are who a recording is browsable under — <c>PrimaryCredits</c> decides
+/// them, and every one of them makes an artist row with a page. A producer, an
+/// engineer or a session guitarist is a fact about the record and not a reason
+/// to list somebody beside Beth Hart, so these name the artist by MBID and as
+/// printed, and mint no artist row.
+///
+/// <b>Everything MusicBrainz states, conductors and composers included</b>, so
+/// a page and the tag write read one list rather than stitching two together.
+/// Replaced wholesale whenever the recording or the work is described.
+/// </remarks>
+public sealed class Contribution
+{
+    public required Guid Id { get; init; }
+
+    /// <summary>The recording linked, or null when the link is on a work.</summary>
+    public RecordingId? RecordingId { get; init; }
+
+    /// <summary>The work linked, or null when the link is on a recording.</summary>
+    public WorkId? WorkId { get; init; }
+
+    /// <summary>MusicBrainz's relationship type: "producer", "engineer", "mix", "instrument", "vocal", "lyricist".</summary>
+    public required string Type { get; init; }
+
+    /// <summary>Its qualifiers, comma-separated: "violin", "lead vocals", "assistant", "co".</summary>
+    public string? Attributes { get; init; }
+
+    public Mbid? ArtistMbid { get; init; }
+
+    /// <summary>The name as this link credits it.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Where MusicBrainz listed it, so a page prints the links in its order.</summary>
+    public required int Position { get; init; }
 }

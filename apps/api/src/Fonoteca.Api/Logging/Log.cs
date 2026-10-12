@@ -544,6 +544,13 @@ internal static partial class Log
         Message = "MusicBrainz merged artist {From} ({Artist}) into {To}; the row keeps the old MBID")]
     public static partial void ArtistMerged(ILogger logger, Guid from, string artist, Guid to);
 
+    /// <remarks>Debug, for <see cref="ArtistNotDescribed"/>'s reason: the worklist is the catalogue.</remarks>
+    [LoggerMessage(
+        EventId = 1267,
+        Level = LogLevel.Debug,
+        Message = "{Recording} was not described: {Reason}")]
+    public static partial void RecordingNotDescribed(ILogger logger, string recording, string reason);
+
     [LoggerMessage(
         EventId = 1280,
         Level = LogLevel.Information,

@@ -5936,6 +5936,8 @@
           "pendingBanners",
           "pendingMotion",
           "pendingBooklets",
+          "pendingRecordings",
+          "pendingGenres",
           "lastCompleted"
         ],
         "type": "object",
@@ -5996,6 +5998,14 @@
             "format": "int32"
           },
           "pendingBooklets": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingRecordings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingGenres": {
             "type": "integer",
             "format": "int32"
           },

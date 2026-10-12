@@ -379,6 +379,8 @@ public static class LibraryEndpoints
             PendingBanners: pending.Banners,
             PendingMotion: pending.Motion,
             PendingBooklets: pending.Booklets,
+            PendingRecordings: pending.Recordings,
+            PendingGenres: pending.Genres,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -619,6 +621,12 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Held albums with no booklets looked for yet, or none found a week ago.</summary>
     int PendingBooklets,
+
+    /// <summary>Held recordings MusicBrainz has not described, or described with no genre a week ago.</summary>
+    int PendingRecordings,
+
+    /// <summary>Held albums with no genres asked for yet, or none found a week ago.</summary>
+    int PendingGenres,
 
     EnrichmentSummary? LastCompleted);
 

@@ -169,6 +169,16 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var recordings = await db.Recordings
+                .Where(UndescribedRecording(NothingFoundCutoff))
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var genres = await db.ReleaseGroups
+                .Where(UngenredAlbum(NothingFoundCutoff))
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             var artists = await db.Artists
                 .Where(UnaskedArtist)
                 .CountAsync(cancellationToken)
@@ -203,7 +213,8 @@ public sealed class EnrichmentService(
                 .ConfigureAwait(false);
 
             return new EnrichmentPending(
-                unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets);
+                unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
+                recordings, genres);
         }
     }
 
@@ -359,6 +370,22 @@ public sealed class EnrichmentService(
                 ClaimPersonFiledAsync(cancellationToken),
                 file => HandlePersonFiledAsync(file, counts, memo, cancellationToken),
                 file => file.Path).ConfigureAwait(false);
+
+            // Then every held recording described again — genres, ISRCs and
+            // everyone MusicBrainz credits — which the two stages above already
+            // did for the files they linked. Before the artists, because a
+            // changed credit line mints artists that stage has to describe.
+            await DrainAsync(
+                ClaimRecordingsAsync(cancellationToken),
+                recording => RedescribeAsync(recording, counts, memo, cancellationToken),
+                recording => recording.Title).ConfigureAwait(false);
+
+            // The albums' own genres: one request each, and what a file is
+            // tagged with before its recording's.
+            await DrainAsync(
+                ClaimUngenredAlbumsAsync(cancellationToken),
+                album => GenresAsync(album, counts, cancellationToken),
+                album => album.Title).ConfigureAwait(false);
 
             // Third, and last because it depends on the first two: the artists
             // those files just credited are in the catalogue by now, so one
@@ -2435,6 +2462,7 @@ public sealed class EnrichmentService(
                 row.EndedYear = described.EndedYear;
                 row.Ended = described.HasEnded;
                 row.Genres = Joined(described.Genres);
+                row.LinksJson = ArtistLinks.Write(described.Links ?? []);
 
                 await RecordBandsAsync(db, row, described.Bands, cancellationToken)
                     .ConfigureAwait(false);
@@ -2520,7 +2548,7 @@ public sealed class EnrichmentService(
     /// "progressive ro" would put a genre in the catalogue that does not exist,
     /// which is worse than dropping it.
     /// </remarks>
-    private static string? Joined(IReadOnlyList<string> genres)
+    internal static string? Joined(IReadOnlyList<string> genres)
     {
         var kept = new List<string>(Math.Min(genres.Count, MaxGenres));
         var length = 0;
@@ -2540,6 +2568,208 @@ public sealed class EnrichmentService(
 
     /// <summary>An artist the catalogue holds and MusicBrainz has not been asked about.</summary>
     private readonly record struct PendingArtist(ArtistId Id, string Name, Mbid Mbid);
+
+    /// <summary>A held recording or album to describe, by the MBID it was last known under.</summary>
+    private readonly record struct PendingDescription<TId>(TId Id, string Title, Mbid Mbid);
+
+    /// <summary>
+    /// Held recordings MusicBrainz has not described, or described with no genre a week ago.
+    /// </summary>
+    /// <remarks>
+    /// Held only, as every describing stage is: a recording no file holds is one
+    /// the catalogue learned from a track list, and nobody browses it. The
+    /// week's retry is keyed on genres alone, because they are the one part of
+    /// the answer that is commonly missing and gained later; a recording with
+    /// genres is never asked again.
+    /// </remarks>
+    private static System.Linq.Expressions.Expression<Func<Recording, bool>> UndescribedRecording(
+        DateTimeOffset cutoff) =>
+        recording => recording.Mbid != null
+            && recording.Files.Any()
+            && (recording.DescribedUtc == null
+                || (recording.Genres == null && recording.DescribedUtc < cutoff));
+
+    /// <summary>Held albums whose genres nobody has asked for, or found none of a week ago.</summary>
+    private static System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UngenredAlbum(
+        DateTimeOffset cutoff) =>
+        group => group.Mbid != null
+            && group.Files.Any()
+            && (group.GenresLookupUtc == null
+                || (group.Genres == null && group.GenresLookupUtc < cutoff));
+
+    /// <summary>The recording worklist, a page at a time, with the artists' <c>seen</c> guard.</summary>
+    private async IAsyncEnumerable<PendingDescription<RecordingId>> ClaimRecordingsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<RecordingId>();
+        var cutoff = NothingFoundCutoff;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PendingDescription<RecordingId>> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                page = await db.Recordings
+                    .AsNoTracking()
+                    .Where(UndescribedRecording(cutoff))
+                    .OrderBy(r => r.Id)
+                    .Select(r => new PendingDescription<RecordingId>(r.Id, r.Title, r.Mbid!.Value))
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var fresh = page.Where(recording => seen.Add(recording.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var recording in fresh) yield return recording;
+        }
+    }
+
+    /// <summary>The album-genre worklist, a page at a time, with the same guard.</summary>
+    private async IAsyncEnumerable<PendingDescription<ReleaseGroupId>> ClaimUngenredAlbumsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<ReleaseGroupId>();
+        var cutoff = NothingFoundCutoff;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PendingDescription<ReleaseGroupId>> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                page = await db.ReleaseGroups
+                    .AsNoTracking()
+                    .Where(UngenredAlbum(cutoff))
+                    .OrderBy(g => g.Id)
+                    .Select(g => new PendingDescription<ReleaseGroupId>(g.Id, g.Title, g.Mbid!.Value))
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var fresh = page.Where(album => seen.Add(album.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var album in fresh) yield return album;
+        }
+    }
+
+    /// <summary>
+    /// One held recording described again: its genres, ISRCs and every credit, through the writer.
+    /// </summary>
+    /// <remarks>
+    /// The same lookup and the same <see cref="CatalogueWriter"/> the file stage
+    /// uses, asked by the MBID the row holds — so a merged recording is folded
+    /// into its survivor here exactly as it would be there, and no outcome or
+    /// decided stamp is touched (rule 4). A deleted one is stamped and left: its
+    /// files keep their link, and the next file stage that reaches them says so.
+    /// </remarks>
+    private async Task RedescribeAsync(
+        PendingDescription<RecordingId> item,
+        Tally counts,
+        Memo memo,
+        CancellationToken cancellationToken)
+    {
+        MusicBrainzRecording? recording;
+        MusicBrainzWork? work = null;
+
+        try
+        {
+            // Read from the memo, never added to it: each recording is asked here
+            // once, and a backfill of the whole library would otherwise hold
+            // every answer in memory for the run.
+            if (!memo.Recordings.TryGetValue(item.Mbid, out recording))
+            {
+                recording = await musicBrainz.GetRecordingAsync(item.Mbid, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (recording is not null)
+            {
+                work = await WorkForAsync(recording, memo, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            // Transient: the stamp stays as it was, and the next run asks again.
+            counts.Failed++;
+            Log.RecordingNotDescribed(logger, item.Title, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.Recordings
+                .FirstOrDefaultAsync(r => r.Id == item.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (row is null) return;
+
+            if (recording is null)
+            {
+                row.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+                Log.RecordingNotDescribed(logger, item.Title, "no such recording");
+            }
+            else
+            {
+                await new CatalogueWriter(db, memo.Artists, clock)
+                    .UpsertAsync(recording, work, cancellationToken, item.Mbid)
+                    .ConfigureAwait(false);
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>One held album's genres, stamped whether or not MusicBrainz has any.</summary>
+    private async Task GenresAsync(
+        PendingDescription<ReleaseGroupId> album,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string>? genres;
+
+        try
+        {
+            genres = await musicBrainz.GetReleaseGroupGenresAsync(album.Mbid, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            counts.Failed++;
+            Log.RecordingNotDescribed(logger, album.Title, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.ReleaseGroups
+                .FirstOrDefaultAsync(g => g.Id == album.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (row is null) return;
+
+            row.GenresLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+            row.Genres = Joined(genres ?? []);
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     /// <summary>The network half: which recording is this, and what is it?</summary>
     private async Task<Resolution> ResolveAsync(
@@ -2849,6 +3079,8 @@ public enum EnrichmentStatus
 /// <param name="Banners">Album artists nobody has looked for a banner of.</param>
 /// <param name="Motion">Held albums nobody has looked for motion artwork of, or found none of a week ago.</param>
 /// <param name="Booklets">Held albums nobody has looked for booklets of, or found none of a week ago.</param>
+/// <param name="Recordings">Held recordings MusicBrainz has not described, or described with no genre a week ago.</param>
+/// <param name="Genres">Held albums whose genres nobody has asked for, or found none of a week ago.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
@@ -2857,7 +3089,9 @@ public sealed record EnrichmentPending(
     int Articles,
     int Banners,
     int Motion,
-    int Booklets)
+    int Booklets,
+    int Recordings,
+    int Genres)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -2867,7 +3101,8 @@ public sealed record EnrichmentPending(
     /// zero and the button is disabled — a stage left out of this total is a
     /// stage that can never be reached.
     /// </remarks>
-    public int Total => Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets;
+    public int Total =>
+        Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres;
 }
 
 /// <summary>Where a running pass has got to.</summary>

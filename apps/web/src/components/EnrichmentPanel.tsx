@@ -40,6 +40,8 @@ function pendingSentence(status: {
   readonly pendingBanners: number
   readonly pendingMotion: number
   readonly pendingBooklets: number
+  readonly pendingRecordings: number
+  readonly pendingGenres: number
 }): string {
   const parts: string[] = []
 
@@ -48,6 +50,24 @@ function pendingSentence(status: {
       `${status.pendingFiles.toLocaleString()} identified file${
         status.pendingFiles === 1 ? '' : 's'
       } with no recording yet`,
+    )
+  }
+
+  // Recordings and albums before artists, as the pass runs them: a recording
+  // described again can credit artists the next clause then has to describe.
+  if (status.pendingRecordings > 0) {
+    parts.push(
+      `${status.pendingRecordings.toLocaleString()} recording${
+        status.pendingRecordings === 1 ? '' : 's'
+      } to describe`,
+    )
+  }
+
+  if (status.pendingGenres > 0) {
+    parts.push(
+      `${status.pendingGenres.toLocaleString()} album${
+        status.pendingGenres === 1 ? '' : 's'
+      } to ask genres for`,
     )
   }
 

@@ -173,6 +173,9 @@ namespace Fonoteca.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("LinksJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTimeOffset?>("LookupUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -294,6 +297,47 @@ namespace Fonoteca.Data.Migrations
                     b.HasKey("ArtistId", "Kind");
 
                     b.ToTable("ArtistImages");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Contribution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ArtistMbid")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Attributes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("WorkId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecordingId");
+
+                    b.HasIndex("WorkId");
+
+                    b.ToTable("Contributions");
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.DiscoveredRecord", b =>
@@ -548,12 +592,23 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("DescribedUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<TimeSpan?>("Duration")
                         .HasColumnType("interval");
+
+                    b.Property<string>("Genres")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("Isrc")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Isrcs")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
@@ -567,6 +622,8 @@ namespace Fonoteca.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DescribedUtc");
 
                     b.HasIndex("Mbid")
                         .IsUnique()
@@ -782,6 +839,13 @@ namespace Fonoteca.Data.Migrations
                     b.Property<int?>("FirstReleaseYear")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Genres")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset?>("GenresLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
 
@@ -871,6 +935,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -885,6 +952,8 @@ namespace Fonoteca.Data.Migrations
                     b.HasIndex("Mbid")
                         .IsUnique()
                         .HasFilter("\"Mbid\" IS NOT NULL");
+
+                    b.HasIndex("ParentId");
 
                     b.HasIndex("Title");
 
@@ -1002,6 +1071,19 @@ namespace Fonoteca.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Contribution", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithMany("Contributions")
+                        .HasForeignKey("RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Work", null)
+                        .WithMany("Contributions")
+                        .HasForeignKey("WorkId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.DiscoveredRecord", b =>
                 {
                     b.HasOne("Fonoteca.Domain.Catalogue.Artist", "Artist")
@@ -1108,6 +1190,16 @@ namespace Fonoteca.Data.Migrations
                     b.Navigation("Release");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Work", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Work", "Parent")
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Parent");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.AlbumBooklet", b =>
                 {
                     b.Navigation("Files");
@@ -1122,6 +1214,8 @@ namespace Fonoteca.Data.Migrations
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Recording", b =>
                 {
+                    b.Navigation("Contributions");
+
                     b.Navigation("Credits");
 
                     b.Navigation("Files");
@@ -1151,6 +1245,8 @@ namespace Fonoteca.Data.Migrations
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Work", b =>
                 {
+                    b.Navigation("Contributions");
+
                     b.Navigation("Recordings");
 
                     b.Navigation("Relationships");

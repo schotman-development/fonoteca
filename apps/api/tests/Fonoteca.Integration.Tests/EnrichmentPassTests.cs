@@ -2733,6 +2733,369 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal(1, shop.Calls);
     }
 
+    /// <summary>
+    /// Everybody MusicBrainz links is kept, qualifiers and all, and none of them
+    /// becomes an artist the credit rule did not choose.
+    /// </summary>
+    [Fact]
+    public async Task EveryLinkMusicBrainzStatesIsKeptWithoutMintingAnArtist()
+    {
+        await SeedAsync(("Karajan/Beethoven 5/01 - Allegro.flac", Cluster(1)));
+
+        var producer = Mb("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d");
+
+        var services = Build(
+            Answering(Recording),
+            new StubCatalogue(
+                recording: RecordingWith(
+                    credits: [Credit(Mozart, "Wolfgang Amadeus Mozart")],
+                    relations:
+                    [
+                        Relation("conductor", Karajan, "Herbert von Karajan", "Person"),
+                        new MusicBrainzRelation(
+                            "instrument", "violin", Soloist, "Anne-Sophie Mutter", null, "Person", null,
+                            ["violin", "solo"]),
+                        Relation("producer", producer, "Michel Glotz", "Person"),
+                    ]),
+                work: WorkWith(
+                [
+                    Relation("composer", Mozart, "Wolfgang Amadeus Mozart", "Person"),
+                    Relation("lyricist", Karajan, "Herbert von Karajan", "Person"),
+                ])));
+
+        await EnrichAsync(services);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var onRecording = await db.Contributions.AsNoTracking()
+            .Where(c => c.RecordingId != null)
+            .OrderBy(c => c.Position)
+            .ToListAsync(Token);
+
+        Assert.Equal(["conductor", "instrument", "producer"], onRecording.Select(c => c.Type));
+        Assert.Equal("violin, solo", onRecording[1].Attributes);
+        Assert.Equal(Soloist, onRecording[1].ArtistMbid);
+        Assert.Equal("Michel Glotz", onRecording[2].Name);
+
+        var onWork = await db.Contributions.AsNoTracking()
+            .Where(c => c.WorkId != null)
+            .OrderBy(c => c.Position)
+            .ToListAsync(Token);
+
+        Assert.Equal(["composer", "lyricist"], onWork.Select(c => c.Type));
+
+        // Who gets a page is unchanged: the soloist and the producer are facts
+        // about the record, not artists in the list.
+        var artists = await db.Artists.AsNoTracking().Select(a => a.Mbid).ToListAsync(Token);
+        Assert.DoesNotContain(artists, mbid => mbid == Soloist || mbid == producer);
+    }
+
+    /// <summary>
+    /// A recording described before genres were asked for is described again,
+    /// once, and the answer it brings stays.
+    /// </summary>
+    [Fact]
+    public async Task AHeldRecordingDescribedBeforeGenresIsDescribedAgainOnce()
+    {
+        await SeedLinkedAsync();
+
+        var catalogue = new StubCatalogue(
+            recording: RecordingWith([Credit(Mozart, "Wolfgang Amadeus Mozart")], []) with
+            {
+                Genres = ["classical", "orchestral"],
+                Isrcs = ["DEF057400010", "DEF057400010", "GBAYE0000001"],
+            },
+            work: WorkWith([]));
+
+        var services = Build(Answering(Recording), catalogue);
+
+        Assert.Equal(1, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Recordings);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(1, catalogue.RecordingCalls);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var recording = await db.Recordings.AsNoTracking().SingleAsync(Token);
+
+            Assert.Equal("classical, orchestral", recording.Genres);
+            Assert.Equal("DEF057400010, GBAYE0000001", recording.Isrcs);
+            Assert.NotNull(recording.DescribedUtc);
+        }
+
+        var again = new StubCatalogue(recording: null, work: null);
+        await EnrichAsync(Build(Answering(Recording), again));
+
+        Assert.Equal(0, again.RecordingCalls);
+    }
+
+    /// <summary>
+    /// No genre is an answer that expires: asked again a week later, never sooner.
+    /// </summary>
+    [Fact]
+    public async Task ARecordingWithNoGenreIsAskedAgainAfterAWeek()
+    {
+        await SeedLinkedAsync();
+
+        var services = Build(Answering(Recording), Classical());
+        await EnrichAsync(services);
+
+        var enrichment = services.GetRequiredService<EnrichmentService>();
+        Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Recordings);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Null((await db.Recordings.AsNoTracking().SingleAsync(Token)).Genres);
+
+            await db.Recordings.ExecuteUpdateAsync(
+                update => update.SetProperty(r => r.DescribedUtc, DateTimeOffset.UtcNow.AddDays(-8)),
+                Token);
+        }
+
+        Assert.Equal(1, (await enrichment.CountPendingAsync(Token)).Recordings);
+    }
+
+    /// <summary>A recording or an album that found genres is never asked again, however long ago.</summary>
+    [Fact]
+    public async Task ARecordingOrAlbumThatFoundGenresIsNeverAskedAgain()
+    {
+        await SeedLinkedAsync(heldAlbum: true);
+
+        var catalogue = new StubCatalogue(
+            recording: RecordingWith([Credit(Mozart, "Wolfgang Amadeus Mozart")], []) with { Genres = ["classical"] },
+            work: null)
+        { AlbumGenres = ["jazz"] };
+
+        var services = Build(Answering(Recording), catalogue);
+        await EnrichAsync(services);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var longAgo = DateTimeOffset.UtcNow.AddDays(-30);
+            await db.Recordings.ExecuteUpdateAsync(update => update.SetProperty(r => r.DescribedUtc, longAgo), Token);
+            await db.ReleaseGroups.ExecuteUpdateAsync(update => update.SetProperty(g => g.GenresLookupUtc, longAgo), Token);
+        }
+
+        var pending = await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token);
+
+        Assert.Equal(0, pending.Recordings);
+        Assert.Equal(0, pending.Genres);
+    }
+
+    /// <summary>A recording or album no file holds is on neither worklist.</summary>
+    [Fact]
+    public async Task OnlyHeldRecordingsAndAlbumsAreDescribed()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Recordings.Add(new Recording { Id = RecordingId.New(), Title = "Unheld", Mbid = Unheld });
+            db.ReleaseGroups.Add(new ReleaseGroup
+            {
+                Id = ReleaseGroupId.New(),
+                Title = "Unheld album",
+                Mbid = Mb("d1e2f3a4-b5c6-4d7e-8f9a-0b1c2d3e4f5a"),
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var pending = await Build(Answering(Recording), Classical())
+            .GetRequiredService<EnrichmentService>()
+            .CountPendingAsync(Token);
+
+        Assert.Equal(0, pending.Recordings);
+        Assert.Equal(0, pending.Genres);
+    }
+
+    /// <summary>The two new stages count towards "is there anything to do", or the button could never reach them.</summary>
+    [Fact]
+    public void TheRecordingAndGenreStagesAreInTheTotal() =>
+        Assert.Equal(7, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4).Total);
+
+    /// <summary>Describing a recording again replaces what it said before, rather than adding to it.</summary>
+    [Fact]
+    public async Task ARecordingDescribedAgainKeepsOnlyItsNewCredits()
+    {
+        await SeedLinkedAsync();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var recording = await db.Recordings.SingleAsync(Token);
+
+            db.Contributions.Add(new Contribution
+            {
+                Id = Guid.CreateVersion7(),
+                RecordingId = recording.Id,
+                Type = "producer",
+                Name = "Somebody Since Removed",
+                Position = 0,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(
+                recording: RecordingWith(
+                    [Credit(Mozart, "Wolfgang Amadeus Mozart")],
+                    [Relation("producer", Karajan, "Michel Glotz", "Person")]),
+                work: null)));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        var names = await check.Contributions.AsNoTracking().Select(c => c.Name).ToListAsync(Token);
+
+        Assert.Equal(["Michel Glotz"], names);
+    }
+
+    /// <summary>An outage describes nothing and stamps nothing.</summary>
+    [Fact]
+    public async Task AnOutageLeavesTheRecordingUndescribed()
+    {
+        await SeedLinkedAsync();
+
+        await EnrichAsync(Build(Answering(Recording), StubCatalogue.Unavailable()));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Null((await db.Recordings.AsNoTracking().SingleAsync(Token)).DescribedUtc);
+    }
+
+    /// <summary>A movement keeps the work it is a part of, minted from the stub MusicBrainz sends.</summary>
+    [Fact]
+    public async Task AMovementKeepsTheWorkItIsAPartOf()
+    {
+        await SeedAsync(("Karajan/Beethoven 5/01 - Allegro.flac", Cluster(1)));
+
+        var whole = Mb("e2c4a6b8-1d3f-4a5b-9c7d-0f2e4a6c8b0d");
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(
+                recording: RecordingWith([Credit(Mozart, "Wolfgang Amadeus Mozart")], []),
+                work: WorkWith([]) with { ParentId = whole, ParentTitle = "Symphony no. 40 in G minor, K. 550" })));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var parent = await db.Works.AsNoTracking().SingleAsync(w => w.Mbid == whole, Token);
+        var movement = await db.Works.AsNoTracking().SingleAsync(w => w.Mbid == WorkId, Token);
+
+        Assert.Equal("Symphony no. 40 in G minor, K. 550", parent.Title);
+        Assert.Equal(parent.Id, movement.ParentId);
+        Assert.Null(parent.ParentId);
+    }
+
+    /// <summary>
+    /// An album's genres are asked for once; none found is asked again a week later.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumsGenresAreKeptAndNoneIsAskedAgainAfterAWeek()
+    {
+        var album = await SeedLinkedAsync(heldAlbum: true);
+
+        var catalogue = new StubCatalogue(recording: null, work: null) { AlbumGenres = ["blues", "blues rock"] };
+        var services = Build(Answering(Recording), catalogue);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(1, catalogue.GenreCalls);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var group = await db.ReleaseGroups.AsNoTracking().SingleAsync(g => g.Id == album, Token);
+            Assert.Equal("blues, blues rock", group.Genres);
+            Assert.NotNull(group.GenresLookupUtc);
+
+            await db.ReleaseGroups.ExecuteUpdateAsync(
+                update => update
+                    .SetProperty(g => g.Genres, (string?)null)
+                    .SetProperty(g => g.GenresLookupUtc, DateTimeOffset.UtcNow.AddDays(-6)),
+                Token);
+        }
+
+        var enrichment = services.GetRequiredService<EnrichmentService>();
+        Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Genres);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ReleaseGroups.ExecuteUpdateAsync(
+                update => update.SetProperty(g => g.GenresLookupUtc, DateTimeOffset.UtcNow.AddDays(-8)),
+                Token);
+        }
+
+        Assert.Equal(1, (await enrichment.CountPendingAsync(Token)).Genres);
+    }
+
+    /// <summary>The artist stage keeps every page MusicBrainz links the artist to.</summary>
+    [Fact]
+    public async Task AnArtistKeepsTheirLinks()
+    {
+        await SeedAsync(("Karajan/Beethoven 5/01 - Allegro.flac", Cluster(1)));
+
+        var described = new MusicBrainzArtist(
+            Karajan, "Herbert von Karajan", "Karajan, Herbert von", "Person", null, "AT", "Male",
+            1908, 1989, true, [], [], [],
+            [new MusicBrainzLink("discogs", new Uri("https://www.discogs.com/artist/239218"))]);
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(
+                recording: RecordingWith([Credit(Karajan, "Herbert von Karajan")], []),
+                work: null,
+                artist: described)));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var artist = await db.Artists.AsNoTracking().SingleAsync(Token);
+        var links = ArtistLinks.Read(artist.LinksJson);
+
+        Assert.Equal(new[] { new ArtistLinks.Entry("discogs", "https://www.discogs.com/artist/239218") }, links);
+    }
+
+    /// <summary>
+    /// One file already linked to a recording MusicBrainz has not described
+    /// since genres were asked for — the shape every enriched library had.
+    /// </summary>
+    private async Task<ReleaseGroupId?> SeedLinkedAsync(bool heldAlbum = false)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = new Recording { Id = RecordingId.New(), Title = "Symphony No. 40", Mbid = Recording };
+        db.Recordings.Add(recording);
+
+        ReleaseGroup? group = null;
+
+        if (heldAlbum)
+        {
+            group = new ReleaseGroup
+            {
+                Id = ReleaseGroupId.New(),
+                Title = "Symphonies",
+                Mbid = Mb("b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e"),
+            };
+
+            db.ReleaseGroups.Add(group);
+        }
+
+        db.MediaFiles.Add(new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = "Karajan/Beethoven 5/01 - Allegro.flac",
+            SizeBytes = 1024,
+            LastModifiedUtc = DateTimeOffset.UtcNow,
+            AcoustId = Cluster(1),
+            AcoustIdCheckedUtc = DateTimeOffset.UtcNow,
+            AcoustIdOutcome = AcoustIdOutcome.Identified,
+            RecordingId = recording.Id,
+            RecordingLookupUtc = DateTimeOffset.UtcNow,
+            EnrichmentOutcome = EnrichmentOutcome.Linked,
+            ReleaseGroupId = group?.Id,
+        });
+
+        await db.SaveChangesAsync(Token);
+        return group?.Id;
+    }
+
     private static async Task EnrichAsync(ServiceProvider services)
     {
         var enrichment = services.GetRequiredService<EnrichmentService>();

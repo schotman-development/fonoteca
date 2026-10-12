@@ -40,8 +40,8 @@ namespace Fonoteca.Domain.Catalogue;
 /// <item><b>Individual performers are not included.</b> A jazz quintet's four
 /// sidemen and a symphony's named soloists would each become an artist with one
 /// or two tracks, and on a real library that is most of the artist list. The
-/// data is fetched and stored; what this rule decides is who gets a page.
-/// Widening it later is a query change, not a re-run.</item>
+/// data is fetched and stored, as <c>Contribution</c> rows; what this rule
+/// decides is who gets a page.</item>
 /// <item><b>Production roles are not credits.</b> Engineer, mix, producer,
 /// mastering — the people who made the record rather than the music. Browsing by
 /// them is a real question and a different one; folding them in here would put

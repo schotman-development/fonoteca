@@ -78,6 +78,11 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
 
         recording.Duration = source.Length;
         recording.WorkId = workRow?.Id;
+        recording.Genres = EnrichmentService.Joined(source.Genres ?? []);
+        recording.Isrcs = Isrcs(source.Isrcs);
+        recording.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+        await ApplyContributionsAsync(recording.Id, null, source.Relations, cancellationToken).ConfigureAwait(false);
 
         var credits = PrimaryCredits.From(source, work);
 
@@ -217,8 +222,114 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         }
 
         work.Type = source.Type;
+        work.ParentId = source.ParentId is { } parent
+            ? (await UpsertParentAsync(parent, source.ParentTitle, cancellationToken).ConfigureAwait(false)).Id
+            : null;
+
+        await ApplyContributionsAsync(null, work.Id, source.Relations, cancellationToken).ConfigureAwait(false);
+
         return work;
     }
+
+    /// <summary>
+    /// The work a movement belongs to, minted from the stub the <c>parts</c> relation carries.
+    /// </summary>
+    /// <remarks>
+    /// Never described on its own — that is a lookup per parent for a title the
+    /// stub already holds — so a parent row has no writers and no parent of its
+    /// own. Its title is refreshed from the stub, and an existing row keeps
+    /// whatever a fuller description gave it.
+    /// </remarks>
+    private async Task<Work> UpsertParentAsync(Mbid id, string? title, CancellationToken cancellationToken)
+    {
+        var parent = db.Works.Local.FirstOrDefault(w => w.Mbid == id)
+            ?? await db.Works.FirstOrDefaultAsync(w => w.Mbid == id, cancellationToken).ConfigureAwait(false);
+
+        if (parent is null)
+        {
+            parent = new Work { Id = WorkId.New(), Title = title ?? string.Empty, Mbid = id };
+            db.Works.Add(parent);
+        }
+        else if (title is not null)
+        {
+            parent.Title = title;
+        }
+
+        return parent;
+    }
+
+    /// <summary>
+    /// Every artist link MusicBrainz states on this recording or work, replacing the last answer.
+    /// </summary>
+    /// <remarks>
+    /// Replaced rather than merged, for <see cref="ApplyCreditsAsync"/>'s reason:
+    /// a rerun over unchanged data produces the identical set and a rerun after a
+    /// correction produces the corrected one. No artist row is minted; see
+    /// <see cref="Contribution"/>.
+    ///
+    /// The rows this scope added earlier go too: two files of one recording, or
+    /// two movements of one work, can be written in a single save, and EF's query
+    /// sees only what the database holds.
+    /// </remarks>
+    private async Task ApplyContributionsAsync(
+        RecordingId? recording,
+        WorkId? work,
+        IReadOnlyList<MusicBrainzRelation> relations,
+        CancellationToken cancellationToken)
+    {
+        var stale = recording is { } recordingId
+            ? db.Contributions.Where(c => c.RecordingId == recordingId)
+            : db.Contributions.Where(c => c.WorkId == work);
+
+        db.Contributions.RemoveRange(await stale.ToListAsync(cancellationToken).ConfigureAwait(false));
+        db.Contributions.RemoveRange(db.Contributions.Local
+            .Where(c => recording is not null ? c.RecordingId == recording : c.WorkId == work)
+            .ToList());
+
+        for (var position = 0; position < relations.Count; position++)
+        {
+            var relation = relations[position];
+
+            db.Contributions.Add(new Contribution
+            {
+                Id = Guid.CreateVersion7(),
+                RecordingId = recording,
+                WorkId = work,
+                Type = Clamp(relation.Type, 100),
+                Attributes = relation.Attributes is { Count: > 0 } attributes
+                    ? Clamp(string.Join(", ", attributes), 500)
+                    : relation.Attribute,
+                ArtistMbid = relation.ArtistId,
+                Name = Clamp(relation.Name, 1000),
+                Position = position,
+            });
+        }
+    }
+
+    /// <summary>The ISRCs as the column stores them, cut on a separator rather than mid-code.</summary>
+    private static string? Isrcs(IReadOnlyList<string> isrcs)
+    {
+        var kept = new List<string>();
+        var length = 0;
+
+        foreach (var isrc in isrcs.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var cost = isrc.Length + (kept.Count == 0 ? 0 : 2);
+            if (length + cost > 1000) break;
+
+            kept.Add(isrc);
+            length += cost;
+        }
+
+        return kept.Count == 0 ? null : string.Join(", ", kept);
+    }
+
+    /// <summary>
+    /// Clamped on length, as the columns are, because an overrun throws out of
+    /// <c>SaveChangesAsync</c> and rolls the stage's stamp back with it.
+    /// </summary>
+    private static string Clamp(string value, int length) =>
+        value.Length <= length ? value : value[..length];
 
     /// <summary>
     /// Billed credits become <c>ArtistCredit</c>; everything else becomes a
