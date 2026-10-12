@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Fonoteca.Domain.Abstractions;
 using Fonoteca.Fixtures;
 using Fonoteca.Providers.Qobuz;
 using Microsoft.Extensions.DependencyInjection;
@@ -323,6 +324,43 @@ public sealed class QobuzCoversTests : IDisposable
         Assert.Empty(stub.Requests);
     }
 
+    /// <summary>
+    /// The cover is their largest rendition, named like the 600px one the album
+    /// lists, because it is also the folder's cover.jpg; the 600px where it is missing.
+    /// </summary>
+    [Fact]
+    public async Task TheLargestRenditionIsFetchedAndTheListedOneIfItIsMissing()
+    {
+        var (covers, stub) = Build(Albums(("The Band", "An Album", null, "24/03/0794881950324_600.jpg")));
+
+        Assert.NotNull(await covers.FindAsync("An Album", "The Band", null, null, [], [], Token));
+        Assert.EndsWith("/0794881950324_max.jpg", stub.Requests[^1].Uri.AbsolutePath, StringComparison.Ordinal);
+
+        var (fallback, fell) = Build(
+            Albums(("The Band", "An Album", null, "24/03/0794881950324_600.jpg")),
+            images: uri => uri.AbsolutePath.EndsWith("_max.jpg", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : null);
+
+        Assert.NotNull(await fallback.FindAsync("An Album", "The Band", null, null, [], [], Token));
+        Assert.EndsWith("/0794881950324_600.jpg", fell.Requests[^1].Uri.AbsolutePath, StringComparison.Ordinal);
+    }
+
+    /// <summary>A server error on the largest rendition is an outage, never a quiet 600px cover.</summary>
+    [Fact]
+    public async Task AServerErrorOnTheLargestRenditionIsAnOutage()
+    {
+        var (covers, stub) = Build(
+            Albums(("The Band", "An Album", null, "24/03/0794881950324_600.jpg")),
+            images: uri => uri.AbsolutePath.EndsWith("_max.jpg", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                : null);
+
+        await Assert.ThrowsAsync<ProviderUnavailableException>(
+            () => covers.FindAsync("An Album", "The Band", null, null, [], [], Token));
+        Assert.DoesNotContain(stub.Requests, request => request.Uri.AbsolutePath.EndsWith("_600.jpg", StringComparison.Ordinal));
+    }
+
     /// <summary>One album is one search, which is what this source is rationed by.</summary>
     [Fact]
     public async Task OneAlbumCostsOneSearch()
@@ -391,12 +429,13 @@ public sealed class QobuzCoversTests : IDisposable
     private (QobuzCovers Covers, StubHttpHandler Stub) Build(
         string search,
         HttpResponseMessage? image = null,
-        Action<QobuzOptions>? configure = null)
+        Action<QobuzOptions>? configure = null,
+        Func<Uri, HttpResponseMessage?>? images = null)
     {
         var stub = new StubHttpHandler(request =>
             request.Uri.Host.Contains("qobuz.com", StringComparison.Ordinal)
             && !request.Uri.AbsolutePath.Contains("/api.json/", StringComparison.Ordinal)
-                ? image ?? Jpeg()
+                ? images?.Invoke(request.Uri) ?? image ?? Jpeg()
                 : Ok(search));
 
         var services = new ServiceCollection();

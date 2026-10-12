@@ -89,7 +89,7 @@ public sealed class QobuzClient(
     /// Not on the client, because the client is shared with audio and infinite
     /// is correct there. See <see cref="DownloadImageAsync"/>.
     /// </remarks>
-    private static readonly TimeSpan ImageTimeout = TimeSpan.FromSeconds(15);
+    internal static readonly TimeSpan ImageTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>Albums matching a search, best first as Qobuz ranks them.</summary>
     public async Task<IReadOnlyList<QobuzAlbum>> SearchAlbumsAsync(

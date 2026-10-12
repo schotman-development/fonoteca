@@ -105,9 +105,14 @@ public sealed class QobuzCovers(
             return null;
         }
 
-        var image = await qobuz
-            .DownloadImageAsync(new Uri(url, UriKind.Absolute), cancellationToken)
-            .ConfigureAwait(false);
+        // Their largest rendition (1417px measured), named like the 600px one the
+        // album lists; that one where it is missing. A cover is also the folder's
+        // cover.jpg, so the larger is worth the extra request.
+        var image = (url.EndsWith("_600.jpg", StringComparison.Ordinal)
+                ? await qobuz.DownloadAsync(new Uri(url[..^"_600.jpg".Length] + "_max.jpg"), QobuzClient.ImageTimeout, cancellationToken)
+                    .ConfigureAwait(false)
+                : null)
+            ?? await qobuz.DownloadImageAsync(new Uri(url, UriKind.Absolute), cancellationToken).ConfigureAwait(false);
 
         // The type the CDN declared, held to the allowlist the whole application
         // serves pictures under. A redirect ending at a document must not become

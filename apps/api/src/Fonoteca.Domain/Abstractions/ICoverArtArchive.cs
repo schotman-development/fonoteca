@@ -21,7 +21,7 @@ public interface ICoverArtArchive
         Mbid release,
         CancellationToken cancellationToken = default);
 
-    /// <summary>One image, at the archive's 500px rendition.</summary>
+    /// <summary>One image, at the archive's 1200px rendition.</summary>
     /// <exception cref="ProviderUnavailableException">The archive could not be reached.</exception>
     Task<CoverArtBytes> DownloadAsync(
         Mbid release,

@@ -64,7 +64,7 @@ public static partial class CatalogueEndpoints
             .WithSummary("The album's cover, as stored in the catalogue.")
             .WithDescription(
                 "The first request for an album with no stored cover fetches the Cover Art "
-                + "Archive's front at 500px and keeps it, so the archive is asked once per album. "
+                + "Archive's front at 1200px and keeps it, so the archive is asked once per album. "
                 + "Where the archive holds no front, Qobuz is asked for the same record — by its "
                 + "barcode, or another edition's under the same title, where there is one, by a "
                 + "matched title, year and credited artist otherwise — and refuses rather than "

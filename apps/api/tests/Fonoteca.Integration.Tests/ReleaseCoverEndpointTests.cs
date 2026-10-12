@@ -355,6 +355,6 @@ public sealed class ReleaseCoverEndpointTests(PostgresFixture postgres) : IAsync
             long imageId,
             long maxBytes,
             CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("A cover is the 500px rendition.");
+            throw new NotSupportedException("A cover is the 1200px rendition.");
     }
 }

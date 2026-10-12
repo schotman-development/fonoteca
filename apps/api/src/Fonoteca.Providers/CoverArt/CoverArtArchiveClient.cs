@@ -28,8 +28,10 @@ public sealed class CoverArtArchiveOptions
 
 /// <summary><see cref="ICoverArtArchive"/> over coverartarchive.org.</summary>
 /// <remarks>
-/// Images are fetched at the 500px rendition: the originals run to several
-/// megabytes of scan, and nothing here draws a box bigger than that.
+/// Covers are fetched at the 1200px rendition: the stored cover is both what
+/// every screen draws and the album's one <c>cover.jpg</c> (the owner's
+/// choice), so 500px left every folder's download-shop copies sharper than it,
+/// and the originals run to several megabytes of scan, too much for a tile.
 /// </remarks>
 public sealed class CoverArtArchiveClient(IHttpClientFactory clients) : ICoverArtArchive
 {
@@ -83,22 +85,31 @@ public sealed class CoverArtArchiveClient(IHttpClientFactory clients) : ICoverAr
         long imageId,
         CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(
-                $"release/{release.Value:D}/{imageId}-500.jpg",
-                cancellationToken)
-            .ConfigureAwait(false);
+        // Every image measured here answers at 1200px, older uploads whose
+        // listing names no 1200px copy included; 500px is the fallback should one not.
+        return await RenditionAsync("1200").ConfigureAwait(false)
+            ?? await RenditionAsync("500").ConfigureAwait(false)
+            ?? throw Unavailable("the image answered 404", cause: null);
 
-        if (!response.IsSuccessStatusCode)
+        async Task<CoverArtBytes?> RenditionAsync(string size)
         {
-            throw Unavailable($"the image answered {(int)response.StatusCode}", cause: null);
+            using var response = await SendAsync($"release/{release.Value:D}/{imageId}-{size}.jpg", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound) return null;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw Unavailable($"the image answered {(int)response.StatusCode}", cause: null);
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return new CoverArtBytes(
+                bytes,
+                response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
         }
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        return new CoverArtBytes(
-            bytes,
-            response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
     }
 
     public async Task<CoverArtBytes?> DownloadOriginalAsync(
