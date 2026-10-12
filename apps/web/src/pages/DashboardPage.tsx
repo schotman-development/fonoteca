@@ -1,6 +1,7 @@
 import { Card, Stack, Text } from '@fonoteca/ui'
 import { useReducer } from 'react'
 
+import { AnalysisPanel } from '../components/AnalysisPanel.tsx'
 import { AttributionPanel } from '../components/AttributionPanel.tsx'
 import { EnrichmentPanel } from '../components/EnrichmentPanel.tsx'
 import { HealthPanel } from '../components/HealthPanel.tsx'
@@ -68,6 +69,15 @@ export function DashboardPage() {
         */}
         <Card title="Library — measure">
           <ProbePanel onProbed={catalogueChanged} />
+        </Card>
+
+        {/*
+          The second decode: what the audio is like rather than what it is.
+          Feeds ReplayGain in the tag write and the measured bit depth the
+          upgrade list trusts over the header.
+        */}
+        <Card title="Library — analyse">
+          <AnalysisPanel onAnalysed={catalogueChanged} />
         </Card>
 
         {/*

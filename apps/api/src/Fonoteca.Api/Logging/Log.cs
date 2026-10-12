@@ -326,6 +326,38 @@ internal static partial class Log
         Message = "Probe stopped early: {Reason}")]
     public static partial void ProbeAborted(ILogger logger, string reason);
 
+    [LoggerMessage(
+        EventId = 1212,
+        Level = LogLevel.Information,
+        Message = "Analysis started ({JobId}): {Pending} files have never been measured.")]
+    public static partial void AnalysisStarted(ILogger logger, string jobId, int pending);
+
+    [LoggerMessage(
+        EventId = 1213,
+        Level = LogLevel.Information,
+        Message = "Analysis finished ({JobId}): {Measured} measured, {Unmeasurable} unmeasurable, {Failed} failed, in {DurationMilliseconds} ms.")]
+    public static partial void AnalysisCompleted(
+        ILogger logger, string jobId, int measured, int unmeasurable, int failed, long durationMilliseconds);
+
+    [LoggerMessage(
+        EventId = 1214,
+        Level = LogLevel.Warning,
+        Message = "Analysis requested while {ActiveKind} is running; the request was rejected.")]
+    public static partial void AnalysisBusy(ILogger logger, string activeKind);
+
+    [LoggerMessage(
+        EventId = 1215,
+        Level = LogLevel.Warning,
+        Message = "Analysis stopped early: {Reason}")]
+    public static partial void AnalysisAborted(ILogger logger, string reason);
+
+    /// <remarks>Debug: the file is the probe's to report on, which already says whether it decodes.</remarks>
+    [LoggerMessage(
+        EventId = 1216,
+        Level = LogLevel.Debug,
+        Message = "{Path} was not analysed: {Reason}")]
+    public static partial void FileNotAnalysed(ILogger logger, string path, string reason);
+
     /// <remarks>
     /// Warning rather than Debug, unlike its identification counterpart: this is
     /// the decoder saying these particular bytes are wrong, and on the target

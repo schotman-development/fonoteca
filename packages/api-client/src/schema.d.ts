@@ -125,6 +125,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/analyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many files have never been measured, and what the last pass found. */
+        get: operations["GetLibraryAnalysisStatus"];
+        put?: never;
+        /**
+         * Measure every file's audio: loudness, dynamic range, real bit depth, silence and clipping.
+         * @description Returns immediately with a job id; progress arrives on the jobs hub. A second decode of each file through ffmpeg's analysis filters, apart from the probe's integrity decode. Fills MediaFile.Measurement. Writes no file and needs the library volume mounted.
+         */
+        post: operations["StartLibraryAnalysis"];
+        /** Ask the running pass to stop after the page it is on. */
+        delete: operations["CancelLibraryAnalysis"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/attribute": {
         parameters: {
             query?: never;
@@ -1616,6 +1638,53 @@ export interface components {
             download: null | components["schemas"]["AlbumDownload"];
             replacement: null | components["schemas"]["AlbumReplacement"];
             filing: null | components["schemas"]["AlbumFiling"];
+        };
+        AnalysisCoverage: {
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            pending: number;
+            /** Format: int32 */
+            measured: number;
+            /** Format: int32 */
+            unmeasurable: number;
+        };
+        AnalysisStartedResponse: {
+            jobId: string;
+            /** Format: int32 */
+            pending: number;
+        };
+        AnalysisStatusResponse: {
+            running: boolean;
+            jobId: null | string;
+            /** Format: int32 */
+            processed: number;
+            /** Format: int32 */
+            total: number;
+            currentFile: null | string;
+            coverage: components["schemas"]["AnalysisCoverage"];
+            lastError: null | string;
+            lastCompleted: null | components["schemas"]["AnalysisSummary"];
+        };
+        AnalysisSummary: {
+            jobId: string;
+            /** Format: date-time */
+            startedAtUtc: string;
+            /** Format: date-time */
+            completedAtUtc: string;
+            /** Format: int64 */
+            durationMilliseconds: number;
+            /** Format: int32 */
+            examined: number;
+            /** Format: int32 */
+            measured: number;
+            /** Format: int32 */
+            unmeasurable: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            skipped: number;
+            cancelled: boolean;
         };
         ArtistDetailResponse: {
             artist: components["schemas"]["ArtistSummary"];
@@ -3330,6 +3399,82 @@ export interface operations {
         };
     };
     CancelLibraryProbe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryAnalysisStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisStatusResponse"];
+                };
+            };
+        };
+    };
+    StartLibraryAnalysis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisStartedResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelLibraryAnalysis: {
         parameters: {
             query?: never;
             header?: never;

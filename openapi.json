@@ -337,6 +337,79 @@
         }
       }
     },
+    "/api/library/analyse": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Measure every file's audio: loudness, dynamic range, real bit depth, silence and clipping.",
+        "description": "Returns immediately with a job id; progress arrives on the jobs hub. A second decode of each file through ffmpeg's analysis filters, apart from the probe's integrity decode. Fills MediaFile.Measurement. Writes no file and needs the library volume mounted.",
+        "operationId": "StartLibraryAnalysis",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisStartedResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "How many files have never been measured, and what the last pass found.",
+        "operationId": "GetLibraryAnalysisStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Ask the running pass to stop after the page it is on.",
+        "operationId": "CancelLibraryAnalysis",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/library/attribute": {
       "post": {
         "tags": [
@@ -4718,6 +4791,161 @@
                 "$ref": "#/components/schemas/AlbumFiling"
               }
             ]
+          }
+        }
+      },
+      "AnalysisCoverage": {
+        "required": [
+          "files",
+          "pending",
+          "measured",
+          "unmeasurable"
+        ],
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "measured": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unmeasurable": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AnalysisStartedResponse": {
+        "required": [
+          "jobId",
+          "pending"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AnalysisStatusResponse": {
+        "required": [
+          "running",
+          "jobId",
+          "processed",
+          "total",
+          "currentFile",
+          "coverage",
+          "lastError",
+          "lastCompleted"
+        ],
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentFile": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/AnalysisCoverage"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastCompleted": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisSummary"
+              }
+            ]
+          }
+        }
+      },
+      "AnalysisSummary": {
+        "required": [
+          "jobId",
+          "startedAtUtc",
+          "completedAtUtc",
+          "durationMilliseconds",
+          "examined",
+          "measured",
+          "unmeasurable",
+          "failed",
+          "skipped",
+          "cancelled"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMilliseconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "examined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "measured": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unmeasurable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cancelled": {
+            "type": "boolean"
           }
         }
       },

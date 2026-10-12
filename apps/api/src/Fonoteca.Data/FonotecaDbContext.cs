@@ -276,6 +276,12 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 q.IsRequired(false);
                 q.Property(p => p.Codec).HasMaxLength(50);
             });
+
+            // The measurement likewise: read with the file, never on its own.
+            e.ComplexProperty(x => x.Measurement, m => m.IsRequired(false));
+
+            // The measure pass's worklist.
+            e.HasIndex(x => x.MeasuredUtc);
         });
 
         modelBuilder.Entity<Artist>(e =>

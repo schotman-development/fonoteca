@@ -697,6 +697,15 @@ public sealed class MediaFile
     public IntegrityState Integrity { get; set; } = IntegrityState.Unchecked;
     public DateTimeOffset? LastScannedUtc { get; set; }
     public DateTimeOffset? LastVerifiedUtc { get; set; }
+
+    /// <summary>
+    /// What the measure pass found in the audio — loudness, dynamic range, the
+    /// bits really used, silence — or null where nothing could be measured.
+    /// </summary>
+    public AudioMeasurement? Measurement { get; set; }
+
+    /// <summary>When the measure pass last asked, answer or not. A scan that sees the bytes change clears it.</summary>
+    public DateTimeOffset? MeasuredUtc { get; set; }
 }
 
 /// <summary>

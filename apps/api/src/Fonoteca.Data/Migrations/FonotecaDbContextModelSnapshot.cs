@@ -473,6 +473,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<DateTimeOffset?>("LastVerifiedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("MeasuredUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("OrderOutcome")
                         .HasColumnType("integer");
 
@@ -520,6 +523,39 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("TrackId")
                         .HasColumnType("uuid");
 
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Measurement", "Fonoteca.Domain.Catalogue.MediaFile.Measurement#AudioMeasurement", b1 =>
+                        {
+                            b1.Property<double?>("DurationSeconds")
+                                .HasColumnType("double precision");
+
+                            b1.Property<double?>("DynamicRange")
+                                .HasColumnType("double precision");
+
+                            b1.Property<int?>("EffectiveBitDepth")
+                                .HasColumnType("integer");
+
+                            b1.Property<double?>("IntegratedLufs")
+                                .HasColumnType("double precision");
+
+                            b1.Property<double>("LeadingSilenceSeconds")
+                                .HasColumnType("double precision");
+
+                            b1.Property<double?>("LoudnessRangeLu")
+                                .HasColumnType("double precision");
+
+                            b1.Property<long?>("PeakCount")
+                                .HasColumnType("bigint");
+
+                            b1.Property<double?>("SamplePeakDbfs")
+                                .HasColumnType("double precision");
+
+                            b1.Property<double>("TrailingSilenceSeconds")
+                                .HasColumnType("double precision");
+
+                            b1.Property<double?>("TruePeakDbtp")
+                                .HasColumnType("double precision");
+                        });
+
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Quality", "Fonoteca.Domain.Catalogue.MediaFile.Quality#AudioQuality", b1 =>
                         {
                             b1.Property<int?>("BitDepth")
@@ -560,6 +596,8 @@ namespace Fonoteca.Data.Migrations
                     b.HasIndex("Integrity");
 
                     b.HasIndex("LastScannedUtc");
+
+                    b.HasIndex("MeasuredUtc");
 
                     b.HasIndex("Path")
                         .IsUnique();

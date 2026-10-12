@@ -105,6 +105,12 @@ builder.Services.AddSingleton<IAudioProbe>(sp => new FfprobeAudioProbe(
     sp.GetRequiredService<FileSystemAudioFileStore>(),
     sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfprobePath));
 
+// The second decode, through ffmpeg's analysis filters: loudness, dynamic
+// range, the bits really used, silence. Its own pass — see AnalysisService.
+builder.Services.AddSingleton<IAudioMeasurer>(sp => new FfmpegAudioMeasurer(
+    sp.GetRequiredService<FileSystemAudioFileStore>(),
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
+
 builder.Services.AddSingleton<TagReader>();
 
 // The read that answers "what is this file", as opposed to the read that
@@ -136,6 +142,7 @@ builder.Services.AddSingleton<IdentificationService>();
 builder.Services.AddSingleton<EnrichmentService>();
 builder.Services.AddSingleton<ReleaseAttributionService>();
 builder.Services.AddSingleton<ProbeService>();
+builder.Services.AddSingleton<AnalysisService>();
 
 // The one pass that rewrites audio files, and the only one nothing may start on
 // its own — see TagWriteService. It is here because it is a pass; it is reached
@@ -154,6 +161,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<IdentificationServ
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EnrichmentService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ReleaseAttributionService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ProbeService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AnalysisService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TagWriteService>());
 
 // The worklist's answers, built before somebody clicks rather than while they

@@ -117,6 +117,24 @@ public static class LibraryEndpoints
             .WithSummary("Ask the running pass to stop after the page it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/analyse", StartAnalysis)
+            .WithName("StartLibraryAnalysis")
+            .WithSummary("Measure every file's audio: loudness, dynamic range, real bit depth, silence and clipping.")
+            .WithDescription(
+                "Returns immediately with a job id; progress arrives on the jobs hub. A second decode "
+                + "of each file through ffmpeg's analysis filters, apart from the probe's integrity "
+                + "decode. Fills MediaFile.Measurement. Writes no file and needs the library volume mounted.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/analyse", GetAnalysisStatus)
+            .WithName("GetLibraryAnalysisStatus")
+            .WithSummary("How many files have never been measured, and what the last pass found.");
+
+        group.MapDelete("/analyse", CancelAnalysis)
+            .WithName("CancelLibraryAnalysis")
+            .WithSummary("Ask the running pass to stop after the page it is on.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         group.MapPost("/attribute", StartAttribution)
             .WithName("StartReleaseAttribution")
             .WithSummary("Work out which album each identified file came from.")
@@ -443,6 +461,51 @@ public static class LibraryEndpoints
             LastCompleted: probes.LastCompleted));
     }
 
+    internal static async Task<Results<Accepted<AnalysisStartedResponse>, ProblemHttpResult>>
+        StartAnalysis(AnalysisService measures, CancellationToken cancellationToken)
+    {
+        var pending = (await measures.CoverageAsync(cancellationToken).ConfigureAwait(false)).Pending;
+        var outcome = measures.Start();
+
+        return outcome switch
+        {
+            { Status: AnalysisStatus.Started, JobId: { } jobId } => TypedResults.Accepted(
+                "/api/library/analyse",
+                new AnalysisStartedResponse(jobId, pending)),
+
+            _ => TypedResults.Problem(
+                title: "The library is already busy",
+                detail: "A scan or another pass is running. Only one at a time touches the "
+                    + "catalogue. Poll GET /api/library/analyse.",
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    internal static async Task<Ok<AnalysisStatusResponse>> GetAnalysisStatus(
+        AnalysisService measures,
+        CancellationToken cancellationToken)
+    {
+        var progress = measures.Progress;
+
+        return TypedResults.Ok(new AnalysisStatusResponse(
+            Running: measures.IsRunning,
+            JobId: progress?.JobId,
+            Processed: progress?.Processed ?? 0,
+            Total: progress?.Total ?? 0,
+            CurrentFile: progress?.CurrentFile,
+            Coverage: await measures.CoverageAsync(cancellationToken).ConfigureAwait(false),
+            LastError: measures.LastError,
+            LastCompleted: measures.LastCompleted));
+    }
+
+    internal static Results<Accepted, ProblemHttpResult> CancelAnalysis(AnalysisService measures) =>
+        measures.Cancel()
+            ? TypedResults.Accepted("/api/library/analyse")
+            : TypedResults.Problem(
+                title: "Nothing to cancel",
+                detail: "No analysis pass is running.",
+                statusCode: StatusCodes.Status409Conflict);
+
     internal static Results<Accepted, ProblemHttpResult> CancelProbe(ProbeService probes) =>
         probes.Cancel()
             ? TypedResults.Accepted("/api/library/probe")
@@ -540,6 +603,19 @@ public sealed record IdentificationStatusResponse(
 public sealed record EnrichmentStartedResponse(string JobId, int Pending);
 
 public sealed record ProbeStartedResponse(string JobId, int Pending);
+
+public sealed record AnalysisStartedResponse(string JobId, int Pending);
+
+/// <param name="LastError">Why the last pass stopped without finishing — usually ffmpeg missing from PATH.</param>
+public sealed record AnalysisStatusResponse(
+    bool Running,
+    string? JobId,
+    int Processed,
+    int Total,
+    string? CurrentFile,
+    AnalysisCoverage Coverage,
+    string? LastError,
+    AnalysisSummary? LastCompleted);
 
 /// <param name="Coverage">What the library measures to, across every pass that has run.</param>
 /// <param name="LastError">

@@ -54,9 +54,9 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
 
     private static readonly AgentCallerContext Agent = new();
 
-    private static readonly string[] Startable = ["scan", "identify", "enrich", "probe", "attribute"];
+    private static readonly string[] Startable = ["scan", "identify", "enrich", "probe", "analyse", "attribute"];
 
-    private static readonly string[] Cancellable = ["identify", "enrich", "probe", "attribute"];
+    private static readonly string[] Cancellable = ["identify", "enrich", "probe", "analyse", "attribute"];
 
     /// <summary>
     /// The token check, as middleware in front of <see cref="Route"/>.
@@ -95,7 +95,7 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
     [McpServerTool(Name = "library_status", ReadOnly = true)]
     [Description(
         "Whether each pass is running, how far it has got, what is pending and how its last run went: "
-        + "scan, identify, enrich, probe, attribute, and the tag write — which is reported here but "
+        + "scan, identify, enrich, probe, analyse, attribute, and the tag write — which is reported here but "
         + "has no tool that starts it.")]
     public async Task<string> LibraryStatus(CancellationToken cancellationToken = default) =>
         Json(new
@@ -109,6 +109,9 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
                 .ConfigureAwait(false)).Value,
             Probe = (await LibraryEndpoints
                 .GetProbeStatus(Get<ProbeService>(), cancellationToken)
+                .ConfigureAwait(false)).Value,
+            Analyse = (await LibraryEndpoints
+                .GetAnalysisStatus(Get<AnalysisService>(), cancellationToken)
                 .ConfigureAwait(false)).Value,
             Attribute = (await LibraryEndpoints
                 .GetAttributionStatus(Get<ReleaseAttributionService>(), cancellationToken)
@@ -287,10 +290,11 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
         + "starts identify after it when that is configured. `identify` fingerprints files with no "
         + "AcoustID and looks them up; it writes tags only with Fonoteca:AllowFileMutation on. `enrich` "
         + "fetches recordings, works and artists. `probe` decodes every file for quality and "
-        + "integrity. `attribute` decides each album folder's release. One runs at a time and the "
+        + "integrity. `analyse` decodes every file again for loudness, dynamic range, real bit depth, "
+        + "silence and clipping. `attribute` decides each album folder's release. One runs at a time and the "
         + "rest answer busy; poll library_status.")]
     public async Task<string> StartPass(
-        [Description("scan, identify, enrich, probe or attribute")] string kind,
+        [Description("scan, identify, enrich, probe, analyse or attribute")] string kind,
         CancellationToken cancellationToken = default) =>
         Answer(kind switch
         {
@@ -310,6 +314,9 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
             "probe" => await LibraryEndpoints
                 .StartProbe(Get<ProbeService>(), cancellationToken)
                 .ConfigureAwait(false),
+            "analyse" => await LibraryEndpoints
+                .StartAnalysis(Get<AnalysisService>(), cancellationToken)
+                .ConfigureAwait(false),
             "attribute" => await LibraryEndpoints
                 .StartAttribution(Get<ReleaseAttributionService>(), cancellationToken)
                 .ConfigureAwait(false),
@@ -318,12 +325,13 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
 
     [McpServerTool(Name = "cancel_pass")]
     [Description("Ask a running pass to stop after the item it is on. A scan cannot be cancelled.")]
-    public string CancelPass([Description("identify, enrich, probe or attribute")] string kind) =>
+    public string CancelPass([Description("identify, enrich, probe, analyse or attribute")] string kind) =>
         Answer(kind switch
         {
             "identify" => (IResult)LibraryEndpoints.CancelIdentification(Get<IdentificationService>()),
             "enrich" => LibraryEndpoints.CancelEnrichment(Get<EnrichmentService>()),
             "probe" => LibraryEndpoints.CancelProbe(Get<ProbeService>()),
+            "analyse" => LibraryEndpoints.CancelAnalysis(Get<AnalysisService>()),
             "attribute" => LibraryEndpoints.CancelAttribution(Get<ReleaseAttributionService>()),
             _ => throw Unknown(kind, Cancellable),
         });
