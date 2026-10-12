@@ -238,7 +238,7 @@ share, lyrics.
 One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
-`getAlbumList2`, `getSong`, `search3`, `stream`, `download`, `getCoverArt`,
+`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `stream`, `download`, `getCoverArt`,
 `getPlaylists`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 
@@ -324,10 +324,18 @@ no other place to put it, so it lands in the access log verbatim, and in
 Development the framework's own request logging prints it. Nothing here can fix
 that; what it changes is that the log is now a credential store.
 
-**There is no genre on a release or a track.** `Artist.Genres` is a string on
-the artist and that is all, so `getGenres` is not offered and `song.genre` is
-absent. Clients that browse by genre will show nothing rather than something
-wrong.
+**A song's genres are its album's, and its recording's only where the album has
+none** (`FileGenres`, the rule the tag write uses too), spelled as MusicBrainz
+spells them and cut at five. An album lists its own, or the commonest among its
+tracks. `genre` carries the first and OpenSubsonic's `genres` the list;
+`getGenres`, `getSongsByGenre` and `getAlbumList2?type=byGenre` browse them.
+Added with the enrichment stages that fill `ReleaseGroups.Genres` and
+`Recordings.Genres`; before those, there was no genre to serve.
+
+**A song's `bitDepth` is the one its audio uses**, where the Analyse pass found
+a lossless file padded beyond it, and its `replayGain` carries the values the tag
+write puts in the file: track gain and peak, and the album folder's where every
+file in it is analysed (`AlbumLoudness`).
 
 **`search3` is a database query, and that is fine.** The note that search needs
 a Solr index is about *MusicBrainz* search, behind the by-hand album screen. A

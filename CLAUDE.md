@@ -14,18 +14,19 @@ A self-hosted music library manager for 100,000+ track libraries: catalogue and
 dedupe, acquisition (Qobuz), *arr-style upgrade monitoring, tag editing.
 .NET 10 API plus a pnpm/Vite/React 19 workspace, joined only by OpenAPI.
 
-**Six passes, six screens, one thing that can spend money.**
+**Seven passes, seven screens, one thing that can spend money.**
 
 | pass | does | service |
 | --- | --- | --- |
 | scan | walks the root, reconciles `MediaFiles` with the disk | `Api/Library/LibraryScanService.cs` |
 | identify | `fpcalc` → AcoustID → writes the tag | `Api/Library/IdentificationService.cs` |
-| enrich | identities into a catalogue — five stages | `Api/Library/EnrichmentService.cs` |
+| enrich | identities into a catalogue, stage by stage | `Api/Library/EnrichmentService.cs` |
 | attribute | which album each *folder* is, and its pressing only on proof | `Api/Library/ReleaseAttributionService.cs` |
 | probe | `ffprobe -count_frames` — quality and integrity in one decode | `Api/Library/ProbeService.cs` |
+| analyse | `ffmpeg` analysis filters — loudness, DR, real bit depth, silence, clipping | `Api/Library/AnalysisService.cs` |
 | tag write | the whole catalogue back into the files | `Api/Library/TagWriteService.cs` |
 
-Five are a `POST`/`GET`/`DELETE` trio under `/api/library` taking
+Six are a `POST`/`GET`/`DELETE` trio under `/api/library` taking
 `LibraryWorkGate`. **The scan is neither**: it cannot be cancelled, and it
 guards itself with a private interlocked flag rather than the gate — so a scan
 can arrive in the middle of anything. Nothing chains one pass into another
@@ -44,7 +45,8 @@ the rest.
 1. **A worklist keys on "we asked", never on "we have an answer".**
    `AcoustIdCheckedUtc`, `RecordingLookupUtc`, `ReleaseLookupUtc`,
    `Artists.LookupUtc`, `PortraitLookupUtc`, `DiscographyLookupUtc`,
-   `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`. A library is full of things the provider has never heard
+   `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`, `Recordings.DescribedUtc`,
+   `ReleaseGroups.GenresLookupUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -227,10 +229,11 @@ run rather than a no-op.
   `DomainEvent.SubjectId` is `varchar(200)`; a library path is up to 4096, and a
   box set broke a live run at file 76. Paths also move.
 
-**Enrichment is five stages in `RunAsync`, in order, because each depends on what
+**Enrichment's stages run in `RunAsync`, in order, because each depends on what
 the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
-artists → portraits → discographies. `CountPendingAsync` returns one number per
+held recordings described again → album genres → artists → portraits → articles,
+banners, motion, booklets → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
 
@@ -246,6 +249,20 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   recognises an ensemble by type OR by relation. Billed credits go to
   `ArtistCredit` (`Position`/`JoinPhrase` describe a printed billing line);
   everything else goes to `Relationship`.
+- **Who gets a page and who is credited are two tables.** `Relationship` is the
+  browse index above; `Contribution` is every artist link MusicBrainz states on
+  a recording or its work — producer, engineer, each player with all their
+  qualifiers, lyricist apart from composer — by MBID and printed name, minting
+  **no artist row**, so a session guitarist never joins the artist list. The
+  album page and the tag write read credits from it. Rebuilt wholesale on every
+  describe, including rows the same save added (EF queries the database).
+- **Every held recording is described again** (`Recordings.DescribedUtc`):
+  genres, every ISRC (`Recordings.Isrcs`, apart from the shop's `Isrc`), the
+  contributions and the work's parent (`Works.ParentId`, one level, minted from
+  the `parts` stub). One with no genre is asked again after a week; one with
+  genres never. Album genres are a release-group lookup each
+  (`ReleaseGroups.Genres`), same rule. Artists carry `LinksJson`, every URL
+  relation, which is how a later source finds one by identity.
 - **A merged MBID is followed, never refused.** WS/2 answers it with the
   survivor's document, so a different id coming back *is* the merge.
   `CatalogueWriter.UpsertAsync(…, asked)` folds the stale recording row into the
@@ -341,6 +358,30 @@ filed as the CD it resembles is a lie every later screen repeats.
   Michael Jackson's albums attributed wrongly; the loss was in `GatherAsync`, not
   in the rule. **Run the pass against the real mirror before believing that.**
 
+**Analyse: a second decode, on purpose.** Its own pass by the owner's choice,
+because the probe reads anything ffmpeg says as the decoder objecting and the
+analysis filters (`ebur128`, `astats`, `drmeter`, `silencedetect`) talk on the
+same channel. Called Analyse because the dashboard already calls the probe
+"measure". The probe's shape throughout: `MeasuredUtc` is the "we asked" stamp,
+a missing binary ends the pass, a file not on disk stays pending, a scan that
+sees the bytes change clears `Measurement`. **Answers, never rankings**:
+`AudioMeasurement` keeps readings; `AudioAnalysis` turns them into ReplayGain 2.0
+(−18 LUFS, sample peak), the DR figure, clipping and the **measured bit depth,
+which the upgrade list and album replacement rank by** — 16-bit audio in a
+24-bit FLAC is a CD rip (`AudioAnalysis.Decided`; the owner's choice).
+astats' "Bit depth: a/b/c/d" is undocumented; its second figure is the one that
+told padded from real on ffmpeg 8.0. ReplayGain's album is the **album folder**
+(`AlbumLoudness`), computed when asked and only when every file in it is
+analysed; the tag write puts all four values in the files, replacing a file's
+own (the owner's choice), and Subsonic serves them. The DR figures go in too,
+as `DYNAMIC RANGE` and `ALBUM DYNAMIC RANGE` — foobar2000's DR Meter's names,
+no standard naming any — the album's only where every track has one.
+**Every analysed file is on the tag write's worklist**, since a gain needs no
+identity — one the catalogue has not answered (`TagWriteService.Answered`) gets
+its ReplayGain and DR alone: no partial answer, no sleeve, no rename. Opus
+gets no ReplayGain (RFC 7845 wants `R128_TRACK_GAIN` there; no Opus in the
+library yet).
+
 **Probe: two questions, one decode.** `-count_frames` decodes rather than parsing
 the header, so the run that fills `AudioQuality` is the only one that can say
 whether the bytes are intact — splitting them decodes the library twice. At
@@ -401,6 +442,19 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   it back as a picture block of its own, the owner's choice. And TagLib# 2.3 times an MP3
   with a LAME `Info` header at double length, so durations are compared per
   reader too.
+- **Genres, ISRCs and credits go in too, under Picard's names** — the owner's
+  choice, replacing whatever the file carried. A file's genres are its album's,
+  its recording's only where the album has none, five at most, spelled as
+  MusicBrainz spells them (`FileGenres`, which Subsonic serves by as well).
+  Credits come from `Contribution` through `CreditTags`: COMPOSER, LYRICIST,
+  CONDUCTOR, ARRANGER, PRODUCER, ENGINEER, MIXER, `PERFORMER=Name (instrument)`.
+  Several values are one field's several values (`CatalogueTags.ValueSeparator`),
+  except in an MP4, where ATL runs them together and they go as one value joined
+  with "; " — and an MP4 gets no ISRC or conductor, which ATL writes where
+  nothing reads them. On ID3 the five without a frame of ATL's go in `TXXX`,
+  where Picard uses `TIPL`/`TMCL`; TagLib-based readers find them either way.
+  The tag editor shows several values joined with "; ", and a value a person
+  saves is theirs, as one value.
 - **A pressing's tags only with a proven pressing.** A file held to its album
   alone gets the album's facts — title, artist, album, album artist (the display
   edition's billing), year (`AlbumYear`), recording and release-group MBIDs, and
@@ -572,7 +626,8 @@ what it means comes from the catalogue.
   every act here is one click on one named entry, and the reversibility is in the
   trash.
 
-**Album covers** are fetched once at 500px and served from `ReleaseCovers` under
+**Album covers** are fetched once at 1200px (Qobuz's at its largest, about 1400px)
+and served from `ReleaseCovers` under
 an ETag — every tile used to hot-link the archive's front-250. Only an image the
 archive lists against *this* release may be chosen, and an upload is held to the
 same raster allowlist with SVG refused.
@@ -619,13 +674,15 @@ sleeve. **A page that changes shape stops the stage instead of answering
 
 **Album booklets** are ADR 0015 — booklets only, never backs, discs or trays
 (the owner's choice). An enrichment stage lists every edition on the Cover Art
-Archive and keeps the fullest edition's `Booklet` pages whole, full size, the
-display edition winning a tie; Qobuz's digital booklet (a PDF "goodie" on
+Archive and keeps the fullest edition's `Booklet` pages whole (never one also
+typed `Front`), full size, the display edition winning a tie; Qobuz's digital booklet (a PDF "goodie" on
 `album/get`, matched by `QobuzCovers.Match`) is kept beside it. Stored in
 `AlbumBooklets`/`AlbumBookletFiles` on the same stamp rules, written by the tag
 write beside the tracks as `booklet-01.jpg`… and `booklet.pdf`, journalled as
 `tagging.booklet`. **Any other `booklet*` file in the folder is a person's and
-wins**: nothing is written for that album.
+wins**: nothing is written for that album. An album no source can answer is
+recorded as failed (`FailedUtc`, never "none") and asked after every album not
+yet asked; three failures in a row end the stage.
 
 **`…/folders/seed`** hands a folder to MusicBrainz's own "add release" form,
 prefilled. Fonoteca writes nothing to MusicBrainz and cannot — their `/ws/2`
@@ -908,9 +965,9 @@ query with `:root:not([data-theme='light'])`. Don't collapse these into a boolea
 `seating.ts`, `identify.ts`, `files.ts`, `qobuz.ts`, `artistFacts.ts`, plus —
 
 - **`workGroups.ts`** — **the link points at the movement, not at the symphony**:
-  `Recording.WorkId` reaches a *leaf*, and the parent piece lives in a
-  work-to-work relationship the catalogue does not store, so grouping falls back
-  to the text before the first `": "`. **Consecutive runs, not a group-by** —
+  `Recording.WorkId` reaches a *leaf*; the piece is `partOf` (`Works.ParentId`,
+  one level), and before a recording is described again grouping falls back to
+  the text before the first `": "`. **Consecutive runs, not a group-by** —
   sorting rows into work buckets would renumber the album on screen.
 - **`listSearch.ts`** — sort, scope and filter live in the **URL**, not in
   component state, or pressing Back lands on an alphabetical list again. The

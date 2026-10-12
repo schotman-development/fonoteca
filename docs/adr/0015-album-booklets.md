@@ -30,7 +30,10 @@ display edition — the pressing the files prove, else the one the cover comes
 from — listed first so it wins a tie (the owner's choice: "prefer the cover
 edition but add from all editions"). Pages are taken in the archive's order,
 as uploaded (full size, the owner's choice), edited scans over `Raw/Unedited`
-ones unless the raw are all there is. Mixing pages from two editions would
+ones unless the raw are all there is, and never one also typed `Front` — the
+booklet's front page is the sleeve again, and the owner wants one cover. A
+proven pressing takes the fullest edition's booklet too, not only its own (the
+owner's choice: the most complete collection). Mixing pages from two editions would
 interleave two printings, so one edition's booklet is never topped up from
 another's.
 
@@ -41,7 +44,8 @@ host and only if the bytes are a PDF.
 **Kept like the motion artwork, written beside the tracks.** A ninth
 enrichment stage stores them in `AlbumBooklets` (the stamp and provenance) and
 `AlbumBookletFiles` (the bytes). A row with no files expires after a week; a
-row with any never does; an outage writes nothing. The tag write puts them in
+row with any never does; a failed ask records only when it failed, never an
+answer. The tag write puts them in
 the album folder as `booklet-01.jpg` onwards and `booklet.pdf` (the owner
 chose the album folder over a `Scans` subfolder), journalled as
 `tagging.booklet` and undone with the sleeve.
@@ -58,6 +62,15 @@ folder, the rest trashed.
 **The catalogue grows by roughly 4–6 GB** across this library at full size,
 held in PostgreSQL until the tag write copies it out.
 
+**One album that cannot be answered is skipped.** Its failure is recorded
+(`AlbumBooklets.FailedUtc`), never as "none", and such albums are asked after
+every album nobody has asked about, oldest failure first (the owner's choice),
+so a few dead ones cannot keep new albums from being asked. Three in a row is
+taken for an outage and ends the stage.
+Before this, an album whose only edition sits on a broken archive.org node
+ended the stage at that album on every run (159 of the 613 albums have one
+edition).
+
 **Every edition is listed once per album** — about 3,650 archive requests for
 this library — and both sources are asked for every album, because "every
 booklet" is the ask and a CD's scanned booklet and the shop's digital one are
@@ -70,8 +83,8 @@ archive cannot give**: one release of *Live at the Regal* sits on an
 archive.org node that answers 500 every time, and read as an outage it ended
 the stage at that album on every run. Its album's booklet comes from the
 editions that answer, the next fullest where it was the fullest. Only when no
-edition can be listed, or every edition with pages fails to give them, is it
-an outage, ending the stage unstamped.
+edition can be listed, or every edition with pages fails to give them, has
+the album no answer; that album is then skipped, above.
 
 **A booklet written by an earlier run reads as a person's** if its stored
 files are later replaced by hand, and stops the album until it is moved.
