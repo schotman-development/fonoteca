@@ -52,6 +52,12 @@ internal interface ISubsonicWriter
 
     /// <summary>A repeated scalar, which only the extension list needs.</summary>
     void Numbers(string name, IEnumerable<int> values);
+
+    /// <summary>
+    /// The element's own text in XML, a <c>value</c> property in JSON — how a
+    /// genre carries its name. After the attributes, like a child.
+    /// </summary>
+    void Value(string value);
 }
 
 /// <summary>
@@ -332,6 +338,8 @@ internal sealed class SubsonicResult : IResult
 
             json.WriteEndArray();
         }
+
+        public void Value(string value) => json.WriteString("value", value);
     }
 
     private sealed class XmlSubsonicWriter(XmlWriter xml) : ISubsonicWriter
@@ -398,6 +406,8 @@ internal sealed class SubsonicResult : IResult
                 xml.WriteElementString(name, value.ToString(CultureInfo.InvariantCulture));
             }
         }
+
+        public void Value(string value) => xml.WriteString(value);
     }
 
     private static string Iso(DateTimeOffset value) =>

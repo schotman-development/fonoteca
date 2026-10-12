@@ -162,6 +162,12 @@ public static partial class SubsonicEndpoints
 
             "byYear" => ByYear(http, albums),
 
+            "byGenre" => Text(http, "genre") is { } genre
+                ? albums
+                    .Where(album => album.Genres.Contains(genre, StringComparer.OrdinalIgnoreCase))
+                    .OrderBy(album => album.Name, StringComparer.OrdinalIgnoreCase)
+                : [],
+
             "random" => albums.OrderBy(_ => Random.Shared.Next()),
 
             _ => albums.OrderBy(album => album.Name, StringComparer.OrdinalIgnoreCase),
@@ -172,6 +178,96 @@ public static partial class SubsonicEndpoints
         return SubsonicResult.Ok(
             "albumList2",
             list => list.Children("album", page, WriteAlbum));
+    }
+
+    /// <summary>
+    /// Every genre a file here carries, with how many songs and albums carry it.
+    /// </summary>
+    /// <remarks>
+    /// Counted by the rule the tag write uses (<see cref="FileGenres"/>), over a
+    /// projection of two short columns per file rather than the whole song —
+    /// the songs are the many.
+    /// </remarks>
+    private static async Task<IResult> GetGenres(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var files = await db.MediaFiles
+            .AsNoTracking()
+            .Select(file => new
+            {
+                Album = file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
+                Recording = file.Recording != null ? file.Recording.Genres : null,
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var albums = await AlbumsAsync(db, artist: null, cancellationToken).ConfigureAwait(false);
+
+        var songCounts = files
+            .SelectMany(file => FileGenres.Of(file.Album, file.Recording))
+            .CountBy(genre => genre, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(StringComparer.OrdinalIgnoreCase);
+
+        var albumCounts = albums
+            .SelectMany(album => album.Genres)
+            .CountBy(genre => genre, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(StringComparer.OrdinalIgnoreCase);
+
+        var genres = songCounts.Keys
+            .Union(albumCounts.Keys, StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return SubsonicResult.Ok(
+            "genres",
+            list => list.Children("genre", genres, (writer, genre) =>
+            {
+                writer.Attr("songCount", songCounts.GetValueOrDefault(genre));
+                writer.Attr("albumCount", albumCounts.GetValueOrDefault(genre));
+                writer.Value(genre);
+            }));
+    }
+
+    /// <summary>
+    /// The songs carrying one genre, a page at a time.
+    /// </summary>
+    /// <remarks>
+    /// <c>ILIKE</c> narrows the files in SQL and <see cref="FileGenres"/> decides
+    /// in memory, because a stored column is a joined list and "rock" is a
+    /// substring of "blues rock". ponytail: the page is cut after the filter,
+    /// so a broad genre loads every file carrying it once per page; a genre
+    /// table is the upgrade if a client pages deep.
+    /// </remarks>
+    private static async Task<IResult> GetSongsByGenre(
+        HttpContext http,
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (Text(http, "genre") is not { } genre)
+        {
+            return SubsonicResult.Error(10, "Required parameter is missing: genre.");
+        }
+
+        var count = Number(http, "count", DefaultListSize, MaxListSize);
+        var offset = Number(http, "offset", 0, int.MaxValue);
+        var pattern = $"%{Escape(genre)}%";
+
+        var candidates = db.MediaFiles.AsNoTracking().Where(file =>
+            (file.ReleaseGroup != null && EF.Functions.ILike(file.ReleaseGroup.Genres!, pattern, "\\"))
+            || (file.Recording != null && EF.Functions.ILike(file.Recording.Genres!, pattern, "\\")));
+
+        var songs = await SongsAsync(candidates, cancellationToken).ConfigureAwait(false);
+
+        var page = songs
+            .Where(song => song.Genres.Contains(genre, StringComparer.OrdinalIgnoreCase))
+            .Skip(offset)
+            .Take(count)
+            .ToList();
+
+        return SubsonicResult.Ok(
+            "songsByGenre",
+            list => list.Children("song", page, WriteSong));
     }
 
     private static async Task<IResult> GetSong(
@@ -330,9 +426,14 @@ public static partial class SubsonicEndpoints
         writer.Attr("songCount", album.SongCount);
         writer.Attr("created", album.Created);
         writer.Attr("year", album.Year);
+        writer.Attr("genre", album.Genres.Count > 0 ? album.Genres[0] : null);
         writer.Attr("musicBrainzId", album.Mbid?.Value.ToString());
         writer.Attr("isDir", true);
+        writer.Children("genres", album.Genres, WriteGenre);
     }
+
+    /// <summary>OpenSubsonic's list beside the protocol's single <c>genre</c>, which keeps the first.</summary>
+    private static void WriteGenre(ISubsonicWriter writer, string genre) => writer.Attr("name", genre);
 
     private static void WriteSong(ISubsonicWriter writer, Song song) =>
         WriteSong(writer, song, parent: null);
@@ -370,7 +471,9 @@ public static partial class SubsonicEndpoints
         writer.Attr("created", song.Created);
         writer.Attr("type", "music");
         writer.Attr("isVideo", false);
+        writer.Attr("genre", song.Genres.Count > 0 ? song.Genres[0] : null);
         writer.Attr("musicBrainzId", song.Mbid?.Value.ToString());
+        writer.Children("genres", song.Genres, WriteGenre);
     }
 }
 
@@ -398,7 +501,8 @@ internal sealed record Album(
     Mbid? Mbid,
     int SongCount,
     Guid Added,
-    DateTimeOffset? Created);
+    DateTimeOffset? Created,
+    IReadOnlyList<string> Genres);
 
 /// <summary>A media file, as a song.</summary>
 /// <param name="Id">Already in its wire form: a catalogued file is <c>tr-</c>, anything else <c>fo-</c>.</param>
@@ -422,4 +526,5 @@ internal sealed record Song(
     int? SampleRateHz,
     int? Channels,
     int? BitDepth,
-    DateTimeOffset? Created);
+    DateTimeOffset? Created,
+    IReadOnlyList<string> Genres);

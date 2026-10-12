@@ -127,6 +127,10 @@ public static partial class SubsonicEndpoints
                 Created = row.Files.Min(file => file.LastModifiedUtc),
 
                 row.EditsJson,
+                row.Genres,
+                RecordingGenres = row.Files
+                    .Select(file => file.Recording != null ? file.Recording.Genres : null)
+                    .ToList(),
 
                 Credits = row.Credits
                     .OrderBy(credit => credit.Position)
@@ -167,7 +171,8 @@ public static partial class SubsonicEndpoints
                     row.Mbid,
                     row.SongCount,
                     row.Added.Value,
-                    row.Created);
+                    row.Created,
+                    FileGenres.OfAlbum(row.Genres, row.RecordingGenres));
             })
             .ToList();
 
@@ -251,6 +256,8 @@ public static partial class SubsonicEndpoints
                 file.Release != null ? file.Release.ReleasedYear : null,
                 file.ReleaseGroup != null ? file.ReleaseGroup.EditsJson : null,
                 file.Release != null ? file.Release.EditsJson : null,
+                file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
+                file.Recording != null ? file.Recording.Genres : null,
                 // No ternary on the navigation: a null one yields an empty
                 // collection through the join EF writes, where `new List<>()`
                 // is not something it can translate at all.
@@ -350,7 +357,8 @@ public static partial class SubsonicEndpoints
             row.Quality?.SampleRateHz,
             row.Quality?.Channels,
             row.Quality?.BitDepth,
-            row.LastModifiedUtc);
+            row.LastModifiedUtc,
+            FileGenres.Of(row.AlbumGenres, row.RecordingGenres));
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>
@@ -376,6 +384,8 @@ public static partial class SubsonicEndpoints
         int? PressingYear,
         string? AlbumEdits,
         string? PressingEdits,
+        string? AlbumGenres,
+        string? RecordingGenres,
         List<CreditRow> AlbumCredits,
         List<CreditRow> GroupCredits,
         List<CreditRow> RecordingCredits);

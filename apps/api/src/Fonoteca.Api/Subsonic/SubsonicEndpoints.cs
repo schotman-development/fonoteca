@@ -138,6 +138,8 @@ public static partial class SubsonicEndpoints
         Map(group, "getAlbumList2", GetAlbumList2);
         Map(group, "getSong", GetSong);
         Map(group, "search3", Search3);
+        Map(group, "getGenres", GetGenres);
+        Map(group, "getSongsByGenre", GetSongsByGenre);
 
         Map(group, "stream", Stream);
         Map(group, "download", Download);

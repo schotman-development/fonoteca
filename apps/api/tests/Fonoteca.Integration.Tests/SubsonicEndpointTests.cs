@@ -688,6 +688,108 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
                 item => item is IExcludeFromDescriptionMetadata { ExcludeFromDescription: true }));
     }
 
+    /// <summary>
+    /// A song carries its album's genres, and a client can browse by them —
+    /// in both formats, since a genre's name is element text in XML.
+    /// </summary>
+    [Fact]
+    public async Task GenresAreOnEverySongAndBrowsable()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ReleaseGroups.ExecuteUpdateAsync(
+                update => update.SetProperty(group => group.Genres, "jazz, cool jazz"),
+                Token);
+
+            await db.Recordings.ExecuteUpdateAsync(
+                update => update.SetProperty(recording => recording.Genres, "pop"),
+                Token);
+
+            // A second album, under another genre, with two songs: what the
+            // filters have to leave out, and a song count that differs from
+            // the album count.
+            var rock = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Loud", Genres = "rock" };
+            db.ReleaseGroups.Add(rock);
+
+            foreach (var n in new[] { 1, 2 })
+            {
+                db.MediaFiles.Add(new MediaFile
+                {
+                    Id = MediaFileId.New(),
+                    Path = $"Somebody/Loud/0{n} Song.flac",
+                    SizeBytes = 100,
+                    LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                    ReleaseGroupId = rock.Id,
+                });
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var song = (await JsonAsync(client, $"/rest/getSong.view?id=tr-{_filed.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("song");
+
+        Assert.Equal("jazz", song.GetProperty("genre").GetString());
+        Assert.Equal(
+            ["jazz", "cool jazz"],
+            song.GetProperty("genres").EnumerateArray().Select(genre => genre.GetProperty("name").GetString()));
+
+        var genres = (await JsonAsync(client, "/rest/getGenres.view"))
+            .GetProperty("subsonic-response")
+            .GetProperty("genres")
+            .GetProperty("genre")
+            .EnumerateArray()
+            .ToList();
+
+        var cool = genres.Single(genre => genre.GetProperty("value").GetString() == "cool jazz");
+        Assert.Equal(1, cool.GetProperty("songCount").GetInt32());
+        Assert.Equal(1, cool.GetProperty("albumCount").GetInt32());
+
+        var loud = genres.Single(genre => genre.GetProperty("value").GetString() == "rock");
+        Assert.Equal(2, loud.GetProperty("songCount").GetInt32());
+        Assert.Equal(1, loud.GetProperty("albumCount").GetInt32());
+
+        // The album's genres stand for the file: its recording's "pop" is not one.
+        Assert.DoesNotContain(genres, genre => genre.GetProperty("value").GetString() == "pop");
+
+        var byGenre = (await JsonAsync(client, "/rest/getAlbumList2.view?type=byGenre&genre=Cool%20Jazz"))
+            .GetProperty("subsonic-response")
+            .GetProperty("albumList2")
+            .GetProperty("album");
+
+        var listed = Assert.Single(byGenre.EnumerateArray());
+        Assert.Equal("Waltz for Debby", listed.GetProperty("name").GetString());
+        Assert.Equal(
+            ["jazz", "cool jazz"],
+            listed.GetProperty("genres").EnumerateArray().Select(genre => genre.GetProperty("name").GetString()));
+
+        var songs = (await JsonAsync(client, "/rest/getSongsByGenre.view?genre=jazz"))
+            .GetProperty("subsonic-response")
+            .GetProperty("songsByGenre")
+            .GetProperty("song");
+
+        Assert.Single(songs.EnumerateArray());
+
+        // "cool" is inside "cool jazz" as text and is no genre of anything.
+        Assert.Empty(SongsByGenre(await JsonAsync(client, "/rest/getSongsByGenre.view?genre=cool")));
+        Assert.Single(SongsByGenre(await JsonAsync(client, "/rest/getSongsByGenre.view?genre=rock&offset=1")));
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getGenres.view?{Credentials}", UriKind.Relative),
+            Token);
+
+        var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+        XNamespace ns = "http://subsonic.org/restapi";
+
+        Assert.Contains(xml.Descendants(ns + "genre"), genre => genre.Value == "cool jazz");
+    }
+
+    private static List<JsonElement> SongsByGenre(JsonElement json) =>
+        [.. json.GetProperty("subsonic-response").GetProperty("songsByGenre").GetProperty("song").EnumerateArray()];
+
     private const string Credentials = "u=me&p=" + Password + "&v=1.16.1&c=test";
 
     /// <summary>The album's Subsonic id, which is its release group's.</summary>
