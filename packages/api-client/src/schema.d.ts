@@ -324,7 +324,7 @@ export interface paths {
         };
         /**
          * Album artists in the library, or everyone credited on one.
-         * @description Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists an album is billed to: the release's own credit line, collaborators included, plus anyone billed on every track of an album — which is how a conductor and an orchestra are found on a release the sleeve bills to the composer — and the track's own credit line for files no release has been attributed to yet. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names.
+         * @description Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms.
          */
         get: operations["GetArtists"];
         put?: never;
@@ -1666,6 +1666,8 @@ export interface components {
         ArtistListResponse: {
             /** Format: int32 */
             total: number;
+            /** Format: int32 */
+            inLibrary: number;
             items: components["schemas"]["ArtistSummary"][];
         };
         ArtistProfile: {

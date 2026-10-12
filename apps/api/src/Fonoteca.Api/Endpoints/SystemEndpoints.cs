@@ -75,13 +75,19 @@ public static class SystemEndpoints
             FileMutationAllowed: config.AllowFileMutation,
             Counts: new CatalogueCounts(
                 Files: await db.MediaFiles.CountAsync(cancellationToken).ConfigureAwait(false),
-                Recordings: await db.Recordings.CountAsync(cancellationToken).ConfigureAwait(false),
+                // Recordings held, each once however many files hold it: stored
+                // editions mint a recording for every track they print.
+                Recordings: await db.Recordings.CountAsync(recording => recording.Files.Any(), cancellationToken).ConfigureAwait(false),
                 // Albums held, not editions stored: the stored editions include
                 // every pressing of an album the attribution pass fetched. Plus the
                 // folders answered as no release, which are albums with no group.
                 Albums: await db.ReleaseGroups.CountAsync(g => g.Files.Any(), cancellationToken).ConfigureAwait(false)
                     + (await CatalogueEndpoints.NoReleaseAlbumsAsync(db, cancellationToken).ConfigureAwait(false)).Count,
-                Artists: await db.Artists.CountAsync(cancellationToken).ConfigureAwait(false)));
+                // The Artists screen's counter: every billed artist is listed there
+                // and counted, so the set's size is that number without building
+                // the list.
+                Artists: (await CatalogueEndpoints.BilledArtistsAsync(db, cancellationToken)
+                    .ConfigureAwait(false)).Count));
     }
 }
 

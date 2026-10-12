@@ -123,38 +123,33 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
-    /// The default list is a shelf of records, not everyone on them.
+    /// The default list is who the held albums are billed to, not everyone on them.
     /// </summary>
     /// <remarks>
     /// Measured against the real library, the union reaches 2,860 artists and
     /// 2,157 of them arrive as writers of a work — every songwriter of every pop
     /// song, most with one track. A front page of that is unusable, so the
-    /// default is who the albums are by.
-    ///
-    /// Four artists, and each is here for one of the rule's branches:
+    /// default is who the albums are by, read the way Roon counts its artists
+    /// (the owner's choice).
     ///
     /// <list type="bullet">
-    /// <item><b>Hart and Bonamassa</b> are the release's own credit line, and
-    /// between them are what "collaborations" means — one release, two names,
-    /// and the release credit is the only source carrying both.</item>
-    /// <item><b>Satie</b> would otherwise be lost silently. His file was never
-    /// attributed, so there is no release credit to find him by, and on the real
-    /// library 987 of 8,411 files are in that position — without the fallback a
-    /// refused album takes its artist off this page with nothing to say
-    /// why.</item>
-    /// <item><b>Solti</b> is the classical case, and the one this endpoint gets
-    /// wrong if it reads release credits alone. The sleeve of his Ring names
-    /// Wagner; Solti is on the credit line of every recording on it. He is here
-    /// on that strength — three of three — and the guest spots on the anthology
-    /// are what shows the rule is not merely "credited on something".</item>
-    /// <item><b>Karajan</b> is billed on a release the library holds.</item>
+    /// <item><b>Hart and Bonamassa</b> are one release's credit line, and
+    /// between them are what "collaborations" means.</item>
+    /// <item><b>Karajan</b> is billed on a release the library holds. None of
+    /// this seed's albums has a credit of its own stored, which is the case of
+    /// a download still filed as the shop described it, so the editions'
+    /// credits stand in for the album's.</item>
+    /// <item><b>Wagner</b> is billed on the Ring and holds no track of his own,
+    /// and is listed and counted anyway, as Roon does — the owner's
+    /// choice.</item>
     /// </list>
     ///
-    /// Mozart and the Berliner Philharmoniker are the exclusions, and both are
-    /// the point: a composer reached through the work hop and an orchestra
-    /// linked to a recording it is not billed on are exactly the names that turn
-    /// a shelf into a phone book. Both still have a page, and both are one
-    /// <c>scope=all</c> away.
+    /// Satie and Solti are off it now. Satie's file was never attributed, and
+    /// Solti is on every recording of a Ring whose sleeve names only Wagner —
+    /// credited on the tracks, billed on no album. Mozart and the Berliner
+    /// Philharmoniker are off it too, a composer through the work hop and an
+    /// orchestra on recordings it is not billed on. All four still have a page,
+    /// and all four are one <c>scope=all</c> away.
     /// </remarks>
     [Fact]
     public async Task TheDefaultListIsAlbumArtistsRatherThanEveryoneCredited()
@@ -171,12 +166,25 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
                 "Bonamassa, Joe",
                 "Hart, Beth",
                 "Karajan, Herbert von",
-                "Satie, Erik",
-                "Solti, Georg",
+                "Wagner, Richard",
             ],
             shelf.Items.Select(a => a.SortName));
 
-        Assert.Equal(5, shelf.Total);
+        Assert.Equal(4, shelf.Total);
+        Assert.Equal(4, shelf.InLibrary);
+
+        var everyoneCredited = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
+
+        Assert.NotNull(everyoneCredited);
+        Assert.Contains(everyoneCredited.Items, a => a.Id == _seed.Satie);
+        Assert.Contains(everyoneCredited.Items, a => a.Id == _seed.Solti);
+        Assert.Equal(everyoneCredited.Total, everyoneCredited.InLibrary);
+
+        var info = await client.GetFromJsonAsync<SystemInfoResponse>(
+            new Uri("/api/system/info", UriKind.Relative), Token);
+
+        Assert.Equal(4, info!.Counts.Artists);
 
         // The track counts are the artist's whole holdings either way: this
         // narrows who is listed, never what a listed artist has.
@@ -188,6 +196,137 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(
             everyone.Items.Single(a => a.Id == _seed.Karajan).TrackCount,
             shelf.Items.Single(a => a.Id == _seed.Karajan).TrackCount);
+    }
+
+    /// <summary>
+    /// An album's own credit line wins over its editions'.
+    /// </summary>
+    /// <remarks>
+    /// Editions stand in only where the album has no credit stored. Where it
+    /// has one, an edition's billing is a pressing nobody may hold — on the
+    /// real library that put John Williams, Count Basie and Louis Armstrong
+    /// &amp; His All-Stars on the shelf, three names Roon did not count.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumsOwnCreditLineWinsOverItsEditions()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var symphony = await db.ReleaseGroups
+                .SingleAsync(group => group.Title == "Mozart: Symphony no. 40", Token);
+
+            db.ArtistCredits.Add(new ArtistCredit
+            {
+                Id = Guid.CreateVersion7(),
+                ArtistId = new ArtistId(_seed.Mozart),
+                ReleaseGroupId = symphony.Id,
+                Position = 0,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var shelf = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(shelf);
+
+        // Karajan is billed on the held pressing only; the album bills Mozart.
+        Assert.Contains(shelf.Items, a => a.Id == _seed.Mozart);
+        Assert.DoesNotContain(shelf.Items, a => a.Id == _seed.Karajan);
+
+        // The other album, with no credit of its own, still bills through its edition.
+        Assert.Contains(shelf.Items, a => a.Id == _seed.Hart);
+        Assert.Contains(shelf.Items, a => a.Id == _seed.Bonamassa);
+    }
+
+    /// <summary>
+    /// A followed artist with tracks but no held album is listed and not counted,
+    /// and an album nobody holds bills nobody.
+    /// </summary>
+    /// <remarks>
+    /// Solti holds three tracks and is billed on no album, which is the real
+    /// library's Derek Trucks. Giving him an edition of an album with no file
+    /// must not put him on the shelf either: the editions stand in for an album
+    /// only where the library holds it.
+    /// </remarks>
+    [Fact]
+    public async Task AFollowedArtistWithTracksButNoHeldAlbumIsListedAndNotCounted()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var group = new ReleaseGroup
+            {
+                Id = ReleaseGroupId.New(),
+                Title = "Unheld",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                PrimaryType = "Album",
+            };
+
+            var release = new Release
+            {
+                Id = ReleaseId.New(),
+                Title = "Unheld",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                ReleaseGroupId = group.Id,
+            };
+
+            db.ReleaseGroups.Add(group);
+            db.Releases.Add(release);
+            db.ArtistCredits.Add(new ArtistCredit
+            {
+                Id = Guid.CreateVersion7(),
+                ArtistId = new ArtistId(_seed.Solti),
+                ReleaseId = release.Id,
+                Position = 0,
+            });
+
+            // And an album's own credit on an album nobody holds bills nobody either.
+            var credited = new ReleaseGroup
+            {
+                Id = ReleaseGroupId.New(),
+                Title = "Unheld, credited",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                PrimaryType = "Album",
+            };
+
+            db.ReleaseGroups.Add(credited);
+            db.ArtistCredits.Add(new ArtistCredit
+            {
+                Id = Guid.CreateVersion7(),
+                ArtistId = new ArtistId(_seed.Satie),
+                ReleaseGroupId = credited.Id,
+                Position = 0,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var before = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(before);
+        Assert.DoesNotContain(before.Items, a => a.Id == _seed.Solti);
+        Assert.DoesNotContain(before.Items, a => a.Id == _seed.Satie);
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await client.PostAsJsonAsync(
+                new Uri($"/api/catalogue/artists/{_seed.Solti}/follow", UriKind.Relative),
+                new ArtistFollowRequest(true),
+                Token)).StatusCode);
+
+        var after = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists", UriKind.Relative), Token);
+
+        Assert.NotNull(after);
+        Assert.Contains(after.Items, a => a.Id == _seed.Solti);
+        Assert.Equal(before.Total + 1, after.Total);
+        Assert.Equal(before.InLibrary, after.InLibrary);
     }
 
     /// <summary>
@@ -239,6 +378,16 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.True(orphan.Following);
 
+        // Listed, and not counted: the counter is what the library holds — the
+        // owner's choice — and the dashboard's count is the same number.
+        Assert.Equal(shelf.Items.Count, shelf.Total);
+        Assert.Equal(shelf.Total - 1, shelf.InLibrary);
+
+        var info = await client.GetFromJsonAsync<SystemInfoResponse>(
+            new Uri("/api/system/info", UriKind.Relative), Token);
+
+        Assert.Equal(shelf.InLibrary, info!.Counts.Artists);
+
         // Nothing of theirs is held, and the count says so rather than being
         // suppressed: the row is honest about being empty.
         Assert.Equal(0, orphan.TrackCount);
@@ -248,6 +397,14 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(following);
         Assert.Equal([_seed.Orphan], following.Items.Select(a => a.Id));
+
+        // With no shelf to fall off, holding nothing is what keeps them uncounted.
+        var everyone = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
+
+        Assert.NotNull(everyone);
+        Assert.Contains(everyone.Items, a => a.Id == _seed.Orphan);
+        Assert.Equal(everyone.Total - 1, everyone.InLibrary);
 
         // Unfollowing puts them back out of reach, or the flag is write-once and
         // the catalogue grows artists nobody can remove.
@@ -342,22 +499,17 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
-    /// Being on every track of an album is what makes somebody its artist; being
-    /// on one of them is a guest.
+    /// Being on every track of an album is not being billed on it.
     /// </summary>
     /// <remarks>
-    /// The rule that recovers Solti has to not recover the anthology's guests,
-    /// and the seed is built so that a rule reading "credited on a track of a
-    /// release" cannot tell them apart: both are recording credits on a release
-    /// billed to somebody else. Three of three against one of three is the only
-    /// thing separating them.
-    ///
-    /// The count is the tracks the library <i>holds</i>, not the ones the
-    /// release prints — a box set held one disc of is still an album to whoever
-    /// is browsing it.
+    /// The shelf used to recover Solti this way, three of three on a Ring whose
+    /// sleeve names only Wagner. Roon counts who an album is billed to, and the
+    /// owner chose that count, so he is off the shelf and on <c>scope=all</c>
+    /// with every track still his. Wagner is the other way round: billed and
+    /// holding no track of his own, on the shelf with nothing to show.
     /// </remarks>
     [Fact]
-    public async Task AnArtistOnEveryTrackOfAnAlbumIsItsArtistAndAGuestIsNot()
+    public async Task AnArtistOnEveryTrackButBilledOnNoAlbumIsOffTheShelf()
     {
         using var client = _factory!.CreateClient();
 
@@ -365,19 +517,15 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             new Uri("/api/catalogue/artists", UriKind.Relative), Token);
 
         Assert.NotNull(shelf);
-
-        // Three recordings of the Ring, all three credited to him, and no
-        // release credit anywhere in the catalogue.
-        var solti = shelf.Items.Single(a => a.Id == _seed.Solti);
-        Assert.Equal(3, solti.TrackCount);
-
-        // Wagner is on the sleeve and on no recording, so he is on the shelf's
-        // set and off the page — the same rule that has always excluded an
-        // artist with nothing to show.
-        Assert.DoesNotContain(shelf.Items, a => a.Name == "Richard Wagner");
-
-        // And the composer who is only ever a composer stays out.
+        Assert.DoesNotContain(shelf.Items, a => a.Id == _seed.Solti);
+        Assert.Equal(0, shelf.Items.Single(a => a.Id == _seed.Wagner).TrackCount);
         Assert.DoesNotContain(shelf.Items, a => a.Id == _seed.Mozart);
+
+        var everyone = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
+
+        Assert.NotNull(everyone);
+        Assert.Equal(3, everyone.Items.Single(a => a.Id == _seed.Solti).TrackCount);
     }
 
     /// <summary>
@@ -1534,8 +1682,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         // played it.
         //
         // Wagner has no track of his own here — no work relation, no recording
-        // credit — so he is on the shelf's list and filtered off the page by the
-        // same rule that has always excluded an artist with nothing to show.
+        // credit — so he is billed with nothing to show: on the default shelf
+        // anyway, and off `scope=all`, which lists who holds a track.
         var ringGroup = new ReleaseGroup
         {
             Id = ReleaseGroupId.New(),

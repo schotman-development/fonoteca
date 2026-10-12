@@ -1482,7 +1482,7 @@ public sealed class EnrichmentService(
     /// <remarks>
     /// <c>CatalogueEndpoints.AlbumArtistsAsync</c> is the rule and this is the
     /// only translation: it answers in <see cref="ArtistId"/> because that is
-    /// what the artist list filters on, and the picture sources are keyed on
+    /// what the catalogue keys an artist on, and the picture sources are keyed on
     /// MBIDs because that is what a provider can be asked about. Artists with no
     /// MBID drop out, which is the same set <see cref="UnpicturedArtist"/>
     /// already excludes.

@@ -305,14 +305,15 @@ public static partial class CatalogueEndpoints
             .WithDescription(
                 "Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep "
                 + "the alphabetical order. `query` filters on the artist's name, case-insensitively, "
-                + "anywhere in the string. By default the list is the artists an album is billed "
-                + "to: the release's own credit line, collaborators included, plus anyone billed on "
-                + "every track of an album — which is how a conductor and an orchestra are found on "
-                + "a release the sleeve bills to the composer — and the track's own credit line for "
-                + "files no release has been attributed to yet. "
+                + "anywhere in the string. By default the list is the artists a held album is billed "
+                + "to: the album's own credit line, collaborators included, or its editions' where "
+                + "the album has none stored. "
                 + "`scope=all` widens it to everyone the catalogue can reach a track through: "
                 + "composers and lyricists of the work, conductors, ensembles and guest features, "
-                + "which on a real library is an order of magnitude more names.");
+                + "which on a real library is an order of magnitude more names. `inLibrary` is the "
+                + "counter: by default the artists billed on a held album, listed even with no track "
+                + "of their own; on the other shelves, those holding a track. A followed artist is "
+                + "listed whatever they hold and counted only on those terms.");
 
         group.MapGet("/artists/{id:guid}", GetArtist)
             .WithName("GetArtist")
@@ -654,7 +655,7 @@ public static partial class CatalogueEndpoints
 
         var shelf = everyone || following
             ? null
-            : await AlbumArtistsAsync(db, cancellationToken).ConfigureAwait(false);
+            : await BilledArtistsAsync(db, cancellationToken).ConfigureAwait(false);
 
         var withTracks = named
             .Select(a => (Artist: a, Recordings: theirs.GetValueOrDefault(a.Id) ?? []))
@@ -667,7 +668,13 @@ public static partial class CatalogueEndpoints
             //
             // Following is a person's explicit act and outranks both heuristics,
             // which is the whole difference between this and the other shelves.
-            .Where(row => row.Recordings.Count > 0 || row.Artist.Followed)
+            //
+            // Billed on a held album survives the first cut too, as Roon counts
+            // and lists it — the owner's choice: MusicBrainz bills Christa Ludwig
+            // on the Solti Ring and credits her on none of its recordings.
+            .Where(row => row.Recordings.Count > 0
+                || row.Artist.Followed
+                || (shelf is not null && shelf.Contains(row.Artist.Id)))
             .Where(row => shelf is null || shelf.Contains(row.Artist.Id) || row.Artist.Followed)
             .Where(row => !following || row.Artist.Followed)
             .ToList();
@@ -690,7 +697,13 @@ public static partial class CatalogueEndpoints
             .Select(row => Describe(row.Artist, row.Recordings.Count))
             .ToList();
 
-        return TypedResults.Ok(new ArtistListResponse(withTracks.Count, page));
+        // The counter is about what the library holds, so a followed artist is
+        // listed and counted only on the same terms as anyone else — the owner's
+        // choice. The dashboard's artist count is this number.
+        var inLibrary = withTracks.Count(row =>
+            shelf is null ? row.Recordings.Count > 0 : shelf.Contains(row.Artist.Id));
+
+        return TypedResults.Ok(new ArtistListResponse(withTracks.Count, inLibrary, page));
     }
 
     internal static async Task<Results<Ok<ArtistDetailResponse>, ProblemHttpResult>> GetArtist(
@@ -4490,8 +4503,50 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>
-    /// Who the albums in the library are by — the default artist list, and the
-    /// set worth spending a rationed press photograph on.
+    /// Who the held albums are billed to — the default artist list and the
+    /// dashboard's artist count.
+    /// </summary>
+    /// <remarks>
+    /// <b>The album's own credit line, and its editions' only where the album
+    /// has none stored</b> — the owner's choice, measured against Roon, whose
+    /// artist count it matched exactly (255). Only enrichment writes an album's
+    /// credit, so a download still filed as the shop described it, or an album
+    /// enrichment has not reached, is billed through its editions instead. Where
+    /// the album has its own, an edition's billing is a pressing nobody may hold.
+    ///
+    /// Narrower than <see cref="AlbumArtistsAsync"/> on purpose: the conductor
+    /// on every track of a release billed to the composer, a guest on the only
+    /// held track of an album, and the artists of files no album was attributed
+    /// to are on <c>scope=all</c> and on their own pages, not on the shelf.
+    /// </remarks>
+    internal static async Task<HashSet<ArtistId>> BilledArtistsAsync(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var billed = await db.ArtistCredits
+            .AsNoTracking()
+            .Where(credit => (credit.ReleaseGroupId != null
+                    && db.MediaFiles.Any(file => file.ReleaseGroupId == credit.ReleaseGroupId))
+                || (credit.ReleaseId != null
+                    && db.Releases.Any(release => release.Id == credit.ReleaseId
+                        && release.ReleaseGroup!.Files.Any()
+                        // Through the navigation, not `own.ReleaseGroupId ==
+                        // release.ReleaseGroupId`: both are nullable, and EF's
+                        // null compensation on that comparison cost the index
+                        // and three seconds.
+                        && !release.ReleaseGroup.Credits.Any())))
+            .Select(credit => credit.ArtistId)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return [.. billed];
+    }
+
+    /// <summary>
+    /// Who the records in the library are by, read more widely than the
+    /// shelf's <see cref="BilledArtistsAsync"/> — the set worth spending a
+    /// rationed press photograph on.
     /// </summary>
     /// <remarks>
     /// <b>The union reaches 2,860 artists and 2,157 of them arrive as writers of
@@ -4528,10 +4583,6 @@ public static partial class CatalogueEndpoints
     /// the work hop, and an orchestra linked to a recording it is not billed on.
     /// <see cref="PrimaryCredits"/>'s wider union is right for "what is this
     /// artist's page", and it is the wrong rule for "whose records are these".
-    ///
-    /// Membership is all this answers. An artist on the shelf with nothing to
-    /// show is still dropped by the caller's track-count filter, which is why
-    /// Wagner is in this set and off the page.
     /// </remarks>
     internal static async Task<HashSet<ArtistId>> AlbumArtistsAsync(
         FonotecaDbContext db,
@@ -4837,9 +4888,11 @@ public static partial class CatalogueEndpoints
 /// <summary>A page of artists, with the total the filter matched.</summary>
 /// <remarks>
 /// <c>Total</c> is the count before paging, so a client can say "showing 50 of
-/// 312" without a second request.
+/// 312" without a second request. <c>InLibrary</c> is the counter: the listed
+/// artists the library holds, which leaves out a followed artist listed only for
+/// being followed.
 /// </remarks>
-public sealed record ArtistListResponse(int Total, IReadOnlyList<ArtistSummary> Items);
+public sealed record ArtistListResponse(int Total, int InLibrary, IReadOnlyList<ArtistSummary> Items);
 
 /// <param name="Type">Person, Group, Orchestra, Choir. Null when MusicBrainz does not say.</param>
 /// <param name="TrackCount">Recordings in the library this artist is credited on.</param>

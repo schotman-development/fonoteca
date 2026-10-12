@@ -231,7 +231,11 @@ export function ArtistsPage() {
         ) : null}
 
         {state.status === 'ready' ? (
-          <Results total={state.data.total} shown={state.data.items.length} />
+          <Results
+            total={state.data.total}
+            inLibrary={state.data.inLibrary}
+            shown={state.data.items.length}
+          />
         ) : null}
       </div>
 
@@ -263,16 +267,30 @@ export function ArtistsPage() {
  * How many artists there are, and — when the response was capped — what to do
  * about it.
  *
+ * The count is what the library holds; an artist on the list only because they
+ * are followed is named as such rather than counted.
+ *
  * "500 of 2,752" is honest and useless on its own: it does not say that the
  * missing 2,252 are unreachable by scrolling. The server's cap is high enough
  * that this should not fire on a library of this size, which is exactly why it
  * has to say something actionable when it does.
  */
-function Results({ total, shown }: { readonly total: number; readonly shown: number }) {
+function Results({
+  total,
+  inLibrary,
+  shown,
+}: {
+  readonly total: number
+  readonly inLibrary: number
+  readonly shown: number
+}) {
   if (shown === total) {
+    const followed = total - inLibrary
+
     return (
       <Text size="sm" tone="tertiary">
-        {total.toLocaleString()} artist{total === 1 ? '' : 's'}
+        {inLibrary.toLocaleString()} artist{inLibrary === 1 ? '' : 's'}
+        {followed > 0 ? `, and ${followed.toLocaleString()} more you follow` : ''}
       </Text>
     )
   }
