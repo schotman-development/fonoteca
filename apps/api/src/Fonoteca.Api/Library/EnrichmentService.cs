@@ -339,7 +339,6 @@ public sealed class EnrichmentService(
                 {
                     lastReport = now;
                     var path = pathOf(file);
-                    _progress = new EnrichmentProgress(jobId, counts.Examined, pending, path);
 
                     await Report(jobId, counts.Examined, pending, path, "running").ConfigureAwait(false);
                 }
@@ -2582,6 +2581,11 @@ public sealed class EnrichmentService(
 
     private async Task Report(string jobId, int processed, int total, string? current, string state)
     {
+        // What the status endpoint answers too. Only the files stage set it
+        // before, so every later stage read as 0 to a page that missed the live
+        // messages — the booklet stage looked idle for three hours.
+        if (state == "running") _progress = new EnrichmentProgress(jobId, processed, total, current);
+
         var message = new JobProgressMessage(jobId, JobKind, state, processed, total, current, clock.UtcNow);
 
         await hub.Clients.All.JobProgress(message).ConfigureAwait(false);
