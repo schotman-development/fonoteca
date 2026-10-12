@@ -194,7 +194,10 @@ public sealed class AlbumBookletsTests : IDisposable
         await Assert.ThrowsAsync<ProviderUnavailableException>(() => booklets.FindAsync(Goldberg, [], Token));
     }
 
-    /// <summary>Within one edition the edited pages are the booklet; raw ones count only alone.</summary>
+    /// <summary>
+    /// Within one edition the edited pages are the booklet, raw ones count only
+    /// alone, and the booklet's front page — the cover again — is never one.
+    /// </summary>
     [Fact]
     public void EditedPagesWinOverRawOnesWithinAnEdition()
     {
@@ -207,7 +210,7 @@ public sealed class AlbumBookletsTests : IDisposable
             new(5, Front: false, ["Medium"], null),
         ];
 
-        Assert.Equal([3L, 4L], AlbumBooklets.Booklet(mixed).Select(image => image.Id).ToArray());
+        Assert.Equal([3L], AlbumBooklets.Booklet(mixed).Select(image => image.Id).ToArray());
         Assert.Equal([2L], AlbumBooklets.Booklet([mixed[0], mixed[1], mixed[4]]).Select(image => image.Id).ToArray());
     }
 
@@ -271,6 +274,19 @@ public sealed class AlbumBookletsTests : IDisposable
     }
 
     /// <summary>
+    /// An edition that failed may have held the booklet: with no pages in any
+    /// edition that answered, the album has no answer rather than none.
+    /// </summary>
+    [Fact]
+    public async Task AFailedEditionWithNoPagesElsewhereIsNoAnswer()
+    {
+        var (booklets, _) = Build(Recorded(listing: release => release == Raw ? "503" : null));
+
+        await Assert.ThrowsAsync<ProviderUnavailableException>(
+            () => booklets.FindAsync(TexasHoney, [Raw, FrontOnly], Token));
+    }
+
+    /// <summary>
     /// The fullest edition failing to give its pages falls back to the next
     /// fullest; with nothing to fall back to, it is an outage.
     /// </summary>
@@ -290,6 +306,20 @@ public sealed class AlbumBookletsTests : IDisposable
 
         await Assert.ThrowsAsync<ProviderUnavailableException>(
             () => booklets.FindAsync(TexasHoney, [Edited, FrontOnly], Token));
+    }
+
+    /// <summary>The fullest edition giving no page at all falls back to the next fullest.</summary>
+    [Fact]
+    public async Task AnEditionWhosePagesAreAllGoneFallsBackToTheNext()
+    {
+        var (booklets, _) = Build(Recorded(original: id => id.StartsWith("226000", StringComparison.Ordinal)
+            ? new HttpResponseMessage(HttpStatusCode.NotFound)
+            : null));
+
+        var found = await booklets.FindAsync(TexasHoney, [Edited, Raw], Token);
+
+        Assert.Equal(Raw, found.Edition);
+        Assert.Equal(4, found.Pages.Count);
     }
 
     /// <summary>An archive that cannot be asked is an outage, never "no booklet".</summary>

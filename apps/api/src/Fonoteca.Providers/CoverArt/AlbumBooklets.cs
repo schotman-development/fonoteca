@@ -63,15 +63,18 @@ public sealed class AlbumBooklets(
     /// <summary>The booklet pages of one edition: its edited scans, else its raw ones.</summary>
     /// <remarks>
     /// An image typed both <c>Booklet</c> and <c>Front</c> is the booklet's own
-    /// cover, and a page of it. A raw scan is the same page unedited, uploaded
-    /// beside the edited one, so it counts only where it is all there is.
+    /// cover — the sleeve picture again — and is left out, the owner's choice:
+    /// one cover per album, and that is <c>cover.jpg</c>. A raw scan is the same
+    /// page unedited, uploaded beside the edited one, so it counts only where
+    /// it is all there is.
     /// </remarks>
     public static IReadOnlyList<CoverArtImage> Booklet(IReadOnlyList<CoverArtImage> images)
     {
         ArgumentNullException.ThrowIfNull(images);
 
         var booklet = images
-            .Where(image => image.Types.Contains("Booklet", StringComparer.OrdinalIgnoreCase))
+            .Where(image => image.Types.Contains("Booklet", StringComparer.OrdinalIgnoreCase)
+                && !image.Types.Contains("Front", StringComparer.OrdinalIgnoreCase))
             .ToList();
 
         var edited = booklet
@@ -86,9 +89,10 @@ public sealed class AlbumBooklets(
     /// The archive keeps each release on an archive.org storage node, and one
     /// node answering 500 for one release, every time, was measured here
     /// (<i>Live at the Regal</i>): read as the archive being down, it ended the
-    /// stage at that album on every run. So the archive is down only when not
-    /// one edition of the album could be listed, or when every edition that
-    /// had pages failed to give them; then this throws and nothing is stamped.
+    /// stage at that album on every run. So the album has no answer only when
+    /// no edition that answered has pages while one failed, or when every
+    /// edition that had pages failed to give them; then this throws, and the
+    /// stage records the failure rather than "none".
     /// </remarks>
     private async Task<(Mbid? Edition, List<BookletFile> Pages)> PagesAsync(
         IReadOnlyList<Mbid> editions,
@@ -110,7 +114,9 @@ public sealed class AlbumBooklets(
             }
         }
 
-        if (listed.Count == 0 && unavailable is not null) throw unavailable;
+        // An edition that failed may have held the booklet, so with no pages
+        // anywhere else the album has no answer — never "none".
+        if (unavailable is not null && listed.All(candidate => candidate.Pages.Count == 0)) throw unavailable;
 
         unavailable = null;
 
