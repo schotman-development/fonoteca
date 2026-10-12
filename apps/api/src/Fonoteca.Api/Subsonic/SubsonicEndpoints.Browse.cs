@@ -257,7 +257,7 @@ public static partial class SubsonicEndpoints
             (file.ReleaseGroup != null && EF.Functions.ILike(file.ReleaseGroup.Genres!, pattern, "\\"))
             || (file.Recording != null && EF.Functions.ILike(file.Recording.Genres!, pattern, "\\")));
 
-        var songs = await SongsAsync(candidates, cancellationToken).ConfigureAwait(false);
+        var songs = await SongsAsync(db, candidates, cancellationToken).ConfigureAwait(false);
 
         var page = songs
             .Where(song => song.Genres.Contains(genre, StringComparer.OrdinalIgnoreCase))
@@ -474,6 +474,19 @@ public static partial class SubsonicEndpoints
         writer.Attr("genre", song.Genres.Count > 0 ? song.Genres[0] : null);
         writer.Attr("musicBrainzId", song.Mbid?.Value.ToString());
         writer.Children("genres", song.Genres, WriteGenre);
+
+        // OpenSubsonic's: the values the tag write puts in the file, for a
+        // client that normalises from the API rather than the tags.
+        if (song.ReplayGain is { } gain)
+        {
+            writer.Child("replayGain", replay =>
+            {
+                replay.Attr("trackGain", gain.TrackGain);
+                replay.Attr("trackPeak", gain.TrackPeak);
+                replay.Attr("albumGain", gain.AlbumGain);
+                replay.Attr("albumPeak", gain.AlbumPeak);
+            });
+        }
     }
 }
 
@@ -527,4 +540,8 @@ internal sealed record Song(
     int? Channels,
     int? BitDepth,
     DateTimeOffset? Created,
-    IReadOnlyList<string> Genres);
+    IReadOnlyList<string> Genres,
+    SongReplayGain? ReplayGain);
+
+/// <summary>ReplayGain 2.0, dB and linear peaks; the album values cover the song's album folder.</summary>
+internal sealed record SongReplayGain(double? TrackGain, double? TrackPeak, double? AlbumGain, double? AlbumPeak);

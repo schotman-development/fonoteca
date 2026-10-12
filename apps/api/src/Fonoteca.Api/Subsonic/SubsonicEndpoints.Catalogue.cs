@@ -1,5 +1,6 @@
 using System.Globalization;
 using Fonoteca.Api.Endpoints;
+using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
@@ -204,7 +205,7 @@ public static partial class SubsonicEndpoints
         if (album is { } group) query = query.Where(row => row.ReleaseGroupId == group);
         if (file is { } one) query = query.Where(row => row.Id == one);
 
-        return SongsAsync(query, cancellationToken);
+        return SongsAsync(db, query, cancellationToken);
     }
 
     private static async Task<IReadOnlyList<Song>> SearchSongsAsync(
@@ -226,10 +227,11 @@ public static partial class SubsonicEndpoints
 
         var page = query.OrderBy(row => row.Path).Skip(offset).Take(count);
 
-        return await SongsAsync(page, cancellationToken).ConfigureAwait(false);
+        return await SongsAsync(db, page, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<IReadOnlyList<Song>> SongsAsync(
+        FonotecaDbContext db,
         IQueryable<MediaFile> files,
         CancellationToken cancellationToken)
     {
@@ -258,6 +260,7 @@ public static partial class SubsonicEndpoints
                 file.Release != null ? file.Release.EditsJson : null,
                 file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
                 file.Recording != null ? file.Recording.Genres : null,
+                file.Measurement,
                 // No ternary on the navigation: a null one yields an empty
                 // collection through the join EF writes, where `new List<>()`
                 // is not something it can translate at all.
@@ -285,6 +288,8 @@ public static partial class SubsonicEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        var albums = await AlbumLoudness.ForAsync(db, rows.Select(row => row.Path), cancellationToken).ConfigureAwait(false);
+
         // The album folder first: two rips of one album are one album here, and
         // interleaving them would play every track twice in a row.
         return rows
@@ -294,7 +299,7 @@ public static partial class SubsonicEndpoints
             .ThenBy(row => row.FolderPosition ?? int.MaxValue)
             .ThenBy(row => AlbumFolder.SortKey(row.Path), StringComparer.Ordinal)
             .ThenBy(row => row.Path, StringComparer.Ordinal)
-            .Select(Describe)
+            .Select(row => Describe(row, albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain))
             .ToList();
     }
 
@@ -312,7 +317,7 @@ public static partial class SubsonicEndpoints
     /// use</b>, never from the extension itself, so what a client is told a song
     /// is and what the bytes are served as cannot drift apart.
     /// </remarks>
-    private static Song Describe(SongRow row)
+    private static Song Describe(SongRow row, (double Gain, double Peak)? album)
     {
         var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
@@ -356,9 +361,18 @@ public static partial class SubsonicEndpoints
             row.Quality is { } quality ? (int)(quality.BitrateBps / 1000) : null,
             row.Quality?.SampleRateHz,
             row.Quality?.Channels,
-            row.Quality?.BitDepth,
+
+            // The depth the audio really uses, as the upgrade list trusts it.
+            AudioAnalysis.Decided(row.Quality, row.Measurement)?.BitDepth,
             row.LastModifiedUtc,
-            FileGenres.Of(row.AlbumGenres, row.RecordingGenres));
+            FileGenres.Of(row.AlbumGenres, row.RecordingGenres),
+            row.Measurement is null && album is null
+                ? null
+                : new SongReplayGain(
+                    AudioAnalysis.TrackGain(row.Measurement),
+                    AudioAnalysis.TrackPeak(row.Measurement),
+                    album?.Gain,
+                    album?.Peak));
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>
@@ -386,6 +400,7 @@ public static partial class SubsonicEndpoints
         string? PressingEdits,
         string? AlbumGenres,
         string? RecordingGenres,
+        AudioMeasurement? Measurement,
         List<CreditRow> AlbumCredits,
         List<CreditRow> GroupCredits,
         List<CreditRow> RecordingCredits);

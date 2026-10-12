@@ -44,6 +44,8 @@ internal interface ISubsonicWriter
 
     void Attr(string name, DateTimeOffset? value);
 
+    void Attr(string name, double? value);
+
     /// <summary>One nested object.</summary>
     void Child(string name, Action<ISubsonicWriter> body);
 
@@ -299,6 +301,11 @@ internal sealed class SubsonicResult : IResult
             if (value is { } set) json.WriteString(name, Iso(set));
         }
 
+        public void Attr(string name, double? value)
+        {
+            if (value is { } set) json.WriteNumber(name, set);
+        }
+
         public void Child(string name, Action<ISubsonicWriter> body)
         {
             ArgumentNullException.ThrowIfNull(body);
@@ -373,6 +380,11 @@ internal sealed class SubsonicResult : IResult
         public void Attr(string name, DateTimeOffset? value)
         {
             if (value is { } set) xml.WriteAttributeString(name, Iso(set));
+        }
+
+        public void Attr(string name, double? value)
+        {
+            if (value is { } set) xml.WriteAttributeString(name, set.ToString("R", CultureInfo.InvariantCulture));
         }
 
         public void Child(string name, Action<ISubsonicWriter> body)

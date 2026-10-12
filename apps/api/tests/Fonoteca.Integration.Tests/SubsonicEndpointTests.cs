@@ -787,6 +787,42 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Contains(xml.Descendants(ns + "genre"), genre => genre.Value == "cool jazz");
     }
 
+    /// <summary>
+    /// A song carries its ReplayGain — the album values over its album folder —
+    /// and the bit depth its audio really uses.
+    /// </summary>
+    [Fact]
+    public async Task ASongCarriesItsReplayGainAndItsRealBitDepth()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var filed = await db.MediaFiles.SingleAsync(f => f.Id == _filed, Token);
+            filed.Quality = filed.Quality! with { BitDepth = 24 };
+            filed.Measurement = new AudioMeasurement
+            {
+                IntegratedLufs = -12,
+                SamplePeakDbfs = -1,
+                DurationSeconds = 292,
+                EffectiveBitDepth = 16,
+            };
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var song = (await JsonAsync(client, $"/rest/getSong.view?id=tr-{_filed.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("song");
+
+        Assert.Equal(16, song.GetProperty("bitDepth").GetInt32());
+
+        var gain = song.GetProperty("replayGain");
+        Assert.Equal(-6, gain.GetProperty("trackGain").GetDouble());
+        Assert.Equal(-6, gain.GetProperty("albumGain").GetDouble());
+        Assert.Equal(0.891251, gain.GetProperty("trackPeak").GetDouble());
+    }
+
     private static List<JsonElement> SongsByGenre(JsonElement json) =>
         [.. json.GetProperty("subsonic-response").GetProperty("songsByGenre").GetProperty("song").EnumerateArray()];
 

@@ -166,6 +166,7 @@ public static partial class SubsonicEndpoints
         var known = audio.Count == 0
             ? []
             : await SongsAsync(
+                    db,
                     db.MediaFiles.AsNoTracking().Where(file => audio.Contains(file.Path)),
                     cancellationToken)
                 .ConfigureAwait(false);
