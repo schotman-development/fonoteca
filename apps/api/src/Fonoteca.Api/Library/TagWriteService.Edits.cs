@@ -115,8 +115,8 @@ public sealed partial class TagWriteService
                     [.. fields.Select(field =>
                     {
                         var spelled = CatalogueTagFields.Spell(path, field) ?? CatalogueTagFields.Custom(path, field);
-                        var now = spelled is null ? null : reading?.Find(spelled);
-                        var stated = wanted.GetValueOrDefault(field);
+                        var now = Shown(spelled is null ? null : reading?.Find(spelled));
+                        var stated = Shown(wanted.GetValueOrDefault(field));
                         var mine = person.TryGetValue(field, out var set);
 
                         return new TagCell(field, mine ? set : stated ?? now, stated, now, mine);
@@ -369,6 +369,17 @@ public sealed partial class TagWriteService
 
         return PersonEdits.Write(edits);
     }
+
+    /// <summary>
+    /// A field's several values as the editor shows them: "jazz; vocal jazz".
+    /// </summary>
+    /// <remarks>
+    /// ATL's separator is a control character a person can neither see nor type,
+    /// and <see cref="PersonTags.Problem"/> refuses it. A value a person saves is
+    /// theirs as typed, so one written back with "; " is one value.
+    /// </remarks>
+    private static string? Shown(string? value) =>
+        value?.Replace(CatalogueTags.ValueSeparator.ToString(), "; ", StringComparison.Ordinal);
 
     /// <summary>The album page's key an album field is corrected under there.</summary>
     /// <param name="pressed">Whether the folder's files are filed under one proven pressing, whose year is the file's.</param>

@@ -142,7 +142,7 @@ public sealed class TagWriter(
             if (field is null) continue;
 
             var current = before.Find(field);
-            var value = mine.TryGetValue(canonical, out var set) ? set : desired[canonical];
+            var value = mine.TryGetValue(canonical, out var set) ? set : CatalogueTagFields.Render(path, desired[canonical]);
 
             if (!string.Equals(current, value, StringComparison.Ordinal))
             {
@@ -418,6 +418,9 @@ public sealed class TagWriter(
             case CatalogueTags.Genre: track.Genre = value ?? string.Empty; break;
             case CatalogueTags.Composer: track.Composer = value ?? string.Empty; break;
             case CatalogueTags.Comment: track.Comment = value ?? string.Empty; break;
+            case CatalogueTags.Isrc: track.ISRC = value ?? string.Empty; break;
+            case CatalogueTags.Lyricist: track.Lyricist = value ?? string.Empty; break;
+            case CatalogueTags.Conductor: track.Conductor = value ?? string.Empty; break;
             case CatalogueTags.TrackNumber: track.TrackNumber = value is null ? 0 : Count(value); break;
             case CatalogueTags.TrackTotal: track.TrackTotal = value is null ? 0 : Count(value); break;
             case CatalogueTags.DiscNumber: track.DiscNumber = value is null ? 0 : Count(value); break;

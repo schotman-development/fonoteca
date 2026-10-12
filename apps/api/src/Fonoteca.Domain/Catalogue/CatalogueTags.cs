@@ -62,6 +62,15 @@ public sealed record CatalogueTagSource
     public Mbid? WorkMbid { get; init; }
 
     public AcoustId? AcoustId { get; init; }
+
+    /// <summary>The genres the file carries — see <see cref="FileGenres"/>.</summary>
+    public IReadOnlyList<string> Genres { get; init; } = [];
+
+    /// <summary>Every ISRC MusicBrainz lists for the recording; which one this file's audio is, nobody knows.</summary>
+    public IReadOnlyList<string> Isrcs { get; init; } = [];
+
+    /// <summary>The credits, as <see cref="CreditTags"/> reads them off MusicBrainz's links.</summary>
+    public CreditTags Credits { get; init; } = CreditTags.None;
 }
 
 /// <summary>
@@ -98,10 +107,30 @@ public static class CatalogueTags
     public const string DiscTotal = "DISCTOTAL";
     public const string Year = "YEAR";
 
-    // Never from the catalogue: only a person sets these. See PersonTags.
+    // A person sets these too, and wins (PersonTags); the comment is only theirs.
     public const string Genre = "GENRE";
     public const string Composer = "COMPOSER";
     public const string Comment = "COMMENT";
+
+    // The credits, under Picard's names.
+    public const string Isrc = "ISRC";
+    public const string Lyricist = "LYRICIST";
+    public const string Conductor = "CONDUCTOR";
+    public const string Arranger = "ARRANGER";
+    public const string Producer = "PRODUCER";
+    public const string Engineer = "ENGINEER";
+    public const string Mixer = "MIXER";
+    public const string Performer = "PERFORMER";
+
+    /// <summary>
+    /// Between the values of a field that holds several — two genres, three producers.
+    /// </summary>
+    /// <remarks>
+    /// ATL's own separator as this application configures it, so a joined value
+    /// is written as separate values: several Vorbis comments, a null-separated
+    /// ID3v2.4 frame. A person's value may not contain it (<see cref="PersonTags"/>).
+    /// </remarks>
+    public const char ValueSeparator = '\u001F';
 
     public const string RecordingId = "MUSICBRAINZ_TRACKID";
     public const string ReleaseId = "MUSICBRAINZ_ALBUMID";
@@ -152,7 +181,30 @@ public static class CatalogueTags
         Add(tags, ArtistId, Join(source.ArtistMbids));
         Add(tags, AlbumArtistId, Join(source.AlbumArtistMbids));
 
+        Add(tags, Genre, Values(source.Genres));
+        Add(tags, Isrc, Values(source.Isrcs));
+        Add(tags, Composer, Values(source.Credits.Composers));
+        Add(tags, Lyricist, Values(source.Credits.Lyricists));
+        Add(tags, Conductor, Values(source.Credits.Conductors));
+        Add(tags, Arranger, Values(source.Credits.Arrangers));
+        Add(tags, Producer, Values(source.Credits.Producers));
+        Add(tags, Engineer, Values(source.Credits.Engineers));
+        Add(tags, Mixer, Values(source.Credits.Mixers));
+        Add(tags, Performer, Values(source.Credits.Performers));
+
         return tags;
+    }
+
+    /// <summary>Several values as one field holds them, each once, in order; null for none.</summary>
+    private static string? Values(IReadOnlyList<string> values)
+    {
+        var kept = values
+            .Select(value => value.Replace(ValueSeparator, ' ').Trim())
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return kept.Count == 0 ? null : string.Join(ValueSeparator, kept);
     }
 
     private static void Add(Dictionary<string, string> tags, string name, string? value)

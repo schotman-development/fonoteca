@@ -132,12 +132,16 @@ internal static partial class VerifierReading
     /// <param name="vorbis">The Vorbis comment's name.</param>
     /// <param name="described">The ID3v2 <c>TXXX</c> description and the MP4 freeform atom's name.</param>
     /// <param name="key">The APE item's key.</param>
+    /// <remarks>
+    /// Every value a field holds, joined as ATL joins them, so a field written
+    /// with three producers is held to all three rather than to the first.
+    /// </remarks>
     public static string? Custom(File file, string vorbis, string described, string key)
     {
         if (file.GetTag(TagTypes.Xiph, create: false) is XiphComment xiph)
         {
             var values = xiph.GetField(vorbis);
-            if (values.Length > 0) return values[0];
+            if (values.Length > 0) return Joined(values);
         }
 
         if (file.GetTag(TagTypes.Id3v2, create: false) is TagLib.Id3v2.Tag id3)
@@ -149,7 +153,7 @@ internal static partial class VerifierReading
                     continue;
                 }
 
-                if (frame.Text.Length > 0) return frame.Text[0];
+                if (frame.Text.Length > 0) return Joined(frame.Text);
             }
         }
 
@@ -165,11 +169,13 @@ internal static partial class VerifierReading
         if (file.GetTag(TagTypes.Ape, create: false) is TagLib.Ape.Tag ape)
         {
             var item = ape.GetItem(key);
-            if (item is not null && item.ToStringArray().Length > 0) return item.ToStringArray()[0];
+            if (item is not null && item.ToStringArray().Length > 0) return Joined(item.ToStringArray());
         }
 
         return null;
     }
+
+    private static string Joined(string[] values) => string.Join(TaggingDefaults.ValueSeparator, values);
 
     /// <summary>
     /// The common fields, under the same names <see cref="TagReader.Describe"/>

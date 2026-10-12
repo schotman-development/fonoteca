@@ -60,7 +60,73 @@ public sealed class CatalogueTagWriteTests : IDisposable
         AlbumArtistCredit = "Miles Davis",
         AlbumArtistMbids = [new Mbid(Artist)],
         AcoustId = new AcoustId(Cluster),
+        Genres = ["jazz", "modal jazz"],
+        Isrcs = ["USSM15900113"],
+        Credits = new CreditTags
+        {
+            Composers = ["Miles Davis"],
+            Lyricists = ["Eddie Jefferson"],
+            Conductors = ["Gil Evans"],
+            Arrangers = ["Gil Evans"],
+            Producers = ["Irving Townsend", "Teo Macero"],
+            Engineers = ["Fred Plaut"],
+            Mixers = ["Mark Wilder"],
+            Performers = ["John Coltrane (tenor saxophone)", "Bill Evans (piano)"],
+        },
     };
+
+    /// <summary>An MP4 is never planned an ISRC or a conductor; every other container is.</summary>
+    [Fact]
+    public void AnMp4IsNotGivenTheFieldsAtlWouldHideInIt()
+    {
+        Assert.Null(CatalogueTagFields.Spell(new LibraryPath("a/b.m4a"), CatalogueTags.Isrc));
+        Assert.Null(CatalogueTagFields.Spell(new LibraryPath("a/b.m4a"), CatalogueTags.Conductor));
+        Assert.Equal(CatalogueTags.Lyricist, CatalogueTagFields.Spell(new LibraryPath("a/b.m4a"), CatalogueTags.Lyricist));
+        Assert.Equal(CatalogueTags.Isrc, CatalogueTagFields.Spell(new LibraryPath("a/b.flac"), CatalogueTags.Isrc));
+        Assert.Equal(CatalogueTags.Conductor, CatalogueTagFields.Spell(new LibraryPath("a/b.mp3"), CatalogueTags.Conductor));
+    }
+
+    /// <summary>
+    /// Genres and credits land under Picard's names, several values as several
+    /// where the container can say so, as a tool that is neither of ours reads them.
+    /// </summary>
+    /// <remarks>
+    /// ffprobe joins a Vorbis field's values with ";" and reports only an ID3
+    /// frame's first, which is why the MP3 rows check the first. An MP4 holds one
+    /// value joined with "; ", and no ISRC or conductor — see
+    /// <c>CatalogueTagFields.NotInMp4</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData("flac", "genre", "jazz;modal jazz")]
+    [InlineData("flac", "PRODUCER", "Irving Townsend;Teo Macero")]
+    [InlineData("flac", "PERFORMER", "John Coltrane (tenor saxophone);Bill Evans (piano)")]
+    [InlineData("flac", "LYRICIST", "Eddie Jefferson")]
+    [InlineData("flac", "CONDUCTOR", "Gil Evans")]
+    [InlineData("flac", "ISRC", "USSM15900113")]
+    [InlineData("flac", "composer", "Miles Davis")]
+    [InlineData("flac", "ENGINEER", "Fred Plaut")]
+    [InlineData("flac", "MIXER", "Mark Wilder")]
+    [InlineData("flac", "ARRANGER", "Gil Evans")]
+    [InlineData("mp3", "genre", "jazz")]
+    [InlineData("mp3", "PRODUCER", "Irving Townsend")]
+    [InlineData("mp3", "TSRC", "USSM15900113")]
+    [InlineData("mp3", "TEXT", "Eddie Jefferson")]
+    [InlineData("mp3", "performer", "Gil Evans")]
+    [InlineData("mp3", "composer", "Miles Davis")]
+    [InlineData("m4a", "genre", "jazz; modal jazz")]
+    [InlineData("m4a", "PERFORMER", "John Coltrane (tenor saxophone); Bill Evans (piano)")]
+    [InlineData("m4a", "LYRICIST", "Eddie Jefferson")]
+    [InlineData("m4a", "ISRC", null)]
+    public async Task GenresAndCreditsLandWhereOtherTaggersPutThem(string extension, string tag, string? expected)
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(SourceFor(extension));
+
+        Assert.Equal(TagWriteStatus.Written, (await Write(writer, path)).Status);
+
+        Assert.Equal(expected, Tag(TagsReportedByFfprobe(path), tag));
+    }
 
     /// <summary>
     /// The two spellings, each confirmed by a tool that is neither of ours.

@@ -67,7 +67,64 @@ public static class CatalogueTagFields
         CatalogueTags.Genre,
         CatalogueTags.Composer,
         CatalogueTags.Comment,
+        CatalogueTags.Isrc,
+        CatalogueTags.Lyricist,
+        CatalogueTags.Conductor,
     }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The credits ATL has no typed property for, which every container takes
+    /// under Picard's name as is: a Vorbis comment, an ID3v2 <c>TXXX</c>, an MP4
+    /// freeform atom.
+    /// </summary>
+    /// <remarks>
+    /// ponytail: <c>TXXX</c> on ID3, where Picard writes <c>TIPL</c> and
+    /// <c>TMCL</c>. TagLib-based readers — Navidrome among them — read a
+    /// <c>TXXX:PRODUCER</c> as <c>PRODUCER</c> all the same; ATL's
+    /// <c>InvolvedPeople</c> writes <c>TIPL</c> and is the upgrade if a player is
+    /// measured to need it, with a TagLib# reading of that frame to verify it.
+    /// </remarks>
+    private static readonly FrozenSet<string> Credits = new[]
+    {
+        CatalogueTags.Arranger,
+        CatalogueTags.Producer,
+        CatalogueTags.Engineer,
+        CatalogueTags.Mixer,
+        CatalogueTags.Performer,
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Typed fields ATL puts somewhere in an MP4 that neither TagLib# nor ffprobe
+    /// looks: measured on ATL 7.16, the ISRC and the conductor. Left out of MP4s
+    /// rather than written where nothing reads them.
+    /// </summary>
+    private static readonly FrozenSet<string> NotInMp4 = new[]
+    {
+        CatalogueTags.Isrc,
+        CatalogueTags.Conductor,
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly FrozenSet<string> Mp4 = new[] { "m4a", "m4b", "aac", "alac" }
+        .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsMp4(LibraryPath path) =>
+        Mp4.Contains(System.IO.Path.GetExtension(path.Value).TrimStart('.'));
+
+    /// <summary>
+    /// A catalogue value as this container takes it.
+    /// </summary>
+    /// <remarks>
+    /// Several values are one field's several values everywhere but MP4, where
+    /// ATL 7.16 runs them together with nothing between — "jazzvocal jazz", as
+    /// TagLib# and ffprobe both read it back. There they are one value joined
+    /// with "; ", which is what players split an MP4's genre on.
+    /// </remarks>
+    public static string Render(LibraryPath path, string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        return IsMp4(path) ? value.Replace(CatalogueTags.ValueSeparator.ToString(), "; ", StringComparison.Ordinal) : value;
+    }
 
     /// <summary>
     /// Canonical name — which is also the Vorbis and APEv2 spelling — to the
@@ -130,10 +187,14 @@ public static class CatalogueTagFields
 
         if (style is null) return null;
 
+        if (NotInMp4.Contains(canonical) && IsMp4(path)) return null;
+
         // ATL resolves these itself, and it does it per container — TRACKNUMBER
         // is a Vorbis comment, a TRCK frame and a `trkn` atom, and none of that
         // is ours to spell.
         if (IsStandard(canonical)) return canonical;
+
+        if (Credits.Contains(canonical)) return canonical;
 
         if (!TitleCased.TryGetValue(canonical, out var titled)) return null;
 

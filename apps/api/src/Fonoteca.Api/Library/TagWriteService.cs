@@ -577,6 +577,17 @@ public sealed partial class TagWriteService(
                 file.TagEditsJson,
                 file.ReleaseGroup!.EditsJson,
                 file.Release!.EditsJson,
+                file.ReleaseGroup!.Genres,
+                file.Recording.Genres,
+                file.Recording.Isrcs,
+                file.Recording.Contributions
+                    .OrderBy(link => link.Position)
+                    .Select(link => new PendingLink(link.Type, link.Attributes, link.Name))
+                    .ToList(),
+                file.Recording.Work!.Contributions
+                    .OrderBy(link => link.Position)
+                    .Select(link => new PendingLink(link.Type, link.Attributes, link.Name))
+                    .ToList(),
                 file.Recording.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new PendingCredit(
@@ -1994,6 +2005,9 @@ public sealed partial class TagWriteService(
     /// <param name="Latin">The displayed alias, only to recognise a folder named by it.</param>
     private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid, string Own, string? Latin);
 
+    /// <summary>One link MusicBrainz states on the recording or its work, as <see cref="CreditTags"/> reads it.</summary>
+    private sealed record PendingLink(string Type, string? Attributes, string Name);
+
     /// <summary>
     /// One file's row, flattened out of the entity graph.
     /// </summary>
@@ -2023,6 +2037,11 @@ public sealed partial class TagWriteService(
         string? TagEditsJson,
         string? AlbumEditsJson,
         string? PressingEditsJson,
+        string? AlbumGenres,
+        string? RecordingGenres,
+        string? Isrcs,
+        List<PendingLink> RecordingLinks,
+        List<PendingLink> WorkLinks,
         List<PendingCredit> RecordingCredits,
         List<PendingCredit> ReleaseCredits)
     {
@@ -2087,6 +2106,9 @@ public sealed partial class TagWriteService(
             ArtistMbids = Mbids(RecordingCredits),
             AlbumArtistCredit = AlbumArtistEdit ?? Line(ReleaseCredits),
             AlbumArtistMbids = Mbids(ReleaseCredits),
+            Genres = FileGenres.Of(AlbumGenres, RecordingGenres),
+            Isrcs = FileGenres.Split(Isrcs),
+            Credits = CreditTags.From(RecordingLinks.Concat(WorkLinks).Select(link => (link.Type, link.Attributes, link.Name))),
         };
 
         /// <summary>

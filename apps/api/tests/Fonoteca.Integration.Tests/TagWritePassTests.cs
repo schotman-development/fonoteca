@@ -232,6 +232,61 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     }
 
     /// <summary>
+    /// The album's genres, the recording's ISRCs and everybody MusicBrainz
+    /// credits on it or its work reach the file — and a second run finds
+    /// nothing to do, so several values round-trip as the catalogue holds them.
+    /// </summary>
+    [Fact]
+    public async Task GenresIsrcsAndCreditsReachTheFile()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var recording = await db.Recordings.SingleAsync(Token);
+            var group = await db.ReleaseGroups.SingleAsync(Token);
+
+            group.Genres = "jazz, modal jazz";
+            recording.Genres = "pop";
+            recording.Isrcs = "USSM15900113";
+
+            var work = new Work { Id = WorkId.New(), Title = "So What", Mbid = Mb("66666666-6666-4666-8666-666666666666") };
+            db.Works.Add(work);
+            recording.WorkId = work.Id;
+
+            db.Contributions.AddRange(
+                new Contribution { Id = Guid.CreateVersion7(), RecordingId = recording.Id, Type = "producer", Name = "Irving Townsend", Position = 0 },
+                new Contribution { Id = Guid.CreateVersion7(), RecordingId = recording.Id, Type = "instrument", Attributes = "tenor saxophone", Name = "John Coltrane", Position = 1 },
+                new Contribution { Id = Guid.CreateVersion7(), WorkId = work.Id, Type = "composer", Name = "Miles Davis", Position = 0 });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var services = Build();
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Written);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
+
+        // The album's genres, not the recording's "pop".
+        Assert.Equal($"jazz{CatalogueTags.ValueSeparator}modal jazz", reading.Find(CatalogueTags.Genre));
+        Assert.Equal("USSM15900113", reading.Find(CatalogueTags.Isrc));
+        Assert.Equal("Irving Townsend", reading.Find(CatalogueTags.Producer));
+        Assert.Equal("John Coltrane (tenor saxophone)", reading.Find(CatalogueTags.Performer));
+        Assert.Equal("Miles Davis", reading.Find(CatalogueTags.Composer));
+
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library, services)).Written);
+
+        // The editor shows the two genres as a person reads them, not ATL's separator.
+        var state = await services.GetRequiredService<TagWriteService>().FolderTagsAsync("Miles Davis/Kind of Blue", Token);
+        var genre = state!.Files.Single().Cells.Single(cell => cell.Field == CatalogueTags.Genre);
+
+        Assert.Equal("jazz; modal jazz", genre.Catalogue);
+        Assert.Equal("jazz; modal jazz", genre.File);
+    }
+
+    /// <summary>
     /// The sharp edge: writing tags must not make the next scan discard the catalogue.
     /// </summary>
     /// <remarks>

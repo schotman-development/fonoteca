@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Fonoteca.Domain.Catalogue;
 
 namespace Fonoteca.Tagging;
 
@@ -37,7 +38,7 @@ namespace Fonoteca.Tagging;
 internal static class TaggingDefaults
 {
     /// <summary>The character ATL joins and splits multi-valued fields on.</summary>
-    internal const char ValueSeparator = '\u001F';
+    internal const char ValueSeparator = CatalogueTags.ValueSeparator;
 
     /// <summary>Whether ATL now writes an ID3v2 <c>UFID</c> frame as the format defines it.</summary>
     /// <remarks>

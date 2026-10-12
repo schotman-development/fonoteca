@@ -227,6 +227,12 @@ public sealed class TagReader(IAudioFileStore files)
         AddIfPresent(fields, "COMPOSER", track.Composer);
         AddIfPresent(fields, "COMMENT", track.Comment);
 
+        // The typed credits ATL takes out of the comments and frames it reads,
+        // so they would otherwise be in no reading at all.
+        AddIfPresent(fields, "ISRC", track.ISRC);
+        AddIfPresent(fields, "LYRICIST", track.Lyricist);
+        AddIfPresent(fields, "CONDUCTOR", track.Conductor);
+
         // The numbers, so a catalogue write can be diffed and verified against
         // them. Reported under the same names CatalogueTags uses, which is what
         // lets one desired-value map serve as both the plan's input and the
