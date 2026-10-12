@@ -1964,9 +1964,12 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         await SeedBookletAsync();
 
         var folder = Path.Combine(_root, "Miles Davis/Kind of Blue");
-        var elsewhere = Path.Combine(_root, "elsewhere.jpg");
-        await File.WriteAllBytesAsync(elsewhere, PageOne, Token);
-        File.CreateSymbolicLink(Path.Combine(folder, "booklet-01.jpg"), elsewhere);
+
+        // A relative target as long as the page, so the link's own length
+        // matches and only its being a link can give it away.
+        Assert.Equal(4, PageOne.Length);
+        await File.WriteAllBytesAsync(Path.Combine(folder, "page"), PageOne, Token);
+        File.CreateSymbolicLink(Path.Combine(folder, "booklet-01.jpg"), "page");
 
         Assert.Equal(0, (await RunAsync(TagWriteScope.Library)).BookletsWritten);
         Assert.False(File.Exists(Path.Combine(folder, "booklet-02.png")));

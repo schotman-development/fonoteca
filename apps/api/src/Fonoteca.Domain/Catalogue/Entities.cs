@@ -1208,6 +1208,14 @@ public sealed class AlbumBooklet
     /// <summary>When the sources were last asked.</summary>
     public required DateTimeOffset SavedUtc { get; set; }
 
+    /// <summary>
+    /// When the last ask got no answer at all — an error, not "none". Such an
+    /// album is still to do, and is asked after every album nobody has asked
+    /// about, so one the archive can never answer cannot stand in front of
+    /// new ones. Null once any answer is saved.
+    /// </summary>
+    public DateTimeOffset? FailedUtc { get; set; }
+
     public List<AlbumBookletFile> Files { get; init; } = [];
 }
 

@@ -406,9 +406,11 @@ public sealed class EnrichmentService(
 
             // Ninth, after the motion art and for its reasons: every edition's
             // listing and a few megabytes of scans per album.
+            var bookletRun = new BookletRun();
+
             await BatchesAsync(
                 "album booklets",
-                token => BookletsAsync(BookletBatchSize, counts, token),
+                token => BookletsAsync(BookletBatchSize, bookletRun, counts, token),
                 counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
             // Fifth, and last — and the reason changed out from under this line
@@ -1903,7 +1905,11 @@ public sealed class EnrichmentService(
         {
             var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
-            asks = await AlbumAsksAsync(db, UnanimatedAlbums(db, NothingFoundCutoff), size, cancellationToken)
+            asks = await AlbumAsksAsync(
+                    db,
+                    UnanimatedAlbums(db, NothingFoundCutoff).OrderBy(group => group.Id),
+                    size,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -1947,7 +1953,7 @@ public sealed class EnrichmentService(
     /// <param name="Editions">Its editions with a MusicBrainz id, the display edition first.</param>
     private sealed record AlbumAsk(ReleaseGroupId Id, AlbumToFind Album, IReadOnlyList<Mbid> Editions);
 
-    /// <summary>The first <paramref name="size"/> albums of a worklist, described for a source.</summary>
+    /// <summary>The first <paramref name="size"/> albums of an ordered worklist, described for a source.</summary>
     /// <remarks>
     /// <b>The album is asked about as its display edition</b> — the title,
     /// year, billing line and barcode the album page shows, which are the ones
@@ -1961,7 +1967,6 @@ public sealed class EnrichmentService(
     {
         var albums = await worklist
             .AsNoTracking()
-            .OrderBy(group => group.Id)
             .Select(group => new { group.Id, group.Title, group.FirstReleaseYear })
             .Take(size)
             .ToListAsync(cancellationToken)
@@ -2011,25 +2016,52 @@ public sealed class EnrichmentService(
     /// <summary>Albums asked about per batch: few, for the motion stage's reason.</summary>
     private const int BookletBatchSize = 5;
 
+    /// <summary>Albums in a row that may go unanswered before it is taken for an outage.</summary>
+    private const int BookletFailuresInARow = 3;
+
+    /// <summary>One run of the booklet stage: the albums it could not get an answer for, and the current streak.</summary>
+    private sealed class BookletRun
+    {
+        public HashSet<ReleaseGroupId> Unanswered { get; } = [];
+
+        public int InARow { get; set; }
+    }
+
     /// <summary>
-    /// Albums the library holds whose booklets nobody has looked for, or found
-    /// none of a week ago. <see cref="UnanimatedAlbums"/>'s shape, for its reasons.
+    /// Albums the library holds whose booklets nobody has looked for, found
+    /// none of a week ago, or got no answer for at all.
+    /// <see cref="UnanimatedAlbums"/>'s shape, for its reasons.
     /// </summary>
     private static IQueryable<ReleaseGroup> UnbookletedAlbums(FonotecaDbContext db, DateTimeOffset cutoff) =>
         db.ReleaseGroups.Where(group => group.Files.Any()
             && !db.AlbumBooklets.Any(booklet => booklet.ReleaseGroupId == group.Id
+                && booklet.FailedUtc == null
                 && (booklet.Files.Any() || booklet.SavedUtc >= cutoff)));
 
     /// <summary>
     /// Asks the archive and the shop for one batch of albums' booklets, writing each answer as it comes.
     /// </summary>
     /// <remarks>
-    /// <see cref="MotionAsync"/>'s rules. <b>The display edition is listed
-    /// first</b> — the pressing the files prove where there is one — so it keeps
-    /// the booklet on a tie, and an edition the files sit on comes before one
-    /// they do not.
+    /// <see cref="MotionAsync"/>'s rules, but for one. <b>The display edition is
+    /// listed first</b> — the pressing the files prove where there is one — so
+    /// it keeps the booklet on a tie, and an edition the files sit on comes
+    /// before one they do not.
+    ///
+    /// <b>One album that cannot be answered is skipped, not the end of the
+    /// stage.</b> An archive.org node answering 500 for one release every time
+    /// was measured here — six of about 150 listings — and an album whose only
+    /// edition sits on one ended the stage on every run, at the same album.
+    /// Its failure is recorded (<see cref="AlbumBooklet.FailedUtc"/>), never as
+    /// "none", and such albums are asked after every album nobody has asked
+    /// about, oldest failure first, so a few dead ones cannot stand in front of
+    /// new ones (the owner's choice). <see cref="BookletFailuresInARow"/> albums
+    /// failing in a row is what an outage looks like, and that ends the stage.
     /// </remarks>
-    private async Task<int> BookletsAsync(int size, Tally counts, CancellationToken cancellationToken)
+    private async Task<int> BookletsAsync(
+        int size,
+        BookletRun run,
+        Tally counts,
+        CancellationToken cancellationToken)
     {
         List<AlbumAsk> asks;
 
@@ -2037,14 +2069,45 @@ public sealed class EnrichmentService(
         await using (claim.ConfigureAwait(false))
         {
             var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+            var skipped = run.Unanswered.ToList();
 
-            asks = await AlbumAsksAsync(db, UnbookletedAlbums(db, NothingFoundCutoff), size, cancellationToken)
+            asks = await AlbumAsksAsync(
+                    db,
+                    UnbookletedAlbums(db, NothingFoundCutoff)
+                        .Where(group => !skipped.Contains(group.Id))
+                        .OrderBy(group => db.AlbumBooklets.Any(booklet =>
+                            booklet.ReleaseGroupId == group.Id && booklet.FailedUtc != null))
+                        .ThenBy(group => db.AlbumBooklets
+                            .Where(booklet => booklet.ReleaseGroupId == group.Id)
+                            .Select(booklet => booklet.FailedUtc)
+                            .FirstOrDefault())
+                        .ThenBy(group => group.Id),
+                    size,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
 
         foreach (var ask in asks)
         {
-            var found = await booklets.FindAsync(ask.Album, ask.Editions, cancellationToken).ConfigureAwait(false);
+            AlbumBookletFound found;
+
+            try
+            {
+                found = await booklets.FindAsync(ask.Album, ask.Editions, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ProviderUnavailableException cause)
+            {
+                run.Unanswered.Add(ask.Id);
+                Log.BookletAlbumUnanswered(logger, ask.Album.Title, cause.Message);
+
+                await BookletFailedAsync(ask.Id, cancellationToken).ConfigureAwait(false);
+
+                if (++run.InARow >= BookletFailuresInARow) throw;
+
+                continue;
+            }
+
+            run.InARow = 0;
 
             var save = scopeFactory.CreateAsyncScope();
             await using (save.ConfigureAwait(false))
@@ -2090,6 +2153,32 @@ public sealed class EnrichmentService(
         }
 
         return asks.Count;
+    }
+
+    /// <summary>Records that an album's booklet ask got no answer, keeping any answer it had.</summary>
+    private async Task BookletFailedAsync(ReleaseGroupId album, CancellationToken cancellationToken)
+    {
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+            var now = StoreTime.ToStorePrecision(clock.UtcNow);
+
+            var row = await db.AlbumBooklets
+                .FirstOrDefaultAsync(booklet => booklet.ReleaseGroupId == album, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (row is null)
+            {
+                db.AlbumBooklets.Add(new AlbumBooklet { ReleaseGroupId = album, SavedUtc = now, FailedUtc = now });
+            }
+            else
+            {
+                row.FailedUtc = now;
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

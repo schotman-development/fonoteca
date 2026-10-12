@@ -422,6 +422,17 @@ internal static partial class Log
     public static partial void BatchStageEnded(ILogger logger, string stage, string reason);
 
     /// <remarks>
+    /// A warning, because it can repeat: an album whose only source answers
+    /// an error every time is skipped on every run, and this line is where
+    /// that shows.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1265,
+        Level = LogLevel.Warning,
+        Message = "No booklet answer for {Title}; asked again after the rest next run: {Reason}")]
+    public static partial void BookletAlbumUnanswered(ILogger logger, string title, string reason);
+
+    /// <remarks>
     /// Debug, like <see cref="ArtistNotDescribed"/>, and for a narrower version
     /// of the same reason: the worklist here is the followed set rather than the
     /// catalogue, so this can never be thousands of lines — but a followed

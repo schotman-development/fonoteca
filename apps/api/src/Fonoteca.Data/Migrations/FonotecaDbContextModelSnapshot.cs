@@ -32,6 +32,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("ArchiveRelease")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("FailedUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("QobuzAlbumId")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");

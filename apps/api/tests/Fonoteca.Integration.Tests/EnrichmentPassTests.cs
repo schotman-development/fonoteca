@@ -1419,24 +1419,219 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal(new[] { shown, first }, Assert.Single(booklets.Asked).Editions);
     }
 
-    /// <summary>An outage stamps nothing, for the motion stage's reason.</summary>
+    /// <summary>
+    /// An album that cannot be answered is skipped for the run, unstamped,
+    /// and the albums after it are still asked; the next run asks it again.
+    /// </summary>
+    /// <remarks>
+    /// The live failure: an album whose only edition sits on an archive.org
+    /// node that answers 500 every time ended the stage on every run, at that
+    /// album, and nothing after it was ever asked.
+    /// </remarks>
     [Fact]
-    public async Task AFailedBookletLookupStampsNothing()
+    public async Task AnAlbumWithNoAnswerIsSkippedAndTheRestAreStillAsked()
     {
         await SeedBilledArtistAsync(Karajan, "Karajan");
         await SeedBilledArtistAsync(Berliner, "Berliner Philharmoniker");
+
+        Mbid dead;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            dead = (await db.Releases
+                .Where(release => release.Files.Any(file => file.Path.StartsWith("Karajan/")))
+                .Select(release => release.Mbid)
+                .SingleAsync(Token))!.Value;
+        }
+
+        var booklets = new StubBooklets { UnavailableFor = new HashSet<Mbid> { dead } };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
+        var enrichment = services.GetRequiredService<EnrichmentService>();
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, booklets.Asked.Count);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            // Only the album that was answered is stamped; the other's failure is
+            // recorded, which is not an answer.
+            var rows = await db.AlbumBooklets.AsNoTracking().ToListAsync(Token);
+            Assert.Single(rows, row => row.FailedUtc is null);
+            Assert.Single(rows, row => row.FailedUtc is not null);
+        }
+
+        Assert.Equal(1, (await enrichment.CountPendingAsync(Token)).Booklets);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(3, booklets.Asked.Count);
+        Assert.Contains(dead, booklets.Asked[^1].Editions);
+    }
+
+    /// <summary>
+    /// An answer breaks the streak: four albums with no answer, never three in
+    /// a row, do not end the stage.
+    /// </summary>
+    [Fact]
+    public async Task AnAnswerBetweenFailuresResetsTheStreak()
+    {
+        var dead = new HashSet<Mbid>();
+        string[] albums = ["Dead 1", "Dead 2", "Good 1", "Dead 3", "Dead 4", "Good 2"];
+
+        foreach (var name in albums)
+        {
+            await SeedBilledArtistAsync(new Mbid(Guid.CreateVersion7()), name);
+        }
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var name in albums.Where(name => name.StartsWith("Dead", StringComparison.Ordinal)))
+            {
+                dead.Add((await db.Releases
+                    .Where(release => release.Files.Any(file => file.Path.StartsWith(name + "/")))
+                    .Select(release => release.Mbid)
+                    .SingleAsync(Token))!.Value);
+            }
+        }
+
+        var booklets = new StubBooklets { UnavailableFor = dead };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(6, booklets.Asked.Count);
+        Assert.Equal(4, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Booklets);
+    }
+
+    /// <summary>
+    /// Albums failing in a row is an outage: the stage ends, and nothing is stamped.
+    /// </summary>
+    [Fact]
+    public async Task ThreeAlbumsFailingInARowEndTheStage()
+    {
+        for (var index = 0; index < 4; index++)
+        {
+            await SeedBilledArtistAsync(new Mbid(Guid.CreateVersion7()), $"Orchestra {index}");
+        }
 
         var booklets = new StubBooklets { Unavailable = true };
         var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
 
         await EnrichAsync(services);
 
-        Assert.Single(booklets.Asked);
+        Assert.Equal(3, booklets.Asked.Count);
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
-        Assert.Empty(await db.AlbumBooklets.AsNoTracking().ToListAsync(Token));
-        Assert.Equal(2, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Booklets);
+        // Failures recorded, no answer stamped.
+        var rows = await db.AlbumBooklets.AsNoTracking().Include(booklet => booklet.Files).ToListAsync(Token);
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, row => Assert.NotNull(row.FailedUtc));
+        Assert.All(rows, row => Assert.Empty(row.Files));
+        Assert.Equal(4, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Booklets);
+    }
+
+    /// <summary>
+    /// Failed albums take turns, oldest failure first, so a fourth dead album
+    /// is not left behind three that fail before it on every run.
+    /// </summary>
+    [Fact]
+    public async Task FailedAlbumsTakeTurnsOldestFailureFirst()
+    {
+        for (var index = 0; index < 4; index++)
+        {
+            await SeedBilledArtistAsync(new Mbid(Guid.CreateVersion7()), $"Dead {index}");
+        }
+
+        var dead = new HashSet<Mbid>();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var mbid in await db.Releases.Select(release => release.Mbid).ToListAsync(Token))
+            {
+                dead.Add(mbid!.Value);
+            }
+        }
+
+        var booklets = new StubBooklets { UnavailableFor = dead };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
+
+        for (var run = 0; run < 3; run++) await EnrichAsync(services);
+
+        Assert.Equal(9, booklets.Asked.Count);
+        Assert.All(
+            dead,
+            edition => Assert.True(booklets.Asked.Count(ask => ask.Editions.Contains(edition)) >= 2));
+    }
+
+    /// <summary>A failure on an album with an expired "none" marks that row failed.</summary>
+    [Fact]
+    public async Task AFailureMarksAnExistingStampFailed()
+    {
+        await SeedBilledArtistAsync(Karajan, "Karajan");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.AlbumBooklets.Add(new AlbumBooklet
+            {
+                ReleaseGroupId = await db.ReleaseGroups.Select(group => group.Id).SingleAsync(Token),
+                SavedUtc = DateTimeOffset.UtcNow.AddDays(-8),
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var booklets = new StubBooklets { Unavailable = true };
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.NotNull((await db.AlbumBooklets.AsNoTracking().SingleAsync(Token)).FailedUtc);
+        }
+    }
+
+    /// <summary>
+    /// Albums whose ask failed before are asked after every album nobody has
+    /// asked about, so three dead ones cannot keep a new album from being asked.
+    /// </summary>
+    /// <remarks>
+    /// The review's case: three albums the archive can never answer, first in
+    /// id order, ended the stage at them on every run, and an album added
+    /// later — a higher id — was never reached.
+    /// </remarks>
+    [Fact]
+    public async Task AlbumsThatFailedBeforeAreAskedAfterNewOnes()
+    {
+        for (var index = 0; index < 3; index++)
+        {
+            await SeedBilledArtistAsync(new Mbid(Guid.CreateVersion7()), $"Dead {index}");
+        }
+
+        var dead = new HashSet<Mbid>();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            foreach (var mbid in await db.Releases.Select(release => release.Mbid).ToListAsync(Token))
+            {
+                dead.Add(mbid!.Value);
+            }
+        }
+
+        var booklets = new StubBooklets { UnavailableFor = dead };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), booklets: booklets);
+
+        await EnrichAsync(services);
+        Assert.Equal(3, booklets.Asked.Count);
+
+        await SeedBilledArtistAsync(new Mbid(Guid.CreateVersion7()), "Newcomer");
+
+        await EnrichAsync(services);
+
+        // The newcomer first, then the three dead ones, which end the stage again.
+        Assert.Equal(7, booklets.Asked.Count);
+        Assert.DoesNotContain(booklets.Asked[3].Editions, dead.Contains);
+        Assert.Equal(3, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Booklets);
     }
 
     /// <summary>An outage stamps nothing: not knowing is not "none".</summary>
@@ -2840,6 +3035,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
     {
         public bool Unavailable { get; init; }
 
+        /// <summary>Editions whose album cannot be answered, as one on a dead archive.org node.</summary>
+        public IReadOnlySet<Mbid> UnavailableFor { get; init; } = new HashSet<Mbid>();
+
         public List<(AlbumToFind Album, IReadOnlyList<Mbid> Editions)> Asked { get; } = [];
 
         public Task<AlbumBookletFound> FindAsync(
@@ -2849,7 +3047,10 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         {
             lock (Asked) Asked.Add((album, editions));
 
-            if (Unavailable) throw new ProviderUnavailableException("stub", "The archive is down.");
+            if (Unavailable || editions.Any(UnavailableFor.Contains))
+            {
+                throw new ProviderUnavailableException("stub", "The archive is down.");
+            }
 
             return Task.FromResult(
                 booklets.FirstOrDefault(booklet => editions.Contains(booklet.Edition)).Found ?? AlbumBookletFound.None);
