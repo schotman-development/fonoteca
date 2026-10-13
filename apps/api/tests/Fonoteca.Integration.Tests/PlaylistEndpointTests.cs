@@ -510,6 +510,7 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("ArtistCountry", "Is", "gb", null, 2)]
     [InlineData("Year", "Between", "1980", "1970", 2)]
     [InlineData("Year", "IsEmpty", null, null, 1)]
+    [InlineData("Year", "IsNot", "1977", null, 1)]
     [InlineData("SampleRate", "AtLeast", "88.2", null, 1)]
     [InlineData("HiRes", "IsTrue", null, null, 1)]
     [InlineData("Length", "AtMost", "260", null, 1)]

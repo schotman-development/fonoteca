@@ -343,7 +343,7 @@ internal static class SmartQuery
         static int? Whole(double? number) => number is { } n ? (int)Math.Round(n) : null;
     }
 
-    /// <summary>A comparison of a nullable column; a missing value matches nothing but "is not" and "is empty".</summary>
+    /// <summary>A comparison of a nullable column; a missing value matches nothing but "is not" and "is unknown".</summary>
     private static Expression<Func<MediaFile, bool>> Compare<T>(
         Expression<Func<MediaFile, T?>> column,
         SmartOperator op,

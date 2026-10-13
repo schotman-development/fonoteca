@@ -19,9 +19,9 @@ namespace Fonoteca.Domain.Catalogue;
 /// song is in the playlist once, as the best of its copies that matched. The
 /// catalogue holds no plays, stars or ratings, so there is nothing to ask about
 /// listening. Text matches without regard to case. A value the catalogue does
-/// not hold matches no comparison and no "is not" of a number, but does match
-/// "is not" and "does not contain" of text, since a song with no genre is not
-/// jazz; <see cref="SmartOperator.IsEmpty"/> asks for it outright.
+/// not hold matches no comparison, but does match "is not" and "does not
+/// contain", of a number as of text, since a song with no genre is not jazz;
+/// <see cref="SmartOperator.IsEmpty"/> asks for it outright.
 ///
 /// The screen's twin is <c>smartRules.ts</c>; a field's kind there must match
 /// <see cref="KindOf"/>, or the screen offers what this refuses.
