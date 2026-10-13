@@ -200,6 +200,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | booklets | — | `Providers/CoverArt/AlbumBooklets.cs`, `EnrichmentService.BookletsAsync`, `TagWriteService.EnsureBookletAsync` |
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
+| playlists | `Domain/Catalogue/PlaylistFile.cs` | `Api/Library/PlaylistFiles.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
 ## The passes
@@ -698,6 +699,28 @@ answers is feeding the provider its own opinion and reading the echo as
 corroboration. Eligibility is `IdentityDecidedUtc IS NOT NULL` — what a
 submission carries is the *link*, so the case worth most is a cluster naming
 nothing that a person has just named.
+
+**Playlists** are a person's lists of songs, each written as
+`Playlists/<name>.m3u8` at the library root with paths relative to it (the
+owner's choices: Navidrome, Roon and the production copy read them there).
+**An entry is a song, not a file** (`PlaylistEntry`): each write names the
+best copy held (`PlaylistFile.Best`), so an upgrade or a trashed duplicate
+leaves the playlist pointing at what remains. The places that delete a
+recording after moving its files — a merge, the catch-up's fold and move, a
+download re-filed by hand — move its entries too (`PlaylistFiles.FollowAsync`,
+in the same save); **a new one must do the same**, or an entry whose last copy
+is deleted before the next playlist write is left naming nothing. An entry's
+last copy covers any other change of recording, and one whose link was
+withdrawn (an undone tag write reopens it) still plays the song, rule 3. A song with no copy
+stays on the playlist and out of the file. **The files are written after every tag write run and its
+undo, and after every playlist edit — nothing else** (the owner's choice, over a
+sweep a minute): each write resolves every entry and rewrites only the files
+whose text changed, so a file-manager move, a scan or a replacement reaches them
+at the next of those. Nothing is written while the root looks unmounted. **Fonoteca
+owns those files** — an edit made elsewhere is overwritten, a name whose file is
+not a playlist's is refused, a deleted playlist's file goes to the trash.
+Subsonic reads and writes them through the same handlers. Roon's documentation
+does not say whether it re-reads a changed m3u; Navidrome does.
 
 ## Acquisition
 
