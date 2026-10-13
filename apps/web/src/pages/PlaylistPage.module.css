@@ -1,0 +1,30 @@
+/* The cover beside the name, as an album page has it. */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-20);
+}
+
+.cover {
+  width: 176px;
+  aspect-ratio: 1;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
+
+/* Four different albums from the top of the list, two by two. */
+.cover[data-mosaic] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.numberCol {
+  width: 48px;
+}
+
+.actionsCol {
+  width: 120px;
+}

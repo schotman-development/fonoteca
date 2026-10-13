@@ -15,12 +15,13 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Fragment, useDeferredValue, useId, useRef } from 'react'
 
 import { api, apiBaseUrl } from '../api.ts'
+import { AddToPlaylist } from '../components/AddToPlaylist.tsx'
 import { Pager } from '../components/Pager.tsx'
 import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
 import { leaf } from './artistAlbums.ts'
 import styles from './BrowsePage.module.css'
-import { releaseCover, releaseGroupArt } from './coverArt.ts'
+import { albumArt } from './coverArt.ts'
 import { contentUrl } from './files.ts'
 import { type PagedListSearch, TRACK_SORTS, type TrackSort } from './listSearch.ts'
 import { qualityLabel, qualityTone } from './ReleasePage.tsx'
@@ -144,11 +145,23 @@ export function TracksPage() {
                     Length
                   </TableHeaderCell>
                   <TableHeaderCell className={styles.formatCol}>Format</TableHeaderCell>
+                  <TableHeaderCell className={styles.addCol}>
+                    <VisuallyHidden>Add to a playlist</VisuallyHidden>
+                  </TableHeaderCell>
                 </tr>
               </thead>
               <tbody>
                 {state.data.items.map((track) => (
-                  <Row key={track.recordingId} track={track} />
+                  <tr key={track.recordingId}>
+                    <TrackCells track={track} />
+                    <TableCell>
+                      <AddToPlaylist
+                        recordingIds={[track.recordingId]}
+                        name={track.title}
+                        compact
+                      />
+                    </TableCell>
+                  </tr>
                 ))}
               </tbody>
             </Table>
@@ -161,18 +174,17 @@ export function TracksPage() {
   )
 }
 
-function Row({ track }: { readonly track: TrackListRow }) {
+/**
+ * One track's cells, play button to format: the Tracks page's row, and the
+ * playlist page's with its own cells either side.
+ */
+export function TrackCells({ track }: { readonly track: TrackListRow }) {
   const { album, file } = track
   const byline = track.artists.map((credit) => credit.name + (credit.joinPhrase ?? '')).join('')
-  const cover =
-    album?.coverReleaseId != null
-      ? releaseCover(album.coverReleaseId)
-      : album?.mbid != null
-        ? releaseGroupArt(album.mbid)
-        : undefined
+  const cover = album != null ? albumArt(album) : undefined
 
   return (
-    <tr>
+    <>
       <TableCell>
         <PlayButton
           track={{
@@ -264,6 +276,6 @@ function Row({ track }: { readonly track: TrackListRow }) {
           ) : null}
         </Stack>
       </TableCell>
-    </tr>
+    </>
   )
 }

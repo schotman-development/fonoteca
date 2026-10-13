@@ -16,11 +16,13 @@ import {
   Tabs,
   Text,
   usePlayback,
+  VisuallyHidden,
 } from '@fonoteca/ui'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { api, apiBaseUrl } from '../api.ts'
+import { AddToPlaylist } from '../components/AddToPlaylist.tsx'
 import { TagEditor } from '../components/TagEditor.tsx'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { UndoFolderButton } from '../components/UndoFolderButton.tsx'
@@ -234,6 +236,9 @@ function Album({
   // nothing, so an owned album's slot for it writes its tags instead.
   const owned = release.files > 0
   const first = tracks.flatMap((track) => track.files.map((file) => ({ track, file })))[0]
+  const heldSongs = [
+    ...new Set(tracks.filter((track) => track.files.length > 0).map((track) => track.recordingId)),
+  ]
 
   return (
     <article className={styles.page} aria-labelledby={`${id}title`}>
@@ -325,6 +330,9 @@ function Album({
             >
               Play
             </Button>
+            {heldSongs.length > 0 ? (
+              <AddToPlaylist recordingIds={heldSongs} name={release.title} />
+            ) : null}
             {owned ? (
               <TagWritePanel
                 scope={{ kind: 'album', id: releaseId }}
@@ -1035,6 +1043,9 @@ function Tracks({
             <TableHeaderCell>Track</TableHeaderCell>
             <TableHeaderCell numeric>Length</TableHeaderCell>
             <TableHeaderCell>In your library</TableHeaderCell>
+            <TableHeaderCell>
+              <VisuallyHidden>Add to a playlist</VisuallyHidden>
+            </TableHeaderCell>
           </tr>
         </thead>
 
@@ -1047,7 +1058,7 @@ function Tracks({
             <tbody key={`${disc}:${group.key}`}>
               {discs > 1 && index === 0 ? (
                 <tr className={styles.group}>
-                  <th colSpan={4} scope="rowgroup">
+                  <th colSpan={5} scope="rowgroup">
                     Disc {disc}
                   </th>
                 </tr>
@@ -1055,7 +1066,7 @@ function Tracks({
               {group.workTitle !== null ? (
                 <tr>
                   <td className={styles.workGutter} />
-                  <th className={styles.work} colSpan={3} scope="rowgroup">
+                  <th className={styles.work} colSpan={4} scope="rowgroup">
                     <Text size="sm" weight="medium">
                       {group.workTitle}
                     </Text>
@@ -1145,6 +1156,12 @@ function Row({
           exists to be able to ask.
         */}
         <FileBadges files={track.files} />
+      </TableCell>
+
+      <TableCell>
+        {track.files.length > 0 ? (
+          <AddToPlaylist recordingIds={[track.recordingId]} name={track.title} compact />
+        ) : null}
       </TableCell>
     </tr>
   )

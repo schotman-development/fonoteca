@@ -18,6 +18,7 @@ export type NavItem = {
     | '/library/tracks'
     | '/library/composers'
     | '/library/compositions'
+    | '/library/playlists'
     | '/library/matching'
     | '/files'
     | '/acquire'
@@ -88,6 +89,12 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Compositions',
         exact: false,
         keywords: ['works', 'pieces', 'standards', 'covers'],
+      },
+      {
+        to: '/library/playlists',
+        label: 'Playlists',
+        exact: false,
+        keywords: ['m3u', 'lists', 'mixtapes', 'queue'],
       },
       // The disk, rather than the catalogue: where somebody goes when a screen
       // above is wrong about something — a duplicate folder, a stray rip.

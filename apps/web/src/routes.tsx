@@ -17,6 +17,8 @@ import {
   releaseListSearch,
   trackListSearch,
 } from './pages/listSearch.ts'
+import { PlaylistPage } from './pages/PlaylistPage.tsx'
+import { PlaylistsPage } from './pages/PlaylistsPage.tsx'
 import { ReleasePage } from './pages/ReleasePage.tsx'
 import { ReleasesPage } from './pages/ReleasesPage.tsx'
 import { TracksPage } from './pages/TracksPage.tsx'
@@ -129,6 +131,18 @@ const compositionsRoute = createRoute({
   validateSearch: compositionListSearch,
 })
 
+const playlistsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/playlists',
+  component: PlaylistsPage,
+})
+
+const playlistRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/playlists/$playlistId',
+  component: PlaylistPage,
+})
+
 /**
  * The worklist of refusals.
  *
@@ -224,6 +238,8 @@ const routeTree = rootRoute.addChildren([
   tracksRoute,
   composersRoute,
   compositionsRoute,
+  playlistsRoute,
+  playlistRoute,
   matchingRoute,
   filesRoute,
   acquireRoute,
@@ -246,6 +262,8 @@ export {
   filesRoute,
   homeRoute,
   matchingRoute,
+  playlistRoute,
+  playlistsRoute,
   releaseRoute,
   releasesRoute,
   tracksRoute,

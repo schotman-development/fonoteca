@@ -74,6 +74,16 @@ export function releaseGroupArt(mbid: string): string {
   return `https://coverartarchive.org/release-group/${mbid}/front-250`
 }
 
+/** A track's album sleeve: its stored cover, else the archive's, else none and a monogram. */
+export function albumArt(album: {
+  readonly coverReleaseId: string | null
+  readonly mbid: string | null
+}): string | undefined {
+  if (album.coverReleaseId != null) return releaseCover(album.coverReleaseId)
+  if (album.mbid != null) return releaseGroupArt(album.mbid)
+  return undefined
+}
+
 /**
  * Where a portrait comes from now: this application, not the provider.
  *
