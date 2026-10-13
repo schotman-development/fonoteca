@@ -147,6 +147,10 @@ public static partial class SubsonicEndpoints
 
         Map(group, "getUser", GetUser);
         Map(group, "getPlaylists", GetPlaylists);
+        Map(group, "getPlaylist", GetPlaylist);
+        Map(group, "createPlaylist", CreatePlaylist);
+        Map(group, "updatePlaylist", UpdatePlaylist);
+        Map(group, "deletePlaylist", DeletePlaylist);
         Map(group, "scrobble", Scrobble);
         Map(group, "getScanStatus", GetScanStatus);
         Map(group, "startScan", StartScan);
@@ -196,8 +200,8 @@ public static partial class SubsonicEndpoints
     /// <remarks>
     /// Several clients call this at login to decide which buttons to draw, and a
     /// missing answer reads to them as a broken server. Every role is stated
-    /// rather than assumed, and the three that are true are the three this
-    /// surface actually does: stream, download and cover art. Nothing here can
+    /// rather than assumed, and the four that are true are the four this
+    /// surface actually does: stream, download, cover art and playlists. Nothing here can
     /// star, rate, upload, share or administer anything, so a client that reads
     /// this draws none of those.
     ///
@@ -215,7 +219,7 @@ public static partial class SubsonicEndpoints
             user.Attr("settingsRole", false);
             user.Attr("downloadRole", true);
             user.Attr("uploadRole", false);
-            user.Attr("playlistRole", false);
+            user.Attr("playlistRole", true);
             user.Attr("coverArtRole", true);
             user.Attr("commentRole", false);
             user.Attr("podcastRole", false);
@@ -247,23 +251,6 @@ public static partial class SubsonicEndpoints
                 writer.Attr("name", extension.Name);
                 writer.Numbers("versions", extension.Versions);
             });
-
-    /// <summary>
-    /// The playlists, of which there are none.
-    /// </summary>
-    /// <remarks>
-    /// Empty rather than absent, because a missing endpoint is an error a client
-    /// shows and an empty list is a screen saying there are no playlists, which
-    /// is true. Nothing here stores a queue or a playlist — see
-    /// <c>PlaybackProvider</c>, which says so in its own words.
-    /// </remarks>
-    private static IResult GetPlaylists() =>
-        SubsonicResult.Ok(
-            "playlists",
-            playlists => playlists.Children(
-                "playlist",
-                Array.Empty<object>(),
-                (_, _) => { }));
 
     /// <summary>
     /// A play, acknowledged and stored nowhere.

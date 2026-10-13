@@ -228,7 +228,10 @@ errors on every track.
 **`getPlaylists` returns an empty list.** There is no queue and no playlist
 anywhere — `PlaybackProvider` says so in its own words, and nothing is persisted
 about playback at all. Writable playlists are a table and a decision, not part of
-this.
+this. *Amended 2026-10-13:* that table exists now (`Playlist`), and
+`getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist` and
+`deletePlaylist` read and write it through the playlist endpoints' own
+handlers (`SubsonicEndpoints.Playlists.cs`).
 
 Also absent: file-based *writing*, video, podcasts, jukebox, chat, bookmarks,
 share, lyrics.

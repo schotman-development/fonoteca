@@ -33,12 +33,15 @@ internal static class SubsonicIds
     private const string AlbumPrefix = "al-";
     private const string SongPrefix = "tr-";
     private const string PathPrefix = "fo-";
+    private const string PlaylistPrefix = "pl-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
     internal static string Album(ReleaseGroupId id) => AlbumPrefix + id.Value.ToString("N");
 
     internal static string Song(MediaFileId id) => SongPrefix + id.Value.ToString("N");
+
+    internal static string Playlist(PlaylistId id) => PlaylistPrefix + id.Value.ToString("N");
 
     /// <summary>A directory, or a file the catalogue does not hold.</summary>
     internal static string Path(string libraryRelativePath) =>
@@ -52,6 +55,9 @@ internal static class SubsonicIds
 
     internal static MediaFileId? AsSong(string? id) =>
         Guid(id, SongPrefix) is { } value ? new MediaFileId(value) : null;
+
+    internal static PlaylistId? AsPlaylist(string? id) =>
+        Guid(id, PlaylistPrefix) is { } value ? new PlaylistId(value) : null;
 
     /// <summary>
     /// The library-relative path a folder id carries, or null when the id is not

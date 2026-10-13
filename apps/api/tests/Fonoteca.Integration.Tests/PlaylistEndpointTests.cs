@@ -466,6 +466,75 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         }
     }
 
+    [Fact]
+    public async Task ASubsonicClientCreatesEditsAndDeletesPlaylists()
+    {
+        using var client = _factory!.CreateClient();
+
+        var created = await SubsonicAsync(client, $"createPlaylist?name=Phone&songId={Song(_lossy)}&songId={Song(_dreamsFile)}");
+
+        Assert.Equal("ok", created.GetProperty("status").GetString());
+
+        var id = created.GetProperty("playlist").GetProperty("id").GetString()!;
+
+        // A song is played from its best copy whichever copy the client named.
+        Assert.Equal([Song(_lossless), Song(_dreamsFile)], Entries(created.GetProperty("playlist")));
+        Assert.Contains($"../{Lossless}", ReadPlaylist("Phone"), StringComparison.Ordinal);
+
+        var refused = await SubsonicAsync(client, $"createPlaylist?name=Bad&songId={Song(_nameless)}");
+
+        Assert.Equal("failed", refused.GetProperty("status").GetString());
+        Assert.Equal(70, refused.GetProperty("error").GetProperty("code").GetInt32());
+
+        var listed = await SubsonicAsync(client, "getPlaylists");
+        var only = Assert.Single(listed.GetProperty("playlists").GetProperty("playlist").EnumerateArray());
+
+        Assert.Equal(id, only.GetProperty("id").GetString());
+        Assert.Equal(2, only.GetProperty("songCount").GetInt32());
+        Assert.Equal(528, only.GetProperty("duration").GetInt32());
+
+        var updated = await SubsonicAsync(client, $"updatePlaylist?playlistId={id}&songIndexToRemove=0&songIdToAdd={Song(_dreamsFile)}");
+
+        Assert.Equal("ok", updated.GetProperty("status").GetString());
+        Assert.Equal(
+            [Song(_dreamsFile), Song(_dreamsFile)],
+            Entries((await SubsonicAsync(client, $"getPlaylist?id={id}")).GetProperty("playlist")));
+
+        var deleted = await SubsonicAsync(client, $"deletePlaylist?id={id}");
+
+        Assert.Equal("ok", deleted.GetProperty("status").GetString());
+        Assert.Empty((await SubsonicAsync(client, "getPlaylists")).GetProperty("playlists").GetProperty("playlist").EnumerateArray());
+    }
+
+    /// <summary>
+    /// A song with no copy is not shown to a client, and a client replacing the
+    /// songs it was shown does not take that one away.
+    /// </summary>
+    [Fact]
+    public async Task ASubsonicReplaceKeepsTheEntriesTheClientCouldNotSee()
+    {
+        using var client = _factory!.CreateClient();
+        var playlist = await CreateAsync(client, "Road trip", _chain, _dreams);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.MediaFiles.Where(file => file.Id == _dreamsFile).ExecuteDeleteAsync(Token);
+        }
+
+        var id = $"pl-{playlist.Id:N}";
+
+        Assert.Equal([Song(_lossless)], Entries((await SubsonicAsync(client, $"getPlaylist?id={id}")).GetProperty("playlist")));
+
+        var replaced = await SubsonicAsync(client, $"createPlaylist?playlistId={id}&songId={Song(_lossless)}&songId={Song(_lossy)}");
+
+        Assert.Equal([Song(_lossless), Song(_lossless)], Entries(replaced.GetProperty("playlist")));
+
+        var read = await GetAsync(client, playlist.Id);
+
+        Assert.Equal(["The Chain", "The Chain", "Dreams"], read.Entries.Select(entry => entry.Title));
+        Assert.Null(read.Entries[2].Track);
+    }
+
     private async Task<PlaylistResponse> CreateAsync(HttpClient client, string name, params RecordingId[] songs)
     {
         using var response = await client.PostAsJsonAsync(
