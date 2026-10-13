@@ -1178,6 +1178,7 @@ public static partial class CatalogueEndpoints
         ArtistFollowRequest request,
         FonotecaDbContext db,
         IClock clock,
+        PlaylistFiles playlists,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -1226,6 +1227,10 @@ public static partial class CatalogueEndpoints
         // date records are compared against rather than a record of which of our
         // own passes ran first.
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        // A smart playlist can ask whether an artist is followed, and this
+        // takes no gate whose release would refresh it.
+        playlists.Refresh();
 
         return TypedResults.Ok(new ArtistFollowResponse(artist.Id.Value, artist.Followed));
     }
@@ -1327,6 +1332,7 @@ public static partial class CatalogueEndpoints
         FonotecaDbContext db,
         IMusicBrainzCatalogue musicBrainz,
         IClock clock,
+        PlaylistFiles playlists,
         CancellationToken cancellationToken)
     {
         if (request is null
@@ -1356,6 +1362,7 @@ public static partial class CatalogueEndpoints
             existing.Followed = true;
             existing.FollowedUtc ??= StoreTime.ToStorePrecision(clock.UtcNow);
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            playlists.Refresh();
 
             return TypedResults.Ok(new ArtistFollowResponse(existing.Id.Value, true));
         }

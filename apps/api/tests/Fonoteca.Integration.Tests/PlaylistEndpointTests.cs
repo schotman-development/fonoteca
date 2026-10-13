@@ -590,6 +590,37 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.False(await db.SmartPlaylists.AnyAsync(Token));
     }
 
+    /// <summary>Following takes no gate, so it asks for the refresh itself: a rule can ask who is followed.</summary>
+    [Fact]
+    public async Task FollowingAnArtistRewritesTheSmartPlaylists()
+    {
+        using var client = _factory!.CreateClient();
+        await CreateSmartAsync(client, "Followed", Criteria(Group("All", Condition("Followed", "IsTrue"))));
+
+        Assert.DoesNotContain("The Chain", ReadPlaylist("Followed"), StringComparison.Ordinal);
+
+        Guid band;
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            band = (await db.Artists.SingleAsync(Token)).Id.Value;
+        }
+
+        using var followed = await client.PostAsJsonAsync(
+            new Uri($"/api/catalogue/artists/{band}/follow", UriKind.Relative),
+            new { follow = true },
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, followed.StatusCode);
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!ReadPlaylist("Followed").Contains("The Chain", StringComparison.Ordinal) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50, Token);
+        }
+
+        Assert.Contains($"../{Lossless}\n", ReadPlaylist("Followed"), StringComparison.Ordinal);
+    }
+
     /// <summary>The scan never takes the gate, so it asks for the refresh itself.</summary>
     [Fact]
     public async Task AScanRewritesTheSmartPlaylists()
