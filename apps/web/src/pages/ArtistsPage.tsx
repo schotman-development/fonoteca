@@ -254,7 +254,11 @@ export function ArtistsPage() {
           */
           <CatalogueGrid aria-label="Artists">
             {state.data.items.map((artist) => (
-              <ArtistCard key={artist.id} artist={artist} />
+              <ArtistCard
+                key={artist.id}
+                artist={artist}
+                counting={sort === 'albums' ? 'albums' : 'songs'}
+              />
             ))}
           </CatalogueGrid>
         )
@@ -380,7 +384,14 @@ function Empty({
  * what the grid sizes its columns by, and dropping it would silently give the
  * whole page the album width.
  */
-function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
+function ArtistCard({
+  artist,
+  counting = 'songs',
+}: {
+  readonly artist: ArtistSummary
+  /** What the subtitle counts: whichever the list beside it is ordered by. */
+  readonly counting?: 'songs' | 'albums'
+}) {
   const image = artistImageUrl(artist)
 
   return (
@@ -407,7 +418,11 @@ function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
         so anything sharing it with the count is shown as a fragment or not
         at all.
       */
-      subtitle={`${artist.trackCount.toLocaleString()} tracks`}
+      subtitle={
+        counting === 'albums' && artist.albumCount != null
+          ? count(artist.albumCount, 'album')
+          : count(artist.songCount, 'song')
+      }
       meta={
         <>
           {/*
@@ -469,4 +484,8 @@ function ArtistCard({ artist }: { readonly artist: ArtistSummary }) {
       )}
     />
   )
+}
+
+function count(n: number, unit: string) {
+  return `${n.toLocaleString()} ${unit}${n === 1 ? '' : 's'}`
 }

@@ -303,8 +303,9 @@ public static partial class CatalogueEndpoints
             .WithName("GetArtists")
             .WithSummary("Album artists in the library, or everyone credited on one.")
             .WithDescription(
-                "Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep "
-                + "the alphabetical order. `query` filters on the artist's name, case-insensitively, "
+                "Ordered by sort name, by `sort=tracks` for the most songs first (a work's "
+                + "movements count once), or by `sort=albums` for the most held albums billed to "
+                + "them, songs breaking a tie — other ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, "
                 + "anywhere in the string. By default the list is the artists a held album is billed "
                 + "to: the album's own credit line, collaborators included, or its editions' where "
                 + "the album has none stored. "
@@ -653,12 +654,13 @@ public static partial class CatalogueEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var shelf = everyone || following
-            ? null
-            : await BilledArtistsAsync(db, cancellationToken).ConfigureAwait(false);
+        var albums = await BilledAlbumsAsync(db, cancellationToken).ConfigureAwait(false);
+        var shelf = everyone || following ? null : albums.Keys.ToHashSet();
+        var pieces = await PiecesAsync(db, cancellationToken).ConfigureAwait(false);
 
         var withTracks = named
             .Select(a => (Artist: a, Recordings: theirs.GetValueOrDefault(a.Id) ?? []))
+            .Select(row => (row.Artist, row.Recordings, Songs: Songs.Count(row.Recordings, pieces)))
             // A followed artist survives both cuts below, and has to survive
             // both. An artist with no recordings is exactly what following
             // somebody the library holds nothing by produces, and the album
@@ -680,21 +682,27 @@ public static partial class CatalogueEndpoints
             .ToList();
 
         // Sorted here rather than in SQL because the list is already in memory:
-        // the track count is not a column, it is the size of the recording set
+        // the song count is not a column, it is worked out from the recording set
         // `RecordingsByArtistAsync` built, so PostgreSQL has nothing to order by.
         //
         // `OrderByDescending` is stable in LINQ to Objects, so artists sharing a
         // count keep the sort-name order the collation above put them in — which
         // is the only reason this can drop the ICU ordering and still be
-        // alphabetical within a tie.
-        var ordered = sort == "tracks"
-            ? withTracks.OrderByDescending(row => row.Recordings.Count).ToList()
-            : withTracks;
+        // alphabetical within a tie. Albums break their ties on songs first, so
+        // one large box set does not outrank a shelf of records.
+        var ordered = sort switch
+        {
+            "tracks" => withTracks.OrderByDescending(row => row.Songs).ToList(),
+            "albums" => [.. withTracks
+                .OrderByDescending(row => albums.GetValueOrDefault(row.Artist.Id))
+                .ThenByDescending(row => row.Songs)],
+            _ => withTracks,
+        };
 
         var page = ordered
             .Skip(from)
             .Take(wanted)
-            .Select(row => Describe(row.Artist, row.Recordings.Count))
+            .Select(row => Describe(row.Artist, row.Songs, albums.GetValueOrDefault(row.Artist.Id)))
             .ToList();
 
         // The counter is about what the library holds, so a followed artist is
@@ -1103,7 +1111,7 @@ public static partial class CatalogueEndpoints
             [.. ArtistLinks.Read(artist.LinksJson).Select(link => new ArtistLink(link.Type, link.Url))]);
 
         return TypedResults.Ok(new ArtistDetailResponse(
-            Describe(artist, rows.Count),
+            Describe(artist, Songs.Count(theirs, await PiecesAsync(db, cancellationToken).ConfigureAwait(false))),
             rows,
             new ArtistDiscography(
                 groups.Count,
@@ -4673,33 +4681,58 @@ public static partial class CatalogueEndpoints
     /// held track of an album, and the artists of files no album was attributed
     /// to are on <c>scope=all</c> and on their own pages, not on the shelf.
     /// </remarks>
-    internal static async Task<HashSet<ArtistId>> BilledArtistsAsync(
+    /// <returns>Each billed artist and how many held albums they are billed on.</returns>
+    internal static async Task<Dictionary<ArtistId, int>> BilledAlbumsAsync(
         FonotecaDbContext db,
         CancellationToken cancellationToken)
     {
-        var billed = await db.ArtistCredits
+        var own = await db.ArtistCredits
             .AsNoTracking()
-            .Where(credit => (credit.ReleaseGroupId != null
-                    && db.MediaFiles.Any(file => file.ReleaseGroupId == credit.ReleaseGroupId))
-                || (credit.ReleaseId != null
-                    && db.Releases.Any(release => release.Id == credit.ReleaseId
-                        && release.ReleaseGroup!.Files.Any()
-                        // Through the navigation, not `own.ReleaseGroupId ==
-                        // release.ReleaseGroupId`: both are nullable, and EF's
-                        // null compensation on that comparison cost the index
-                        // and three seconds.
-                        && !release.ReleaseGroup.Credits.Any())))
-            .Select(credit => credit.ArtistId)
-            .Distinct()
+            .Where(credit => credit.ReleaseGroupId != null
+                && db.MediaFiles.Any(file => file.ReleaseGroupId == credit.ReleaseGroupId))
+            .Select(credit => new { credit.ArtistId, Album = credit.ReleaseGroupId!.Value })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return [.. billed];
+        var editions = await db.ArtistCredits
+            .AsNoTracking()
+            .Where(credit => credit.ReleaseId != null)
+            .Join(
+                db.Releases.Where(release => release.ReleaseGroup!.Files.Any()
+                    // Through the navigation, not `own.ReleaseGroupId ==
+                    // release.ReleaseGroupId`: both are nullable, and EF's null
+                    // compensation on that comparison cost the index and three
+                    // seconds.
+                    && !release.ReleaseGroup.Credits.Any()),
+                credit => credit.ReleaseId!.Value,
+                release => release.Id,
+                (credit, release) => new { credit.ArtistId, Album = release.ReleaseGroupId!.Value })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return own.Concat(editions)
+            .Distinct()
+            .GroupBy(pair => pair.ArtistId)
+            .ToDictionary(albums => albums.Key, albums => albums.Count());
     }
 
     /// <summary>
+    /// The larger work each held recording of a movement is part of, which is
+    /// what <see cref="Songs"/> counts it as.
+    /// </summary>
+    private static async Task<Dictionary<RecordingId, WorkId>> PiecesAsync(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken) =>
+        await db.Recordings
+            .AsNoTracking()
+            .Where(recording => recording.Files.Any() && recording.Work!.ParentId != null)
+            .Select(recording => new { recording.Id, Piece = recording.Work!.ParentId!.Value })
+            .ToDictionaryAsync(row => row.Id, row => row.Piece, cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <summary>
     /// Who the records in the library are by, read more widely than the
-    /// shelf's <see cref="BilledArtistsAsync"/> — the set worth spending a
+    /// shelf's <see cref="BilledAlbumsAsync"/> — the set worth spending a
     /// rationed press photograph on.
     /// </summary>
     /// <remarks>
@@ -5010,7 +5043,7 @@ public static partial class CatalogueEndpoints
     /// about how the column happens to be stored.
     /// </remarks>
     /// <remarks>A person's corrections are laid over the providers' answers here — see <c>PersonEdits</c>.</remarks>
-    private static ArtistSummary Describe(Artist artist, int trackCount)
+    private static ArtistSummary Describe(Artist artist, int songCount, int? albumCount = null)
     {
         var edits = PersonEdits.Read(artist.EditsJson);
         string? Field(string field, string? provider) => PersonEdits.Apply(edits, field, provider);
@@ -5023,7 +5056,8 @@ public static partial class CatalogueEndpoints
             Field("sortName", artist.SortName),
             Field("disambiguation", artist.Disambiguation),
             Field("type", artist.Type),
-            trackCount,
+            songCount,
+            albumCount,
             Field("portrait", artist.PortraitUrl),
             Field("country", artist.Country),
             Field("gender", artist.Gender),
@@ -5049,7 +5083,8 @@ public static partial class CatalogueEndpoints
 public sealed record ArtistListResponse(int Total, int InLibrary, IReadOnlyList<ArtistSummary> Items);
 
 /// <param name="Type">Person, Group, Orchestra, Choir. Null when MusicBrainz does not say.</param>
-/// <param name="TrackCount">Recordings in the library this artist is credited on.</param>
+/// <param name="SongCount">Songs in the library this artist is credited on, a work's movements counting once (<see cref="Songs"/>).</param>
+/// <param name="AlbumCount">Held albums billed to this artist; null where the response did not count them.</param>
 /// <param name="Cover">
 /// A release of theirs to draw as their picture, by MusicBrainz id — the album
 /// most of their tracks were filed under. Null when nothing of theirs has been
@@ -5082,7 +5117,8 @@ public sealed record ArtistSummary(
     string? SortName,
     string? Disambiguation,
     string? Type,
-    int TrackCount,
+    int SongCount,
+    int? AlbumCount,
 
     /// <summary>
     /// A picture of the artist, on whichever provider's CDN answered.

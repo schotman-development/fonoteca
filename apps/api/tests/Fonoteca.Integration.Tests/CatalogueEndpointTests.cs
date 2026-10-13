@@ -118,7 +118,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         var mozart = body.Items.Single(a => a.Id == _seed.Mozart);
 
         // Both movements, reached through the work rather than a credit line.
-        Assert.Equal(2, mozart.TrackCount);
+        Assert.Equal(2, mozart.SongCount);
         Assert.Equal("Person", mozart.Type);
     }
 
@@ -194,8 +194,8 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.NotNull(everyone);
 
         Assert.Equal(
-            everyone.Items.Single(a => a.Id == _seed.Karajan).TrackCount,
-            shelf.Items.Single(a => a.Id == _seed.Karajan).TrackCount);
+            everyone.Items.Single(a => a.Id == _seed.Karajan).SongCount,
+            shelf.Items.Single(a => a.Id == _seed.Karajan).SongCount);
     }
 
     /// <summary>
@@ -390,7 +390,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         // Nothing of theirs is held, and the count says so rather than being
         // suppressed: the row is honest about being empty.
-        Assert.Equal(0, orphan.TrackCount);
+        Assert.Equal(0, orphan.SongCount);
 
         var following = await client.GetFromJsonAsync<ArtistListResponse>(
             new Uri("/api/catalogue/artists?scope=following", UriKind.Relative), Token);
@@ -518,14 +518,14 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
 
         Assert.NotNull(shelf);
         Assert.DoesNotContain(shelf.Items, a => a.Id == _seed.Solti);
-        Assert.Equal(0, shelf.Items.Single(a => a.Id == _seed.Wagner).TrackCount);
+        Assert.Equal(0, shelf.Items.Single(a => a.Id == _seed.Wagner).SongCount);
         Assert.DoesNotContain(shelf.Items, a => a.Id == _seed.Mozart);
 
         var everyone = await client.GetFromJsonAsync<ArtistListResponse>(
             new Uri("/api/catalogue/artists?scope=all", UriKind.Relative), Token);
 
         Assert.NotNull(everyone);
-        Assert.Equal(3, everyone.Items.Single(a => a.Id == _seed.Solti).TrackCount);
+        Assert.Equal(3, everyone.Items.Single(a => a.Id == _seed.Solti).SongCount);
     }
 
     /// <summary>
@@ -807,7 +807,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(JsonValueKind.Number, list.RootElement.GetProperty("total").ValueKind);
         Assert.Equal(
             JsonValueKind.Number,
-            list.RootElement.GetProperty("items")[0].GetProperty("trackCount").ValueKind);
+            list.RootElement.GetProperty("items")[0].GetProperty("songCount").ValueKind);
 
         using var detail = await client.GetAsync(
             new Uri($"/api/catalogue/artists/{_seed.Hart}", UriKind.Relative), Token);
@@ -846,8 +846,9 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         {
             var detail = await ArtistAsync(client, summary.Id);
 
-            Assert.Equal(summary.TrackCount, detail.Tracks.Count);
-            Assert.Equal(summary.TrackCount, detail.Artist.TrackCount);
+            // Songs, so a work's movements are one; the page lists each track.
+            Assert.Equal(summary.SongCount, detail.Artist.SongCount);
+            Assert.InRange(detail.Artist.SongCount, Math.Min(1, detail.Tracks.Count), detail.Tracks.Count);
         }
     }
 
@@ -1133,7 +1134,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             ],
             body.Items.Select(a => a.SortName));
 
-        Assert.Equal([4, 3, 2, 2, 2, 1, 1], body.Items.Select(a => a.TrackCount));
+        Assert.Equal([4, 3, 2, 2, 2, 1, 1], body.Items.Select(a => a.SongCount));
 
         // An order nobody asked for is the default here too.
         var nonsense = await client.GetFromJsonAsync<ArtistListResponse>(

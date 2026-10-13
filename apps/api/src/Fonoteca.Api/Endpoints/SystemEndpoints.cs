@@ -86,7 +86,7 @@ public static class SystemEndpoints
                 // The Artists screen's counter: every billed artist is listed there
                 // and counted, so the set's size is that number without building
                 // the list.
-                Artists: (await CatalogueEndpoints.BilledArtistsAsync(db, cancellationToken)
+                Artists: (await CatalogueEndpoints.BilledAlbumsAsync(db, cancellationToken)
                     .ConfigureAwait(false)).Count));
     }
 }

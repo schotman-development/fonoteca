@@ -19,17 +19,21 @@
  */
 
 /**
- * The two orders worth having for artists, and the reason there is not a third.
+ * The orders worth having for artists, and the reason there is not a fourth.
  *
  * Alphabetical is how you find somebody you already have in mind; by holdings
  * is how you find out who this library is actually *about*, which on a
- * collection assembled over years is rarely who you would guess. Everything
- * else — by type, by year of first release — is a filter wearing a sort's
- * clothes, and neither is a column here.
+ * collection assembled over years is rarely who you would guess. Holdings two
+ * ways, because songs alone let one large box set outrank a shelf of records.
+ * Everything else — by type, by year of first release — is a filter wearing a
+ * sort's clothes, and neither is a column here.
+ *
+ * `tracks` keeps its name in the address bar and the API; it counts songs.
  */
 export const ARTIST_SORTS = [
   ['name', 'Name'],
-  ['tracks', 'Most tracks'],
+  ['tracks', 'Most songs'],
+  ['albums', 'Most albums'],
 ] as const
 
 export type ArtistSort = (typeof ARTIST_SORTS)[number][0]

@@ -346,7 +346,7 @@ export interface paths {
         };
         /**
          * Album artists in the library, or everyone credited on one.
-         * @description Ordered by sort name, or by `sort=tracks` for the most-held first — ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms.
+         * @description Ordered by sort name, by `sort=tracks` for the most songs first (a work's movements count once), or by `sort=albums` for the most held albums billed to them, songs breaking a tie — other ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms.
          */
         get: operations["GetArtists"];
         put?: never;
@@ -1773,7 +1773,9 @@ export interface components {
             disambiguation: null | string;
             type: null | string;
             /** Format: int32 */
-            trackCount: number;
+            songCount: number;
+            /** Format: int32 */
+            albumCount: null | number;
             portrait: null | string;
             country: null | string;
             gender: null | string;

@@ -147,7 +147,8 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
     [McpServerTool(Name = "list_artists", ReadOnly = true)]
     [Description(
         "Artists in the library, alphabetically. `query` matches anywhere in the name, "
-        + "case-insensitively. `sort`: omit for alphabetical, `tracks` for most-held first. `scope`: "
+        + "case-insensitively. `sort`: omit for alphabetical, `tracks` for most songs first, "
+        + "`albums` for most albums first. `scope`: "
         + "omit for the artists albums are billed to, `all` for everyone credited — composers, "
         + "conductors, guests.")]
     public async Task<string> ListArtists(
