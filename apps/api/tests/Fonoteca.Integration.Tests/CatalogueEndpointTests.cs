@@ -1536,6 +1536,27 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(1, mozart.SongCount);
     }
 
+    [Fact]
+    public async Task TheHomePageCountsComposersAndCompositionsAsTheirPagesDo()
+    {
+        using var client = _factory!.CreateClient();
+
+        var overview = await client.GetFromJsonAsync<LibraryOverviewResponse>(
+            new Uri("/api/catalogue/overview", UriKind.Relative), Token);
+
+        var composers = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/composers", UriKind.Relative), Token);
+
+        var compositions = await client.GetFromJsonAsync<CompositionListResponse>(
+            new Uri("/api/catalogue/compositions", UriKind.Relative), Token);
+
+        // Mozart, and his symphony however many tracks of it are held.
+        Assert.Equal(1, overview!.Composers);
+        Assert.Equal(composers!.Total, overview.Composers);
+        Assert.Equal(1, overview.Compositions);
+        Assert.Equal(compositions!.Total, overview.Compositions);
+    }
+
     private static async Task<AlbumDetailResponse> AlbumAsync(HttpClient client, Guid id)
     {
         var body = await client.GetFromJsonAsync<AlbumDetailResponse>(

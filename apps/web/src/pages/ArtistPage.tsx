@@ -1037,7 +1037,7 @@ function MissingRecords({
         // run yet, and saying which of the three states this is remains the
         // whole content here.
         <Text size="sm" tone="tertiary">
-          Nothing listed yet — run the enrichment pass from Foundation to fetch what they released.
+          Nothing listed yet — run the enrichment pass from Settings to fetch what they released.
         </Text>
       ) : discography.missing.length === 0 ? (
         <Text size="sm" tone="tertiary">

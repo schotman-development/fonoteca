@@ -369,7 +369,7 @@ function Empty({
       </Text>
       <Text size="sm" tone="tertiary" block>
         Artists appear once the enrichment pass has asked MusicBrainz who made the identified files.
-        Run it from <Link to="/">Foundation</Link>.
+        Run it from <Link to="/settings/status">Settings</Link>.
       </Text>
     </Stack>
   )

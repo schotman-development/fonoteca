@@ -30,7 +30,7 @@ export function DashboardPage() {
     <Stack direction="column" gap={24}>
       <Stack direction="column" gap={4}>
         <Text size="xl" weight="semibold" block>
-          Foundation
+          Status
         </Text>
         <Text tone="secondary" block>
           Scan the library, identify what is in it, then ask MusicBrainz who made it. Everything

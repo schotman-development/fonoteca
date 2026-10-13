@@ -3,7 +3,7 @@ import { Link, Outlet } from '@tanstack/react-router'
 
 import styles from './AppShell.module.css'
 import { useAppCommands } from './commands.ts'
-import { NAV_ITEMS } from './navigation.ts'
+import { NAV_SECTIONS } from './navigation.ts'
 
 /**
  * The root layout: a navigation rail, a top bar, the current route, and the
@@ -41,19 +41,24 @@ export function AppShell() {
             location: the router already knows, and asking it twice is how the
             marker ends up on the wrong link after a redirect.
 
-            The links come from NAV_ITEMS, which the command bar reads too — see
+            The links come from NAV_SECTIONS, which the command bar reads too — see
             the note there on why the list is not written out twice.
           */}
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              className={styles.navLink}
-              activeProps={{ 'data-current': 'page', 'aria-current': 'page' }}
-              activeOptions={{ exact: item.exact }}
-            >
-              {item.label}
-            </Link>
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.label} className={styles.navSection}>
+              <h2 className={styles.navSectionLabel}>{section.label}</h2>
+              {section.items.map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={styles.navLink}
+                  activeProps={{ 'data-current': 'page', 'aria-current': 'page' }}
+                  activeOptions={{ exact: item.exact }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
           ))}
         </nav>
       </header>

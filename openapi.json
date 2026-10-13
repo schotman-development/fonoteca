@@ -3462,6 +3462,27 @@
         }
       }
     },
+    "/api/catalogue/overview": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "The library in totals: songs, composers, compositions, quality, formats, decades and genres.",
+        "operationId": "GetLibraryOverview",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryOverviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/tracks": {
       "get": {
         "tags": [
@@ -6416,6 +6437,23 @@
           }
         }
       },
+      "DecadeCount": {
+        "required": [
+          "decade",
+          "count"
+        ],
+        "type": "object",
+        "properties": {
+          "decade": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "DiscographyRow": {
         "required": [
           "id",
@@ -7961,6 +7999,61 @@
           }
         }
       },
+      "LibraryOverviewResponse": {
+        "required": [
+          "songs",
+          "composers",
+          "compositions",
+          "quality",
+          "formats",
+          "decades",
+          "undatedAlbums",
+          "genres"
+        ],
+        "type": "object",
+        "properties": {
+          "songs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "composers": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "compositions": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "quality": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OverviewCount"
+            }
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OverviewCount"
+            }
+          },
+          "decades": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecadeCount"
+            }
+          },
+          "undatedAlbums": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OverviewCount"
+            }
+          }
+        }
+      },
       "LibraryScanStatusResponse": {
         "required": [
           "running",
@@ -8360,6 +8453,22 @@
             "type": "string"
           },
           "files": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "OverviewCount": {
+        "required": [
+          "name",
+          "count"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "count": {
             "type": "integer",
             "format": "int32"
           }

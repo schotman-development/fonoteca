@@ -65,7 +65,25 @@
 .nav {
   display: flex;
   flex-direction: column;
+  gap: var(--space-20);
+}
+
+.navSection {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
+}
+
+/* Inset by the link's padding and marker, so the label lines up with the link
+   text under it. */
+.navSectionLabel {
+  margin: 0;
+  padding: 0 calc(var(--space-8) + var(--border-width-thick)) var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
 }
 
 /*
@@ -216,6 +234,16 @@
     flex-direction: row;
     gap: var(--space-4);
     margin-inline-end: auto;
+  }
+
+  .navSection {
+    flex-direction: row;
+    gap: var(--space-4);
+  }
+
+  /* No room for headings in one row. */
+  .navSectionLabel {
+    display: none;
   }
 
   .navLink {

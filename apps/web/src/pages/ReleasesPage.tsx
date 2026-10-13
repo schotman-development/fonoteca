@@ -254,13 +254,13 @@ function Empty({ filtered }: { readonly filtered: boolean }) {
       </Text>
       <Text size="sm" tone="tertiary" block>
         Albums appear once the attribution pass has worked out which release each file came from.
-        Run it from <Link to="/">Foundation</Link>.
+        Run it from <Link to="/settings/status">Settings</Link>.
       </Text>
     </Stack>
   )
 }
 
-function AlbumCard({ album }: { readonly album: AlbumSummary }) {
+export function AlbumCard({ album }: { readonly album: AlbumSummary }) {
   const certainty = CERTAINTY[album.certainty]
 
   return (

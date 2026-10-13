@@ -1,0 +1,84 @@
+/* The headings exist for semantics; their type comes from the Text inside. */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: var(--space-12);
+  margin: 0;
+}
+
+/* The value reads first and the label under it, while the markup keeps
+   `dt` before `dd`. Packed to the top, so a label that wraps does not lift
+   its value out of line with the others. */
+.tile {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+.value {
+  margin: 0;
+}
+
+.breakdowns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
+  gap: var(--space-16);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+/* One set of columns for every row, so the labels take only the width the
+   longest needs and the bars line up. */
+.bars {
+  display: grid;
+  grid-template-columns: fit-content(11rem) 1fr auto;
+  gap: var(--space-6) var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bar {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  justify-items: start;
+}
+
+.bar > :last-child {
+  justify-self: end;
+}
+
+.track {
+  justify-self: stretch;
+  block-size: 8px;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-inset);
+}
+
+.fill {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background-color: var(--color-accent-solid);
+}

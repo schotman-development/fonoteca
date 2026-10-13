@@ -12,6 +12,7 @@
 export type NavItem = {
   readonly to:
     | '/'
+    | '/settings/status'
     | '/library'
     | '/library/albums'
     | '/library/tracks'
@@ -38,55 +39,89 @@ export type NavItem = {
   readonly keywords: readonly string[]
 }
 
-export const NAV_ITEMS: readonly NavItem[] = [
-  { to: '/', label: 'Foundation', exact: true, keywords: ['dashboard', 'scan', 'health'] },
-  { to: '/library', label: 'Artists', exact: true, keywords: ['library', 'people', 'performers'] },
-  { to: '/library/albums', label: 'Albums', exact: false, keywords: ['releases', 'catalogue'] },
+/**
+ * The rail's headings. Browsing reads the library, its folders included;
+ * management changes it — answers questions, spends money.
+ */
+export type NavSection = {
+  readonly label: string
+  readonly items: readonly NavItem[]
+}
+
+export const NAV_SECTIONS: readonly NavSection[] = [
   {
-    to: '/library/tracks',
-    label: 'Tracks',
-    exact: false,
-    keywords: ['songs', 'recordings', 'play'],
+    label: 'General',
+    items: [
+      { to: '/', label: 'Home', exact: true, keywords: ['home', 'overview', 'stats', 'counts'] },
+      {
+        to: '/settings/status',
+        label: 'Settings',
+        exact: false,
+        keywords: ['status', 'foundation', 'dashboard', 'scan', 'passes', 'health'],
+      },
+    ],
   },
   {
-    to: '/library/composers',
-    label: 'Composers',
-    exact: false,
-    keywords: ['writers', 'songwriters', 'lyricists'],
+    label: 'Library',
+    items: [
+      {
+        to: '/library',
+        label: 'Artists',
+        exact: true,
+        keywords: ['library', 'people', 'performers'],
+      },
+      { to: '/library/albums', label: 'Albums', exact: false, keywords: ['releases', 'catalogue'] },
+      {
+        to: '/library/tracks',
+        label: 'Tracks',
+        exact: false,
+        keywords: ['songs', 'recordings', 'play'],
+      },
+      {
+        to: '/library/composers',
+        label: 'Composers',
+        exact: false,
+        keywords: ['writers', 'songwriters', 'lyricists'],
+      },
+      {
+        to: '/library/compositions',
+        label: 'Compositions',
+        exact: false,
+        keywords: ['works', 'pieces', 'standards', 'covers'],
+      },
+      // The disk, rather than the catalogue: where somebody goes when a screen
+      // above is wrong about something — a duplicate folder, a stray rip.
+      {
+        to: '/files',
+        label: 'Files',
+        exact: false,
+        keywords: ['files', 'folders', 'disk', 'upload', 'delete', 'trash', 'rename'],
+      },
+    ],
   },
   {
-    to: '/library/compositions',
-    label: 'Compositions',
-    exact: false,
-    keywords: ['works', 'pieces', 'standards', 'covers'],
-  },
-  // Not exact, though nothing sits below it today — a question opens in a
-  // dialog rather than at a path of its own. Left as it is because the rail
-  // behaves identically either way here, and the next screen under /identify
-  // would otherwise unhighlight the section it belongs to.
-  {
-    to: '/library/matching',
-    label: 'Identify',
-    exact: false,
-    keywords: ['matching', 'questions', 'unmatched'],
-  },
-  // The disk, rather than the catalogue. It sits after the catalogue
-  // screens because it is where somebody goes when one of them is wrong about
-  // something — a duplicate folder, a stray rip — and before Acquire because
-  // nothing on it spends money.
-  {
-    to: '/files',
-    label: 'Files',
-    exact: false,
-    keywords: ['files', 'folders', 'disk', 'upload', 'delete', 'trash', 'rename'],
-  },
-  // Last, and separate from the screens above it in more than order: those
-  // browse and correct what is already here, this one spends money on something
-  // that is not.
-  {
-    to: '/acquire',
-    label: 'Acquire',
-    exact: true,
-    keywords: ['qobuz', 'download', 'buy', 'purchase', 'acquire'],
+    label: 'Management',
+    items: [
+      // Not exact, though nothing sits below it today — a question opens in a
+      // dialog rather than at a path of its own. Left as it is because the rail
+      // behaves identically either way here, and the next screen under /identify
+      // would otherwise unhighlight the section it belongs to.
+      {
+        to: '/library/matching',
+        label: 'Identify',
+        exact: false,
+        keywords: ['matching', 'questions', 'unmatched'],
+      },
+      // Last, and separate from Identify in more than order: that one corrects
+      // what is already here, this one spends money on something that is not.
+      {
+        to: '/acquire',
+        label: 'Acquire',
+        exact: true,
+        keywords: ['qobuz', 'download', 'buy', 'purchase', 'acquire'],
+      },
+    ],
   },
 ]
+
+export const NAV_ITEMS: readonly NavItem[] = NAV_SECTIONS.flatMap((section) => section.items)

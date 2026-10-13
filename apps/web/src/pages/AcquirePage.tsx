@@ -825,7 +825,7 @@ function Missing({
           {unbrowsedArtists > 0
             ? ` ${unbrowsedArtists.toLocaleString()} ${
                 unbrowsedArtists === 1 ? 'artist has' : 'artists have'
-              } not been browsed yet, so this count is incomplete — run the enrichment pass from Foundation.`
+              } not been browsed yet, so this count is incomplete — run the enrichment pass from Settings.`
             : ''}
         </Text>
       )
@@ -834,7 +834,7 @@ function Missing({
     return (
       <Text size="sm" tone="tertiary">
         {unbrowsedArtists > 0
-          ? `Nothing listed yet — run the enrichment pass from Foundation to fetch what ${
+          ? `Nothing listed yet — run the enrichment pass from Settings to fetch what ${
               unbrowsedArtists === followedArtists
                 ? 'they'
                 : `${unbrowsedArtists.toLocaleString()} of them`
@@ -865,7 +865,7 @@ function Missing({
           {unbrowsedArtists > 0
             ? ` ${unbrowsedArtists.toLocaleString()} ${
                 unbrowsedArtists === 1 ? 'artist has' : 'artists have'
-              } not been browsed yet — run the enrichment pass from Foundation.`
+              } not been browsed yet — run the enrichment pass from Settings.`
             : ''}
         </>
       }

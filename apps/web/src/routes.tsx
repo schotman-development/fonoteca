@@ -8,6 +8,7 @@ import { ComposersPage } from './pages/ComposersPage.tsx'
 import { CompositionsPage } from './pages/CompositionsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
+import { HomePage } from './pages/HomePage.tsx'
 import { IdentifyPage } from './pages/IdentifyPage.tsx'
 import {
   artistListSearch,
@@ -33,9 +34,15 @@ import { TracksPage } from './pages/TracksPage.tsx'
  */
 const rootRoute = createRootRoute({ component: AppShell })
 
-const dashboardRoute = createRoute({
+const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
+  component: HomePage,
+})
+
+const dashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings/status',
   component: DashboardPage,
 })
 
@@ -208,6 +215,7 @@ const acquireRoute = createRoute({
 })
 
 const routeTree = rootRoute.addChildren([
+  homeRoute,
   dashboardRoute,
   artistsRoute,
   artistRoute,
@@ -236,6 +244,7 @@ export {
   compositionsRoute,
   dashboardRoute,
   filesRoute,
+  homeRoute,
   matchingRoute,
   releaseRoute,
   releasesRoute,

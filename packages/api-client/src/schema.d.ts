@@ -1246,6 +1246,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The library in totals: songs, composers, compositions, quality, formats, decades and genres. */
+        get: operations["GetLibraryOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/tracks": {
         parameters: {
             query?: never;
@@ -2077,6 +2094,12 @@ export interface components {
             name: string;
             joinPhrase: null | string;
         };
+        DecadeCount: {
+            /** Format: int32 */
+            decade: number;
+            /** Format: int32 */
+            count: number;
+        };
         DiscographyRow: {
             /** Format: uuid */
             id: string;
@@ -2506,6 +2529,20 @@ export interface components {
             trackCount: number;
             formats: null | string;
         };
+        LibraryOverviewResponse: {
+            /** Format: int32 */
+            songs: number;
+            /** Format: int32 */
+            composers: number;
+            /** Format: int32 */
+            compositions: number;
+            quality: components["schemas"]["OverviewCount"][];
+            formats: components["schemas"]["OverviewCount"][];
+            decades: components["schemas"]["DecadeCount"][];
+            /** Format: int32 */
+            undatedAlbums: number;
+            genres: components["schemas"]["OverviewCount"][];
+        };
         LibraryScanStatusResponse: {
             running: boolean;
             lastCompleted: null | components["schemas"]["LibraryScanSummary"];
@@ -2610,6 +2647,11 @@ export interface components {
             outcome: string;
             /** Format: int32 */
             files: number;
+        };
+        OverviewCount: {
+            name: string;
+            /** Format: int32 */
+            count: number;
         };
         ProbeCoverage: {
             /** Format: int32 */
@@ -5970,6 +6012,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryOverviewResponse"];
                 };
             };
         };
