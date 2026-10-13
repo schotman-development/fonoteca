@@ -125,7 +125,7 @@ export function fileSize(bytes: number | null | undefined): string | null {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null
   if (bytes < 1000) return `${bytes} B`
 
-  const units = ['kB', 'MB', 'GB']
+  const units = ['kB', 'MB', 'GB', 'TB']
   let value = bytes / 1000
   let unit = 0
 
