@@ -301,6 +301,10 @@ public sealed class MusicBrainzCatchUp(
                     .ExecuteUpdateAsync(update => update.SetProperty(track => track.RecordingId, into), cancellationToken)
                     .ConfigureAwait(false);
 
+                await PlaylistFiles
+                    .FollowAsync(db, new Dictionary<RecordingId, RecordingId> { [recording] = into }, cancellationToken)
+                    .ConfigureAwait(false);
+
                 folded.Add(recording);
             }
 
@@ -343,6 +347,7 @@ public sealed class MusicBrainzCatchUp(
             .ConfigureAwait(false);
 
         var moved = new List<Guid>();
+        var songs = new Dictionary<RecordingId, RecordingId>();
 
         foreach (var file in files)
         {
@@ -354,12 +359,16 @@ public sealed class MusicBrainzCatchUp(
                 continue;
             }
 
+            if (file.RecordingId is { } shops && shops != recording) songs.TryAdd(shops, recording);
+
             file.ReleaseId = written;
             file.ReleaseGroupId = group;
             file.TrackId = seat;
             file.RecordingId = recording;
             moved.Add(file.Id.Value);
         }
+
+        await PlaylistFiles.FollowAsync(db, songs, cancellationToken).ConfigureAwait(false);
 
         return (moved, files.Count - moved.Count);
     }

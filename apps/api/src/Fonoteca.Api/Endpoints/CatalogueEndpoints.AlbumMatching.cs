@@ -1279,6 +1279,18 @@ public static partial class CatalogueEndpoints
             row.ReleaseLookupUtc = null;
         }
 
+        // The shop's recordings are forgotten below; a playlist naming one
+        // moves with its file.
+        await PlaylistFiles
+            .FollowAsync(
+                db,
+                seats
+                    .Where(seat => seat.Row.RecordingId is { } shops && shops != seat.Recording)
+                    .DistinctBy(seat => seat.Row.RecordingId!.Value)
+                    .ToDictionary(seat => seat.Row.RecordingId!.Value, seat => seat.Recording),
+                cancellationToken)
+            .ConfigureAwait(false);
+
         foreach (var (row, recording) in seats)
         {
             row.RecordingId = recording;

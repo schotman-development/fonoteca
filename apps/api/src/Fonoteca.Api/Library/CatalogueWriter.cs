@@ -174,6 +174,11 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false));
 
+        // Before the row goes, or its set-null takes the entries with it.
+        await PlaylistFiles
+            .FollowAsync(db, new Dictionary<RecordingId, RecordingId> { [stale.Id] = survivor.Id }, cancellationToken)
+            .ConfigureAwait(false);
+
         db.Recordings.Remove(stale);
 
         var payload = JsonSerializer.Serialize(new

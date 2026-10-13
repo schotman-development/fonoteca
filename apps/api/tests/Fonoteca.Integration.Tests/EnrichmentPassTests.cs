@@ -502,6 +502,26 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
                 ReleaseDecidedUtc = decided,
             });
 
+            // A playlist entry with no copy named yet: only the merge itself can
+            // carry it, since no playlist write has run.
+            var playlist = new Playlist
+            {
+                Id = PlaylistId.New(),
+                Name = "Mix",
+                Path = "Playlists/Mix.m3u8",
+                CreatedUtc = DateTimeOffset.UtcNow,
+                ChangedUtc = DateTimeOffset.UtcNow,
+            };
+            playlist.Entries.Add(new PlaylistEntry
+            {
+                Id = Guid.CreateVersion7(),
+                PlaylistId = playlist.Id,
+                Position = 0,
+                RecordingId = old.Id,
+                Title = "Adagio molto",
+            });
+            seed.Playlists.Add(playlist);
+
             await seed.SaveChangesAsync(Token);
         }
 
@@ -518,6 +538,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
         var files = await db.MediaFiles.AsNoTracking().ToListAsync(Token);
         Assert.All(files, file => Assert.Equal(survivorRow, file.RecordingId));
+        Assert.Equal(survivorRow, (await db.PlaylistEntries.AsNoTracking().SingleAsync(Token)).RecordingId);
 
         // The track moved in place, so the seated file still sits on it.
         var moved = await db.Tracks.AsNoTracking().SingleAsync(Token);
