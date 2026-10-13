@@ -25,8 +25,41 @@ identical by path and inode.
    going on. A sync that only touches images, booklets, PDFs and motion videos
    is safe.
 4. Check that every stale or changed production inode also exists in the test
-   tree or `/mnt/vault/fonoteca-test/music-trash`. If one does not, it is the
-   only copy: stop and ask.
+   tree, `/mnt/vault/fonoteca-test/music-trash` or `music-replaced`. If one
+   does not, it is the only copy: stop and ask. A tag write leaves exactly
+   this, so compare the decoded audio
+   (`ffmpeg -v error -i f -map 0:a -f md5 -`) and tell the user whether only
+   the tags differ.
+5. Before asking, count what Aria would lose, read-only. Old ids are
+   `sha1(relative path)`. Count favourites from `GET /api/tracks?limit=100000`,
+   plays from `GET /api/plays/counts`, and entries from each
+   `GET /api/playlists/{id}/tracks`.
+
+## Re-linking Aria (when the user asks for it)
+
+Aria is `podman-compose@aria.service` on `admin@10.0.0.10`. Its database is
+`~/.local/share/containers/storage/volumes/aria-data/_data/aria.db`. There is
+no sqlite3 there, so use `podman unshare python3`, and open it with
+`?mode=ro` while you are only reading.
+
+1. After the file sync, `POST /api/scan` (synchronous) creates the new
+   tracks.
+2. Compare each album's `albumId` before and after. It is the folder plus the
+   ALBUM tag, so a tag write can change it. If the new id already holds a
+   better match, drop the old id's leftover rows rather than moving them.
+3. `podman stop aria`, then copy `aria.db` into `~/aria-relink-<date>/`.
+4. Re-key the rows that name a track id:
+   - `plays.trackId`
+   - `playlist_tracks.trackId`
+   - `tag_items` and `edits` where the kind is `track`
+   - `enrich_cache` where the kind is `track` or `lyrics` (insert or ignore,
+     then delete the old row)
+   - `tracks.addedAt`, restored from the old row
+   - `tracks.favourite`
+
+   Dry-run the script, then apply it.
+5. `podman unshare chown 65532:65532` the db files, then `podman start aria`,
+   and check `GET /api/plays/counts`.
 
 ## Apply
 
