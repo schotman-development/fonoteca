@@ -397,8 +397,9 @@ public sealed class FileManagerService(
 
             Log.FilesMoved(logger, source, target, rows);
 
-            // A static playlist is its file: a line naming what moved follows it.
-            await playlists.RepointAsync([new PlaylistMove(source, target)], cancellationToken).ConfigureAwait(false);
+            // A static playlist is its file: a line naming what moved follows
+            // it, whether or not the client is still waiting.
+            await playlists.RepointAsync([new PlaylistMove(source, target)], CancellationToken.None).ConfigureAwait(false);
 
             return new FileOperation(true, 1, rows, target, null);
         }

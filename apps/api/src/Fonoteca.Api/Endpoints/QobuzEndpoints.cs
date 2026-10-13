@@ -1242,7 +1242,7 @@ public static class QobuzEndpoints
         if (replacement.ArchivedTo is not null)
         {
             await acquiring.Playlists
-                .FollowFormatsAsync(filing?.Folder ?? replacement.DownloadedTo, cancellationToken)
+                .FollowFormatsAsync(filing?.Folder ?? replacement.DownloadedTo, CancellationToken.None)
                 .ConfigureAwait(false);
         }
 

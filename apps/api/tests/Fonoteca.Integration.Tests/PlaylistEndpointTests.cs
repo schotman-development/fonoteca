@@ -417,17 +417,21 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     [Fact]
     public async Task AnUpgradeCarriesALineToTheSameNameInAnotherFormat()
     {
-        WriteFile("Playlists/Mix.m3u8", $"#EXTM3U\n../{Lossy}\n../Fleetwood Mac/Rumours MP3/08 Two.mp3\n");
+        WriteFile(
+            "Playlists/Mix.m3u8",
+            $"#EXTM3U\n../{Lossy}\n../Fleetwood Mac/Rumours MP3/08 Two.mp3\n../Somebody/02 Gone.mp3\n");
 
         System.IO.File.Delete(Path.Combine(_root, Lossy));
         WriteFile("Fleetwood Mac/Rumours MP3/07 The Chain.flac", "audio");
         WriteFile("Fleetwood Mac/Rumours MP3/08 Two.flac", "audio");
         WriteFile("Fleetwood Mac/Rumours MP3/08 Two.m4a", "audio");
+        WriteFile("Somebody/02 Gone.flac", "audio");
 
         await _factory!.Services.GetRequiredService<PlaylistFiles>().FollowFormatsAsync("Fleetwood Mac/Rumours MP3", Token);
 
+        // Another folder's dead line is not the upgrade's, whatever sits beside it.
         Assert.Equal(
-            "#EXTM3U\n../Fleetwood Mac/Rumours MP3/07 The Chain.flac\n../Fleetwood Mac/Rumours MP3/08 Two.mp3\n",
+            "#EXTM3U\n../Fleetwood Mac/Rumours MP3/07 The Chain.flac\n../Fleetwood Mac/Rumours MP3/08 Two.mp3\n../Somebody/02 Gone.mp3\n",
             ReadPlaylist("Mix"));
     }
 
