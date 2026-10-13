@@ -10,11 +10,12 @@ import { albumArt } from './coverArt.ts'
 import { songsLine } from './playlists.ts'
 
 /**
- * Every playlist, as a shelf of covers.
+ * Every playlist, static and smart, as a shelf of covers.
  *
  * Each is an m3u in the library's Playlists folder, which is what makes it
  * reach Navidrome, Roon and the production copy; the page says so, because a
- * person editing one here should know where else it shows.
+ * person editing one here should know where else it shows, and that a static
+ * one edited there is edited here too.
  */
 export function PlaylistsPage() {
   const state = useApiQuery(() => api.get('/api/catalogue/playlists'), [])
@@ -28,13 +29,17 @@ export function PlaylistsPage() {
           </Text>
         </h1>
         <Text tone="secondary" block>
-          Lists of songs you put together. Each is saved as an m3u in the library's Playlists
-          folder, so Navidrome, Roon and phone apps read it too. It is rewritten after every tag
-          write, which is what renames the library's folders, and every time you edit it.
+          Each is an m3u in the library's Playlists folder, so Navidrome, Roon and phone apps read
+          it too. A playlist is its file: one edited by another program shows here as it now is, and
+          when Fonoteca renames or moves a song's file the playlist follows it. A smart playlist is
+          rules instead, and Fonoteca rewrites its file whenever the library changes.
         </Text>
       </Stack>
 
-      <NewPlaylist />
+      <Stack gap={16} align="end" wrap>
+        <NewPlaylist />
+        <NewSmartPlaylist />
+      </Stack>
 
       <div role="status" aria-live="polite" aria-busy={state.status === 'loading'}>
         {state.status === 'loading' ? <Text tone="tertiary">Reading the playlists…</Text> : null}
@@ -66,31 +71,56 @@ export function PlaylistsPage() {
 
             return (
               <CatalogueCard
-                key={playlist.id}
+                key={`${playlist.kind}:${playlist.id}`}
                 variant="album"
                 title={playlist.name}
                 subtitle={songsLine(playlist.songs, playlist.songs, playlist.duration)}
                 meta={
-                  playlist.held < playlist.songs ? (
+                  playlist.kind === 'Smart' ? (
+                    <Badge size="sm">Smart</Badge>
+                  ) : playlist.held < playlist.songs ? (
                     <Badge tone="warning" size="sm">
                       {(playlist.songs - playlist.held).toLocaleString()} not in the library
                     </Badge>
                   ) : undefined
                 }
                 {...(cover != null ? { image: cover } : {})}
-                render={(props) => (
-                  <Link
-                    {...props}
-                    to="/library/playlists/$playlistId"
-                    params={{ playlistId: playlist.id }}
-                  />
-                )}
+                render={(props) =>
+                  playlist.kind === 'Smart' ? (
+                    <Link
+                      {...props}
+                      to="/library/playlists/smart/$playlistId"
+                      params={{ playlistId: playlist.id }}
+                    />
+                  ) : (
+                    <Link
+                      {...props}
+                      to="/library/playlists/$playlistId"
+                      params={{ playlistId: playlist.id }}
+                    />
+                  )
+                }
               />
             )
           })}
         </CatalogueGrid>
       ) : null}
     </Stack>
+  )
+}
+
+function NewSmartPlaylist() {
+  const navigate = useNavigate()
+
+  return (
+    <Button
+      variant="secondary"
+      onClick={() =>
+        void navigate({ to: '/library/playlists/smart/$playlistId', params: { playlistId: 'new' } })
+      }
+    >
+      New smart playlist
+    </Button>
   )
 }
 
@@ -106,7 +136,7 @@ function NewPlaylist() {
     setError(null)
     try {
       const playlist = await api.post('/api/catalogue/playlists', {
-        json: { name: name.trim(), recordingIds: null },
+        json: { name: name.trim(), recordingIds: null, fileIds: null },
       })
       await navigate({ to: '/library/playlists/$playlistId', params: { playlistId: playlist.id } })
     } catch (cause) {

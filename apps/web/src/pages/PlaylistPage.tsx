@@ -36,15 +36,19 @@ export function PlaylistPage() {
 }
 
 /**
- * One playlist: its songs in order, each playing the copy its m3u names.
+ * One static playlist: its file's entries in order, each playing the file it
+ * names.
  *
  * Every edit is saved as it is made and the server's answer replaces the page,
- * so what is shown is what the file now says. A song with no copy in the
- * library stays in its place, dimmed, and out of the file.
+ * so what is shown is what the file now says. An entry naming nothing the
+ * library holds stays in its place, dimmed, as the file has it. Entries are
+ * named by their place, so an edit carries the version of the file it was made
+ * against, and one made after another program changed the file is refused.
  */
 function Playlist({ id }: { readonly id: string }) {
+  const navigate = useNavigate()
   const state = useApiQuery(
-    () => api.get('/api/catalogue/playlists/{id}', { params: { path: { id } } }),
+    () => api.get('/api/catalogue/playlists/{file}', { params: { path: { file: id } } }),
     [id],
   )
   const [edited, setEdited] = useState<PlaylistResponse | null>(null)
@@ -53,19 +57,30 @@ function Playlist({ id }: { readonly id: string }) {
 
   const playlist = edited ?? (state.status === 'ready' ? state.data : null)
 
-  const save = async (change: { readonly name?: string; readonly entries?: readonly string[] }) => {
+  const save = async (change: { readonly name?: string; readonly entries?: readonly number[] }) => {
+    if (playlist == null) return false
     setBusy(true)
     setError(null)
     try {
-      setEdited(
-        await api.post('/api/catalogue/playlists/{id}', {
-          params: { path: { id } },
-          json: {
-            name: change.name ?? null,
-            entries: change.entries != null ? [...change.entries] : null,
-          },
-        }),
-      )
+      const saved = await api.post('/api/catalogue/playlists/{file}', {
+        params: { path: { file: id } },
+        json: {
+          name: change.name ?? null,
+          entries: change.entries != null ? [...change.entries] : null,
+          version: playlist.version,
+        },
+      })
+
+      // A rename is a new file, and so a new address.
+      if (saved.id !== id) {
+        await navigate({
+          to: '/library/playlists/$playlistId',
+          params: { playlistId: saved.id },
+          replace: true,
+        })
+      } else {
+        setEdited(saved)
+      }
       return true
     } catch (cause) {
       setError(describeError(cause))
@@ -91,7 +106,7 @@ function Playlist({ id }: { readonly id: string }) {
     )
   }
 
-  const order = playlist.entries.map((entry) => entry.id)
+  const order = playlist.entries.map((entry) => entry.index)
   const move = (index: number, offset: number) => {
     const next = moved(order, index, offset)
     if (next != null) void save({ entries: next })
@@ -100,6 +115,13 @@ function Playlist({ id }: { readonly id: string }) {
   return (
     <Stack direction="column" gap={20}>
       <Header playlist={playlist} busy={busy} onRename={(name) => save({ name })} />
+
+      {!playlist.editable ? (
+        <Text size="sm" tone="secondary">
+          This file is not UTF-8, so Fonoteca reads it and never writes it. Edit it where it was
+          made.
+        </Text>
+      ) : null}
 
       {error != null ? (
         <Text size="sm" tone="danger" role="alert">
@@ -129,14 +151,16 @@ function Playlist({ id }: { readonly id: string }) {
                   Length
                 </TableHeaderCell>
                 <TableHeaderCell className={styles.formatCol}>Format</TableHeaderCell>
-                <TableHeaderCell className={own.actionsCol}>
-                  <VisuallyHidden>Order</VisuallyHidden>
-                </TableHeaderCell>
+                {playlist.editable ? (
+                  <TableHeaderCell className={own.actionsCol}>
+                    <VisuallyHidden>Order</VisuallyHidden>
+                  </TableHeaderCell>
+                ) : null}
               </tr>
             </thead>
             <tbody>
               {playlist.entries.map((entry, index) => (
-                <tr key={entry.id}>
+                <tr key={entry.index}>
                   <TableCell numeric>
                     <Text size="sm" family="mono" tone="tertiary">
                       {index + 1}
@@ -149,39 +173,41 @@ function Playlist({ id }: { readonly id: string }) {
                     <Missing entry={entry} />
                   )}
 
-                  <TableCell>
-                    <Stack gap={2}>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Move ${entry.title} up`}
-                        disabled={busy || index === 0}
-                        onClick={() => move(index, -1)}
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Move ${entry.title} down`}
-                        disabled={busy || index === order.length - 1}
-                        onClick={() => move(index, 1)}
-                      >
-                        ↓
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Remove ${entry.title} from the playlist`}
-                        disabled={busy}
-                        onClick={() =>
-                          void save({ entries: order.filter((other) => other !== entry.id) })
-                        }
-                      >
-                        ✕
-                      </Button>
-                    </Stack>
-                  </TableCell>
+                  {playlist.editable ? (
+                    <TableCell>
+                      <Stack gap={2}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Move ${entry.title} up`}
+                          disabled={busy || index === 0}
+                          onClick={() => move(index, -1)}
+                        >
+                          ↑
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Move ${entry.title} down`}
+                          disabled={busy || index === order.length - 1}
+                          onClick={() => move(index, 1)}
+                        >
+                          ↓
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Remove ${entry.title} from the playlist`}
+                          disabled={busy}
+                          onClick={() =>
+                            void save({ entries: order.filter((other) => other !== entry.index) })
+                          }
+                        >
+                          ✕
+                        </Button>
+                      </Stack>
+                    </TableCell>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -192,8 +218,8 @@ function Playlist({ id }: { readonly id: string }) {
   )
 }
 
-/** A song the library holds no copy of: what it was, in the same columns, and why it does not play. */
-function Missing({ entry }: { readonly entry: PlaylistEntryRow }) {
+/** An entry naming nothing the library holds: what the file calls it, in the same columns, and why it does not play. */
+export function Missing({ entry }: { readonly entry: PlaylistEntryRow }) {
   return (
     <>
       <TableCell />
@@ -207,12 +233,9 @@ function Missing({ entry }: { readonly entry: PlaylistEntryRow }) {
           {entry.artist ?? '—'}
         </Text>
       </TableCell>
-      <TableCell
-        truncate
-        title="It stays on the playlist and out of the file until a copy returns."
-      >
+      <TableCell truncate title={entry.location}>
         <Text size="sm" tone="tertiary" truncate>
-          No copy in the library
+          Not in the library: {entry.location}
         </Text>
       </TableCell>
       <TableCell numeric>
@@ -335,7 +358,7 @@ function Header({
             onClick={() => {
               if (first == null) return
               playback.play({
-                id: `${playlist.id}:${held[0]?.id}`,
+                id: `${playlist.id}:${held[0]?.index}`,
                 src: contentUrl(apiBaseUrl, first.file.path),
                 title: first.title,
                 subtitle: playlist.name,
@@ -344,7 +367,11 @@ function Header({
           >
             Play
           </Button>
-          <Button variant="secondary" disabled={busy || renaming} onClick={() => setRenaming(true)}>
+          <Button
+            variant="secondary"
+            disabled={busy || renaming || !playlist.editable}
+            onClick={() => setRenaming(true)}
+          >
             Rename
           </Button>
           <Button variant="danger" disabled={busy} onClick={() => setDeleting(true)}>
@@ -380,7 +407,9 @@ function DeleteDialog({
     setBusy(true)
     setError(null)
     try {
-      await api.delete('/api/catalogue/playlists/{id}', { params: { path: { id: playlist.id } } })
+      await api.delete('/api/catalogue/playlists/{file}', {
+        params: { path: { file: playlist.id } },
+      })
       onDeleted()
     } catch (cause) {
       setError(describeError(cause))

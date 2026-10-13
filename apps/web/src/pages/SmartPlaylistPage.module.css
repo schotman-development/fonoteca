@@ -1,0 +1,49 @@
+/* A group of rules: its own box, so a group inside a group reads as one. */
+.group {
+  margin: 0;
+  min-inline-size: 0;
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding-inline: var(--space-4);
+}
+
+.rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.condition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.value {
+  inline-size: 200px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  block-size: var(--density-control);
+}
+
+.numberCol {
+  width: 48px;
+}

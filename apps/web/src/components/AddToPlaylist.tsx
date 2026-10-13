@@ -120,21 +120,27 @@ function Chooser({
   const create = () =>
     run(async () => {
       const playlist = await api.post('/api/catalogue/playlists', {
-        json: { name: title.trim(), recordingIds: [...recordingIds] },
+        json: { name: title.trim(), recordingIds: [...recordingIds], fileIds: null },
       })
       return { id: playlist.id, name: playlist.name }
     })
 
   const addTo = (id: string) =>
     run(async () => {
-      const playlist = await api.post('/api/catalogue/playlists/{id}/songs', {
-        params: { path: { id } },
-        json: { recordingIds: [...recordingIds] },
+      const playlist = await api.post('/api/catalogue/playlists/{file}/songs', {
+        params: { path: { file: id } },
+        json: { recordingIds: [...recordingIds], fileIds: null },
       })
       return { id: playlist.id, name: playlist.name }
     })
 
   const songs = `${recordingIds.length} ${recordingIds.length === 1 ? 'song' : 'songs'}`
+
+  // A smart playlist's songs are its rules', so it takes none by hand.
+  const statics =
+    state.status === 'ready'
+      ? state.data.items.filter((playlist) => playlist.kind === 'Static')
+      : []
 
   return (
     <Dialog
@@ -183,13 +189,13 @@ function Chooser({
           </Text>
         ) : null}
 
-        {state.status === 'ready' && state.data.items.length > 0 ? (
+        {state.status === 'ready' && statics.length > 0 ? (
           <Stack direction="column" gap={4}>
             <Text size="xs" tone="tertiary">
               Or one you have
             </Text>
             <ul className={styles.list}>
-              {state.data.items.map((playlist) => (
+              {statics.map((playlist) => (
                 <li key={playlist.id}>
                   <button
                     type="button"

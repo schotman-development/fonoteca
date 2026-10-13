@@ -21,6 +21,7 @@ import { PlaylistPage } from './pages/PlaylistPage.tsx'
 import { PlaylistsPage } from './pages/PlaylistsPage.tsx'
 import { ReleasePage } from './pages/ReleasePage.tsx'
 import { ReleasesPage } from './pages/ReleasesPage.tsx'
+import { SmartPlaylistPage } from './pages/SmartPlaylistPage.tsx'
 import { TracksPage } from './pages/TracksPage.tsx'
 
 /**
@@ -137,10 +138,18 @@ const playlistsRoute = createRoute({
   component: PlaylistsPage,
 })
 
+/** A static playlist, addressed by its file's name, since the file is the playlist. */
 const playlistRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/playlists/$playlistId',
   component: PlaylistPage,
+})
+
+/** A smart playlist by its id, or `new` for one not yet saved. */
+const smartPlaylistRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/playlists/smart/$playlistId',
+  component: SmartPlaylistPage,
 })
 
 /**
@@ -240,6 +249,7 @@ const routeTree = rootRoute.addChildren([
   compositionsRoute,
   playlistsRoute,
   playlistRoute,
+  smartPlaylistRoute,
   matchingRoute,
   filesRoute,
   acquireRoute,
@@ -266,6 +276,7 @@ export {
   playlistsRoute,
   releaseRoute,
   releasesRoute,
+  smartPlaylistRoute,
   tracksRoute,
 }
 
