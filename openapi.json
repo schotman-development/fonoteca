@@ -3638,7 +3638,8 @@
         "tags": [
           "Catalogue"
         ],
-        "summary": "Every playlist, by name, with its first albums for a cover.",
+        "summary": "Every playlist, static and smart, by name, with its first albums for a cover.",
+        "description": "A static playlist is any `.m3u8` or `.m3u` at the top of the library's `Playlists` folder that no smart playlist owns, whoever wrote it; its `id` is the file's name. A smart playlist's `id` is its own. Counts are of the file's entries: `held` are those naming a file the catalogue holds.",
         "operationId": "GetPlaylists",
         "responses": {
           "200": {
@@ -3657,8 +3658,8 @@
         "tags": [
           "Catalogue"
         ],
-        "summary": "A new playlist, optionally with songs, written to the library as an m3u.",
-        "description": "`recordingIds` are songs the library holds, in order; the same song may appear twice. The file is `Playlists/<name>.m3u8` with paths relative to it, naming the best copy of each song, and Fonoteca rewrites it after every tag write and every edit to the playlist — an edit made to the file elsewhere is overwritten.",
+        "summary": "A new static playlist, optionally with songs, written to the library as an m3u.",
+        "description": "`recordingIds` are songs, each written as the best copy the library holds; `fileIds` are files, written as themselves, after the songs. The file is `Playlists/<name>.m3u8` with paths relative to it. From then on the file is the playlist: an edit made to it elsewhere is what this application reads.",
         "operationId": "CreatePlaylist",
         "requestBody": {
           "content": {
@@ -3704,22 +3705,21 @@
         }
       }
     },
-    "/api/catalogue/playlists/{id}": {
+    "/api/catalogue/playlists/{file}": {
       "get": {
         "tags": [
           "Catalogue"
         ],
-        "summary": "One playlist's songs, in order, each with the copy that plays it.",
-        "description": "An entry with no `track` is a song the library holds no copy of any more — an album being replaced, or every copy trashed. It stays on the playlist and out of the file until a copy returns.",
+        "summary": "One static playlist's entries, in the file's order.",
+        "description": "An entry with no `track` names nothing the catalogue holds: a file since removed or upgraded away, a stream, a path outside the library. It stays in the file as written.",
         "operationId": "GetPlaylist",
         "parameters": [
           {
-            "name": "id",
+            "name": "file",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             }
           }
         ],
@@ -3750,17 +3750,16 @@
         "tags": [
           "Catalogue"
         ],
-        "summary": "Rename a playlist, or set the order of its entries.",
-        "description": "`entries` is the new order as entry ids; an entry left out is removed. Either field may be omitted. A rename renames the file.",
+        "summary": "Rename a static playlist, or set the order of its entries.",
+        "description": "`entries` is the new order as indexes into the entries `GetPlaylist` returned; one left out is removed. It needs the `version` that came with them, and is refused when the file has changed since. A rename renames the file and its `#PLAYLIST:` line. Every other line of the file is kept as it is.",
         "operationId": "UpdatePlaylist",
         "parameters": [
           {
-            "name": "id",
+            "name": "file",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             }
           }
         ],
@@ -3821,16 +3820,15 @@
         "tags": [
           "Catalogue"
         ],
-        "summary": "Delete a playlist; its file moves to the trash.",
+        "summary": "Delete a static playlist: its file moves to the trash.",
         "operationId": "DeletePlaylist",
         "parameters": [
           {
-            "name": "id",
+            "name": "file",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             }
           }
         ],
@@ -3861,21 +3859,20 @@
         }
       }
     },
-    "/api/catalogue/playlists/{id}/songs": {
+    "/api/catalogue/playlists/{file}/songs": {
       "post": {
         "tags": [
           "Catalogue"
         ],
-        "summary": "Add songs to the end of a playlist.",
+        "summary": "Add songs or files to the end of a static playlist.",
         "operationId": "AddPlaylistSongs",
         "parameters": [
           {
-            "name": "id",
+            "name": "file",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             }
           }
         ],
@@ -3912,6 +3909,265 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/smart-playlists": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "A new smart playlist: rules the library keeps an m3u of.",
+        "description": "The file is `Playlists/<name>.m3u8`, written now and again after every pass, undo, tag edit, download, answer on Identify and scan. Only the file holds the songs; an edit made to it elsewhere is overwritten.",
+        "operationId": "CreateSmartPlaylist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmartPlaylistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/smart-playlists/preview": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "What a set of rules would hold, without saving anything.",
+        "description": "Counts are of every song; `entries` are the first 200.",
+        "operationId": "PreviewSmartPlaylist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmartPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmartPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/smart-playlists/{id}": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "One smart playlist's rules, and the songs its file holds.",
+        "operationId": "GetSmartPlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Rename a smart playlist or change its rules; its file is written again.",
+        "operationId": "UpdateSmartPlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmartPlaylistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Delete a smart playlist; its file moves to the trash.",
+        "operationId": "DeleteSmartPlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4178,11 +4434,22 @@
       },
       "AddPlaylistSongsRequest": {
         "required": [
-          "recordingIds"
+          "recordingIds",
+          "fileIds"
         ],
         "type": "object",
         "properties": {
           "recordingIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "fileIds": {
             "type": [
               "null",
               "array"
@@ -6725,7 +6992,8 @@
       "CreatePlaylistRequest": {
         "required": [
           "name",
-          "recordingIds"
+          "recordingIds",
+          "fileIds"
         ],
         "type": "object",
         "properties": {
@@ -6736,6 +7004,16 @@
             ]
           },
           "recordingIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "fileIds": {
             "type": [
               "null",
               "array"
@@ -8809,17 +9087,18 @@
       },
       "PlaylistEntryRow": {
         "required": [
-          "id",
+          "index",
           "title",
           "artist",
+          "location",
           "fileId",
           "track"
         ],
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
+          "index": {
+            "type": "integer",
+            "format": "int32"
           },
           "title": {
             "type": "string"
@@ -8829,6 +9108,9 @@
               "null",
               "string"
             ]
+          },
+          "location": {
+            "type": "string"
           },
           "fileId": {
             "type": [
@@ -8849,6 +9131,12 @@
           }
         }
       },
+      "PlaylistKind": {
+        "enum": [
+          "Static",
+          "Smart"
+        ]
+      },
       "PlaylistListResponse": {
         "required": [
           "items"
@@ -8866,18 +9154,23 @@
       "PlaylistResponse": {
         "required": [
           "id",
+          "kind",
           "name",
           "file",
+          "version",
+          "editable",
           "duration",
-          "createdUtc",
           "changedUtc",
+          "criteria",
           "entries"
         ],
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PlaylistKind"
           },
           "name": {
             "type": "string"
@@ -8885,19 +9178,31 @@
           "file": {
             "type": "string"
           },
+          "version": {
+            "type": "string"
+          },
+          "editable": {
+            "type": "boolean"
+          },
           "duration": {
             "type": [
               "null",
               "string"
             ]
           },
-          "createdUtc": {
-            "type": "string",
-            "format": "date-time"
-          },
           "changedUtc": {
             "type": "string",
             "format": "date-time"
+          },
+          "criteria": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartCriteria"
+              }
+            ]
           },
           "entries": {
             "type": "array",
@@ -8910,19 +9215,23 @@
       "PlaylistSummary": {
         "required": [
           "id",
+          "kind",
           "name",
           "file",
           "songs",
           "held",
           "duration",
+          "seconds",
           "changedUtc",
           "albums"
         ],
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PlaylistKind"
           },
           "name": {
             "type": "string"
@@ -8943,6 +9252,10 @@
               "null",
               "string"
             ]
+          },
+          "seconds": {
+            "type": "integer",
+            "format": "int32"
           },
           "changedUtc": {
             "type": "string",
@@ -10339,6 +10652,246 @@
           }
         }
       },
+      "SmartCriteria": {
+        "required": [
+          "rules",
+          "sort",
+          "reverse",
+          "limit"
+        ],
+        "type": "object",
+        "properties": {
+          "rules": {
+            "$ref": "#/components/schemas/SmartRule"
+          },
+          "sort": {
+            "$ref": "#/components/schemas/SmartSort"
+          },
+          "reverse": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "SmartField": {
+        "enum": [
+          "Title",
+          "Artist",
+          "AlbumArtist",
+          "Album",
+          "Work",
+          "Genre",
+          "Composer",
+          "Lyricist",
+          "Conductor",
+          "Performer",
+          "Arranger",
+          "Producer",
+          "Engineer",
+          "Credited",
+          "Isrc",
+          "AlbumType",
+          "Label",
+          "ReleaseCountry",
+          "MediumFormat",
+          "ArtistCountry",
+          "ArtistType",
+          "Path",
+          "Codec",
+          "Year",
+          "PressingYear",
+          "Length",
+          "BitDepth",
+          "SampleRate",
+          "Bitrate",
+          "Channels",
+          "DynamicRange",
+          "Loudness",
+          "Lossless",
+          "HiRes",
+          "Followed",
+          "Damaged",
+          "Added",
+          null
+        ]
+      },
+      "SmartMatch": {
+        "enum": [
+          "All",
+          "Any",
+          null
+        ]
+      },
+      "SmartOperator": {
+        "enum": [
+          "Is",
+          "IsNot",
+          "Contains",
+          "DoesNotContain",
+          "StartsWith",
+          "EndsWith",
+          "AtLeast",
+          "AtMost",
+          "Between",
+          "IsEmpty",
+          "IsNotEmpty",
+          "IsTrue",
+          "IsFalse",
+          "InTheLast",
+          "NotInTheLast",
+          null
+        ]
+      },
+      "SmartPlaylistRequest": {
+        "required": [
+          "name",
+          "criteria"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "criteria": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartCriteria"
+              }
+            ]
+          }
+        }
+      },
+      "SmartPreviewRequest": {
+        "required": [
+          "criteria"
+        ],
+        "type": "object",
+        "properties": {
+          "criteria": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartCriteria"
+              }
+            ]
+          }
+        }
+      },
+      "SmartPreviewResponse": {
+        "required": [
+          "songs",
+          "duration",
+          "entries"
+        ],
+        "type": "object",
+        "properties": {
+          "songs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlaylistEntryRow"
+            }
+          }
+        }
+      },
+      "SmartRule": {
+        "required": [
+          "match",
+          "rules",
+          "field",
+          "operator",
+          "value",
+          "to"
+        ],
+        "type": "object",
+        "properties": {
+          "match": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartMatch"
+              }
+            ]
+          },
+          "rules": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SmartRule"
+            }
+          },
+          "field": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartField"
+              }
+            ]
+          },
+          "operator": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartOperator"
+              }
+            ]
+          },
+          "value": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "to": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SmartSort": {
+        "enum": [
+          "Added",
+          "Title",
+          "Artist",
+          "Album",
+          "Year",
+          "Length",
+          "Random"
+        ]
+      },
       "Stream": {
         "type": "string",
         "format": "binary"
@@ -11283,7 +11836,8 @@
       "UpdatePlaylistRequest": {
         "required": [
           "name",
-          "entries"
+          "entries",
+          "version"
         ],
         "type": "object",
         "properties": {
@@ -11299,9 +11853,15 @@
               "array"
             ],
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "type": "integer",
+              "format": "int32"
             }
+          },
+          "version": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

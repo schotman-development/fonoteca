@@ -378,27 +378,6 @@ public sealed partial class TagWriteService(
         finally
         {
             _actor = Actor;
-            await RefreshPlaylistsAsync().ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Every playlist's m3u, written again after the renames a run or an undo made.
-    /// </summary>
-    /// <remarks>
-    /// After every run, finished or not, since a stopped run has still renamed
-    /// what it reached; and never the run's failure, because its files are
-    /// already written.
-    /// </remarks>
-    private async Task RefreshPlaylistsAsync()
-    {
-        try
-        {
-            await playlists.SyncAsync(CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception cause)
-        {
-            Log.PlaylistSyncFailed(logger, cause);
         }
     }
 

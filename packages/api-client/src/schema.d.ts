@@ -1330,12 +1330,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every playlist, by name, with its first albums for a cover. */
+        /**
+         * Every playlist, static and smart, by name, with its first albums for a cover.
+         * @description A static playlist is any `.m3u8` or `.m3u` at the top of the library's `Playlists` folder that no smart playlist owns, whoever wrote it; its `id` is the file's name. A smart playlist's `id` is its own. Counts are of the file's entries: `held` are those naming a file the catalogue holds.
+         */
         get: operations["GetPlaylists"];
         put?: never;
         /**
-         * A new playlist, optionally with songs, written to the library as an m3u.
-         * @description `recordingIds` are songs the library holds, in order; the same song may appear twice. The file is `Playlists/<name>.m3u8` with paths relative to it, naming the best copy of each song, and Fonoteca rewrites it after every tag write and every edit to the playlist — an edit made to the file elsewhere is overwritten.
+         * A new static playlist, optionally with songs, written to the library as an m3u.
+         * @description `recordingIds` are songs, each written as the best copy the library holds; `fileIds` are files, written as themselves, after the songs. The file is `Playlists/<name>.m3u8` with paths relative to it. From then on the file is the playlist: an edit made to it elsewhere is what this application reads.
          */
         post: operations["CreatePlaylist"];
         delete?: never;
@@ -1344,7 +1347,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalogue/playlists/{id}": {
+    "/api/catalogue/playlists/{file}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1352,24 +1355,24 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * One playlist's songs, in order, each with the copy that plays it.
-         * @description An entry with no `track` is a song the library holds no copy of any more — an album being replaced, or every copy trashed. It stays on the playlist and out of the file until a copy returns.
+         * One static playlist's entries, in the file's order.
+         * @description An entry with no `track` names nothing the catalogue holds: a file since removed or upgraded away, a stream, a path outside the library. It stays in the file as written.
          */
         get: operations["GetPlaylist"];
         put?: never;
         /**
-         * Rename a playlist, or set the order of its entries.
-         * @description `entries` is the new order as entry ids; an entry left out is removed. Either field may be omitted. A rename renames the file.
+         * Rename a static playlist, or set the order of its entries.
+         * @description `entries` is the new order as indexes into the entries `GetPlaylist` returned; one left out is removed. It needs the `version` that came with them, and is refused when the file has changed since. A rename renames the file and its `#PLAYLIST:` line. Every other line of the file is kept as it is.
          */
         post: operations["UpdatePlaylist"];
-        /** Delete a playlist; its file moves to the trash. */
+        /** Delete a static playlist: its file moves to the trash. */
         delete: operations["DeletePlaylist"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/catalogue/playlists/{id}/songs": {
+    "/api/catalogue/playlists/{file}/songs": {
         parameters: {
             query?: never;
             header?: never;
@@ -1378,9 +1381,68 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add songs to the end of a playlist. */
+        /** Add songs or files to the end of a static playlist. */
         post: operations["AddPlaylistSongs"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/smart-playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A new smart playlist: rules the library keeps an m3u of.
+         * @description The file is `Playlists/<name>.m3u8`, written now and again after every pass, undo, tag edit, download, answer on Identify and scan. Only the file holds the songs; an edit made to it elsewhere is overwritten.
+         */
+        post: operations["CreateSmartPlaylist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/smart-playlists/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a set of rules would hold, without saving anything.
+         * @description Counts are of every song; `entries` are the first 200.
+         */
+        post: operations["PreviewSmartPlaylist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/smart-playlists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One smart playlist's rules, and the songs its file holds. */
+        get: operations["GetSmartPlaylist"];
+        put?: never;
+        /** Rename a smart playlist or change its rules; its file is written again. */
+        post: operations["UpdateSmartPlaylist"];
+        /** Delete a smart playlist; its file moves to the trash. */
+        delete: operations["DeleteSmartPlaylist"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1511,6 +1573,7 @@ export interface components {
         };
         AddPlaylistSongsRequest: {
             recordingIds: null | string[];
+            fileIds: null | string[];
         };
         AlbumCard: {
             /** Format: uuid */
@@ -2157,6 +2220,7 @@ export interface components {
         CreatePlaylistRequest: {
             name: null | string;
             recordingIds: null | string[];
+            fileIds: null | string[];
         };
         CreditName: {
             /** Format: uuid */
@@ -2724,32 +2788,36 @@ export interface components {
             count: number;
         };
         PlaylistEntryRow: {
-            /** Format: uuid */
-            id: string;
+            /** Format: int32 */
+            index: number;
             title: string;
             artist: null | string;
+            location: string;
             /** Format: uuid */
             fileId: null | string;
             track: null | components["schemas"]["TrackListRow"];
         };
+        /** @enum {unknown} */
+        PlaylistKind: "Static" | "Smart";
         PlaylistListResponse: {
             items: components["schemas"]["PlaylistSummary"][];
         };
         PlaylistResponse: {
-            /** Format: uuid */
             id: string;
+            kind: components["schemas"]["PlaylistKind"];
             name: string;
             file: string;
+            version: string;
+            editable: boolean;
             duration: null | string;
             /** Format: date-time */
-            createdUtc: string;
-            /** Format: date-time */
             changedUtc: string;
+            criteria: null | components["schemas"]["SmartCriteria"];
             entries: components["schemas"]["PlaylistEntryRow"][];
         };
         PlaylistSummary: {
-            /** Format: uuid */
             id: string;
+            kind: components["schemas"]["PlaylistKind"];
             name: string;
             file: string;
             /** Format: int32 */
@@ -2757,6 +2825,8 @@ export interface components {
             /** Format: int32 */
             held: number;
             duration: null | string;
+            /** Format: int32 */
+            seconds: number;
             /** Format: date-time */
             changedUtc: string;
             albums: components["schemas"]["TrackListAlbum"][];
@@ -3089,6 +3159,42 @@ export interface components {
             name: string;
             value: string;
         };
+        SmartCriteria: {
+            rules: components["schemas"]["SmartRule"];
+            sort: components["schemas"]["SmartSort"];
+            reverse: boolean;
+            /** Format: int32 */
+            limit: null | number;
+        };
+        /** @enum {unknown} */
+        SmartField: "Title" | "Artist" | "AlbumArtist" | "Album" | "Work" | "Genre" | "Composer" | "Lyricist" | "Conductor" | "Performer" | "Arranger" | "Producer" | "Engineer" | "Credited" | "Isrc" | "AlbumType" | "Label" | "ReleaseCountry" | "MediumFormat" | "ArtistCountry" | "ArtistType" | "Path" | "Codec" | "Year" | "PressingYear" | "Length" | "BitDepth" | "SampleRate" | "Bitrate" | "Channels" | "DynamicRange" | "Loudness" | "Lossless" | "HiRes" | "Followed" | "Damaged" | "Added" | null;
+        /** @enum {unknown} */
+        SmartMatch: "All" | "Any" | null;
+        /** @enum {unknown} */
+        SmartOperator: "Is" | "IsNot" | "Contains" | "DoesNotContain" | "StartsWith" | "EndsWith" | "AtLeast" | "AtMost" | "Between" | "IsEmpty" | "IsNotEmpty" | "IsTrue" | "IsFalse" | "InTheLast" | "NotInTheLast" | null;
+        SmartPlaylistRequest: {
+            name: null | string;
+            criteria: null | components["schemas"]["SmartCriteria"];
+        };
+        SmartPreviewRequest: {
+            criteria: null | components["schemas"]["SmartCriteria"];
+        };
+        SmartPreviewResponse: {
+            /** Format: int32 */
+            songs: number;
+            duration: null | string;
+            entries: components["schemas"]["PlaylistEntryRow"][];
+        };
+        SmartRule: {
+            match: null | components["schemas"]["SmartMatch"];
+            rules: null | components["schemas"]["SmartRule"][];
+            field: null | components["schemas"]["SmartField"];
+            operator: null | components["schemas"]["SmartOperator"];
+            value: null | string;
+            to: null | string;
+        };
+        /** @enum {unknown} */
+        SmartSort: "Added" | "Title" | "Artist" | "Album" | "Year" | "Length" | "Random";
         /** Format: binary */
         Stream: string;
         SubjectFileResponse: {
@@ -3331,7 +3437,8 @@ export interface components {
         };
         UpdatePlaylistRequest: {
             name: null | string;
-            entries: null | string[];
+            entries: null | number[];
+            version: null | string;
         };
         UpgradeCandidate: {
             /** Format: uuid */
@@ -6288,7 +6395,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: string;
+                file: string;
             };
             cookie?: never;
         };
@@ -6319,7 +6426,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: string;
+                file: string;
             };
             cookie?: never;
         };
@@ -6372,7 +6479,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: string;
+                file: string;
             };
             cookie?: never;
         };
@@ -6410,7 +6517,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: string;
+                file: string;
             };
             cookie?: never;
         };
@@ -6440,6 +6547,212 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CreateSmartPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartPlaylistRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    PreviewSmartPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartPreviewResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetSmartPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    UpdateSmartPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartPlaylistRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DeleteSmartPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

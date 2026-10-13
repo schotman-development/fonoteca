@@ -168,7 +168,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TagWriteService>()
 // wait. Hosted only — nothing else holds a reference to it.
 builder.Services.AddHostedService<CandidateWarmService>();
 
+// Every write to the Playlists folder, and the smart playlists' refresh on
+// each release of the gate.
 builder.Services.AddSingleton<PlaylistFiles>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PlaylistFiles>());
 
 // ---------------------------------------------------------------------------
 // External services. Both are registered unconditionally, including when the

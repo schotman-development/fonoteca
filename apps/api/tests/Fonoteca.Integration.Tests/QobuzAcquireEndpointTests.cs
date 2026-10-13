@@ -125,6 +125,33 @@ public sealed class QobuzAcquireEndpointTests(PostgresFixture postgres) : IAsync
         Assert.False(Directory.Exists(Path.Combine(_root, ".fonoteca-downloads")));
     }
 
+    /// <summary>
+    /// A static playlist naming the old rip's file follows it to the new one of
+    /// the same name in another format: the owner's choice, and only here.
+    /// </summary>
+    [Fact]
+    public async Task APlaylistNamingTheOldRipFollowsItIntoTheNewFormat()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        await HeldAsync(Mp3(), "Fleetwood Mac/Rumours/01 The Chain.mp3", "Fleetwood Mac/Rumours/02 Dreams.mp3");
+        await FileUnderRumoursAsync();
+
+        var m3u = Path.Combine(_root, "Playlists", "Mix.m3u8");
+        Directory.CreateDirectory(Path.GetDirectoryName(m3u)!);
+        await File.WriteAllTextAsync(m3u, "#EXTM3U\n../Fleetwood Mac/Rumours/02 Dreams.mp3\n", Token);
+
+        using var client = _factory!.CreateClient();
+        using var response = await client.PostAsJsonAsync(
+            new Uri("/api/qobuz/albums/1/upgrade", UriKind.Relative),
+            new UpgradeRequest("Fleetwood Mac/Rumours", 2),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(ReplacementVerdict.Replace, (await response.Content.ReadFromJsonAsync<AlbumUpgrade>(Token))!.Replacement!.Verdict);
+        Assert.Equal("#EXTM3U\n../Fleetwood Mac/Rumours/02 Dreams.flac\n", await File.ReadAllTextAsync(m3u, Token));
+    }
+
     [Fact]
     public async Task APlainDownloadOfAnAlbumHeldInPartCompletesIt()
     {

@@ -367,6 +367,8 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
             sp => sp.GetRequiredService<FileSystemAudioFileStore>());
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
+        services.AddSingleton<LibraryWorkGate>();
+        services.AddSingleton<PlaylistFiles>();
 
         var provider = services.BuildServiceProvider();
         _providers.Add(provider);

@@ -40,6 +40,12 @@ public sealed class LibraryWorkGate
     public bool IsBusy => ActiveKind is not null;
 
     /// <summary>
+    /// Raised after each release, outside the lock: whatever held the gate may
+    /// have changed the catalogue. A handler must not throw or block.
+    /// </summary>
+    public event Action? Released;
+
+    /// <summary>
     /// Takes the gate, or reports who has it.
     /// </summary>
     /// <remarks>
@@ -69,6 +75,7 @@ public sealed class LibraryWorkGate
     private void Release()
     {
         lock (_sync) _activeKind = null;
+        Released?.Invoke();
     }
 
     /// <summary>Idempotent, so a double dispose cannot release somebody else's turn.</summary>

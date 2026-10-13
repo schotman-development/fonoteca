@@ -443,6 +443,7 @@ public sealed class FileManagerTests(PostgresFixture postgres) : IAsyncLifetime
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
         services.AddSingleton<LibraryWorkGate>();
+        services.AddSingleton<PlaylistFiles>();
         services.AddScoped<FileManagerService>();
         services.AddSingleton(Options.Create(new FonotecaOptions
         {

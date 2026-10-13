@@ -34,6 +34,7 @@ internal static class SubsonicIds
     private const string SongPrefix = "tr-";
     private const string PathPrefix = "fo-";
     private const string PlaylistPrefix = "pl-";
+    private const string PlaylistFilePrefix = "pf-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
@@ -42,6 +43,9 @@ internal static class SubsonicIds
     internal static string Song(MediaFileId id) => SongPrefix + id.Value.ToString("N");
 
     internal static string Playlist(PlaylistId id) => PlaylistPrefix + id.Value.ToString("N");
+
+    /// <summary>A static playlist, which is its file: the file's name in the Playlists folder.</summary>
+    internal static string PlaylistFile(string name) => PlaylistFilePrefix + name;
 
     /// <summary>A directory, or a file the catalogue does not hold.</summary>
     internal static string Path(string libraryRelativePath) =>
@@ -58,6 +62,11 @@ internal static class SubsonicIds
 
     internal static PlaylistId? AsPlaylist(string? id) =>
         Guid(id, PlaylistPrefix) is { } value ? new PlaylistId(value) : null;
+
+    internal static string? AsPlaylistFile(string? id) =>
+        id is not null && id.StartsWith(PlaylistFilePrefix, StringComparison.Ordinal) && id.Length > PlaylistFilePrefix.Length
+            ? id[PlaylistFilePrefix.Length..]
+            : null;
 
     /// <summary>
     /// The library-relative path a folder id carries, or null when the id is not

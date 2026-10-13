@@ -836,7 +836,7 @@ internal static partial class Log
     [LoggerMessage(
         EventId = 1600,
         Level = LogLevel.Warning,
-        Message = "Writing the playlists failed; the next tag write or playlist edit tries again.")]
+        Message = "Writing the playlists failed; the next move, edit or library change tries again.")]
     public static partial void PlaylistSyncFailed(ILogger logger, Exception cause);
 
     [LoggerMessage(
@@ -848,7 +848,7 @@ internal static partial class Log
     [LoggerMessage(
         EventId = 1602,
         Level = LogLevel.Warning,
-        Message = "Playlist '{Path}' could not be written; the next tag write or playlist edit tries again.")]
+        Message = "Playlist '{Path}' could not be written; the next move, edit or library change tries again.")]
     public static partial void PlaylistNotWritten(ILogger logger, string path, Exception cause);
 
     [LoggerMessage(
@@ -856,4 +856,10 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Playlist '{Path}' deleted; its file moved to '{Destination}'")]
     public static partial void PlaylistTrashed(ILogger logger, string path, string destination);
+
+    [LoggerMessage(
+        EventId = 1604,
+        Level = LogLevel.Warning,
+        Message = "Smart playlist '{Path}' has rules that do not read back, so its file was not written.")]
+    public static partial void SmartPlaylistUnreadable(ILogger logger, string path);
 }

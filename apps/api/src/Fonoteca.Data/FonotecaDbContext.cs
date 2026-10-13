@@ -35,8 +35,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<AlbumBookletFile> AlbumBookletFiles => Set<AlbumBookletFile>();
     public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
     public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
-    public DbSet<Playlist> Playlists => Set<Playlist>();
-    public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
+    public DbSet<SmartPlaylist> SmartPlaylists => Set<SmartPlaylist>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -562,35 +561,13 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<Playlist>(e =>
+        modelBuilder.Entity<SmartPlaylist>(e =>
         {
             e.HasKey(x => x.Id);
-            e.Property(x => x.Name).HasMaxLength(Playlist.NameLength).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(SmartPlaylist.NameLength).IsRequired();
             e.Property(x => x.Path).HasMaxLength(1000).IsRequired();
             e.HasIndex(x => x.Path).IsUnique();
-            e.HasMany(x => x.Entries)
-                .WithOne()
-                .HasForeignKey(x => x.PlaylistId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<PlaylistEntry>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Title).HasMaxLength(PlaylistEntry.TitleLength).IsRequired();
-            e.Property(x => x.Artist).HasMaxLength(PlaylistEntry.ArtistLength);
-            e.HasIndex(x => new { x.PlaylistId, x.Position });
-
-            // Set null rather than cascade: see PlaylistEntry, which follows
-            // its last copy to wherever the recording went.
-            e.HasOne<Recording>()
-                .WithMany()
-                .HasForeignKey(x => x.RecordingId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne<MediaFile>()
-                .WithMany()
-                .HasForeignKey(x => x.MediaFileId)
-                .OnDelete(DeleteBehavior.SetNull);
+            e.Property(x => x.CriteriaJson).HasColumnType("jsonb").IsRequired();
         });
 
         base.OnModelCreating(modelBuilder);

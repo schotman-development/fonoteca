@@ -200,7 +200,6 @@ public sealed partial class TagWriteService
             }
 
             await db.SaveChangesAsync(token).ConfigureAwait(false);
-            await RefreshPlaylistsAsync().ConfigureAwait(false);
 
             Log.TagsUndone(logger, folder, edit.Id, undo.Restored, undo.Moved, undo.Problems.Count);
 

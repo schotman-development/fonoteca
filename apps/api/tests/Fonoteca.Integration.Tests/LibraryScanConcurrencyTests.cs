@@ -52,6 +52,8 @@ public sealed class LibraryScanConcurrencyTests(PostgresFixture postgres) : IAsy
             sp => sp.GetRequiredService<FileSystemAudioFileStore>());
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
+        services.AddSingleton<LibraryWorkGate>();
+        services.AddSingleton<PlaylistFiles>();
 
         _services = services.BuildServiceProvider();
     }

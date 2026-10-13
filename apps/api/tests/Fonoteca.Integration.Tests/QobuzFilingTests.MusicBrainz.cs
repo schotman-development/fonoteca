@@ -57,13 +57,11 @@ public sealed partial class QobuzFilingTests
         var musicBrainz = new StubMusicBrainz();
         var factory = Factory(mutation: false, musicBrainz);
         await DownloadAsync(factory);
-        await PlaylistOfEverySongAsync();
 
         musicBrainz.Releases.Add(Rumours());
         var swept = await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token);
 
         Assert.Equal((1, 0), swept);
-        await AssertThePlaylistFollowedTheFilesAsync();
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
@@ -119,9 +117,7 @@ public sealed partial class QobuzFilingTests
             await db.SaveChangesAsync(Token);
         }
 
-        await PlaylistOfEverySongAsync();
         await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token);
-        await AssertThePlaylistFollowedTheFilesAsync();
 
         await using var check = PostgresFixture.CreateContext(_connectionString);
         var dreams = await check.MediaFiles.Include(file => file.Track).SingleAsync(file => file.Path.EndsWith("Dreams.flac"), Token);
@@ -157,7 +153,6 @@ public sealed partial class QobuzFilingTests
 
         // A pressing the barcode search never finds, named by a person.
         musicBrainz.Releases.Add(Rumours() with { Barcode = null });
-        await PlaylistOfEverySongAsync();
 
         using var client = factory.CreateClient();
         using var response = await client.PostAsJsonAsync(
@@ -180,54 +175,6 @@ public sealed partial class QobuzFilingTests
 
         Assert.Empty(await db.Releases.Where(release => release.Mbid == null).ToListAsync(Token));
         Assert.Empty(await db.Recordings.Where(recording => recording.Mbid == null).ToListAsync(Token));
-        await AssertThePlaylistFollowedTheFilesAsync();
-    }
-
-    /// <summary>
-    /// A playlist of every song the download holds, naming no copy yet — one no
-    /// playlist write has run on, so only the catch-up itself can carry it.
-    /// </summary>
-    private async Task PlaylistOfEverySongAsync()
-    {
-        await using var db = PostgresFixture.CreateContext(_connectionString);
-
-        var playlist = new Playlist
-        {
-            Id = PlaylistId.New(),
-            Name = "Mix",
-            Path = "Playlists/Mix.m3u8",
-            CreatedUtc = DateTimeOffset.UtcNow,
-            ChangedUtc = DateTimeOffset.UtcNow,
-        };
-
-        var songs = await db.MediaFiles.OrderBy(file => file.Path).Select(file => file.RecordingId).ToListAsync(Token);
-
-        for (var position = 0; position < songs.Count; position++)
-        {
-            playlist.Entries.Add(new PlaylistEntry
-            {
-                Id = Guid.CreateVersion7(),
-                PlaylistId = playlist.Id,
-                Position = position,
-                RecordingId = songs[position],
-                Title = "Song",
-            });
-        }
-
-        db.Playlists.Add(playlist);
-        await db.SaveChangesAsync(Token);
-    }
-
-    /// <summary>Every entry names the recording its file is filed under now.</summary>
-    private async Task AssertThePlaylistFollowedTheFilesAsync()
-    {
-        await using var db = PostgresFixture.CreateContext(_connectionString);
-
-        var files = await db.MediaFiles.OrderBy(file => file.Path).Select(file => file.RecordingId).ToListAsync(Token);
-        var entries = await db.PlaylistEntries.OrderBy(entry => entry.Position).Select(entry => entry.RecordingId).ToListAsync(Token);
-
-        Assert.All(files, recording => Assert.NotNull(recording));
-        Assert.Equal(files, entries);
     }
 
     [Fact]

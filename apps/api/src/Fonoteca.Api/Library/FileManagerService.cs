@@ -69,6 +69,7 @@ public sealed class FileManagerService(
     ICallerContext caller,
     IOptions<FonotecaOptions> options,
     IClock clock,
+    PlaylistFiles playlists,
     ILogger<FileManagerService> logger)
 {
     /// <summary>What holds the gate while files are being moved.</summary>
@@ -395,6 +396,9 @@ public sealed class FileManagerService(
             }
 
             Log.FilesMoved(logger, source, target, rows);
+
+            // A static playlist is its file: a line naming what moved follows it.
+            await playlists.RepointAsync([new PlaylistMove(source, target)], cancellationToken).ConfigureAwait(false);
 
             return new FileOperation(true, 1, rows, target, null);
         }

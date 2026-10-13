@@ -834,6 +834,7 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
         services.AddScoped<AcoustIdTagWriter>();
 
         services.AddSingleton<LibraryWorkGate>();
+        services.AddSingleton<PlaylistFiles>();
         services.AddSingleton<IdentificationService>();
 
         services.AddSingleton<IOptions<FonotecaOptions>>(

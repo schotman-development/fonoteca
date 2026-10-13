@@ -1237,6 +1237,15 @@ public static class QobuzEndpoints
             : await acquiring.FileAsync(album, fetched, replacement.DownloadedTo, moved: true, replacedKnown: known, cancellationToken)
                 .ConfigureAwait(false);
 
+        // A playlist naming the old rip's file follows it to the new one of
+        // the same name, where the format alone changed: the owner's choice.
+        if (replacement.ArchivedTo is not null)
+        {
+            await acquiring.Playlists
+                .FollowFormatsAsync(filing?.Folder ?? replacement.DownloadedTo, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         return TypedResults.Ok(new AlbumUpgrade(fetched, replacement, filing));
     }
 

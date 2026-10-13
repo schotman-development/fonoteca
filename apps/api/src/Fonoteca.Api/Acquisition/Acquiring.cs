@@ -27,6 +27,7 @@ public sealed class Acquiring(
     MusicBrainzCatchUp catchUp,
     ICallerContext caller,
     FonotecaDbContext db,
+    PlaylistFiles playlists,
     ILogger<Acquiring> logger)
 {
     /// <summary>The kind a download takes the gate as.</summary>
@@ -35,6 +36,8 @@ public sealed class Acquiring(
     public LibraryWorkGate Gate => gate;
 
     public DownloadFiling Filing => filing;
+
+    public PlaylistFiles Playlists => playlists;
 
     /// <summary>Files a download's landed tracks and writes their album folder.</summary>
     /// <param name="folder">The album folder the tracks are in now.</param>

@@ -809,6 +809,12 @@ public sealed partial class TagWriteService
                 }
             },
             cancellationToken).ConfigureAwait(false);
+
+        // A static playlist is its file, and a line naming what just moved
+        // would otherwise name nothing.
+        await playlists
+            .RepointAsync([new PlaylistMove(Relative(store.Root, from), Relative(store.Root, to))], cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>A journal subject within <c>varchar(200)</c>, never cut through a character.</summary>

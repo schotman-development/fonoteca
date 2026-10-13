@@ -33,6 +33,7 @@ public sealed class LibraryScanService(
     FileSystemAudioFileStore store,
     LibraryScanner scanner,
     IClock clock,
+    PlaylistFiles playlists,
     ILogger<LibraryScanService> logger)
 {
     /// <summary>
@@ -93,6 +94,10 @@ public sealed class LibraryScanService(
 
             var summary = await RunAsync(cancellationToken).ConfigureAwait(false);
             _lastCompleted = summary;
+
+            // The one piece of library work that never takes the gate, so
+            // the smart playlists are not refreshed by its release.
+            playlists.Refresh();
             return new LibraryScanOutcome(LibraryScanStatus.Completed, summary);
         }
         finally
