@@ -79,6 +79,33 @@ export const RELEASE_SORTS = [
 
 export type ReleaseSort = (typeof RELEASE_SORTS)[number][0]
 
+/** The album list's orders, by track; within an album, the files' order in its folder. */
+export const TRACK_SORTS = [
+  ['title', 'Title'],
+  ['artist', 'Artist'],
+  ['album', 'Album'],
+  ['added', 'Recently added'],
+] as const
+
+export type TrackSort = (typeof TRACK_SORTS)[number][0]
+
+/** By compositions rather than songs: a composer is what they wrote. */
+export const COMPOSER_SORTS = [
+  ['name', 'Name'],
+  ['compositions', 'Most compositions'],
+] as const
+
+export type ComposerSort = (typeof COMPOSER_SORTS)[number][0]
+
+/** Most recorded is the one that finds the standards: the pieces held in several performances. */
+export const COMPOSITION_SORTS = [
+  ['title', 'Title'],
+  ['recorded', 'Most recorded'],
+  ['composer', 'Composer'],
+] as const
+
+export type CompositionSort = (typeof COMPOSITION_SORTS)[number][0]
+
 /**
  * The default of each, named once.
  *
@@ -99,6 +126,18 @@ export type ArtistListSearch = {
 export type ReleaseListSearch = {
   readonly query?: string | undefined
   readonly sort?: ReleaseSort | undefined
+}
+
+/** The paged lists also keep their page, so Back from an album lands where it left. */
+export type PagedListSearch<T extends string> = {
+  readonly query?: string | undefined
+  readonly sort?: T | undefined
+  readonly page?: number | undefined
+}
+
+export type ComposerListSearch = {
+  readonly query?: string | undefined
+  readonly sort?: ComposerSort | undefined
 }
 
 /**
@@ -138,5 +177,36 @@ export function releaseListSearch(search: Record<string, unknown>): ReleaseListS
   return {
     query: text(search.query),
     sort: oneOf(RELEASE_SORTS, search.sort),
+  }
+}
+
+/** A whole number from 2 up; the first page is the absence of one. */
+function page(value: unknown): number | undefined {
+  const number = typeof value === 'string' ? Number(value) : value
+  return typeof number === 'number' && Number.isInteger(number) && number > 1 ? number : undefined
+}
+
+export function trackListSearch(search: Record<string, unknown>): PagedListSearch<TrackSort> {
+  return {
+    query: text(search.query),
+    sort: oneOf(TRACK_SORTS, search.sort),
+    page: page(search.page),
+  }
+}
+
+export function composerListSearch(search: Record<string, unknown>): ComposerListSearch {
+  return {
+    query: text(search.query),
+    sort: oneOf(COMPOSER_SORTS, search.sort),
+  }
+}
+
+export function compositionListSearch(
+  search: Record<string, unknown>,
+): PagedListSearch<CompositionSort> {
+  return {
+    query: text(search.query),
+    sort: oneOf(COMPOSITION_SORTS, search.sort),
+    page: page(search.page),
   }
 }

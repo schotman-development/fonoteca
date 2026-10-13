@@ -1,0 +1,80 @@
+/*
+ * The Tracks, Composers and Compositions pages. The heading and the filter are
+ * the artist list's, with the same resets for the same reason.
+ */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 360px;
+}
+
+.table {
+  overflow-x: auto;
+}
+
+/* Fixed, so a truncating cell has a width to truncate to. */
+.table table {
+  table-layout: fixed;
+  min-width: 860px;
+}
+
+.playCol {
+  width: 48px;
+}
+
+.lengthCol {
+  width: 72px;
+}
+
+.formatCol {
+  width: 150px;
+}
+
+.countCol {
+  width: 110px;
+}
+
+/* Performances get what the title and composers leave: they are the longest cell. */
+.pieceCol {
+  width: 26%;
+}
+
+.composerCol {
+  width: 20%;
+}
+
+/* The album cell: a small sleeve, then its title. */
+.album {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Text sets its own colour, so a link here owns the decoration and the focus ring only. */
+.link {
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.link:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* A composition's rows grow with its performances, so they read from the top. */
+.compositions td {
+  vertical-align: top;
+  padding-block: var(--space-8);
+}

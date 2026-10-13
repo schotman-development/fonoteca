@@ -1246,6 +1246,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every recording the library holds a file of, a page at a time.
+         * @description One row per recording, so two encodings of a song are one row and `files` says how many. Ordered by title, or by `sort=artist` (the first billed name, uncredited last), `sort=album` (the album's title, then the file's place in its folder) or `sort=added` (newest file first). `query` matches the title, a billed name or the album title, case-insensitively, anywhere in the string. A file no recording is known for is not listed: it is a question on Identify.
+         */
+        get: operations["GetTracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/composers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Everyone who wrote a piece the library holds a recording of.
+         * @description Ordered by sort name, or by `sort=compositions` for the most pieces held first. `compositionCount` counts pieces, a work's movements once; `songCount` is the artist list's. `query` filters on the name as the artist list does. Every songwriter is here, not only the classical composers.
+         */
+        get: operations["GetComposers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/compositions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every piece the library holds a recording of, with each performance of it.
+         * @description A piece is a movement's parent work, or the work itself. A performance is one album and one set of performers, and a piece's movements on one album are one whoever each is credited to (`Performances`). Ordered by title, by `sort=recorded` for the most performances first, or by `sort=composer` (the first composer by name, none last). `query` matches the title or a composer's name, case-insensitively.
+         */
+        get: operations["GetCompositions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/qobuz/status": {
         parameters: {
             query?: never;
@@ -1776,6 +1836,8 @@ export interface components {
             songCount: number;
             /** Format: int32 */
             albumCount: null | number;
+            /** Format: int32 */
+            compositionCount: null | number;
             portrait: null | string;
             country: null | string;
             gender: null | string;
@@ -1979,6 +2041,41 @@ export interface components {
             path: null | string;
             /** Format: int64 */
             sizeBytes: null | number;
+        };
+        CompositionComposer: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        CompositionListResponse: {
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["CompositionRow"][];
+        };
+        CompositionPerformance: {
+            performers: null | string;
+            /** Format: uuid */
+            albumId: null | string;
+            album: string;
+            /** Format: int32 */
+            year: null | number;
+            /** Format: int32 */
+            tracks: number;
+            movements: boolean;
+        };
+        CompositionRow: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            type: null | string;
+            composers: components["schemas"]["CompositionComposer"][];
+            performances: components["schemas"]["CompositionPerformance"][];
+        };
+        CreditName: {
+            /** Format: uuid */
+            artistId: string;
+            name: string;
+            joinPhrase: null | string;
         };
         DiscographyRow: {
             /** Format: uuid */
@@ -3035,6 +3132,35 @@ export interface components {
             /** Format: double */
             samplingRate: null | number;
             detail: null | string;
+        };
+        TrackListAlbum: {
+            /** Format: uuid */
+            albumId: string;
+            title: string;
+            /** Format: int32 */
+            year: null | number;
+            /** Format: uuid */
+            coverReleaseId: null | string;
+            /** Format: uuid */
+            mbid: null | string;
+        };
+        TrackListResponse: {
+            /** Format: int32 */
+            total: number;
+            items: components["schemas"]["TrackListRow"][];
+        };
+        TrackListRow: {
+            /** Format: uuid */
+            recordingId: string;
+            title: string;
+            workTitle: null | string;
+            duration: null | string;
+            artists: components["schemas"]["CreditName"][];
+            album: null | components["schemas"]["TrackListAlbum"];
+            folder: string;
+            file: components["schemas"]["FileRow"];
+            /** Format: int32 */
+            files: number;
         };
         /** @enum {unknown} */
         TrackOutcome: "Downloaded" | "Skipped" | "Failed";
@@ -5844,6 +5970,79 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetTracks: {
+        parameters: {
+            query?: {
+                query?: string;
+                sort?: string;
+                skip?: number;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackListResponse"];
+                };
+            };
+        };
+    };
+    GetComposers: {
+        parameters: {
+            query?: {
+                query?: string;
+                sort?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistListResponse"];
+                };
+            };
+        };
+    };
+    GetCompositions: {
+        parameters: {
+            query?: {
+                query?: string;
+                sort?: string;
+                skip?: number;
+                take?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompositionListResponse"];
                 };
             };
         };

@@ -1452,6 +1452,90 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Portrait: detail.Artist.Portrait,
             Banner: detail.Profile.Banner);
 
+    [Fact]
+    public async Task TracksAreEveryHeldRecordingOnceWithItsFiles()
+    {
+        using var client = _factory!.CreateClient();
+
+        var all = await client.GetFromJsonAsync<TrackListResponse>(
+            new Uri("/api/catalogue/tracks", UriKind.Relative), Token);
+
+        // Eleven held; "I'd Rather Go Blind" and "Never Ripped" have no file.
+        Assert.NotNull(all);
+        Assert.Equal(11, all.Total);
+        Assert.DoesNotContain(all.Items, track => track.Title is "I'd Rather Go Blind" or "Never Ripped");
+
+        // One row for the FLAC and the MP3, billed as the sleeve prints it.
+        var duet = Assert.Single(all.Items, track => track.RecordingId == _seed.Duet);
+        Assert.Equal(2, duet.Files);
+        Assert.Equal(["Beth Hart", "Joe Bonamassa"], duet.Artists.Select(credit => credit.Name));
+        Assert.Equal(" & ", duet.Artists[0].JoinPhrase);
+        Assert.Equal(_seed.SeesawAlbum, duet.Album!.AlbumId);
+
+        var page = await client.GetFromJsonAsync<TrackListResponse>(
+            new Uri("/api/catalogue/tracks?skip=2&take=3", UriKind.Relative), Token);
+
+        Assert.Equal(11, page!.Total);
+        Assert.Equal(
+            all.Items.Skip(2).Take(3).Select(track => track.RecordingId),
+            page.Items.Select(track => track.RecordingId));
+
+        // A billed name finds the duet and the three guest spots.
+        var found = await client.GetFromJsonAsync<TrackListResponse>(
+            new Uri("/api/catalogue/tracks?query=bonamassa", UriKind.Relative), Token);
+
+        Assert.Equal(4, found!.Total);
+    }
+
+    [Fact]
+    public async Task AMovementsPieceIsOneCompositionWithItsComposerAndPerformance()
+    {
+        using var client = _factory!.CreateClient();
+
+        var before = await client.GetFromJsonAsync<CompositionListResponse>(
+            new Uri("/api/catalogue/compositions", UriKind.Relative), Token);
+
+        // Both tracks on one album by one orchestra are one performance of the
+        // work, and the composer comes off nothing because nobody billed him.
+        var symphony = Assert.Single(before!.Items);
+        Assert.Equal("Symphony no. 40 in G minor, K. 550", symphony.Title);
+        Assert.Equal(_seed.Mozart, Assert.Single(symphony.Composers).Id);
+
+        var performance = Assert.Single(symphony.Performances);
+        Assert.Equal("Berliner Philharmoniker, Herbert von Karajan", performance.Performers);
+        Assert.Equal(_seed.SymphonyAlbum, performance.AlbumId);
+        Assert.Equal(2, performance.Tracks);
+        Assert.False(performance.Movements);
+
+        // Once the work is known to be a movement, the piece is its parent —
+        // which carries no writers, so the composer is still the movement's.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var parent = new Work { Id = WorkId.New(), Title = "Symphony no. 40" };
+            db.Works.Add(parent);
+
+            var movement = await db.Works.SingleAsync(work => work.Title == symphony.Title, Token);
+            movement.ParentId = parent.Id;
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var after = await client.GetFromJsonAsync<CompositionListResponse>(
+            new Uri("/api/catalogue/compositions?query=mozart", UriKind.Relative), Token);
+
+        var piece = Assert.Single(after!.Items);
+        Assert.Equal("Symphony no. 40", piece.Title);
+        Assert.True(Assert.Single(piece.Performances).Movements);
+
+        var composers = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/composers", UriKind.Relative), Token);
+
+        var mozart = Assert.Single(composers!.Items);
+        Assert.Equal(_seed.Mozart, mozart.Id);
+        Assert.Equal(1, mozart.CompositionCount);
+        Assert.Equal(1, mozart.SongCount);
+    }
+
     private static async Task<AlbumDetailResponse> AlbumAsync(HttpClient client, Guid id)
     {
         var body = await client.GetFromJsonAsync<AlbumDetailResponse>(

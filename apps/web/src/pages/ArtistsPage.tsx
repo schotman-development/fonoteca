@@ -384,13 +384,13 @@ function Empty({
  * what the grid sizes its columns by, and dropping it would silently give the
  * whole page the album width.
  */
-function ArtistCard({
+export function ArtistCard({
   artist,
   counting = 'songs',
 }: {
   readonly artist: ArtistSummary
   /** What the subtitle counts: whichever the list beside it is ordered by. */
-  readonly counting?: 'songs' | 'albums'
+  readonly counting?: 'songs' | 'albums' | 'compositions'
 }) {
   const image = artistImageUrl(artist)
 
@@ -421,7 +421,9 @@ function ArtistCard({
       subtitle={
         counting === 'albums' && artist.albumCount != null
           ? count(artist.albumCount, 'album')
-          : count(artist.songCount, 'song')
+          : counting === 'compositions' && artist.compositionCount != null
+            ? count(artist.compositionCount, 'composition')
+            : count(artist.songCount, 'song')
       }
       meta={
         <>

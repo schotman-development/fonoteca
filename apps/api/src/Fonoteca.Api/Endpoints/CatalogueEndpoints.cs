@@ -587,6 +587,7 @@ public static partial class CatalogueEndpoints
         MapCoverEndpoints(group);
         MapPortraitEndpoints(group);
         MapProfileEndpoints(group);
+        MapBrowseEndpoints(group);
 
         return app;
     }
@@ -5043,7 +5044,7 @@ public static partial class CatalogueEndpoints
     /// about how the column happens to be stored.
     /// </remarks>
     /// <remarks>A person's corrections are laid over the providers' answers here — see <c>PersonEdits</c>.</remarks>
-    private static ArtistSummary Describe(Artist artist, int songCount, int? albumCount = null)
+    private static ArtistSummary Describe(Artist artist, int songCount, int? albumCount = null, int? compositionCount = null)
     {
         var edits = PersonEdits.Read(artist.EditsJson);
         string? Field(string field, string? provider) => PersonEdits.Apply(edits, field, provider);
@@ -5058,6 +5059,7 @@ public static partial class CatalogueEndpoints
             Field("type", artist.Type),
             songCount,
             albumCount,
+            compositionCount,
             Field("portrait", artist.PortraitUrl),
             Field("country", artist.Country),
             Field("gender", artist.Gender),
@@ -5085,6 +5087,7 @@ public sealed record ArtistListResponse(int Total, int InLibrary, IReadOnlyList<
 /// <param name="Type">Person, Group, Orchestra, Choir. Null when MusicBrainz does not say.</param>
 /// <param name="SongCount">Songs in the library this artist is credited on, a work's movements counting once (<see cref="Songs"/>).</param>
 /// <param name="AlbumCount">Held albums billed to this artist; null where the response did not count them.</param>
+/// <param name="CompositionCount">Pieces of theirs the library holds a recording of, a work's movements counting once; null where the response did not count them.</param>
 /// <param name="Cover">
 /// A release of theirs to draw as their picture, by MusicBrainz id — the album
 /// most of their tracks were filed under. Null when nothing of theirs has been
@@ -5119,6 +5122,7 @@ public sealed record ArtistSummary(
     string? Type,
     int SongCount,
     int? AlbumCount,
+    int? CompositionCount,
 
     /// <summary>
     /// A picture of the artist, on whichever provider's CDN answered.

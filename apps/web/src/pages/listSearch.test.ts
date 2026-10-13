@@ -14,7 +14,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { artistListSearch, releaseListSearch } from './listSearch.ts'
+import {
+  artistListSearch,
+  composerListSearch,
+  compositionListSearch,
+  releaseListSearch,
+  trackListSearch,
+} from './listSearch.ts'
 
 test('a chosen order and scope survive the round trip', () => {
   assert.deepEqual(artistListSearch({ query: 'karajan', sort: 'tracks', scope: 'following' }), {
@@ -51,4 +57,20 @@ test('anything else is dropped rather than carried', () => {
     sort: undefined,
     scope: undefined,
   })
+})
+
+test('a page is a whole number from two up, and the first is no page at all', () => {
+  assert.equal(trackListSearch({ page: 3 }).page, 3)
+  assert.equal(trackListSearch({ page: '3' }).page, 3)
+  assert.equal(compositionListSearch({ page: 1 }).page, undefined)
+  assert.equal(compositionListSearch({ page: 2.5 }).page, undefined)
+  assert.equal(trackListSearch({ page: 'two' }).page, undefined)
+})
+
+test('the new lists keep only their own orders', () => {
+  assert.equal(trackListSearch({ sort: 'album' }).sort, 'album')
+  assert.equal(trackListSearch({ sort: 'recorded' }).sort, undefined)
+  assert.equal(compositionListSearch({ sort: 'recorded' }).sort, 'recorded')
+  assert.equal(composerListSearch({ sort: 'compositions' }).sort, 'compositions')
+  assert.equal(composerListSearch({ sort: 'tracks' }).sort, undefined)
 })

@@ -3462,6 +3462,156 @@
         }
       }
     },
+    "/api/catalogue/tracks": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every recording the library holds a file of, a page at a time.",
+        "description": "One row per recording, so two encodings of a song are one row and `files` says how many. Ordered by title, or by `sort=artist` (the first billed name, uncredited last), `sort=album` (the album's title, then the file's place in its folder) or `sort=added` (newest file first). `query` matches the title, a billed name or the album title, case-insensitively, anywhere in the string. A file no recording is known for is not listed: it is a question on Identify.",
+        "operationId": "GetTracks",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/composers": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Everyone who wrote a piece the library holds a recording of.",
+        "description": "Ordered by sort name, or by `sort=compositions` for the most pieces held first. `compositionCount` counts pieces, a work's movements once; `songCount` is the artist list's. `query` filters on the name as the artist list does. Every songwriter is here, not only the classical composers.",
+        "operationId": "GetComposers",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/compositions": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every piece the library holds a recording of, with each performance of it.",
+        "description": "A piece is a movement's parent work, or the work itself. A performance is one album and one set of performers, and a piece's movements on one album are one whoever each is credited to (`Performances`). Ordered by title, by `sort=recorded` for the most performances first, or by `sort=composer` (the first composer by name, none last). `query` matches the title or a composer's name, case-insensitively.",
+        "operationId": "GetCompositions",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompositionListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/qobuz/status": {
       "get": {
         "tags": [
@@ -5314,6 +5464,7 @@
           "type",
           "songCount",
           "albumCount",
+          "compositionCount",
           "portrait",
           "country",
           "gender",
@@ -5356,6 +5507,13 @@
             "format": "int32"
           },
           "albumCount": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "compositionCount": {
             "type": [
               "null",
               "integer"
@@ -6117,6 +6275,144 @@
               "integer"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "CompositionComposer": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CompositionListResponse": {
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompositionRow"
+            }
+          }
+        }
+      },
+      "CompositionPerformance": {
+        "required": [
+          "performers",
+          "albumId",
+          "album",
+          "year",
+          "tracks",
+          "movements"
+        ],
+        "type": "object",
+        "properties": {
+          "performers": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "albumId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "album": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "movements": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CompositionRow": {
+        "required": [
+          "id",
+          "title",
+          "type",
+          "composers",
+          "performances"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "composers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompositionComposer"
+            }
+          },
+          "performances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompositionPerformance"
+            }
+          }
+        }
+      },
+      "CreditName": {
+        "required": [
+          "artistId",
+          "name",
+          "joinPhrase"
+        ],
+        "type": "object",
+        "properties": {
+          "artistId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "joinPhrase": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -10183,6 +10479,126 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "TrackListAlbum": {
+        "required": [
+          "albumId",
+          "title",
+          "year",
+          "coverReleaseId",
+          "mbid"
+        ],
+        "type": "object",
+        "properties": {
+          "albumId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "coverReleaseId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "TrackListResponse": {
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackListRow"
+            }
+          }
+        }
+      },
+      "TrackListRow": {
+        "required": [
+          "recordingId",
+          "title",
+          "workTitle",
+          "duration",
+          "artists",
+          "album",
+          "folder",
+          "file",
+          "files"
+        ],
+        "type": "object",
+        "properties": {
+          "recordingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workTitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreditName"
+            }
+          },
+          "album": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrackListAlbum"
+              }
+            ]
+          },
+          "folder": {
+            "type": "string"
+          },
+          "file": {
+            "$ref": "#/components/schemas/FileRow"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

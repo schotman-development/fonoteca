@@ -10,7 +10,16 @@
  * A new section is a compile error here until the route exists.
  */
 export type NavItem = {
-  readonly to: '/' | '/library' | '/library/albums' | '/library/matching' | '/files' | '/acquire'
+  readonly to:
+    | '/'
+    | '/library'
+    | '/library/albums'
+    | '/library/tracks'
+    | '/library/composers'
+    | '/library/compositions'
+    | '/library/matching'
+    | '/files'
+    | '/acquire'
   readonly label: string
   /**
    * Whether the link is current only on exactly this path.
@@ -31,8 +40,26 @@ export type NavItem = {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/', label: 'Foundation', exact: true, keywords: ['dashboard', 'scan', 'health'] },
-  { to: '/library', label: 'Artists', exact: true, keywords: ['library', 'people', 'composers'] },
+  { to: '/library', label: 'Artists', exact: true, keywords: ['library', 'people', 'performers'] },
   { to: '/library/albums', label: 'Albums', exact: false, keywords: ['releases', 'catalogue'] },
+  {
+    to: '/library/tracks',
+    label: 'Tracks',
+    exact: false,
+    keywords: ['songs', 'recordings', 'play'],
+  },
+  {
+    to: '/library/composers',
+    label: 'Composers',
+    exact: false,
+    keywords: ['writers', 'songwriters', 'lyricists'],
+  },
+  {
+    to: '/library/compositions',
+    label: 'Compositions',
+    exact: false,
+    keywords: ['works', 'pieces', 'standards', 'covers'],
+  },
   // Not exact, though nothing sits below it today — a question opens in a
   // dialog rather than at a path of its own. Left as it is because the rail
   // behaves identically either way here, and the next screen under /identify
@@ -43,7 +70,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     exact: false,
     keywords: ['matching', 'questions', 'unmatched'],
   },
-  // The disk, rather than the catalogue. It sits after the three catalogue
+  // The disk, rather than the catalogue. It sits after the catalogue
   // screens because it is where somebody goes when one of them is wrong about
   // something — a duplicate folder, a stray rip — and before Acquire because
   // nothing on it spends money.
@@ -53,9 +80,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
     exact: false,
     keywords: ['files', 'folders', 'disk', 'upload', 'delete', 'trash', 'rename'],
   },
-  // Last, and separate from the three above it in more than order: those browse
-  // and correct what is already here, this one spends money on something that
-  // is not.
+  // Last, and separate from the screens above it in more than order: those
+  // browse and correct what is already here, this one spends money on something
+  // that is not.
   {
     to: '/acquire',
     label: 'Acquire',

@@ -4,12 +4,21 @@ import { AppShell } from './AppShell.tsx'
 import { AcquirePage } from './pages/AcquirePage.tsx'
 import { ArtistPage } from './pages/ArtistPage.tsx'
 import { ArtistsPage } from './pages/ArtistsPage.tsx'
+import { ComposersPage } from './pages/ComposersPage.tsx'
+import { CompositionsPage } from './pages/CompositionsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
 import { IdentifyPage } from './pages/IdentifyPage.tsx'
-import { artistListSearch, releaseListSearch } from './pages/listSearch.ts'
+import {
+  artistListSearch,
+  composerListSearch,
+  compositionListSearch,
+  releaseListSearch,
+  trackListSearch,
+} from './pages/listSearch.ts'
 import { ReleasePage } from './pages/ReleasePage.tsx'
 import { ReleasesPage } from './pages/ReleasesPage.tsx'
+import { TracksPage } from './pages/TracksPage.tsx'
 
 /**
  * The route tree, defined in code.
@@ -89,6 +98,28 @@ const releaseRoute = createRoute({
   path: '/library/albums/$albumId',
   component: ReleasePage,
   validateSearch: releaseListSearch,
+})
+
+/** The library by track, by composer and by composition; state in the URL as above. */
+const tracksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/tracks',
+  component: TracksPage,
+  validateSearch: trackListSearch,
+})
+
+const composersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/composers',
+  component: ComposersPage,
+  validateSearch: composerListSearch,
+})
+
+const compositionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/compositions',
+  component: CompositionsPage,
+  validateSearch: compositionListSearch,
 })
 
 /**
@@ -182,6 +213,9 @@ const routeTree = rootRoute.addChildren([
   artistRoute,
   releasesRoute,
   releaseRoute,
+  tracksRoute,
+  composersRoute,
+  compositionsRoute,
   matchingRoute,
   filesRoute,
   acquireRoute,
@@ -198,11 +232,14 @@ export {
   acquireRoute,
   artistRoute,
   artistsRoute,
+  composersRoute,
+  compositionsRoute,
   dashboardRoute,
   filesRoute,
   matchingRoute,
   releaseRoute,
   releasesRoute,
+  tracksRoute,
 }
 
 /**

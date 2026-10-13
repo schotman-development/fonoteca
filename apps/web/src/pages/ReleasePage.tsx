@@ -863,7 +863,7 @@ function dateLabel(year: number | null, month: number | null, day: number | null
  * A file's format, with the depth the analysis measured where a lossless file
  * uses fewer bits than it declares: "FLAC 24→16/44.1".
  */
-function qualityLabel(quality: FileQuality, analysis: FileAnalysis | null): string {
+export function qualityLabel(quality: FileQuality, analysis: FileAnalysis | null): string {
   if (!quality.lossless) return `${quality.codec} ${quality.bitrateKbps}`
 
   const depth =
@@ -878,7 +878,7 @@ function qualityLabel(quality: FileQuality, analysis: FileAnalysis | null): stri
  * Above CD in depth or rate is hi-res, as `AudioQuality.Tier` reads it — by the
  * measured depth, so a padded file is not shown as hi-res.
  */
-function qualityTone(quality: FileQuality, analysis: FileAnalysis | null): BadgeTone {
+export function qualityTone(quality: FileQuality, analysis: FileAnalysis | null): BadgeTone {
   if (!quality.lossless) return 'warning'
   const depth = analysis?.realBitDepth ?? quality.bitDepth ?? 0
   return depth > 16 || quality.sampleRateHz > 48_000 ? 'accent' : 'neutral'
