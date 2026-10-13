@@ -98,6 +98,54 @@ public sealed partial class TagWritePassTests
         Assert.Equal(0, rescan.Summary.Updated);
     }
 
+    /// <summary>The run renames the album, the undo moves it back, and a playlist naming it follows both.</summary>
+    [Fact]
+    public async Task APlaylistFollowsTheRenameAndItsUndo()
+    {
+        SkipWithoutTools();
+        await SeedAsync(("Miles Davis/kob rip/CD1/track one.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var file = await db.MediaFiles.SingleAsync(Token);
+            var playlist = new Playlist
+            {
+                Id = PlaylistId.New(),
+                Name = "Mix",
+                Path = "Playlists/Mix.m3u8",
+                CreatedUtc = DateTimeOffset.UtcNow,
+                ChangedUtc = DateTimeOffset.UtcNow,
+            };
+
+            playlist.Entries.Add(new PlaylistEntry
+            {
+                Id = Guid.CreateVersion7(),
+                PlaylistId = playlist.Id,
+                Position = 0,
+                RecordingId = file.RecordingId,
+                Title = "So What",
+            });
+
+            db.Playlists.Add(playlist);
+            await db.SaveChangesAsync(Token);
+        }
+
+        var services = Build(fileNaming: FileNaming.DefaultPattern);
+        var m3u = Path.Combine(_root, "Playlists", "Mix.m3u8");
+
+        Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Renamed);
+        Assert.Contains(
+            "\n../Miles Davis/Kind of Blue (1959)/01 - So What.flac\n",
+            await File.ReadAllTextAsync(m3u, Token),
+            StringComparison.Ordinal);
+
+        Assert.Equal(TagUndoStatus.Undone, (await UndoAsync(services, "Miles Davis/Kind of Blue (1959)")).Status);
+        Assert.Contains(
+            "\n../Miles Davis/kob rip/CD1/track one.flac\n",
+            await File.ReadAllTextAsync(m3u, Token),
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task AnOldNameSinceTakenKeepsTheAlbumWhereItIs()
     {

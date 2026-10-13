@@ -2658,6 +2658,7 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         services.AddScoped<TagWriter>();
 
         services.AddSingleton<LibraryWorkGate>();
+        services.AddSingleton<PlaylistFiles>();
         services.AddSingleton<TagWriteService>();
 
         services.AddSingleton<IOptions<FonotecaOptions>>(

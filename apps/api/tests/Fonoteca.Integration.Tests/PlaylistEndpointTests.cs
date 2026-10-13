@@ -154,6 +154,35 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A folder renamed through the file manager, and the m3u names the new
+    /// path after the next tag write — not before, since nothing else writes it
+    /// (the owner's choice).
+    /// </summary>
+    [Fact]
+    public async Task AFolderRenamedInTheLibraryIsFollowedAfterTheNextTagWrite()
+    {
+        using var client = _factory!.CreateClient();
+        await CreateAsync(client, "Road trip", _chain);
+
+        using var moved = await client.PostAsJsonAsync(
+            new Uri("/api/files/move", UriKind.Relative),
+            new { from = "Fleetwood Mac/Rumours (1977)", to = "Fleetwood Mac/Rumours" },
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+        Assert.Contains($"\n../{Lossless}\n", ReadPlaylist("Road trip"), StringComparison.Ordinal);
+
+        await _factory.Services
+            .GetRequiredService<TagWriteService>()
+            .WriteFolderAsync("Fleetwood Mac/Rumours", "test", null, Token);
+
+        Assert.Contains("\n../Fleetwood Mac/Rumours/07 - The Chain.flac\n", ReadPlaylist("Road trip"), StringComparison.Ordinal);
+
+        // Nothing moved since: the file is not written again.
+        Assert.Equal(0, await SyncAsync());
+    }
+
+    /// <summary>
     /// A recording merged away — its file repointed and its row deleted, as
     /// <c>CatalogueWriter</c> and the catch-up do — and the entry follows its
     /// last copy to the survivor.
