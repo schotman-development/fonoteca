@@ -168,6 +168,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TagWriteService>()
 // wait. Hosted only — nothing else holds a reference to it.
 builder.Services.AddHostedService<CandidateWarmService>();
 
+builder.Services.AddSingleton<PlaylistFiles>();
+
 // ---------------------------------------------------------------------------
 // External services. Both are registered unconditionally, including when the
 // key or the contact is missing: the failure then names the setting at the

@@ -3633,6 +3633,296 @@
         }
       }
     },
+    "/api/catalogue/playlists": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every playlist, by name, with its first albums for a cover.",
+        "operationId": "GetPlaylists",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "A new playlist, optionally with songs, written to the library as an m3u.",
+        "description": "`recordingIds` are songs the library holds, in order; the same song may appear twice. The file is `Playlists/<name>.m3u8` with paths relative to it, naming the best copy of each song, and Fonoteca rewrites it after every tag write and every edit to the playlist — an edit made to the file elsewhere is overwritten.",
+        "operationId": "CreatePlaylist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlaylistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/playlists/{id}": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "One playlist's songs, in order, each with the copy that plays it.",
+        "description": "An entry with no `track` is a song the library holds no copy of any more — an album being replaced, or every copy trashed. It stays on the playlist and out of the file until a copy returns.",
+        "operationId": "GetPlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Rename a playlist, or set the order of its entries.",
+        "description": "`entries` is the new order as entry ids; an entry left out is removed. Either field may be omitted. A rename renames the file.",
+        "operationId": "UpdatePlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlaylistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Delete a playlist; its file moves to the trash.",
+        "operationId": "DeletePlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/playlists/{id}/songs": {
+      "post": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Add songs to the end of a playlist.",
+        "operationId": "AddPlaylistSongs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPlaylistSongsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/qobuz/status": {
       "get": {
         "tags": [
@@ -3883,6 +4173,24 @@
           "recordings": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "AddPlaylistSongsRequest": {
+        "required": [
+          "recordingIds"
+        ],
+        "type": "object",
+        "properties": {
+          "recordingIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },
@@ -6414,6 +6722,31 @@
           }
         }
       },
+      "CreatePlaylistRequest": {
+        "required": [
+          "name",
+          "recordingIds"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recordingIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
       "CreditName": {
         "required": [
           "artistId",
@@ -8471,6 +8804,155 @@
           "count": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "PlaylistEntryRow": {
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "fileId",
+          "track"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fileId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "track": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrackListRow"
+              }
+            ]
+          }
+        }
+      },
+      "PlaylistListResponse": {
+        "required": [
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlaylistSummary"
+            }
+          }
+        }
+      },
+      "PlaylistResponse": {
+        "required": [
+          "id",
+          "name",
+          "file",
+          "duration",
+          "createdUtc",
+          "changedUtc",
+          "entries"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "changedUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlaylistEntryRow"
+            }
+          }
+        }
+      },
+      "PlaylistSummary": {
+        "required": [
+          "id",
+          "name",
+          "file",
+          "songs",
+          "held",
+          "duration",
+          "changedUtc",
+          "albums"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "songs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "held": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "duration": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "albums": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackListAlbum"
+            }
           }
         }
       },
@@ -10794,6 +11276,31 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "UpdatePlaylistRequest": {
+        "required": [
+          "name",
+          "entries"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entries": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         }

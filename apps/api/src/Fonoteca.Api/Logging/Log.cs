@@ -832,4 +832,28 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "MusicBrainz was not asked about Qobuz album {Album} at download, which is filed as the shop described it: {Reason}")]
     public static partial void DownloadNotLookedUp(ILogger logger, string album, string reason);
+
+    [LoggerMessage(
+        EventId = 1600,
+        Level = LogLevel.Warning,
+        Message = "Writing the playlists failed; the next tag write or playlist edit tries again.")]
+    public static partial void PlaylistSyncFailed(ILogger logger, Exception cause);
+
+    [LoggerMessage(
+        EventId = 1601,
+        Level = LogLevel.Information,
+        Message = "Playlist written: '{Path}'")]
+    public static partial void PlaylistWritten(ILogger logger, string path);
+
+    [LoggerMessage(
+        EventId = 1602,
+        Level = LogLevel.Warning,
+        Message = "Playlist '{Path}' could not be written; the next tag write or playlist edit tries again.")]
+    public static partial void PlaylistNotWritten(ILogger logger, string path, Exception cause);
+
+    [LoggerMessage(
+        EventId = 1603,
+        Level = LogLevel.Information,
+        Message = "Playlist '{Path}' deleted; its file moved to '{Destination}'")]
+    public static partial void PlaylistTrashed(ILogger logger, string path, string destination);
 }

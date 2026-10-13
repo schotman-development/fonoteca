@@ -1323,6 +1323,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every playlist, by name, with its first albums for a cover. */
+        get: operations["GetPlaylists"];
+        put?: never;
+        /**
+         * A new playlist, optionally with songs, written to the library as an m3u.
+         * @description `recordingIds` are songs the library holds, in order; the same song may appear twice. The file is `Playlists/<name>.m3u8` with paths relative to it, naming the best copy of each song, and Fonoteca rewrites it after every tag write and every edit to the playlist — an edit made to the file elsewhere is overwritten.
+         */
+        post: operations["CreatePlaylist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/playlists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One playlist's songs, in order, each with the copy that plays it.
+         * @description An entry with no `track` is a song the library holds no copy of any more — an album being replaced, or every copy trashed. It stays on the playlist and out of the file until a copy returns.
+         */
+        get: operations["GetPlaylist"];
+        put?: never;
+        /**
+         * Rename a playlist, or set the order of its entries.
+         * @description `entries` is the new order as entry ids; an entry left out is removed. Either field may be omitted. A rename renames the file.
+         */
+        post: operations["UpdatePlaylist"];
+        /** Delete a playlist; its file moves to the trash. */
+        delete: operations["DeletePlaylist"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/playlists/{id}/songs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add songs to the end of a playlist. */
+        post: operations["AddPlaylistSongs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/qobuz/status": {
         parameters: {
             query?: never;
@@ -1445,6 +1508,9 @@ export interface components {
             score: number;
             /** Format: int32 */
             recordings: number;
+        };
+        AddPlaylistSongsRequest: {
+            recordingIds: null | string[];
         };
         AlbumCard: {
             /** Format: uuid */
@@ -2088,6 +2154,10 @@ export interface components {
             composers: components["schemas"]["CompositionComposer"][];
             performances: components["schemas"]["CompositionPerformance"][];
         };
+        CreatePlaylistRequest: {
+            name: null | string;
+            recordingIds: null | string[];
+        };
         CreditName: {
             /** Format: uuid */
             artistId: string;
@@ -2652,6 +2722,44 @@ export interface components {
             name: string;
             /** Format: int32 */
             count: number;
+        };
+        PlaylistEntryRow: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            artist: null | string;
+            /** Format: uuid */
+            fileId: null | string;
+            track: null | components["schemas"]["TrackListRow"];
+        };
+        PlaylistListResponse: {
+            items: components["schemas"]["PlaylistSummary"][];
+        };
+        PlaylistResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            file: string;
+            duration: null | string;
+            /** Format: date-time */
+            createdUtc: string;
+            /** Format: date-time */
+            changedUtc: string;
+            entries: components["schemas"]["PlaylistEntryRow"][];
+        };
+        PlaylistSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            file: string;
+            /** Format: int32 */
+            songs: number;
+            /** Format: int32 */
+            held: number;
+            duration: null | string;
+            /** Format: date-time */
+            changedUtc: string;
+            albums: components["schemas"]["TrackListAlbum"][];
         };
         ProbeCoverage: {
             /** Format: int32 */
@@ -3220,6 +3328,10 @@ export interface components {
         };
         TrashRequest: {
             paths: string[];
+        };
+        UpdatePlaylistRequest: {
+            name: null | string;
+            entries: null | string[];
         };
         UpgradeCandidate: {
             /** Format: uuid */
@@ -6105,6 +6217,234 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompositionListResponse"];
+                };
+            };
+        };
+    };
+    GetPlaylists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistListResponse"];
+                };
+            };
+        };
+    };
+    CreatePlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePlaylistRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    UpdatePlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlaylistRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DeletePlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    AddPlaylistSongs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPlaylistSongsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

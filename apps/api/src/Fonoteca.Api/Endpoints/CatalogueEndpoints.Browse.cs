@@ -105,10 +105,29 @@ public static partial class CatalogueEndpoints
             _ => recordings.OrderBy(recording => recording.Title),
         };
 
-        var rows = await sorted
-            .ThenBy(recording => recording.Id)
-            .Skip(skip)
-            .Take(take)
+        var items = await TrackRowsAsync(
+                db,
+                sorted.ThenBy(recording => recording.Id).Skip(skip).Take(take),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return TypedResults.Ok(new TrackListResponse(total, items));
+    }
+
+    /// <summary>
+    /// The Tracks page's row for each recording, in the order given.
+    /// </summary>
+    /// <remarks>
+    /// Every recording must hold a file: a row's <c>File</c> is its first. The
+    /// playlist page shows its songs through this too, with its own copy laid
+    /// over that one.
+    /// </remarks>
+    internal static async Task<List<TrackListRow>> TrackRowsAsync(
+        FonotecaDbContext db,
+        IQueryable<Recording> recordings,
+        CancellationToken cancellationToken)
+    {
+        var rows = await recordings
             .Select(recording => new
             {
                 recording.Id,
@@ -160,7 +179,7 @@ public static partial class CatalogueEndpoints
         var displays = (await EditionFactsAsync(db, unclaimed, cancellationToken).ConfigureAwait(false))
             .ToDictionary(entry => entry.Key, entry => DisplayEdition(entry.Value)?.Id);
 
-        var items = rows
+        return rows
             .Select(row =>
             {
                 var first = row.Files[0];
@@ -185,8 +204,6 @@ public static partial class CatalogueEndpoints
                     row.Files.Count);
             })
             .ToList();
-
-        return TypedResults.Ok(new TrackListResponse(total, items));
     }
 
     internal static async Task<Ok<ArtistListResponse>> GetComposers(

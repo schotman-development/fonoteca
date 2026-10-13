@@ -589,6 +589,7 @@ public static partial class CatalogueEndpoints
         MapProfileEndpoints(group);
         MapOverviewEndpoints(group);
         MapBrowseEndpoints(group);
+        MapPlaylistEndpoints(group);
 
         return app;
     }
