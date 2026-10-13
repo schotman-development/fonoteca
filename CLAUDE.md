@@ -200,7 +200,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | booklets | — | `Providers/CoverArt/AlbumBooklets.cs`, `EnrichmentService.BookletsAsync`, `TagWriteService.EnsureBookletAsync` |
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
-| playlists | `Domain/Catalogue/PlaylistFile.cs` | `Api/Library/PlaylistFiles.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
+| playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
 ## The passes
@@ -700,26 +700,42 @@ corroboration. Eligibility is `IdentityDecidedUtc IS NOT NULL` — what a
 submission carries is the *link*, so the case worth most is a cluster naming
 nothing that a person has just named.
 
-**Playlists** are a person's lists of songs, each written as
-`Playlists/<name>.m3u8` at the library root with paths relative to it (the
-owner's choices: Navidrome, Roon and the production copy read them there).
-**An entry is a song, not a file** (`PlaylistEntry`): each write names the
-best copy held (`PlaylistFile.Best`), so an upgrade or a trashed duplicate
-leaves the playlist pointing at what remains. The places that delete a
-recording after moving its files — a merge, the catch-up's fold and move, a
-download re-filed by hand — move its entries too (`PlaylistFiles.FollowAsync`,
-in the same save); **a new one must do the same**, or an entry whose last copy
-is deleted before the next playlist write is left naming nothing. An entry's
-last copy covers any other change of recording, and one whose link was
-withdrawn (an undone tag write reopens it) still plays the song, rule 3. A song with no copy
-stays on the playlist and out of the file. **The files are written after every tag write run and its
-undo, and after every playlist edit — nothing else** (the owner's choice, over a
-sweep a minute): each write resolves every entry and rewrites only the files
-whose text changed, so a file-manager move, a scan or a replacement reaches them
-at the next of those. Nothing is written while the root looks unmounted. **Fonoteca
-owns those files** — an edit made elsewhere is overwritten, a name whose file is
-not a playlist's is refused, a deleted playlist's file goes to the trash.
-Subsonic reads and writes them through the same handlers. Roon's documentation
+**Playlists** are m3u files at the top of `Playlists/` in the library root,
+with paths relative to the file (the owner's choices: Navidrome, Roon and the
+production copy read them there). Two kinds share the folder.
+
+- **A static playlist is its file and nothing else** (the owner's choice), so it
+  has no row. Any `.m3u8` or `.m3u` there that no smart playlist owns is one,
+  whoever wrote it, and its id is the file's name. An edit here changes only
+  the lines it names and keeps every other line, comment and the file's own
+  newline; entries are named by their place, so an edit carries the file's
+  `version` and is refused when the file changed since. A file that is not
+  UTF-8 is read as Latin-1 and never written.
+- **A line follows its file only where Fonoteca moved it.** Every move in the tag
+  write's rename and its undo (`TagWriteService.MoveAsync`) and in the file
+  manager calls `PlaylistFiles.RepointAsync` after it commits; a folder move
+  carries every line under it, the dead ones too. **A new place that moves
+  files must do the same.** A file that leaves the library leaves its line as
+  written — another release's copy of the song is no replacement (the owner's
+  choice) — except after an upgrade, when `FollowFormatsAsync` points the line
+  at the one file of its name in another format in that folder, the FLAC that
+  replaced an MP3. Adding a song writes its best copy (`PlaylistFile.Best`); a
+  Subsonic client's song is the file it named.
+- **A smart playlist is rules** (`SmartPlaylist`, `SmartRules`, and its twin
+  `smartRules.ts`): a tree of groups, each matching all or any of its
+  conditions and groups, after WordPress's `tax_query` (the owner's choice).
+  The fields cover song, people, album, artist and file, and the tree is one
+  SQL `WHERE` over files (`SmartQuery`). A song is in once, as the best of its
+  matching copies, and "added in the last" compares UUIDv7 file ids as rows.
+  **Only the file holds the songs.** It is written whole on save, and again on
+  every release of `LibraryWorkGate` — every pass, undo, tag edit, download and
+  answer on Identify — and at the end of every scan, which never takes the gate
+  (the owner's choice, over a sweep). A time rule moves only at the next of
+  those. An edit made to the file elsewhere is overwritten.
+
+Nothing is written while the root looks unmounted, and a deleted playlist's file
+goes to the trash. Subsonic reads both kinds through the same handlers and writes
+static ones; a smart one is read-only there (error 50). Roon's documentation
 does not say whether it re-reads a changed m3u; Navidrome does.
 
 ## Acquisition
