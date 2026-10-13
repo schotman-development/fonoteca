@@ -35,6 +35,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<AlbumBookletFile> AlbumBookletFiles => Set<AlbumBookletFile>();
     public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
     public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
+    public DbSet<Playlist> Playlists => Set<Playlist>();
+    public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -47,6 +49,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         configurationBuilder.Properties<ArtistId>().HaveConversion<ArtistIdConverter>();
         configurationBuilder.Properties<DiscoveredRecordId>()
             .HaveConversion<DiscoveredRecordIdConverter>();
+        configurationBuilder.Properties<PlaylistId>().HaveConversion<PlaylistIdConverter>();
         configurationBuilder.Properties<Mbid>().HaveConversion<MbidConverter>();
         configurationBuilder.Properties<AcoustId>().HaveConversion<AcoustIdConverter>();
 
@@ -557,6 +560,37 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .WithMany()
                 .HasForeignKey(x => x.ArtistId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Playlist>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(Playlist.NameLength).IsRequired();
+            e.Property(x => x.Path).HasMaxLength(1000).IsRequired();
+            e.HasIndex(x => x.Path).IsUnique();
+            e.HasMany(x => x.Entries)
+                .WithOne()
+                .HasForeignKey(x => x.PlaylistId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlaylistEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(PlaylistEntry.TitleLength).IsRequired();
+            e.Property(x => x.Artist).HasMaxLength(PlaylistEntry.ArtistLength);
+            e.HasIndex(x => new { x.PlaylistId, x.Position });
+
+            // Set null rather than cascade: see PlaylistEntry, which follows
+            // its last copy to wherever the recording went.
+            e.HasOne<Recording>()
+                .WithMany()
+                .HasForeignKey(x => x.RecordingId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<MediaFile>()
+                .WithMany()
+                .HasForeignKey(x => x.MediaFileId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         base.OnModelCreating(modelBuilder);

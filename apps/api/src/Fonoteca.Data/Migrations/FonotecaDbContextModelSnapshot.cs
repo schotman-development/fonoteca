@@ -625,6 +625,73 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("MediaFiles");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Playlist", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ChangedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("Playlists");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.PlaylistEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Artist")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid?>("MediaFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlaylistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaFileId");
+
+                    b.HasIndex("RecordingId");
+
+                    b.HasIndex("PlaylistId", "Position");
+
+                    b.ToTable("PlaylistEntries");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Recording", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1164,6 +1231,25 @@ namespace Fonoteca.Data.Migrations
                     b.Navigation("Track");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.PlaylistEntry", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.MediaFile", null)
+                        .WithMany()
+                        .HasForeignKey("MediaFileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Playlist", null)
+                        .WithMany("Entries")
+                        .HasForeignKey("PlaylistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithMany()
+                        .HasForeignKey("RecordingId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Recording", b =>
                 {
                     b.HasOne("Fonoteca.Domain.Catalogue.Work", "Work")
@@ -1248,6 +1334,11 @@ namespace Fonoteca.Data.Migrations
                     b.Navigation("Credits");
 
                     b.Navigation("Relationships");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Playlist", b =>
+                {
+                    b.Navigation("Entries");
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Recording", b =>

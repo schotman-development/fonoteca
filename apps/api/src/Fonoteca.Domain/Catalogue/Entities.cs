@@ -1875,3 +1875,77 @@ public sealed class Contribution
     /// <summary>Where MusicBrainz listed it, so a page prints the links in its order.</summary>
     public required int Position { get; init; }
 }
+
+/// <summary>A person's list of songs, in their order, written out as an m3u.</summary>
+/// <remarks>
+/// <b>The row is the playlist; the file is a rendering of it.</b> Fonoteca
+/// rewrites <see cref="Path"/> after every tag write and every edit to the
+/// playlist, so an edit made to the file by hand or by another player is
+/// overwritten, the owner's choice for a first version. Nothing reads an m3u
+/// back.
+/// </remarks>
+public sealed class Playlist
+{
+    public const int NameLength = 200;
+
+    public required PlaylistId Id { get; init; }
+
+    public required string Name { get; set; }
+
+    /// <summary>
+    /// Library-relative path of the m3u, under <c>PlaylistFile.Folder</c>.
+    /// Stored rather than derived from the name, so a rename knows which file
+    /// was its own even after the naming rule changes.
+    /// </summary>
+    public required string Path { get; set; }
+
+    public required DateTimeOffset CreatedUtc { get; init; }
+
+    public required DateTimeOffset ChangedUtc { get; set; }
+
+    public List<PlaylistEntry> Entries { get; init; } = [];
+}
+
+/// <summary>One song on a playlist.</summary>
+/// <remarks>
+/// <b>An entry is a song, not a file</b> (the owner's choice): the m3u names
+/// the best copy the library holds of <see cref="RecordingId"/> each time it is
+/// written, so an upgrade or a trashed duplicate leaves the playlist pointing at
+/// what remains.
+///
+/// <b>A recording deleted after its files moved onto another takes its entries
+/// along</b> — the merge, the catch-up's fold and move, a download re-filed by
+/// hand all call <c>PlaylistFiles.FollowAsync</c> before the row goes, so an
+/// entry never depends on a file surviving until the next playlist write.
+/// <see cref="MediaFileId"/>, the copy it last named, covers every other way a
+/// file changes recording: the next write follows it. A last copy since linked
+/// to nothing — an undone tag write reopens its folder, an outside tagger's
+/// bytes withdraw its AcoustID — still plays the song: an answer withdrawn is
+/// not a different one (rule 3). A recording deleted any other way sets
+/// <see cref="RecordingId"/> null rather than taking the entry with it.
+///
+/// <see cref="Title"/> and <see cref="Artist"/> are what it was last known as,
+/// for the one entry nothing can resolve: its recording and its last copy both
+/// gone.
+/// </remarks>
+public sealed class PlaylistEntry
+{
+    public const int TitleLength = 1000;
+
+    public const int ArtistLength = 2000;
+
+    public required Guid Id { get; init; }
+
+    public required PlaylistId PlaylistId { get; init; }
+
+    /// <summary>From 0, in the playlist's order.</summary>
+    public required int Position { get; set; }
+
+    public RecordingId? RecordingId { get; set; }
+
+    public MediaFileId? MediaFileId { get; set; }
+
+    public required string Title { get; set; }
+
+    public string? Artist { get; set; }
+}
