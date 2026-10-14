@@ -95,6 +95,25 @@ button.root {
 
 /* ---- text ---- */
 
+/*
+ * Four covers as one square: the quarters meet edge to edge, and the corners
+ * and the hairline border are the square's rather than each cover's.
+ * `> span` rather than `> *` so it outranks Artwork's own `.root`, whatever
+ * order the two stylesheets load in.
+ */
+.mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.mosaic > span {
+  border: none;
+  border-radius: 0;
+}
+
 .body {
   display: flex;
   flex-direction: column;

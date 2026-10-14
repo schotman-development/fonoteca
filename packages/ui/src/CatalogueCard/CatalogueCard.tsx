@@ -36,6 +36,12 @@ export type CatalogueCardProps = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
   readonly meta?: ReactNode
   /** Cover or portrait. Omit and the card draws a monogram instead. */
   readonly image?: string
+  /**
+   * Four covers drawn as one square, for a tile that stands for many albums
+   * rather than one — a genre. Fewer than four, and the first is drawn alone.
+   * Album tiles only: four portraits cropped into a circle read as nobody.
+   */
+  readonly mosaic?: readonly string[]
   /** Renders the card as a link. */
   readonly href?: string
   /**
@@ -76,11 +82,14 @@ export function CatalogueCard({
   subtitle,
   meta,
   image,
+  mosaic,
   href,
   render,
   className,
   ...rest
 }: CatalogueCardProps) {
+  const single = image ?? mosaic?.[0]
+
   const elementProps: CatalogueCardElementProps = {
     ...rest,
     // Joined rather than the ternary the other components use: `render` is
@@ -90,12 +99,20 @@ export function CatalogueCard({
     'data-catalogue-card': variant,
     children: (
       <>
-        <Artwork
-          name={title}
-          shape={variant === 'artist' ? 'circle' : 'square'}
-          size="fill"
-          {...(image != null ? { src: image } : {})}
-        />
+        {variant === 'album' && mosaic != null && mosaic.length >= 4 ? (
+          <span className={styles.mosaic}>
+            {mosaic.slice(0, 4).map((src, index) => (
+              <Artwork key={index} name={title} size="fill" src={src} />
+            ))}
+          </span>
+        ) : (
+          <Artwork
+            name={title}
+            shape={variant === 'artist' ? 'circle' : 'square'}
+            size="fill"
+            {...(single != null ? { src: single } : {})}
+          />
+        )}
         <span className={styles.body}>
           <Text size="sm" weight="medium" truncate>
             {title}

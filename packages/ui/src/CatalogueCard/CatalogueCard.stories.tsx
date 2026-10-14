@@ -73,6 +73,40 @@ export const WithoutArtwork: Story = {
 }
 
 /**
+ * A tile standing for many albums — a genre — draws four of their covers as
+ * one square. Fewer than four, and the first stands alone.
+ */
+export const Mosaic: Story = {
+  render: () => (
+    <Stack gap={16} align="start">
+      <Frame width={160}>
+        <CatalogueCard
+          variant="album"
+          title="Blues"
+          subtitle="181 albums"
+          mosaic={[
+            cover('#1971c2', '#0b0d0e'),
+            cover('#f59f00', '#c92a2a'),
+            cover('#2f9e44', '#0b0d0e'),
+            cover('#ae3ec9', '#1971c2'),
+          ]}
+          href="#blues"
+        />
+      </Frame>
+      <Frame width={160}>
+        <CatalogueCard
+          variant="album"
+          title="Delta Blues"
+          subtitle="2 albums"
+          mosaic={[cover('#f59f00', '#c92a2a'), cover('#2f9e44', '#0b0d0e')]}
+          href="#delta-blues"
+        />
+      </Frame>
+    </Stack>
+  ),
+}
+
+/**
  * The `meta` slot, which is where a card earns its place over a row: quality,
  * certainty, and whether the album is all there.
  */
