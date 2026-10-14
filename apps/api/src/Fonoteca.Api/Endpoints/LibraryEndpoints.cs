@@ -260,6 +260,12 @@ public static class LibraryEndpoints
                 detail: "Only one scan runs at a time. Poll GET /api/library/scan for its result.",
                 statusCode: StatusCodes.Status409Conflict),
 
+            { Status: LibraryScanStatus.HasherUnavailable } => TypedResults.Problem(
+                title: "ffmpeg could not be run",
+                detail: "Files changed on disk, and telling a retag from new audio needs ffmpeg. "
+                    + "Check Fonoteca:FfmpegPath. Nothing was changed.",
+                statusCode: StatusCodes.Status503ServiceUnavailable),
+
             // 503, not 500: the configured root is missing, which is a mount
             // that has not come back rather than a bug, and it is very likely
             // to be true again in a minute.

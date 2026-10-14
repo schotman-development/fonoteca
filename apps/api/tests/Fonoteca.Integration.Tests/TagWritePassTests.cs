@@ -2649,6 +2649,7 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         services.AddSingleton<IAudioFileStore>(sp => sp.GetRequiredService<FileSystemAudioFileStore>());
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
+        services.AddSingleton(sp => new FfmpegAudioHasher(sp.GetRequiredService<FileSystemAudioFileStore>(), "ffmpeg"));
 
         services.AddSingleton<TagReader>();
         services.AddSingleton(new TagWriterOptions { AllowFileMutation = allowMutation });

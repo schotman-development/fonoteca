@@ -8696,6 +8696,7 @@
           "added",
           "updated",
           "unchanged",
+          "moved",
           "removed",
           "unreadableDirectories"
         ],
@@ -8726,6 +8727,10 @@
             "format": "int32"
           },
           "unchanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "moved": {
             "type": "integer",
             "format": "int32"
           },

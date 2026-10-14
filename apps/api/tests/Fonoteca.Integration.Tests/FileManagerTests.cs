@@ -442,6 +442,8 @@ public sealed class FileManagerTests(PostgresFixture postgres) : IAsyncLifetime
             sp => sp.GetRequiredService<FileSystemAudioFileStore>());
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
+        services.AddSingleton(sp => new FfmpegAudioHasher(sp.GetRequiredService<FileSystemAudioFileStore>(), "ffmpeg"));
+        services.AddSingleton<Fonoteca.Tagging.TagReader>();
         services.AddSingleton<LibraryWorkGate>();
         services.AddSingleton<PlaylistFiles>();
         services.AddScoped<FileManagerService>();

@@ -2697,6 +2697,8 @@ export interface components {
             /** Format: int32 */
             unchanged: number;
             /** Format: int32 */
+            moved: number;
+            /** Format: int32 */
             removed: number;
             /** Format: int32 */
             unreadableDirectories: number;

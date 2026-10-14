@@ -138,6 +138,46 @@ public sealed class LibraryScanEndpointTests(PostgresFixture postgres) : IAsyncL
         Assert.Contains("LibraryPath", problem, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A changed file the scan cannot hash is a tool to fix, not a library to
+    /// rewrite: a 503 naming the setting, and the row as it was.
+    /// </summary>
+    [Fact]
+    public async Task PostScanReturns503WhenFfmpegCannotHashAChangedFile()
+    {
+        await using var broken = _factory!.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Fonoteca:FfmpegPath", Path.Combine(_root, "no-ffmpeg-here"));
+            builder.UseSetting("Fonoteca:IdentifyAfterScan", "false");
+        });
+
+        using var client = broken.CreateClient();
+        var scan = new Uri("/api/library/scan", UriKind.Relative);
+
+        WriteFile("a.flac", "original");
+        (await client.PostAsync(scan, content: null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(TestContext.Current.CancellationToken);
+            row.AudioHash = "audio";
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        WriteFile("a.flac", "a longer body");
+
+        using var response = await client.PostAsync(scan, content: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains(
+            "FfmpegPath",
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),
+            StringComparison.Ordinal);
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal("audio", (await check.MediaFiles.SingleAsync(TestContext.Current.CancellationToken)).AudioHash);
+    }
+
     private void WriteFile(string relativePath, string content = "not really audio")
     {
         var absolute = Path.Combine(_root, relativePath);

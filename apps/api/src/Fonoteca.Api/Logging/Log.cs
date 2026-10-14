@@ -84,15 +84,22 @@ internal static partial class Log
         EventId = 1201,
         Level = LogLevel.Information,
         Message = "Library scan finished: {FilesSeen} files seen, {Added} added, {Updated} updated, "
-            + "{Unchanged} unchanged, {Removed} removed, in {ElapsedMs}ms")]
+            + "{Unchanged} unchanged, {Moved} moved, {Removed} removed, in {ElapsedMs}ms")]
     public static partial void ScanCompleted(
         ILogger logger,
         int filesSeen,
         int added,
         int updated,
         int unchanged,
+        int moved,
         int removed,
         long elapsedMs);
+
+    [LoggerMessage(
+        EventId = 1217,
+        Level = LogLevel.Error,
+        Message = "Library scan refused: a changed file needed its audio hashed and {Reason} Nothing was changed.")]
+    public static partial void ScanHasherUnavailable(ILogger logger, string reason);
 
     [LoggerMessage(
         EventId = 1202,

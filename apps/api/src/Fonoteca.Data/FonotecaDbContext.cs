@@ -179,7 +179,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.RecordingCandidatesJson).HasColumnType("jsonb");
 
             // Dedupe reads these constantly, so both are indexed. AudioHash is
-            // the exact-duplicate path (same decoded audio, different tags);
+            // the exact-duplicate path (same audio packets, different tags);
             // Fingerprint is the cross-encoding path.
             e.HasIndex(x => x.AudioHash).HasFilter("\"AudioHash\" IS NOT NULL");
             e.HasIndex(x => x.ContentHash).HasFilter("\"ContentHash\" IS NOT NULL");

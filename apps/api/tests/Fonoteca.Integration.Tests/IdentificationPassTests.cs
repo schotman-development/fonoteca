@@ -823,6 +823,7 @@ public sealed class IdentificationPassTests(PostgresFixture postgres) : IAsyncLi
         services.AddSingleton<IAudioFileStore>(sp => sp.GetRequiredService<FileSystemAudioFileStore>());
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
+        services.AddSingleton(sp => new FfmpegAudioHasher(sp.GetRequiredService<FileSystemAudioFileStore>(), "ffmpeg"));
 
         services.AddSingleton<IAudioFingerprinter>(
             sp => new FpcalcFingerprinter(sp.GetRequiredService<FileSystemAudioFileStore>(), "fpcalc"));

@@ -2,6 +2,7 @@ using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Fixtures;
 using Fonoteca.Ingest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -113,13 +114,15 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>
-    /// A changed file invalidates everything derived from its bytes. A stale
-    /// audio hash is worse than none: it is what makes dedupe delete the copy
-    /// that was actually different.
+    /// A file whose audio changed invalidates everything derived from its bytes.
+    /// A stale audio hash is worse than none: it is what makes dedupe delete the
+    /// copy that was actually different.
     /// </summary>
     [Fact]
     public async Task ChangedFileIsUpdatedAndItsDerivedDataDiscarded()
     {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
         var absolute = WriteFile("a.flac", "original");
         await ScanAsync();
 
@@ -311,6 +314,512 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Another program retagging a file changes its size and mtime and not its
+    /// audio, so nothing the audio earned is forgotten.
+    /// </summary>
+    [Fact]
+    public async Task AFileAnotherProgramRetaggedKeepsWhatItsAudioEarned()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var absolute = CopyCorpus("Artist/Album/01.flac");
+        await ScanAsync();
+        var asked = await AnswerAsync("Artist/Album/01.flac", hashed: true);
+
+        Remux(absolute, absolute, "title=Retagged elsewhere");
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(1, summary.Updated);
+
+        var row = (await RowsAsync()).Single();
+        Assert.Equal(new FileInfo(absolute).Length, row.SizeBytes);
+        Assert.NotNull(row.AudioHash);
+        Assert.NotNull(row.AcoustId);
+        Assert.NotNull(row.RecordingId);
+        Assert.NotNull(row.IdentityDecidedUtc);
+        Assert.NotNull(row.Quality);
+        Assert.NotNull(row.LastVerifiedUtc);
+        Assert.Equal(asked, row.ReleaseLookupUtc);
+
+        // Whether it still carries its AcoustID is the file's to say again.
+        Assert.Null(row.AcoustIdTaggedUtc);
+
+        // The bytes did change.
+        Assert.Null(row.ContentHash);
+    }
+
+    /// <summary>A hashed file whose audio was replaced is new audio, and keeps nothing the old audio earned.</summary>
+    [Fact]
+    public async Task AFileWhoseAudioWasReplacedKeepsNothingTheOldAudioEarned()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var absolute = CopyCorpus("Artist/Album/01.flac");
+        await ScanAsync();
+        await AnswerAsync("Artist/Album/01.flac", hashed: true);
+
+        OtherAudio(absolute);
+        await ScanAsync();
+
+        var row = (await RowsAsync()).Single();
+        Assert.Null(row.AudioHash);
+        Assert.Null(row.AcoustId);
+        Assert.Null(row.RecordingId);
+        Assert.Null(row.IdentityDecidedUtc);
+        Assert.Null(row.Quality);
+        Assert.Null(row.ReleaseLookupUtc);
+    }
+
+    /// <summary>The numbers a file carries are its folder's order, so new ones re-decide the folder.</summary>
+    [Fact]
+    public async Task ARetagThatRenumbersAFilePutsItsFolderBackThroughAttribution()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var absolute = CopyCorpus("Artist/Album/01.flac");
+        await ScanAsync();
+        await AnswerAsync("Artist/Album/01.flac", hashed: true);
+
+        Remux(absolute, absolute, "track=2");
+        await ScanAsync();
+
+        var row = (await RowsAsync()).Single();
+        Assert.Equal(2, row.TagTrackNumber);
+        Assert.Null(row.ReleaseLookupUtc);
+        Assert.NotNull(row.RecordingId);
+        Assert.NotNull(row.Quality);
+    }
+
+    /// <summary>
+    /// A folder renamed by another program is the same files somewhere else, not
+    /// a deletion and an arrival that take every answer with them.
+    /// </summary>
+    [Fact]
+    public async Task AFolderAnotherProgramRenamedKeepsItsRows()
+    {
+        WriteFile("Artist/Album/01.flac", "one");
+        WriteFile("Artist/Album/02.flac", "two two");
+        await ScanAsync();
+        await AnswerAsync("Artist/Album/01.flac");
+        await AnswerAsync("Artist/Album/02.flac");
+        var before = (await RowsAsync()).ToDictionary(row => Path.GetFileName(row.Path));
+
+        Directory.Move(Path.Combine(_root, "Artist/Album"), Path.Combine(_root, "Artist/Album (1979)"));
+        var summary = await ScanAsync();
+
+        Assert.Equal(2, summary.Moved);
+        Assert.Equal(0, summary.Added);
+        Assert.Equal(0, summary.Removed);
+
+        var rows = await RowsAsync();
+        Assert.All(rows, row => Assert.StartsWith("Artist/Album (1979)/", row.Path, StringComparison.Ordinal));
+        Assert.All(rows, row => Assert.Equal(before[Path.GetFileName(row.Path)].Id, row.Id));
+        Assert.All(rows, row => Assert.NotNull(row.AcoustId));
+        Assert.All(rows, row => Assert.Equal(before[Path.GetFileName(row.Path)].ReleaseLookupUtc, row.ReleaseLookupUtc));
+
+        // Not one byte changed, so what the file says is still known.
+        Assert.All(rows, row => Assert.NotNull(row.AcoustIdTaggedUtc));
+    }
+
+    /// <summary>
+    /// One file moved into another album folder keeps its answers, and the
+    /// folder it joined is decided again, since a folder is one album.
+    /// </summary>
+    [Fact]
+    public async Task AFileMovedIntoAnotherFolderKeepsItsAnswersAndReopensItsAlbum()
+    {
+        WriteFile("Artist/Album/01.flac", "one");
+        WriteFile("Artist/Album/02.flac", "two two");
+        WriteFile("Artist/Other/01.flac", "three three three");
+        await ScanAsync();
+
+        foreach (var path in (await RowsAsync()).Select(row => row.Path)) await AnswerAsync(path);
+
+        var id = (await RowsAsync()).Single(row => row.Path == "Artist/Album/02.flac").Id;
+
+        File.Move(Path.Combine(_root, "Artist/Album/02.flac"), Path.Combine(_root, "Artist/Other/02.flac"));
+        var summary = await ScanAsync();
+
+        Assert.Equal(1, summary.Moved);
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        var moved = rows["Artist/Other/02.flac"];
+        Assert.Equal(id, moved.Id);
+        Assert.NotNull(moved.AcoustId);
+        Assert.NotNull(moved.RecordingId);
+        Assert.Null(moved.ReleaseLookupUtc);
+        Assert.NotNull(rows["Artist/Album/01.flac"].ReleaseLookupUtc);
+        Assert.NotNull(rows["Artist/Other/01.flac"].ReleaseLookupUtc);
+    }
+
+    /// <summary>A folder's only file moved into a folder that holds others joins an album that is decided again.</summary>
+    [Fact]
+    public async Task AFileMovedIntoAFolderThatHoldsOthersReopensIt()
+    {
+        WriteFile("Artist/Single/01.flac", "one");
+        WriteFile("Artist/Other/02.flac", "two two");
+        await ScanAsync();
+        await AnswerAsync("Artist/Single/01.flac");
+        await AnswerAsync("Artist/Other/02.flac");
+
+        File.Move(Path.Combine(_root, "Artist/Single/01.flac"), Path.Combine(_root, "Artist/Other/01.flac"));
+        await ScanAsync();
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        Assert.Null(rows["Artist/Other/01.flac"].ReleaseLookupUtc);
+        Assert.NotNull(rows["Artist/Other/01.flac"].AcoustId);
+        Assert.NotNull(rows["Artist/Other/02.flac"].ReleaseLookupUtc);
+    }
+
+    /// <summary>Part of a folder moved to a new one is not the album renamed.</summary>
+    [Fact]
+    public async Task PartOfAFolderMovedToANewOneReopensIt()
+    {
+        WriteFile("Artist/Album/01.flac", "one");
+        WriteFile("Artist/Album/02.flac", "two two");
+        await ScanAsync();
+        await AnswerAsync("Artist/Album/01.flac");
+        await AnswerAsync("Artist/Album/02.flac");
+
+        Directory.CreateDirectory(Path.Combine(_root, "Artist/Bonus"));
+        File.Move(Path.Combine(_root, "Artist/Album/02.flac"), Path.Combine(_root, "Artist/Bonus/02.flac"));
+        await ScanAsync();
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        Assert.Null(rows["Artist/Bonus/02.flac"].ReleaseLookupUtc);
+        Assert.NotNull(rows["Artist/Bonus/02.flac"].AcoustId);
+        Assert.NotNull(rows["Artist/Album/01.flac"].ReleaseLookupUtc);
+    }
+
+    /// <summary>A program that retags and renames in one go is found by the audio.</summary>
+    [Fact]
+    public async Task AFileRetaggedAndRenamedIsFoundByItsAudio()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var absolute = CopyCorpus("Artist/Album/01.flac");
+        await ScanAsync();
+        await AnswerAsync("Artist/Album/01.flac", hashed: true);
+        var id = (await RowsAsync()).Single().Id;
+
+        var renamed = Path.Combine(_root, "Artist/Album (Remaster)/01 Tone.flac");
+        Directory.CreateDirectory(Path.GetDirectoryName(renamed)!);
+        Remux(absolute, renamed, "title=Tone");
+        File.Delete(absolute);
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(1, summary.Moved);
+        Assert.Equal(0, summary.Added);
+        Assert.Equal(0, summary.Removed);
+
+        var row = (await RowsAsync()).Single();
+        Assert.Equal(id, row.Id);
+        Assert.Equal("Artist/Album (Remaster)/01 Tone.flac", row.Path);
+        Assert.Equal(new FileInfo(renamed).Length, row.SizeBytes);
+        Assert.NotNull(row.AcoustId);
+        Assert.NotNull(row.Quality);
+
+        // Renamed inside the folder, and names are evidence for its order.
+        Assert.Null(row.ReleaseLookupUtc);
+    }
+
+    /// <summary>
+    /// Renumbering moves each file onto a name another file had: the same
+    /// paths with other bytes, and still every file is the row it was.
+    /// </summary>
+    [Fact]
+    public async Task ARenumberingThatReusesNamesKeepsEveryRow()
+    {
+        WriteFile("A/B/01.flac", "one");
+        WriteFile("A/B/02.flac", "two two");
+        await ScanAsync();
+        await AnswerAsync("A/B/01.flac");
+        await AnswerAsync("A/B/02.flac");
+        var ids = (await RowsAsync()).ToDictionary(row => row.Path, row => row.Id);
+
+        File.Move(Path.Combine(_root, "A/B/02.flac"), Path.Combine(_root, "A/B/03.flac"));
+        File.Move(Path.Combine(_root, "A/B/01.flac"), Path.Combine(_root, "A/B/02.flac"));
+        WriteFile("A/B/01.flac", "a new first track");
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(2, summary.Moved);
+        Assert.Equal(1, summary.Added);
+        Assert.Equal(0, summary.Updated);
+        Assert.Equal(0, summary.Removed);
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        Assert.Equal(ids["A/B/01.flac"], rows["A/B/02.flac"].Id);
+        Assert.Equal(ids["A/B/02.flac"], rows["A/B/03.flac"].Id);
+        Assert.NotNull(rows["A/B/02.flac"].AcoustId);
+        Assert.NotNull(rows["A/B/03.flac"].AcoustId);
+        Assert.Null(rows["A/B/01.flac"].AcoustId);
+
+        // New names inside the folder are new evidence for its order.
+        Assert.Null(rows["A/B/02.flac"].ReleaseLookupUtc);
+    }
+
+    /// <summary>A tagger renumbering an album rewrites every file on the way, so the audio finds them.</summary>
+    [Fact]
+    public async Task ARenumberingByATaggerIsFoundByTheAudio()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var first = CopyCorpus("A/B/01.flac");
+        var second = Path.Combine(_root, "A/B/02.flac");
+        OtherAudio(second);
+        await ScanAsync();
+        await AnswerAsync("A/B/01.flac", hashed: true);
+        await AnswerAsync("A/B/02.flac", hashed: true);
+        var ids = (await RowsAsync()).ToDictionary(row => row.Path, row => row.Id);
+
+        Remux(second, Path.Combine(_root, "A/B/03.flac"), "track=3");
+        Remux(first, second, "track=2");
+        OtherAudio(first, frequency: 330);
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(2, summary.Moved);
+        Assert.Equal(1, summary.Added);
+        Assert.Equal(0, summary.Removed);
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        Assert.Equal(ids["A/B/01.flac"], rows["A/B/02.flac"].Id);
+        Assert.Equal(ids["A/B/02.flac"], rows["A/B/03.flac"].Id);
+        Assert.NotNull(rows["A/B/02.flac"].Quality);
+        Assert.Equal(2, rows["A/B/02.flac"].TagTrackNumber);
+        Assert.Null(rows["A/B/01.flac"].RecordingId);
+    }
+
+    /// <summary>Two files that swapped names: a cycle no order of updates can make without parking one.</summary>
+    [Fact]
+    public async Task TwoFilesThatSwappedNamesKeepTheirRows()
+    {
+        WriteFile("A/B/01.flac", "one");
+        WriteFile("A/B/02.flac", "two two");
+        await ScanAsync();
+        await AnswerAsync("A/B/01.flac");
+        await AnswerAsync("A/B/02.flac");
+        var ids = (await RowsAsync()).ToDictionary(row => row.Path, row => row.Id);
+
+        File.Move(Path.Combine(_root, "A/B/01.flac"), Path.Combine(_root, "A/B/swap"));
+        File.Move(Path.Combine(_root, "A/B/02.flac"), Path.Combine(_root, "A/B/01.flac"));
+        File.Move(Path.Combine(_root, "A/B/swap"), Path.Combine(_root, "A/B/02.flac"));
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(2, summary.Moved);
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        Assert.Equal(ids["A/B/01.flac"], rows["A/B/02.flac"].Id);
+        Assert.Equal(ids["A/B/02.flac"], rows["A/B/01.flac"].Id);
+        Assert.All(rows.Values, row => Assert.NotNull(row.AcoustId));
+    }
+
+    /// <summary>A file moved over another's name: the one it replaced went nowhere, and goes.</summary>
+    [Fact]
+    public async Task AFileMovedOverAnotherTakesItsPlace()
+    {
+        WriteFile("A/B/01.flac", "one");
+        WriteFile("A/B/02.flac", "two two");
+        await ScanAsync();
+        await AnswerAsync("A/B/01.flac");
+        await AnswerAsync("A/B/02.flac");
+        var id = (await RowsAsync()).Single(row => row.Path == "A/B/01.flac").Id;
+
+        File.Move(Path.Combine(_root, "A/B/01.flac"), Path.Combine(_root, "A/B/02.flac"), overwrite: true);
+        var summary = await ScanAsync();
+
+        Assert.Equal(1, summary.Moved);
+        Assert.Equal(1, summary.Removed);
+        Assert.Equal(0, summary.Added);
+
+        var row = Assert.Single(await RowsAsync());
+        Assert.Equal(id, row.Id);
+        Assert.Equal("A/B/02.flac", row.Path);
+        Assert.NotNull(row.AcoustId);
+    }
+
+    /// <summary>
+    /// A place one row already moved to is not offered again: a second row of
+    /// the same audio that vanished with it is a deletion, not a second claim.
+    /// </summary>
+    [Fact]
+    public async Task APlaceOneRowMovedToIsNotClaimedBySameAudioThatWentWithIt()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        CopyCorpus("X/A/01.flac");
+        var copy = Path.Combine(_root, "Y/B/01.flac");
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        Remux(Corpus.Flac, copy, "title=Another copy");
+        await ScanAsync();
+        await AnswerAsync("X/A/01.flac", hashed: true);
+        await AnswerAsync("Y/B/01.flac", hashed: true);
+        var id = (await RowsAsync()).Single(row => row.Path == "X/A/01.flac").Id;
+
+        Directory.CreateDirectory(Path.Combine(_root, "Z/A"));
+        File.Move(Path.Combine(_root, "X/A/01.flac"), Path.Combine(_root, "Z/A/01.flac"));
+        File.Delete(copy);
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(1, summary.Moved);
+        Assert.Equal(1, summary.Removed);
+
+        var row = Assert.Single(await RowsAsync());
+        Assert.Equal(id, row.Id);
+        Assert.Equal("Z/A/01.flac", row.Path);
+    }
+
+    /// <summary>Two files that could each be either are left as a deletion and an arrival.</summary>
+    [Fact]
+    public async Task AMoveThatCouldBeEitherOfTwoFilesIsNotGuessed()
+    {
+        var stamp = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(WriteFile("A/B/1.flac", "same"), stamp);
+        File.SetLastWriteTimeUtc(WriteFile("A/B/2.flac", "same"), stamp);
+        await ScanAsync();
+
+        Directory.Move(Path.Combine(_root, "A/B"), Path.Combine(_root, "A/C"));
+        var summary = await ScanAsync();
+
+        Assert.Equal(0, summary.Moved);
+        Assert.Equal(2, summary.Added);
+        Assert.Equal(2, summary.Removed);
+    }
+
+    /// <summary>One file gone and two arrived that could each be it: no guess either.</summary>
+    [Fact]
+    public async Task AFileThatCouldHaveGoneToEitherOfTwoPlacesIsNotGuessed()
+    {
+        var stamp = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        var original = WriteFile("A/B/1.flac", "same");
+        File.SetLastWriteTimeUtc(original, stamp);
+        await ScanAsync();
+
+        File.SetLastWriteTimeUtc(WriteFile("A/C/1.flac", "same"), stamp);
+        File.SetLastWriteTimeUtc(WriteFile("A/D/1.flac", "same"), stamp);
+        File.Delete(original);
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(0, summary.Moved);
+        Assert.Equal(2, summary.Added);
+        Assert.Equal(1, summary.Removed);
+    }
+
+    /// <summary>The same bytes under another format's name are not the file that left.</summary>
+    [Fact]
+    public async Task AFileThatChangedItsExtensionIsNotAMove()
+    {
+        WriteFile("A/B/1.flac", "same");
+        await ScanAsync();
+
+        File.Move(Path.Combine(_root, "A/B/1.flac"), Path.Combine(_root, "A/B/1.mp3"));
+        var summary = await ScanAsync();
+
+        Assert.Equal(0, summary.Moved);
+        Assert.Equal(1, summary.Added);
+        Assert.Equal(1, summary.Removed);
+    }
+
+    /// <summary>
+    /// A walk that missed a directory has not seen anything go, so it pairs
+    /// nothing either — a move it cannot see both ends of is not one.
+    /// </summary>
+    [Fact]
+    public async Task AWalkThatMissedADirectoryLooksForNoMove()
+    {
+        WriteFile("A/B/01.flac", "one");
+        WriteFile("Private/02.flac", "two two");
+        await ScanAsync();
+
+        Directory.CreateDirectory(Path.Combine(_root, "A/C"));
+        File.Move(Path.Combine(_root, "A/B/01.flac"), Path.Combine(_root, "A/C/01.flac"));
+
+        var locked = Path.Combine(_root, "Private");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+
+        try
+        {
+            var summary = await ScanAsync();
+
+            Assert.Equal(1, summary.UnreadableDirectories);
+            Assert.Equal(0, summary.Moved);
+            Assert.Equal(0, summary.Removed);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    /// <summary>
+    /// Arrivals are hashed only against a vanished file of their own format,
+    /// and a hash read for a move that was not one is kept.
+    /// </summary>
+    [Fact]
+    public async Task AnArrivalHashedForAMoveKeepsItsHash()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var gone = CopyCorpus("A/B/01.flac");
+        await ScanAsync();
+        await AnswerAsync("A/B/01.flac", hashed: true);
+
+        File.Delete(gone);
+        var other = Path.Combine(_root, "X/Z/other.flac");
+        Directory.CreateDirectory(Path.GetDirectoryName(other)!);
+        OtherAudio(other);
+        Directory.CreateDirectory(Path.Combine(_root, "X/Y"));
+        File.Copy(Corpus.Mp3, Path.Combine(_root, "X/Y/new.mp3"));
+
+        var summary = await ScanAsync();
+
+        Assert.Equal(0, summary.Moved);
+        Assert.Equal(2, summary.Added);
+        Assert.Equal(1, summary.Removed);
+
+        var rows = (await RowsAsync()).ToDictionary(row => row.Path);
+        Assert.NotNull(rows["X/Z/other.flac"].AudioHash);
+        Assert.Null(rows["X/Y/new.mp3"].AudioHash);
+    }
+
+    /// <summary>
+    /// Without ffmpeg a retag cannot be told from new audio, so the scan refuses
+    /// rather than discard what it cannot vouch for.
+    /// </summary>
+    [Fact]
+    public async Task AScanThatCannotHashAChangedFileChangesNothing()
+    {
+        var absolute = WriteFile("a.flac", "original");
+        await ScanAsync();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.MediaFiles.SingleAsync(TestContext.Current.CancellationToken);
+            row.AudioHash = "audio";
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await File.WriteAllTextAsync(absolute, "a longer body", TestContext.Current.CancellationToken);
+        WriteFile("b.flac");
+
+        var outcome = await BuildServices(_root, ffmpeg: Path.Combine(_root, "no-ffmpeg-here"))
+            .GetRequiredService<LibraryScanService>()
+            .ScanAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(LibraryScanStatus.HasherUnavailable, outcome.Status);
+
+        var rows = await RowsAsync();
+        Assert.Equal("audio", Assert.Single(rows).AudioHash);
+        Assert.Equal("original".Length, rows[0].SizeBytes);
+    }
+
     [Fact]
     public async Task MissingLibraryRootIsRefusedWithoutTouchingTheCatalogue()
     {
@@ -355,7 +864,7 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
     /// The same registrations Program makes, minus the web host. If this drifts
     /// from Program the endpoint tests still cover the real wiring.
     /// </summary>
-    private ServiceProvider BuildServices(string libraryRoot)
+    private ServiceProvider BuildServices(string libraryRoot, string ffmpeg = "ffmpeg")
     {
         var services = new ServiceCollection();
 
@@ -367,6 +876,8 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
             sp => sp.GetRequiredService<FileSystemAudioFileStore>());
         services.AddSingleton<LibraryScanner>();
         services.AddSingleton<LibraryScanService>();
+        services.AddSingleton(sp => new FfmpegAudioHasher(sp.GetRequiredService<FileSystemAudioFileStore>(), ffmpeg));
+        services.AddSingleton<Fonoteca.Tagging.TagReader>();
         services.AddSingleton<LibraryWorkGate>();
         services.AddSingleton<PlaylistFiles>();
 
@@ -396,6 +907,94 @@ public sealed class LibraryScanTests(PostgresFixture postgres) : IAsyncLifetime
         Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
         File.WriteAllText(absolute, content);
         return absolute;
+    }
+
+    /// <summary>
+    /// Gives a catalogued file every kind of answer a pass or a person leaves,
+    /// as the rule's album, and returns the album stamp.
+    /// </summary>
+    private async Task<DateTimeOffset> AnswerAsync(string path, bool hashed = false)
+    {
+        var now = StoreTime.ToStorePrecision(DateTimeOffset.UtcNow);
+        var hash = hashed
+            ? await (_services ??= BuildServices(_root)).GetRequiredService<FfmpegAudioHasher>()
+                .HashAsync(new LibraryPath(path), TestContext.Current.CancellationToken)
+            : null;
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = new Recording { Id = RecordingId.New(), Title = path };
+        db.Recordings.Add(recording);
+
+        var row = await db.MediaFiles.SingleAsync(f => f.Path == path, TestContext.Current.CancellationToken);
+        row.AudioHash = hash;
+        row.ContentHash = "content";
+        row.Integrity = IntegrityState.Intact;
+        row.LastVerifiedUtc = now;
+        row.Quality = new AudioQuality
+        {
+            Codec = "flac",
+            SampleRateHz = 44_100,
+            Channels = 2,
+            BitDepth = 16,
+            BitrateBps = 900_000,
+            IsLossless = true,
+        };
+        row.AcoustId = new AcoustId(Guid.CreateVersion7());
+        row.AcoustIdCheckedUtc = now;
+        row.AcoustIdTaggedUtc = now;
+        row.AcoustIdOutcome = AcoustIdOutcome.Identified;
+        row.IdentityDecidedUtc = now;
+        row.RecordingId = recording.Id;
+        row.RecordingLookupUtc = now;
+        row.EnrichmentOutcome = EnrichmentOutcome.Linked;
+        row.ReleaseLookupUtc = now;
+        row.AttributionOutcome = ReleaseAttributionOutcome.GroupOnly;
+
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return now;
+    }
+
+    private string CopyCorpus(string relativePath)
+    {
+        var absolute = Path.Combine(_root, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        File.Copy(Corpus.Flac, absolute);
+        return absolute;
+    }
+
+    /// <summary>What a tagger does, as far as the scan can tell: new bytes around the same packets.</summary>
+    private static void Remux(string source, string destination, params string[] metadata) =>
+        Ffmpeg(destination, ["-i", source, "-map", "0", "-c", "copy", .. metadata.SelectMany(m => new[] { "-metadata", m })]);
+
+    /// <summary>A FLAC of different audio from the corpus's.</summary>
+    private static void OtherAudio(string destination, int frequency = 880) =>
+        Ffmpeg(destination, ["-f", "lavfi", "-i", $"sine=frequency={frequency}:duration=3", "-c:a", "flac"]);
+
+    private static void Ffmpeg(string destination, string[] arguments)
+    {
+        var staged = destination + ".staged.flac";
+
+        using (var ffmpeg = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "ffmpeg",
+            ["-v", "error", "-y", .. arguments, staged])
+        {
+            RedirectStandardError = true,
+        })!)
+        {
+            var error = ffmpeg.StandardError.ReadToEnd();
+            ffmpeg.WaitForExit();
+            Assert.True(ffmpeg.ExitCode == 0, $"ffmpeg could not make {destination}: {error}");
+        }
+
+        File.Move(staged, destination, overwrite: true);
+    }
+
+    private async Task<List<MediaFile>> RowsAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        return await db.MediaFiles.AsNoTracking().OrderBy(f => f.Path).ToListAsync(TestContext.Current.CancellationToken);
     }
 
     private async Task<List<string>> CataloguedPathsAsync()

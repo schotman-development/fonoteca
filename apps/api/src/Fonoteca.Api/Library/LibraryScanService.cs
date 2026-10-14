@@ -12,10 +12,17 @@ namespace Fonoteca.Api.Library;
 /// </summary>
 /// <remarks>
 /// The first real feature, and deliberately the smallest one that is useful:
-/// it answers "which files exist" and nothing else. No hashing, no probing, no
+/// it answers "which files exist" and nothing else. No probing, no
 /// fingerprinting, no identification — those are later passes over the rows
 /// this creates, and folding them in now would turn a scan that takes seconds
 /// into one that takes hours and cannot be run casually.
+///
+/// <b>The one read it does make is for files something else changed.</b> The
+/// library is the files, and other programs edit them: a file whose bytes
+/// changed has its audio hashed against <c>AudioHash</c>, and a file that left
+/// its path — vanished, or replaced there by other audio — is looked for where
+/// files arrived. A file this application wrote never gets here (rule 2), and
+/// an untouched library reads nothing.
 ///
 /// It is a foreground operation on purpose. A walk of 100,000 files is two
 /// syscalls each and a handful of batched inserts, which finishes inside an
@@ -32,6 +39,8 @@ public sealed class LibraryScanService(
     IServiceScopeFactory scopeFactory,
     FileSystemAudioFileStore store,
     LibraryScanner scanner,
+    FfmpegAudioHasher hasher,
+    Fonoteca.Tagging.TagReader tagReader,
     IClock clock,
     PlaylistFiles playlists,
     ILogger<LibraryScanService> logger)
@@ -92,7 +101,20 @@ public sealed class LibraryScanService(
                 return new LibraryScanOutcome(LibraryScanStatus.LibraryRootMissing, null);
             }
 
-            var summary = await RunAsync(cancellationToken).ConfigureAwait(false);
+            LibraryScanSummary summary;
+
+            try
+            {
+                summary = await RunAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (AudioProbeFailedException cause) when (!cause.IsFileFault)
+            {
+                // Every hash precedes every write, so this changed nothing.
+                // Carrying on would read every retagged file as new audio.
+                Log.ScanHasherUnavailable(logger, cause.Message);
+                return new LibraryScanOutcome(LibraryScanStatus.HasherUnavailable, null);
+            }
+
             _lastCompleted = summary;
 
             // The one piece of library work that never takes the gate, so
@@ -116,27 +138,25 @@ public sealed class LibraryScanService(
         {
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
-            // The entire file list up front, projected to the three columns
-            // change detection actually reads. One sequential scan of a few
+            // The entire file list up front, projected to the columns change
+            // detection actually reads. One sequential scan of a few
             // megabytes beats 100,000 point lookups by orders of magnitude, and
             // it is the only way the walk itself stays allocation-cheap.
             var known = await db.MediaFiles
                 .AsNoTracking()
-                .Select(f => new { f.Id, f.Path, f.SizeBytes, f.LastModifiedUtc })
+                .Select(f => new { f.Id, f.Path, f.SizeBytes, f.LastModifiedUtc, f.AudioHash })
                 .ToDictionaryAsync(
                     f => f.Path,
-                    f => new KnownFile(f.Id, f.SizeBytes, f.LastModifiedUtc),
+                    f => new KnownFile(f.Id, f.SizeBytes, f.LastModifiedUtc, f.AudioHash),
                     StringComparer.Ordinal,
                     cancellationToken)
                 .ConfigureAwait(false);
 
             var vanished = new HashSet<string>(known.Keys, StringComparer.Ordinal);
-            var inserts = new List<MediaFile>(InsertBatchSize);
+            var walked = new List<string>();
+            var arrived = new List<ScannedFile>();
             var changes = new List<ChangedFile>();
 
-            var seen = 0;
-            var added = 0;
-            var updated = 0;
             var unchanged = 0;
 
             var report = new LibraryWalkReport();
@@ -144,29 +164,14 @@ public sealed class LibraryScanService(
 
             await foreach (var file in files)
             {
-                seen++;
-
                 var path = file.Path.Value;
                 var modifiedAt = ToStorePrecision(file.LastModifiedUtc);
 
+                walked.Add(path);
+
                 if (!known.TryGetValue(path, out var record))
                 {
-                    inserts.Add(new MediaFile
-                    {
-                        Id = MediaFileId.New(),
-                        Path = path,
-                        SizeBytes = file.SizeBytes,
-                        LastModifiedUtc = modifiedAt,
-                        LastScannedUtc = startedAt,
-                    });
-
-                    added++;
-
-                    if (inserts.Count >= InsertBatchSize)
-                    {
-                        await FlushInsertsAsync(db, inserts, cancellationToken).ConfigureAwait(false);
-                    }
-
+                    arrived.Add(file with { LastModifiedUtc = modifiedAt });
                     continue;
                 }
 
@@ -182,15 +187,92 @@ public sealed class LibraryScanService(
                     continue;
                 }
 
-                changes.Add(new ChangedFile(record.Id, file.SizeBytes, modifiedAt));
-                updated++;
+                changes.Add(new ChangedFile(record.Id, path, file.SizeBytes, modifiedAt, record.AudioHash));
             }
 
-            await FlushInsertsAsync(db, inserts, cancellationToken).ConfigureAwait(false);
+            // Every hash is taken before anything is written, so a hasher that
+            // cannot run leaves the catalogue as it was. A move is only looked
+            // for on the evidence that would delete the row: a walk that
+            // missed a directory has not seen the file gone.
+            var hashed = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            for (var index = 0; index < changes.Count; index++)
+            {
+                if (changes[index].AudioHash is null) continue;
+
+                var now = await hasher.HashAsync(new LibraryPath(changes[index].Path), cancellationToken)
+                    .ConfigureAwait(false);
+
+                changes[index] = changes[index] with { HashNow = now };
+                if (now is not null) hashed[changes[index].Path] = now;
+            }
+
+            // A changed path that no longer holds its row's audio is both a
+            // place a file left and a place one arrived: another program
+            // renumbering an album moves each file onto a name another held.
+            var displaced = changes.Where(change => !change.SameAudio).ToList();
+
+            List<Source> sources =
+            [
+                .. vanished.Select(path => new Source(path, known[path])),
+                .. displaced.Select(change => new Source(change.Path, known[change.Path])),
+            ];
+
+            List<Destination> destinations =
+            [
+                .. arrived.Select(file => new Destination(file, null)),
+                .. displaced.Select(change => new Destination(
+                    new ScannedFile(new LibraryPath(change.Path), change.SizeBytes, change.LastModifiedUtc),
+                    change.HashNow)),
+            ];
+
+            var moves = report.IsComplete
+                ? await MatchMovesAsync(sources, destinations, hashed, cancellationToken).ConfigureAwait(false)
+                : [];
+
+            var moving = moves.Select(move => move.Id).ToHashSet();
+            var landed = moves.Select(move => move.To.Path.Value).ToHashSet(StringComparer.Ordinal);
+
+            vanished.ExceptWith(moves.Select(move => move.From));
+            arrived.RemoveAll(file => landed.Contains(file.Path.Value));
+
+            // Taken by another row while its own audio went nowhere this walk
+            // saw: gone, as a vanished row is. Left by its row and taken by
+            // none: a new file there.
+            var overwritten = displaced
+                .Where(change => landed.Contains(change.Path) && !moving.Contains(change.Id))
+                .Select(change => change.Id)
+                .ToList();
+
+            arrived.AddRange(displaced
+                .Where(change => moving.Contains(change.Id) && !landed.Contains(change.Path))
+                .Select(change => new ScannedFile(new LibraryPath(change.Path), change.SizeBytes, change.LastModifiedUtc)));
+
+            changes.RemoveAll(change => moving.Contains(change.Id) || landed.Contains(change.Path));
+
+            var keepsAlbum = KeepingTheirAlbum(moves, known.Keys, walked);
+
+            var numbers = new Dictionary<MediaFileId, (int? Disc, int? Track)>();
+
+            foreach (var move in moves.Where(move => !move.SameBytes))
+            {
+                numbers[move.Id] = await ReleaseAttributionService
+                    .TagNumbersAsync(tagReader, move.To.Path, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            await ApplyMovesAsync(db, moves, overwritten, keepsAlbum, numbers, startedAt, cancellationToken)
+                .ConfigureAwait(false);
             await ApplyChangesAsync(db, changes, startedAt, cancellationToken).ConfigureAwait(false);
 
-            var removed = await RemoveVanishedAsync(db, known, vanished, seen, report, cancellationToken)
-                .ConfigureAwait(false);
+            foreach (var chunk in arrived.Chunk(InsertBatchSize))
+            {
+                await InsertAsync(db, chunk, hashed, startedAt, cancellationToken).ConfigureAwait(false);
+            }
+
+            var removed = overwritten.Count
+                + await RemoveVanishedAsync(db, known, vanished, walked.Count, report, cancellationToken)
+                    .ConfigureAwait(false);
 
             var completedAt = clock.UtcNow;
 
@@ -198,35 +280,286 @@ public sealed class LibraryScanService(
                 StartedAtUtc: startedAt,
                 CompletedAtUtc: completedAt,
                 DurationMilliseconds: (long)(completedAt - startedAt).TotalMilliseconds,
-                FilesSeen: seen,
-                Added: added,
-                Updated: updated,
+                FilesSeen: walked.Count,
+                Added: arrived.Count,
+                Updated: changes.Count,
                 Unchanged: unchanged,
+                Moved: moves.Count,
                 Removed: removed,
                 UnreadableDirectories: report.UnreadableDirectories);
 
             Log.ScanCompleted(
-                logger, seen, added, updated, unchanged, removed, summary.DurationMilliseconds);
+                logger, walked.Count, arrived.Count, changes.Count, unchanged, moves.Count, removed,
+                summary.DurationMilliseconds);
 
             return summary;
         }
     }
 
-    private static async Task FlushInsertsAsync(
-        FonotecaDbContext db,
-        List<MediaFile> inserts,
+    /// <summary>
+    /// Pairs each place a file left with the place it arrived, where exactly
+    /// one fits.
+    /// </summary>
+    /// <remarks>
+    /// <b>Another program moving a file is not the file going away.</b> Read as a
+    /// deletion and an arrival, a rename by a tagger or a file manager takes
+    /// every AcoustID, album, measurement and answer a person gave with the row,
+    /// and the undo journal is keyed by the row.
+    ///
+    /// Two pieces of evidence, cheapest first. A rename keeps the size and the
+    /// mtime, so those match without opening anything. A program that retags on
+    /// the way changes both, so the audio hash is asked next — of a destination
+    /// only where a row that left has a hash to match and shares its extension,
+    /// which keeps a first scan and a new album from being read at all. Two
+    /// candidates either side is no answer: the file is a deletion and an
+    /// arrival, as it always was. A place cannot pair with itself: its size and
+    /// mtime changed, and its hash is not its row's.
+    /// </remarks>
+    private async Task<List<Move>> MatchMovesAsync(
+        List<Source> sources,
+        List<Destination> destinations,
+        Dictionary<string, string> hashed,
         CancellationToken cancellationToken)
     {
-        if (inserts.Count == 0) return;
+        var moves = new List<Move>();
 
-        db.MediaFiles.AddRange(inserts);
+        if (sources.Count == 0 || destinations.Count == 0) return moves;
+
+        foreach (var (from, to) in Unique(
+            sources,
+            destinations,
+            source => (source.Was.SizeBytes, source.Was.LastModifiedUtc, Extension(source.Path)),
+            destination => (destination.File.SizeBytes, destination.File.LastModifiedUtc, Extension(destination.File.Path.Value))))
+        {
+            moves.Add(new Move(from.Was.Id, from.Path, to.File, SameBytes: true));
+        }
+
+        var moving = moves.Select(move => move.Id).ToHashSet();
+        var landed = moves.Select(move => move.To.Path.Value).ToHashSet(StringComparer.Ordinal);
+
+        var hashedGone = sources.Where(source => !moving.Contains(source.Was.Id) && source.Was.AudioHash is not null).ToList();
+        var extensions = hashedGone.Select(source => Extension(source.Path)).ToHashSet(StringComparer.Ordinal);
+
+        if (extensions.Count == 0) return moves;
+
+        // ponytail: serial, one read per candidate; parallel if a scan after a
+        // bulk retag is measured slow on a disk that is not the bottleneck.
+        var candidates = new List<(ScannedFile File, string Hash)>();
+
+        foreach (var destination in destinations.Where(destination =>
+            !landed.Contains(destination.File.Path.Value) && extensions.Contains(Extension(destination.File.Path.Value))))
+        {
+            var hash = destination.Hash
+                ?? await hasher.HashAsync(destination.File.Path, cancellationToken).ConfigureAwait(false);
+
+            if (hash is null) continue;
+
+            hashed[destination.File.Path.Value] = hash;
+            candidates.Add((destination.File, hash));
+        }
+
+        foreach (var (from, to) in Unique(
+            hashedGone,
+            candidates,
+            source => (source.Was.AudioHash!, Extension(source.Path)),
+            candidate => (candidate.Hash, Extension(candidate.File.Path.Value))))
+        {
+            moves.Add(new Move(from.Was.Id, from.Path, to.File, SameBytes: false));
+        }
+
+        return moves;
+    }
+
+    /// <summary>The pairs whose key is held by exactly one item on each side.</summary>
+    private static List<(TLeft Left, TRight Right)> Unique<TLeft, TRight, TKey>(
+        IEnumerable<TLeft> left,
+        IEnumerable<TRight> right,
+        Func<TLeft, TKey> leftKey,
+        Func<TRight, TKey> rightKey)
+        where TKey : notnull
+    {
+        var lefts = left
+            .GroupBy(leftKey)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
+
+        return right
+            .GroupBy(rightKey)
+            .Where(group => group.Count() == 1 && lefts.ContainsKey(group.Key))
+            .Select(group => (lefts[group.Key], group.Single()))
+            .ToList();
+    }
+
+    private static string Extension(string path) => System.IO.Path.GetExtension(path).ToUpperInvariant();
+
+    /// <summary>The moved files whose album folder went whole to one new place.</summary>
+    /// <remarks>
+    /// The album folder is what attribution decided, and the names inside it are
+    /// evidence for its order (<c>FolderOrder</c>). So a moved file keeps its
+    /// album's stamp only where every file the folder held went to one new
+    /// folder that holds nothing else, each at the same path inside it — an
+    /// album or artist folder renamed. Anything else puts the folder back
+    /// through attribution, which reads a person's answers and keeps them.
+    /// </remarks>
+    private static HashSet<MediaFileId> KeepingTheirAlbum(
+        List<Move> moves,
+        IEnumerable<string> before,
+        IEnumerable<string> after)
+    {
+        if (moves.Count == 0) return [];
+
+        var was = before.CountBy(AlbumFolder.Of).ToDictionary();
+        var now = after.CountBy(AlbumFolder.Of).ToDictionary();
+
+        return moves
+            .GroupBy(move => (From: AlbumFolder.Of(move.From), To: AlbumFolder.Of(move.To.Path.Value)))
+            .Where(group => group.Key.From != group.Key.To
+                && group.Count() == was[group.Key.From]
+                && group.Count() == now[group.Key.To]
+                && group.All(move => move.From[group.Key.From.Length..] == move.To.Path.Value[group.Key.To.Length..]))
+            .SelectMany(group => group)
+            .Select(move => move.Id)
+            .ToHashSet();
+    }
+
+    /// <summary>Points each moved row at the path its file now has.</summary>
+    /// <remarks>
+    /// One transaction, and every moving row parked on a path no file can have
+    /// before any takes its new one: a renumbered album moves each file onto a
+    /// name another row still holds, and <c>Path</c> is unique. Through the
+    /// execution strategy, which refuses a transaction it did not open; the
+    /// delegate may run twice, so it starts from nothing each time.
+    /// </remarks>
+    private static async Task ApplyMovesAsync(
+        FonotecaDbContext db,
+        List<Move> moves,
+        List<MediaFileId> overwritten,
+        HashSet<MediaFileId> keepsAlbum,
+        Dictionary<MediaFileId, (int? Disc, int? Track)> numbers,
+        DateTimeOffset scannedAt,
+        CancellationToken cancellationToken)
+    {
+        if (moves.Count == 0) return;
+
+        // ponytail: every moved row tracked at once; chunk the two phases if a
+        // whole-library rename is measured slow.
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(
+            async token =>
+            {
+                db.ChangeTracker.Clear();
+
+                var transaction = await db.Database.BeginTransactionAsync(token).ConfigureAwait(false);
+
+                await using (transaction.ConfigureAwait(false))
+                {
+                    foreach (var chunk in overwritten.Chunk(IdBatchSize))
+                    {
+                        await db.MediaFiles
+                            .Where(f => chunk.Contains(f.Id))
+                            .ExecuteDeleteAsync(token)
+                            .ConfigureAwait(false);
+                    }
+
+                    var rows = new List<(Move Move, MediaFile Row)>();
+
+                    foreach (var chunk in moves.Chunk(IdBatchSize))
+                    {
+                        var ids = Array.ConvertAll(chunk, move => move.Id);
+
+                        var byId = await db.MediaFiles
+                            .Where(f => ids.Contains(f.Id))
+                            .ToDictionaryAsync(f => f.Id, token)
+                            .ConfigureAwait(false);
+
+                        foreach (var move in chunk)
+                        {
+                            if (!byId.TryGetValue(move.Id, out var row)) continue;
+
+                            // A library path is relative, so one starting with a slash is nobody's.
+                            row.Path = $"/moving/{row.Id.Value}";
+                            rows.Add((move, row));
+                        }
+                    }
+
+                    await db.SaveChangesAsync(token).ConfigureAwait(false);
+
+                    foreach (var (move, row) in rows)
+                    {
+                        row.Path = move.To.Path.Value;
+                        row.LastScannedUtc = scannedAt;
+
+                        if (!move.SameBytes)
+                        {
+                            Retagged(row, move.To.SizeBytes, move.To.LastModifiedUtc, numbers[move.Id]);
+                        }
+
+                        if (!keepsAlbum.Contains(move.Id)) CatalogueWriter.ReopenAttribution(row);
+                    }
+
+                    await db.SaveChangesAsync(token).ConfigureAwait(false);
+                    await transaction.CommitAsync(token).ConfigureAwait(false);
+                }
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        db.ChangeTracker.Clear();
+    }
+
+    /// <summary>
+    /// The same audio in new bytes: another program retagged the file, and
+    /// only what was read off its tags is in doubt.
+    /// </summary>
+    /// <remarks>
+    /// Identity, measurements, the album and every answer a person gave are
+    /// about the audio, and stay. The file's own track and disc numbers are
+    /// read again, and where they moved the folder goes back through
+    /// attribution, since they are its order.
+    /// </remarks>
+    private static void Retagged(
+        MediaFile row,
+        long sizeBytes,
+        DateTimeOffset modifiedAt,
+        (int? Disc, int? Track) numbers)
+    {
+        row.SizeBytes = sizeBytes;
+        row.LastModifiedUtc = modifiedAt;
+        row.ContentHash = null;
+
+        // Whether the file still carries its AcoustID is the file's to say again.
+        row.AcoustIdTaggedUtc = null;
+
+        if (numbers.Disc == row.TagDiscNumber && numbers.Track == row.TagTrackNumber) return;
+
+        row.TagDiscNumber = numbers.Disc;
+        row.TagTrackNumber = numbers.Track;
+        CatalogueWriter.ReopenAttribution(row);
+    }
+
+    private static async Task InsertAsync(
+        FonotecaDbContext db,
+        ScannedFile[] files,
+        Dictionary<string, string> hashed,
+        DateTimeOffset scannedAt,
+        CancellationToken cancellationToken)
+    {
+        db.MediaFiles.AddRange(files.Select(file => new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = file.Path.Value,
+            SizeBytes = file.SizeBytes,
+            LastModifiedUtc = file.LastModifiedUtc,
+            LastScannedUtc = scannedAt,
+
+            // Read while looking for a move it turned out not to be.
+            AudioHash = hashed.GetValueOrDefault(file.Path.Value),
+        }));
+
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         // The change tracker keeps everything it has ever seen. Without this a
         // first scan degrades quadratically: each batch's change detection walks
         // a graph containing every row inserted so far.
         db.ChangeTracker.Clear();
-        inserts.Clear();
     }
 
     /// <summary>Rewrites the rows whose file changed on disk.</summary>
@@ -235,7 +568,7 @@ public sealed class LibraryScanService(
     /// of rows out of 100,000, which is why this is a tracked read-modify-write
     /// rather than the bulk update the first scan would want.
     /// </remarks>
-    private static async Task ApplyChangesAsync(
+    private async Task ApplyChangesAsync(
         FonotecaDbContext db,
         List<ChangedFile> changes,
         DateTimeOffset scannedAt,
@@ -260,11 +593,23 @@ public sealed class LibraryScanService(
                 // snapshot and now. Nothing to update, and nothing wrong.
                 if (!byId.TryGetValue(change.Id, out var row)) continue;
 
-                row.SizeBytes = change.SizeBytes;
-                row.LastModifiedUtc = change.LastModifiedUtc;
                 row.LastScannedUtc = scannedAt;
 
-                // The bytes changed, so everything derived from them now
+                if (change.SameAudio)
+                {
+                    var numbers = await ReleaseAttributionService
+                        .TagNumbersAsync(tagReader, new LibraryPath(row.Path), cancellationToken)
+                        .ConfigureAwait(false);
+
+                    Retagged(row, change.SizeBytes, change.LastModifiedUtc, numbers);
+                    continue;
+                }
+
+                row.SizeBytes = change.SizeBytes;
+                row.LastModifiedUtc = change.LastModifiedUtc;
+
+                // The audio changed — or nothing hashed it before, so nothing can
+                // say it did not — and everything derived from the bytes now
                 // describes a file that no longer exists. Clearing costs a
                 // recompute; keeping a stale audio hash is what makes dedupe
                 // delete the wrong copy.
@@ -441,12 +786,31 @@ public sealed class LibraryScanService(
     private readonly record struct KnownFile(
         MediaFileId Id,
         long SizeBytes,
-        DateTimeOffset LastModifiedUtc);
+        DateTimeOffset LastModifiedUtc,
+        string? AudioHash);
 
     private readonly record struct ChangedFile(
         MediaFileId Id,
+        string Path,
         long SizeBytes,
-        DateTimeOffset LastModifiedUtc);
+        DateTimeOffset LastModifiedUtc,
+        string? AudioHash)
+    {
+        /// <summary>The new bytes' hash, taken only where the row has one to compare.</summary>
+        public string? HashNow { get; init; }
+
+        /// <summary>True when the new bytes hash to the audio the row was measured from.</summary>
+        public bool SameAudio => AudioHash is not null && HashNow == AudioHash;
+    }
+
+    /// <summary>A row whose file left its path: vanished, or displaced by other audio.</summary>
+    private readonly record struct Source(string Path, KnownFile Was);
+
+    /// <summary>A file at a path no row's own audio holds: arrived, or displacing another.</summary>
+    private readonly record struct Destination(ScannedFile File, string? Hash);
+
+    /// <param name="SameBytes">Matched on size and mtime, so nothing about the file changed but its path.</param>
+    private readonly record struct Move(MediaFileId Id, string From, ScannedFile To, bool SameBytes);
 }
 
 /// <summary>What a scan request did.</summary>
@@ -462,6 +826,9 @@ public enum LibraryScanStatus
 
     /// <summary>The configured library root is not present — most likely unmounted.</summary>
     LibraryRootMissing = 2,
+
+    /// <summary>A changed file needed hashing and ffmpeg could not be run. Nothing was written.</summary>
+    HasherUnavailable = 3,
 }
 
 /// <summary>What one scan found.</summary>
@@ -478,6 +845,9 @@ public sealed record LibraryScanSummary(
     int Added,
     int Updated,
     int Unchanged,
+
+    /// <summary>Files found at a new path and kept as the row they were.</summary>
+    int Moved,
     int Removed,
 
     /// <summary>

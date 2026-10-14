@@ -384,13 +384,13 @@ public sealed class MediaFile
     public string? ContentHash { get; set; }
 
     /// <summary>
-    /// Hash of the DECODED audio, ignoring tags and container.
+    /// MD5 of the audio packets as the container holds them, ignoring tags.
     /// </summary>
     /// <remarks>
-    /// This is what makes "same audio, different tags" and "re-encoded losslessly"
-    /// recognisable as identical. For FLAC it is nearly free: the MD5 of the
-    /// unencoded audio is already in the STREAMINFO header, so most of a library
-    /// yields it without decoding a single frame.
+    /// What makes "same audio, different tags" recognisable: another program's
+    /// retag changes the size and mtime and leaves this, which is how the scan
+    /// keeps a retagged file's answers and finds a moved one. Filled by the
+    /// probe. Copied, not decoded, so two encodes of one recording differ.
     /// </remarks>
     public string? AudioHash { get; set; }
 
