@@ -1709,12 +1709,10 @@ public static partial class CatalogueEndpoints
                 // reads the absence and stays a flat list.
                 WorkTitle = track.Recording!.Work == null ? null : track.Recording.Work.Title,
 
-                // The piece the movement belongs to, where MusicBrainz says so —
-                // what the track list groups under before it falls back to
-                // reading the work's title.
-                PartOf = track.Recording.Work == null || track.Recording.Work.Parent == null
-                    ? null
-                    : track.Recording.Work.Parent.Title,
+                // The work the movement is a part of, where MusicBrainz says so,
+                // climbed to the whole piece below — what the track list groups
+                // under before it falls back to reading the work's title.
+                PartOf = track.Recording.Work == null ? null : track.Recording.Work.ParentId,
 
                 // The recording's own billing line and typed links, which the
                 // credits below are rolled up from.
@@ -1818,6 +1816,19 @@ public static partial class CatalogueEndpoints
             .GroupBy(track => track.RecordingId)
             .ToDictionary(group => group.Key, group => group.First());
 
+        // The whole piece each movement's run is headed with.
+        var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+        var pieces = tracks
+            .Where(track => track.PartOf is not null)
+            .Select(track => WorkTree.Top(track.PartOf!.Value, parents))
+            .Distinct()
+            .ToList();
+        var pieceTitles = await db.Works
+            .AsNoTracking()
+            .Where(work => pieces.Contains(work.Id))
+            .ToDictionaryAsync(work => work.Id, work => work.Title, cancellationToken)
+            .ConfigureAwait(false);
+
         // A file sits under the row printing its recording — two rips of one
         // album, in two folders, are two files under one row — except under a
         // claimed pressing, where each file sits on its own slot, a recording
@@ -1869,7 +1880,7 @@ public static partial class CatalogueEndpoints
                     // a guest on one song, a compilation's own artist.
                     own is not null && own != credit ? own : null,
                     [.. row.On.Select(edition => edition.Value)],
-                    facts.PartOf);
+                    facts.PartOf is { } part ? pieceTitles[WorkTree.Top(part, parents)] : null);
             })
             .ToList();
 
@@ -4751,17 +4762,38 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>
-    /// The larger work each held recording of a movement is part of, which is
+    /// The whole piece each held recording of a movement is part of, which is
     /// what <see cref="Songs"/> counts it as.
     /// </summary>
     private static async Task<Dictionary<RecordingId, WorkId>> PiecesAsync(
         FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+
+        return (await db.Recordings
+                .AsNoTracking()
+                .Where(recording => recording.Files.Any() && recording.Work!.ParentId != null)
+                .Select(recording => new { recording.Id, Parent = recording.Work!.ParentId!.Value })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(row => row.Id, row => WorkTree.Top(row.Parent, parents));
+    }
+
+    /// <summary>Every work's parent, for <see cref="WorkTree.Top"/>.</summary>
+    /// <remarks>
+    /// Read whole and climbed in memory: EF cannot walk a chain inside a
+    /// query, and the rows are the works that are a movement of something —
+    /// about a thousand here.
+    /// </remarks>
+    private static async Task<Dictionary<WorkId, WorkId>> WorkParentsAsync(
+        FonotecaDbContext db,
         CancellationToken cancellationToken) =>
-        await db.Recordings
+        await db.Works
             .AsNoTracking()
-            .Where(recording => recording.Files.Any() && recording.Work!.ParentId != null)
-            .Select(recording => new { recording.Id, Piece = recording.Work!.ParentId!.Value })
-            .ToDictionaryAsync(row => row.Id, row => row.Piece, cancellationToken)
+            .Where(work => work.ParentId != null)
+            .Select(work => new { work.Id, Parent = work.ParentId!.Value })
+            .ToDictionaryAsync(row => row.Id, row => row.Parent, cancellationToken)
             .ConfigureAwait(false);
 
     /// <summary>

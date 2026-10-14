@@ -2,10 +2,11 @@ namespace Fonoteca.Domain.Catalogue;
 
 /// <summary>How many songs a set of recordings is.</summary>
 /// <remarks>
-/// A recording of a movement — its work is part of a larger one,
-/// <c>Works.ParentId</c>, one level — counts as that piece, so the four
-/// movements of a symphony are one song; so are two performances of it. Every
-/// other recording counts as itself. The owner's choice: an orchestra's 228
+/// A recording of a movement — its work is part of a larger one, climbed to
+/// the top of <c>Works.ParentId</c> (<see cref="WorkTree"/>) — counts as that
+/// piece, so the four movements of a symphony are one song; so are two
+/// performances of it. Every other recording counts as itself. The owner's
+/// choice: an orchestra's 228
 /// tracks were mostly movements, and every count of music a screen shows is in
 /// songs.
 /// </remarks>

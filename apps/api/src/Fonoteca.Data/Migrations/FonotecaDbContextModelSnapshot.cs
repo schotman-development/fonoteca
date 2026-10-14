@@ -1009,6 +1009,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("PartOfLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(1000)

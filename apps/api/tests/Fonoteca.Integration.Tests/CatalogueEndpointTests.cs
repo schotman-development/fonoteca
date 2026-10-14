@@ -1654,6 +1654,61 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(_seed.Mozart, mozart.Id);
         Assert.Equal(1, mozart.CompositionCount);
         Assert.Equal(1, mozart.SongCount);
+
+        // And once the parent is known to be part of something larger, the
+        // piece is the top of the chain.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var whole = new Work { Id = WorkId.New(), Title = "The Last Three Symphonies" };
+            db.Works.Add(whole);
+
+            var parent = await db.Works.SingleAsync(work => work.Title == "Symphony no. 40", Token);
+            parent.ParentId = whole.Id;
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var climbed = await client.GetFromJsonAsync<CompositionListResponse>(
+            new Uri("/api/catalogue/compositions?query=mozart", UriKind.Relative), Token);
+
+        Assert.Equal("The Last Three Symphonies", Assert.Single(climbed!.Items).Title);
+
+        // A movement of a sibling piece in the same whole is that one piece too:
+        // one composition and one song for its composer, and no new song in the
+        // library's count, where stopping one level up would make two.
+        var songs = (await client.GetFromJsonAsync<LibraryOverviewResponse>(
+            new Uri("/api/catalogue/overview", UriKind.Relative), Token))!.Songs;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var composer = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Mozart), Token);
+            var whole = await db.Works.SingleAsync(work => work.Title == "The Last Three Symphonies", Token);
+            var sibling = new Work { Id = WorkId.New(), Title = "Symphony no. 41", ParentId = whole.Id };
+            var finale = new Work { Id = WorkId.New(), Title = "Symphony no. 41: IV. Molto allegro", ParentId = sibling.Id };
+
+            db.Works.AddRange(sibling, finale);
+            db.Relationships.Add(Link(composer, "composer", work: finale));
+            db.Contributions.Add(Contributed(composer, "composer", finale));
+
+            var movement = await db.Works.SingleAsync(work => work.Title == symphony.Title, Token);
+            var second = await db.Recordings
+                .Where(recording => recording.WorkId == movement.Id)
+                .OrderByDescending(recording => recording.Id)
+                .FirstAsync(Token);
+            second.WorkId = finale.Id;
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var siblings = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/composers", UriKind.Relative), Token);
+
+        var counted = Assert.Single(siblings!.Items);
+        Assert.Equal((1, 1), (counted.CompositionCount, counted.SongCount));
+
+        var overview = await client.GetFromJsonAsync<LibraryOverviewResponse>(
+            new Uri("/api/catalogue/overview", UriKind.Relative), Token);
+        Assert.Equal(songs, overview!.Songs);
     }
 
     /// <summary>

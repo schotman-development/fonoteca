@@ -521,7 +521,15 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
             var guitarist = await db.Artists.SingleAsync(a => a.Name == "Chris Stapleton", Token);
             stapleton = guitarist.Id.Value;
 
-            var piece = new Work { Id = WorkId.New(), Title = "Songs for Nat", Mbid = new Mbid(Guid.CreateVersion7()) };
+            // Two levels up: the heading is the top, not the nearest parent.
+            var whole = new Work { Id = WorkId.New(), Title = "Songs for Nat", Mbid = new Mbid(Guid.CreateVersion7()) };
+            var piece = new Work
+            {
+                Id = WorkId.New(),
+                Title = "Songs for Nat: Side One",
+                Mbid = new Mbid(Guid.CreateVersion7()),
+                ParentId = whole.Id,
+            };
             var song = new Work
             {
                 Id = WorkId.New(),
@@ -530,7 +538,7 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
                 ParentId = piece.Id,
             };
 
-            db.Works.AddRange(piece, song);
+            db.Works.AddRange(whole, piece, song);
             mona.WorkId = song.Id;
 
             db.Contributions.AddRange(

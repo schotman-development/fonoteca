@@ -37,11 +37,23 @@ public sealed class Work
     /// <summary>The work this is a part of — the symphony a movement belongs to — or null.</summary>
     /// <remarks>
     /// One level up, as MusicBrainz's <c>parts</c> relation states it. The
-    /// parent row is minted from the stub that relation carries and is never
-    /// described on its own, so it has a title and an MBID and no writers.
+    /// parent row is minted from the stub that relation carries, so it has a
+    /// title and an MBID and no writers; the parent stage then asks what it is
+    /// a part of in turn (<see cref="PartOfLookupUtc"/>), and the chain climbs
+    /// to the whole piece, which <see cref="WorkTree.Top"/> reads.
     /// </remarks>
     public WorkId? ParentId { get; set; }
     public Work? Parent { get; set; }
+
+    /// <summary>When MusicBrainz was last asked what this work is a part of.</summary>
+    /// <remarks>
+    /// The parent stage's "we asked" stamp (rule 1), set on works other works
+    /// are parts of: a stub minted from a <c>parts</c> relation names the parent
+    /// and not the parent's own parent, so the climb costs one lookup a level.
+    /// Set when the answer is "part of nothing" too, and that answer is asked
+    /// again after a week; a work found to have a parent is never asked again.
+    /// </remarks>
+    public DateTimeOffset? PartOfLookupUtc { get; set; }
 
     public ICollection<Recording> Recordings { get; init; } = [];
     public ICollection<Relationship> Relationships { get; init; } = [];

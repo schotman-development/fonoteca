@@ -42,6 +42,7 @@ function pendingSentence(status: {
   readonly pendingBooklets: number
   readonly pendingRecordings: number
   readonly pendingGenres: number
+  readonly pendingParentWorks: number
 }): string {
   const parts: string[] = []
 
@@ -60,6 +61,15 @@ function pendingSentence(status: {
       `${status.pendingRecordings.toLocaleString()} recording${
         status.pendingRecordings === 1 ? '' : 's'
       } to describe`,
+    )
+  }
+
+  // Then up the work tree, one lookup a level above each movement.
+  if (status.pendingParentWorks > 0) {
+    parts.push(
+      `${status.pendingParentWorks.toLocaleString()} work${
+        status.pendingParentWorks === 1 ? '' : 's'
+      } to trace to the whole piece`,
     )
   }
 

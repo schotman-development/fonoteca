@@ -179,6 +179,10 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var parentWorks = await UnclimbedWorks(db, NothingFoundCutoff)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             var artists = await db.Artists
                 .Where(UnaskedArtist)
                 .CountAsync(cancellationToken)
@@ -214,7 +218,7 @@ public sealed class EnrichmentService(
 
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres);
+                recordings, genres, parentWorks);
         }
     }
 
@@ -379,6 +383,15 @@ public sealed class EnrichmentService(
                 ClaimRecordingsAsync(cancellationToken),
                 recording => RedescribeAsync(recording, counts, memo, cancellationToken),
                 recording => recording.Title).ConfigureAwait(false);
+
+            // Then up the work tree. The stage above mints each movement's
+            // parent from the `parts` stub, which names the parent and not the
+            // parent's own; asking each parent mints the next one up, and the
+            // claim re-reads, so a chain reaches the whole piece in one run.
+            await DrainAsync(
+                ClaimUnclimbedWorksAsync(cancellationToken),
+                work => ClimbAsync(work, counts, cancellationToken),
+                work => work.Title).ConfigureAwait(false);
 
             // The albums' own genres: one request each, and what a file is
             // tagged with before its recording's.
@@ -2597,6 +2610,59 @@ public sealed class EnrichmentService(
             && (group.GenresLookupUtc == null
                 || (group.Genres == null && group.GenresLookupUtc < cutoff));
 
+    /// <summary>
+    /// Works some other work is a part of, not yet asked what they are a part of
+    /// themselves, or found to be the top a week ago.
+    /// </summary>
+    /// <remarks>
+    /// A query rather than an expression, because "is some work's parent" is a
+    /// question about other rows. Every parent the catalogue holds was minted
+    /// describing a held recording, so this is held only like every describing
+    /// stage. A work found to have a parent is never asked again.
+    /// </remarks>
+    private static IQueryable<Work> UnclimbedWorks(FonotecaDbContext db, DateTimeOffset cutoff) =>
+        db.Works.Where(work => work.Mbid != null
+            && db.Works.Any(part => part.ParentId == work.Id)
+            && (work.PartOfLookupUtc == null
+                || (work.ParentId == null && work.PartOfLookupUtc < cutoff)));
+
+    /// <summary>The parent-work worklist, a page at a time, with the same guard.</summary>
+    /// <remarks>
+    /// A parent minted while the stage runs joins a later page, which is how one
+    /// run climbs every level.
+    /// </remarks>
+    private async IAsyncEnumerable<PendingDescription<WorkId>> ClaimUnclimbedWorksAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<WorkId>();
+        var cutoff = NothingFoundCutoff;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PendingDescription<WorkId>> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                page = await UnclimbedWorks(db, cutoff)
+                    .AsNoTracking()
+                    .OrderBy(w => w.Id)
+                    .Select(w => new PendingDescription<WorkId>(w.Id, w.Title, w.Mbid!.Value))
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var fresh = page.Where(work => seen.Add(work.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var work in fresh) yield return work;
+        }
+    }
+
     /// <summary>The recording worklist, a page at a time, with the artists' <c>seen</c> guard.</summary>
     private async IAsyncEnumerable<PendingDescription<RecordingId>> ClaimRecordingsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
@@ -2766,6 +2832,54 @@ public sealed class EnrichmentService(
 
             row.GenresLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
             row.Genres = Joined(genres ?? []);
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>One parent work asked what it is a part of, stamped whether or not it is part of anything.</summary>
+    /// <remarks>
+    /// Asked by the MBID the row holds. A deleted work is stamped and keeps no
+    /// parent; a merged one answers with its survivor's, whose parent is this
+    /// row's too.
+    /// </remarks>
+    private async Task ClimbAsync(
+        PendingDescription<WorkId> item,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        MusicBrainzWork? work;
+
+        try
+        {
+            work = await musicBrainz.GetWorkAsync(item.Mbid, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            counts.Failed++;
+            Log.RecordingNotDescribed(logger, item.Title, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.Works
+                .FirstOrDefaultAsync(w => w.Id == item.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (row is null) return;
+
+            row.PartOfLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+            if (work is not null)
+            {
+                await new CatalogueWriter(db, new HashSet<Mbid>(), clock)
+                    .PartOfAsync(row, work, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -3091,7 +3205,8 @@ public sealed record EnrichmentPending(
     int Motion,
     int Booklets,
     int Recordings,
-    int Genres)
+    int Genres,
+    int ParentWorks)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -3102,7 +3217,8 @@ public sealed record EnrichmentPending(
     /// stage that can never be reached.
     /// </remarks>
     public int Total =>
-        Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres;
+        Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
+        + ParentWorks;
 }
 
 /// <summary>Where a running pass has got to.</summary>

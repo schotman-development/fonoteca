@@ -2908,10 +2908,10 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal(0, pending.Genres);
     }
 
-    /// <summary>The two new stages count towards "is there anything to do", or the button could never reach them.</summary>
+    /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
-    public void TheRecordingAndGenreStagesAreInTheTotal() =>
-        Assert.Equal(7, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4).Total);
+    public void TheRecordingGenreAndParentWorkStagesAreInTheTotal() =>
+        Assert.Equal(12, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5).Total);
 
     /// <summary>Describing a recording again replaces what it said before, rather than adding to it.</summary>
     [Fact]
@@ -2983,6 +2983,60 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal("Symphony no. 40 in G minor, K. 550", parent.Title);
         Assert.Equal(parent.Id, movement.ParentId);
         Assert.Null(parent.ParentId);
+    }
+
+    /// <summary>
+    /// A movement nested three deep climbs to the whole piece in one run, and only
+    /// the top is asked again a week later.
+    /// </summary>
+    [Fact]
+    public async Task AMovementClimbsToTheWholePieceAndOnlyTheTopIsAskedAgain()
+    {
+        await SeedAsync(("Ballet Master/Swan Lake/36 - Variation I.flac", Cluster(1)));
+
+        var number = Mb("0b6f4c1e-8a3d-4e2f-9b7c-1d5e3f7a9c01");
+        var act = Mb("0b6f4c1e-8a3d-4e2f-9b7c-1d5e3f7a9c02");
+        var ballet = Mb("0b6f4c1e-8a3d-4e2f-9b7c-1d5e3f7a9c03");
+
+        MusicBrainzWork Part(Mbid id, string title, Mbid? parent, string? parentTitle) =>
+            new(id, title, null, [], parent, parentTitle);
+
+        var catalogue = new StubCatalogue(
+            recording: RecordingWith([Credit(Mozart, "Wolfgang Amadeus Mozart")], []),
+            work: WorkWith([]) with { ParentId = number, ParentTitle = "Act III, no. 19: Pas de six" },
+            works: new Dictionary<Mbid, MusicBrainzWork>
+            {
+                [number] = Part(number, "Act III, no. 19: Pas de six", act, "Act III"),
+                [act] = Part(act, "Act III", ballet, "Swan Lake, op. 20"),
+                [ballet] = Part(ballet, "Swan Lake, op. 20", null, null),
+            });
+
+        var services = Build(Answering(Recording), catalogue);
+        await EnrichAsync(services);
+
+        var service = services.GetRequiredService<EnrichmentService>();
+        Assert.Equal(0, (await service.CountPendingAsync(Token)).ParentWorks);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var rows = await db.Works.AsNoTracking().ToDictionaryAsync(w => w.Mbid!.Value, Token);
+
+            Assert.Equal(rows[number].Id, rows[WorkId].ParentId);
+            Assert.Equal(rows[act].Id, rows[number].ParentId);
+            Assert.Equal(rows[ballet].Id, rows[act].ParentId);
+            Assert.Null(rows[ballet].ParentId);
+            Assert.All([rows[number], rows[act], rows[ballet]], w => Assert.NotNull(w.PartOfLookupUtc));
+
+            // A week on, the top may have gained a parent; the two below it are answered.
+            foreach (var row in await db.Works.ToListAsync(Token))
+            {
+                row.PartOfLookupUtc = row.PartOfLookupUtc?.AddDays(-8);
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(1, (await service.CountPendingAsync(Token)).ParentWorks);
     }
 
     /// <summary>
@@ -3531,7 +3585,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         bool unavailable = false,
         MusicBrainzArtist? artist = null,
         Func<IReadOnlyList<MusicBrainzReleaseGroup>>? discography = null,
-        IReadOnlyDictionary<Mbid, Mbid>? merged = null) : IMusicBrainzCatalogue
+        IReadOnlyDictionary<Mbid, Mbid>? merged = null,
+        IReadOnlyDictionary<Mbid, MusicBrainzWork>? works = null) : IMusicBrainzCatalogue
     {
         private int _recordingCalls;
         private int _workCalls;
@@ -3642,10 +3697,11 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             return Task.FromResult<IReadOnlyList<string>?>(AlbumGenres);
         }
 
+        /// <summary>The work asked for where <c>works</c> names it, else the one work every lookup answers.</summary>
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _workCalls);
-            return Task.FromResult(work);
+            return Task.FromResult(works is not null && works.TryGetValue(id, out var named) ? named : work);
         }
 
         /// <summary>

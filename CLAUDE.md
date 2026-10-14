@@ -46,7 +46,7 @@ the rest.
    `AcoustIdCheckedUtc`, `RecordingLookupUtc`, `ReleaseLookupUtc`,
    `Artists.LookupUtc`, `PortraitLookupUtc`, `DiscographyLookupUtc`,
    `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`, `Recordings.DescribedUtc`,
-   `ReleaseGroups.GenresLookupUtc`. A library is full of things the provider has never heard
+   `ReleaseGroups.GenresLookupUtc`, `Works.PartOfLookupUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -248,7 +248,7 @@ run rather than a no-op.
 **Enrichment's stages run in `RunAsync`, in order, because each depends on what
 the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
-held recordings described again → album genres → artists → portraits → articles,
+held recordings described again → parent works → album genres → artists → portraits → articles,
 banners, motion, booklets → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
@@ -274,9 +274,12 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   describe, including rows the same save added (EF queries the database).
 - **Every held recording is described again** (`Recordings.DescribedUtc`):
   genres, every ISRC (`Recordings.Isrcs`, apart from the shop's `Isrc`), the
-  contributions and the work's parent (`Works.ParentId`, one level, minted from
-  the `parts` stub). One with no genre is asked again after a week; one with
-  genres never. Album genres are a release-group lookup each
+  contributions and the work's parent (`Works.ParentId`, minted from the
+  `parts` stub). One with no genre is asked again after a week; one with
+  genres never. The parent stage then asks each parent what it is a part of
+  (`Works.PartOfLookupUtc`, the top again after a week), so a chain climbs to
+  the whole piece, which `WorkTree.Top` reads for every count, the composer
+  pages and the album headings (the owner's choice). Album genres are a release-group lookup each
   (`ReleaseGroups.Genres`), same rule. Artists carry `LinksJson`, every URL
   relation, which is how a later source finds one by identity.
 - **A merged MBID is followed, never refused.** WS/2 answers it with the
@@ -1022,8 +1025,8 @@ query with `:root:not([data-theme='light'])`. Don't collapse these into a boolea
 `seating.ts`, `identify.ts`, `files.ts`, `qobuz.ts`, `artistFacts.ts`, plus —
 
 - **`workGroups.ts`** — **the link points at the movement, not at the symphony**:
-  `Recording.WorkId` reaches a *leaf*; the piece is `partOf` (`Works.ParentId`,
-  one level), and before a recording is described again grouping falls back to
+  `Recording.WorkId` reaches a *leaf*; the piece is `partOf` (the top of
+  `Works.ParentId`), and before a recording is described again grouping falls back to
   the text before the first `": "`. **Consecutive runs, not a group-by** —
   sorting rows into work buckets would renumber the album on screen.
 - **`listSearch.ts`** — sort, scope and filter live in the **URL**, not in

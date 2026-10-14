@@ -69,7 +69,7 @@ public static partial class CatalogueEndpoints
         return TypedResults.Ok(new LibraryOverviewResponse(
             Songs: Songs.Count(held, pieces),
             Composers: works.SelectMany(work => composers[work.Work]).Distinct().Count(),
-            Compositions: works.Select(work => work.ParentId ?? work.Work).Distinct().Count(),
+            Compositions: works.Select(work => work.Piece ?? work.Work).Distinct().Count(),
             Quality: [.. fileTotals.Tiers.Select(entry => new OverviewCount(entry.Tier.ToString(), entry.Files))],
             Formats: [.. fileTotals.Codecs.Select(entry => new OverviewCount(entry.Codec, entry.Files))],
             Decades: [.. albumTotals.Decades.Select(entry => new DecadeCount(entry.Decade, entry.Albums))],

@@ -2308,6 +2308,8 @@ export interface components {
             pendingRecordings: number;
             /** Format: int32 */
             pendingGenres: number;
+            /** Format: int32 */
+            pendingParentWorks: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {

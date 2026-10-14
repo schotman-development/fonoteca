@@ -9,8 +9,9 @@ namespace Fonoteca.Api.Endpoints;
  * The library by track, by composer and by composition, beside the artist and
  * album lists.
  *
- * A composition is the piece: a movement's parent work (`Works.ParentId`), or
- * the work itself where it has none. Its composers are the `composer` links on
+ * A composition is the piece: the top of a movement's parent works
+ * (`Works.ParentId`, climbed by `WorkTree`), or the work itself where it has
+ * none. Its composers are the `composer` links on
  * the works its held recordings perform — the parent is minted from a stub and
  * carries no writers of its own.
  *
@@ -235,8 +236,8 @@ public static partial class CatalogueEndpoints
         var composers = await ClassicalComposersAsync(db, cancellationToken).ConfigureAwait(false);
 
         var pieces = held
-            .Where(recording => recording.ParentId != null)
-            .ToDictionary(recording => recording.Id, recording => recording.ParentId!.Value);
+            .Where(recording => recording.Piece != null)
+            .ToDictionary(recording => recording.Id, recording => recording.Piece!.Value);
 
         var counts = held
             .SelectMany(recording => composers[recording.Work].Select(artist => (Artist: artist, Recording: recording)))
@@ -244,7 +245,7 @@ public static partial class CatalogueEndpoints
             .ToDictionary(
                 theirs => theirs.Key,
                 theirs => (
-                    Compositions: theirs.Select(pair => pair.Recording.ParentId ?? pair.Recording.Work).Distinct().Count(),
+                    Compositions: theirs.Select(pair => pair.Recording.Piece ?? pair.Recording.Work).Distinct().Count(),
                     Songs: Songs.Count(theirs.Select(pair => pair.Recording.Id), pieces)));
 
         var ids = counts.Keys.ToList();
@@ -345,8 +346,10 @@ public static partial class CatalogueEndpoints
             .ToDictionaryAsync(work => work.Id, cancellationToken)
             .ConfigureAwait(false);
 
+        var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+
         var pieces = held
-            .GroupBy(recording => recording.ParentId ?? recording.Work)
+            .GroupBy(recording => recording.ParentId is { } part ? WorkTree.Top(part, parents) : recording.Work)
             .Select(piece =>
             {
                 var writers = piece
@@ -454,16 +457,24 @@ public static partial class CatalogueEndpoints
             [.. ordered.Skip(skip).Take(take)]));
     }
 
-    /// <summary>Every held recording of a work, with the piece it is a movement of.</summary>
+    /// <summary>Every held recording of a work, with the whole piece it is a movement of.</summary>
     private static async Task<List<HeldWork>> HeldWorksAsync(
         FonotecaDbContext db,
-        CancellationToken cancellationToken) =>
-        await db.Recordings
-            .AsNoTracking()
-            .Where(recording => recording.WorkId != null && recording.Files.Any())
-            .Select(recording => new HeldWork(recording.Id, recording.WorkId!.Value, recording.Work!.ParentId))
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        CancellationToken cancellationToken)
+    {
+        var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+
+        return [.. (await db.Recordings
+                .AsNoTracking()
+                .Where(recording => recording.WorkId != null && recording.Files.Any())
+                .Select(recording => new { recording.Id, Work = recording.WorkId!.Value, recording.Work!.ParentId })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .Select(row => new HeldWork(
+                row.Id,
+                row.Work,
+                row.ParentId is { } part ? WorkTree.Top(part, parents) : null))];
+    }
 
     /// <summary>Who wrote each work, by work.</summary>
     private static async Task<ILookup<WorkId, (ArtistId Artist, string Name)>> ComposersAsync(
@@ -551,7 +562,7 @@ public static partial class CatalogueEndpoints
     /// <summary>The last segment of a folder, which is all a row has room for.</summary>
     private static string Leaf(string folder) => folder[(folder.LastIndexOf('/') + 1)..];
 
-    private readonly record struct HeldWork(RecordingId Id, WorkId Work, WorkId? ParentId);
+    private readonly record struct HeldWork(RecordingId Id, WorkId Work, WorkId? Piece);
 }
 
 /// <summary>A page of tracks, with the total the filter matched.</summary>

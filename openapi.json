@@ -7204,6 +7204,7 @@
           "pendingBooklets",
           "pendingRecordings",
           "pendingGenres",
+          "pendingParentWorks",
           "lastCompleted"
         ],
         "type": "object",
@@ -7272,6 +7273,10 @@
             "format": "int32"
           },
           "pendingGenres": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingParentWorks": {
             "type": "integer",
             "format": "int32"
           },

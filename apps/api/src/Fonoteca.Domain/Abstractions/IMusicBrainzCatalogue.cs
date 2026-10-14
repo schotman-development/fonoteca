@@ -391,8 +391,8 @@ public sealed record MusicBrainzWork(
     /// <summary>The work this one is a part of — the symphony a movement belongs to.</summary>
     /// <remarks>
     /// One level up only. An aria's parent is its act and the act's is the
-    /// opera; reaching the top would cost a lookup per level, and the album page
-    /// groups consecutive tracks, where the nearest parent is the useful one.
+    /// opera; reaching the top costs a lookup per level, which the enrichment
+    /// pass's parent stage spends on each parent work in turn.
     /// </remarks>
     Mbid? ParentId = null,
 

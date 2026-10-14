@@ -241,13 +241,32 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
+    /// What a parent work is itself a part of, from its own lookup: one level of the climb.
+    /// </summary>
+    /// <remarks>
+    /// Only the parent changes: the row stays the stub it was minted as, with no
+    /// writers of its own. A work naming itself as its own parent is read as
+    /// having none.
+    /// </remarks>
+    public async Task PartOfAsync(Work row, MusicBrainzWork source, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(source);
+
+        row.ParentId = source.ParentId is { } parent && parent != row.Mbid
+            ? (await UpsertParentAsync(parent, source.ParentTitle, cancellationToken).ConfigureAwait(false)).Id
+            : null;
+    }
+
+    /// <summary>
     /// The work a movement belongs to, minted from the stub the <c>parts</c> relation carries.
     /// </summary>
     /// <remarks>
     /// Never described on its own — that is a lookup per parent for a title the
-    /// stub already holds — so a parent row has no writers and no parent of its
-    /// own. Its title is refreshed from the stub, and an existing row keeps
-    /// whatever a fuller description gave it.
+    /// stub already holds — so a parent row has no writers, and its own parent
+    /// is the parent stage's to find (<see cref="PartOfAsync"/>). Its title is
+    /// refreshed from the stub, and an existing row keeps whatever a fuller
+    /// description or that stage gave it.
     /// </remarks>
     private async Task<Work> UpsertParentAsync(Mbid id, string? title, CancellationToken cancellationToken)
     {
