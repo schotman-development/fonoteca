@@ -12,6 +12,7 @@ type ScanSummary = {
   added: number
   updated: number
   unchanged: number
+  moved: number
   removed: number
   unreadableDirectories: number
 }
@@ -119,6 +120,7 @@ export function LibraryScanPanel({ onScanned }: { readonly onScanned?: () => voi
               <Stat label="Seen" value={summary.filesSeen} />
               <Stat label="Added" value={summary.added} />
               <Stat label="Updated" value={summary.updated} />
+              <Stat label="Moved" value={summary.moved} />
               <Stat label="Removed" value={summary.removed} />
             </Stack>
 
