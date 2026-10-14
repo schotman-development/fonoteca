@@ -927,6 +927,20 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             await db.ReleaseGroups
                 .Where(g => g.Title == "Blues Summit 100")
                 .ExecuteUpdateAsync(update => update.SetProperty(g => g.Genres, "classical"), Token);
+
+            // Followed, and billed on no album of any genre: on no genre's shelf.
+            await db.Artists
+                .Where(a => a.Id == new ArtistId(_seed.Wagner))
+                .ExecuteUpdateAsync(update => update.SetProperty(a => a.Followed, true), Token);
+
+            // A folder answered as nobody's release: an album with no genre to carry.
+            var duet = await db.Recordings.SingleAsync(r => r.Id == new RecordingId(_seed.Duet), Token);
+            var bootleg = File("Somebody/Bootleg/01 - Live.flac", duet);
+            bootleg.AttributionOutcome = ReleaseAttributionOutcome.Unreleased;
+            bootleg.IdentityDecidedUtc = DateTimeOffset.UtcNow;
+            bootleg.ReleaseDecidedUtc = DateTimeOffset.UtcNow;
+            db.MediaFiles.Add(bootleg);
+            await db.SaveChangesAsync(Token);
         }
 
         using var client = _factory!.CreateClient();
@@ -941,7 +955,19 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal([2, 1, 1, 1, 1], genres.Select(genre => genre.Albums));
         Assert.Equal(["Blues", "Rock"], genres.Single(genre => genre.Name == "Blues Rock").Tops);
         Assert.Empty(genres.Single(genre => genre.Name == "Rock").Tops);
-        Assert.NotEmpty(genres.Single(genre => genre.Name == "Orchestral").Covers);
+        Assert.Equal(2, genres.Single(genre => genre.Name == "Classical").Covers.Count);
+
+        // The home page counts the same albums under the same names.
+        var overview = await client.GetFromJsonAsync<LibraryOverviewResponse>(
+            new Uri("/api/catalogue/overview", UriKind.Relative), Token);
+
+        Assert.Contains(new OverviewCount("Classical", 2), overview!.Genres);
+        Assert.Contains(new OverviewCount("Blues Rock", 1), overview.Genres);
+
+        var all = await client.GetFromJsonAsync<AlbumListResponse>(
+            new Uri("/api/catalogue/albums", UriKind.Relative), Token);
+
+        Assert.Single(all!.NoRelease);
 
         var rock = await client.GetFromJsonAsync<AlbumListResponse>(
             new Uri("/api/catalogue/albums?genre=rock", UriKind.Relative), Token);
