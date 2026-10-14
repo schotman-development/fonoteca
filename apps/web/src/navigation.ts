@@ -16,6 +16,7 @@ export type NavItem = {
     | '/library'
     | '/library/albums'
     | '/library/tracks'
+    | '/library/genres'
     | '/library/composers'
     | '/library/compositions'
     | '/library/playlists'
@@ -77,6 +78,12 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Tracks',
         exact: false,
         keywords: ['songs', 'recordings', 'play'],
+      },
+      {
+        to: '/library/genres',
+        label: 'Genres',
+        exact: false,
+        keywords: ['styles', 'subgenres', 'rock', 'jazz', 'classical'],
       },
       {
         to: '/library/composers',

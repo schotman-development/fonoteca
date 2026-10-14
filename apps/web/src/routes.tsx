@@ -8,6 +8,7 @@ import { ComposersPage } from './pages/ComposersPage.tsx'
 import { CompositionsPage } from './pages/CompositionsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
+import { GenrePage, GenresPage } from './pages/GenresPage.tsx'
 import { HomePage } from './pages/HomePage.tsx'
 import { IdentifyPage } from './pages/IdentifyPage.tsx'
 import {
@@ -116,6 +117,19 @@ const tracksRoute = createRoute({
   path: '/library/tracks',
   component: TracksPage,
   validateSearch: trackListSearch,
+})
+
+/** The library by genre, Fonoteca's own; one genre by its name, which is what files carry. */
+const genresRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/genres',
+  component: GenresPage,
+})
+
+const genreRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/genres/$genre',
+  component: GenrePage,
 })
 
 const composersRoute = createRoute({
@@ -245,6 +259,8 @@ const routeTree = rootRoute.addChildren([
   releasesRoute,
   releaseRoute,
   tracksRoute,
+  genresRoute,
+  genreRoute,
   composersRoute,
   compositionsRoute,
   playlistsRoute,
@@ -270,6 +286,8 @@ export {
   compositionsRoute,
   dashboardRoute,
   filesRoute,
+  genreRoute,
+  genresRoute,
   homeRoute,
   matchingRoute,
   playlistRoute,

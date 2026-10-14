@@ -189,7 +189,7 @@ function Tile({ label, value }: { readonly label: string; readonly value: string
   )
 }
 
-function Shelf<T>({
+export function Shelf<T>({
   title,
   more,
   state,
