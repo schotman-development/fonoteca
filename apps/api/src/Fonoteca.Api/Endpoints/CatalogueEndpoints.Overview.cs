@@ -33,11 +33,21 @@ public static partial class CatalogueEndpoints
 
         // Albums held, as `/api/system/info` counts them, less the folders
         // answered as no release: those have no year and no genres to give.
-        var albums = await db.ReleaseGroups
+        // Their genres as the Genres screen counts them: their own, else their tracks'.
+        var albums = (await db.ReleaseGroups
             .Where(group => group.Files.Any())
-            .Select(group => new OverviewAlbum(group.FirstReleaseYear, group.Genres))
+            .Select(group => new
+            {
+                group.FirstReleaseYear,
+                group.Genres,
+                RecordingGenres = group.Files
+                    .Select(file => file.Recording != null ? file.Recording.Genres : null)
+                    .ToList(),
+            })
             .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false))
+            .Select(group => new OverviewAlbum(group.FirstReleaseYear, FileGenres.OfAlbum(group.Genres, group.RecordingGenres)))
+            .ToList();
 
         var held = await db.Recordings
             .AsNoTracking()

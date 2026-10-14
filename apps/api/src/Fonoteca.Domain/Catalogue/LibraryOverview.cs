@@ -4,7 +4,8 @@ namespace Fonoteca.Domain.Catalogue;
 public sealed record OverviewFile(AudioQuality? Quality, AudioMeasurement? Measurement);
 
 /// <summary>What one held album adds to the library's totals.</summary>
-public sealed record OverviewAlbum(int? Year, string? Genres);
+/// <param name="Genres">The genres it carries (<see cref="FileGenres.OfAlbum"/>).</param>
+public sealed record OverviewAlbum(int? Year, IReadOnlyList<string> Genres);
 
 public sealed record FileTotals(
     IReadOnlyList<(QualityTier Tier, int Files)> Tiers,
@@ -68,7 +69,7 @@ public static class LibraryOverview
                 undated++;
             }
 
-            foreach (var genre in FileGenres.Split(album.Genres).Distinct(StringComparer.Ordinal))
+            foreach (var genre in album.Genres.Distinct(StringComparer.Ordinal))
             {
                 genreCounts[genre] = genreCounts.GetValueOrDefault(genre) + 1;
             }

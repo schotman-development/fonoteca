@@ -545,7 +545,7 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
         using var client = _factory!.CreateClient();
         var album = await AlbumAsync(client, _seed.Unforgettable);
 
-        Assert.Equal(["jazz", "vocal jazz"], album.About.Genres);
+        Assert.Equal(["Jazz", "Vocal Jazz"], album.About.Genres);
         Assert.Equal("Songs for Nat", album.Tracks.Single(track => track.Title == "Mona Lisa").PartOf);
 
         var producer = Assert.Single(album.Credits, credit => credit.Group == "Production");
@@ -581,7 +581,7 @@ public sealed class AlbumEndpointTests(PostgresFixture postgres) : IAsyncLifetim
         using var client = _factory!.CreateClient();
         var album = await AlbumAsync(client, _seed.Unforgettable);
 
-        Assert.Equal(["pop", "vocal jazz"], album.About.Genres);
+        Assert.Equal(["Pop", "Jazz", "Vocal Jazz"], album.About.Genres);
     }
 
     /// <summary>

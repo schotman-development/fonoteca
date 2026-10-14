@@ -8,22 +8,23 @@ public sealed class FileGenresTests
     [Fact]
     public void TheAlbumsGenresWinOverTheRecordings()
     {
-        Assert.Equal(["blues rock", "blues"], FileGenres.Of("blues rock, blues", "pop"));
+        Assert.Equal(["Blues", "Rock", "Blues Rock"], FileGenres.Of("blues rock, blues", "pop"));
     }
 
     [Fact]
     public void TheRecordingsStandInWhereTheAlbumHasNone()
     {
-        Assert.Equal(["pop"], FileGenres.Of(null, "pop"));
+        Assert.Equal(["Pop"], FileGenres.Of(null, "pop"));
         Assert.Empty(FileGenres.Of(null, null));
     }
 
+    /// <summary>The cut is on what MusicBrainz states; the tops come on top of it.</summary>
     [Fact]
-    public void AFileCarriesAtMostFive()
+    public void AFileCarriesWhatItsFiveMostVotedGenresComeTo()
     {
         Assert.Equal(
-            ["a", "b", "c", "d", "e"],
-            FileGenres.Of("a, b, c, d, e, f, g", null));
+            ["Jazz", "Swing", "Big Band", "Bebop", "Hard Bop", "Cool Jazz"],
+            FileGenres.Of("swing, big band, bebop, hard bop, cool jazz, soul jazz", null));
     }
 
     /// <summary>An album nobody voted on is listed under what most of its tracks carry.</summary>
@@ -31,9 +32,9 @@ public sealed class FileGenresTests
     public void AnAlbumWithNoGenresOfItsOwnTakesItsTracksCommonestFirst()
     {
         Assert.Equal(
-            ["rock", "blues", "soul"],
+            ["Rock", "Blues", "R&B", "Soul"],
             FileGenres.OfAlbum(null, ["blues, rock", "rock", null, "soul, rock"]));
 
-        Assert.Equal(["jazz"], FileGenres.OfAlbum("jazz", ["rock", "rock"]));
+        Assert.Equal(["Jazz"], FileGenres.OfAlbum("jazz", ["rock", "rock"]));
     }
 }

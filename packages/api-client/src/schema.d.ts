@@ -346,7 +346,7 @@ export interface paths {
         };
         /**
          * Album artists in the library, or everyone credited on one.
-         * @description Ordered by sort name, by `sort=tracks` for the most songs first (a work's movements count once), or by `sort=albums` for the most held albums billed to them, songs breaking a tie — other ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms.
+         * @description Ordered by sort name, by `sort=tracks` for the most songs first (a work's movements count once), or by `sort=albums` for the most held albums billed to them, songs breaking a tie — other ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms. `genre` narrows any scope to the artists billed on the held albums carrying that genre (see `/genres`), counting only those albums.
          */
         get: operations["GetArtists"];
         put?: never;
@@ -478,6 +478,8 @@ export interface paths {
          * @description An album is a release group; `editionId` names the pressing only where every file is filed under the same one. Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the album title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like, and is only given against a claimed pressing — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.
          *
          *     `noRelease` lists the album folders answered as coming from no release, which have no release group: unpaged, outside `total`, filtered on the folder name.
+         *
+         *     `genre` keeps the albums carrying one of Fonoteca's genres (see `/genres`), or a subgenre of it, and leaves `noRelease` empty: a folder of no release carries none.
          */
         get: operations["GetAlbums"];
         put?: never;
@@ -1255,6 +1257,26 @@ export interface paths {
         };
         /** The library in totals: songs, composers, compositions, quality, formats, decades and genres. */
         get: operations["GetLibraryOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogue/genres": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every genre a held album carries: its tops, how many albums, and sleeves to show it by.
+         * @description Most albums first, a tie in the tree's order; a genre no held album carries is left out. `tops` is empty for a top and names two for a fusion, which sits under both. An album counts under each genre it carries and under their tops. `covers` are up to four releases whose stored sleeves stand for the genre, albums with one first. The albums and artists of a genre are `/albums?genre=` and `/artists?genre=`.
+         */
+        get: operations["GetGenres"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2519,6 +2541,16 @@ export interface components {
             /** Format: int32 */
             closed: number;
             detail: string;
+        };
+        GenreListResponse: {
+            genres: components["schemas"]["GenreSummary"][];
+        };
+        GenreSummary: {
+            name: string;
+            tops: string[];
+            /** Format: int32 */
+            albums: number;
+            covers: string[];
         };
         IdentificationStartedResponse: {
             jobId: string;
@@ -4312,6 +4344,7 @@ export interface operations {
                 scope?: string;
                 skip?: number;
                 take?: number;
+                genre?: string;
             };
             header?: never;
             path?: never;
@@ -4542,6 +4575,7 @@ export interface operations {
                 sort?: string;
                 skip?: number;
                 take?: number;
+                genre?: string;
             };
             header?: never;
             path?: never;
@@ -6253,6 +6287,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryOverviewResponse"];
+                };
+            };
+        };
+    };
+    GetGenres: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenreListResponse"];
                 };
             };
         };

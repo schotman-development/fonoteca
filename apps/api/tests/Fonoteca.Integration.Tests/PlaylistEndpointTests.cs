@@ -502,6 +502,13 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     [Theory]
     [InlineData("Genre", "Is", "soft rock", null, 2)]
     [InlineData("Genre", "Is", "soft", null, 0)]
+    // Asked of Fonoteca's genres: "soft rock" carries Soft Rock and its top, Rock.
+    [InlineData("Genre", "Is", "Rock", null, 2)]
+    [InlineData("Genre", "Contains", "soft", null, 2)]
+    [InlineData("Genre", "Is", "Pop", null, 0)]
+    [InlineData("Genre", "DoesNotContain", "Rock", null, 1)]
+    // A rule in MusicBrainz's words folds as the files do: yacht rock is Soft Rock.
+    [InlineData("Genre", "Is", "yacht rock", null, 2)]
     // The MP3 is filed under no album and its recording has no genre of its own.
     [InlineData("Genre", "IsNot", "rock", null, 1)]
     [InlineData("Genre", "IsEmpty", null, null, 1)]

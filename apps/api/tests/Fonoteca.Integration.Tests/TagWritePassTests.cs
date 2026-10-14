@@ -273,8 +273,8 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         var reading = await new TagReader(new FileSystemAudioFileStore(_root))
             .ReadAsync(new LibraryPath("Miles Davis/Kind of Blue/01 track.flac"), cancellationToken: Token);
 
-        // The album's genres, not the recording's "pop".
-        Assert.Equal($"jazz{CatalogueTags.ValueSeparator}modal jazz", reading.Find(CatalogueTags.Genre));
+        // The album's genres, not the recording's "pop", folded into Fonoteca's: modal jazz is Post-Bop.
+        Assert.Equal($"Jazz{CatalogueTags.ValueSeparator}Post-Bop", reading.Find(CatalogueTags.Genre));
         Assert.Equal("USSM15900113", reading.Find(CatalogueTags.Isrc));
         Assert.Equal("Irving Townsend", reading.Find(CatalogueTags.Producer));
         Assert.Equal("John Coltrane (tenor saxophone)", reading.Find(CatalogueTags.Performer));
@@ -293,8 +293,8 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         var state = await services.GetRequiredService<TagWriteService>().FolderTagsAsync("Miles Davis/Kind of Blue", Token);
         var genre = state!.Files.Single().Cells.Single(cell => cell.Field == CatalogueTags.Genre);
 
-        Assert.Equal("jazz; modal jazz", genre.Catalogue);
-        Assert.Equal("jazz; modal jazz", genre.File);
+        Assert.Equal("Jazz; Post-Bop", genre.Catalogue);
+        Assert.Equal("Jazz; Post-Bop", genre.File);
     }
 
     /// <summary>

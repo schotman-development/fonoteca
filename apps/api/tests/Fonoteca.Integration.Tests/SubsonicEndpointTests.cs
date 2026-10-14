@@ -732,9 +732,9 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .GetProperty("subsonic-response")
             .GetProperty("song");
 
-        Assert.Equal("jazz", song.GetProperty("genre").GetString());
+        Assert.Equal("Jazz", song.GetProperty("genre").GetString());
         Assert.Equal(
-            ["jazz", "cool jazz"],
+            ["Jazz", "Cool Jazz"],
             song.GetProperty("genres").EnumerateArray().Select(genre => genre.GetProperty("name").GetString()));
 
         var genres = (await JsonAsync(client, "/rest/getGenres.view"))
@@ -744,16 +744,16 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .ToList();
 
-        var cool = genres.Single(genre => genre.GetProperty("value").GetString() == "cool jazz");
+        var cool = genres.Single(genre => genre.GetProperty("value").GetString() == "Cool Jazz");
         Assert.Equal(1, cool.GetProperty("songCount").GetInt32());
         Assert.Equal(1, cool.GetProperty("albumCount").GetInt32());
 
-        var loud = genres.Single(genre => genre.GetProperty("value").GetString() == "rock");
+        var loud = genres.Single(genre => genre.GetProperty("value").GetString() == "Rock");
         Assert.Equal(2, loud.GetProperty("songCount").GetInt32());
         Assert.Equal(1, loud.GetProperty("albumCount").GetInt32());
 
         // The album's genres stand for the file: its recording's "pop" is not one.
-        Assert.DoesNotContain(genres, genre => genre.GetProperty("value").GetString() == "pop");
+        Assert.DoesNotContain(genres, genre => genre.GetProperty("value").GetString() == "Pop");
 
         var byGenre = (await JsonAsync(client, "/rest/getAlbumList2.view?type=byGenre&genre=Cool%20Jazz"))
             .GetProperty("subsonic-response")
@@ -763,7 +763,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         var listed = Assert.Single(byGenre.EnumerateArray());
         Assert.Equal("Waltz for Debby", listed.GetProperty("name").GetString());
         Assert.Equal(
-            ["jazz", "cool jazz"],
+            ["Jazz", "Cool Jazz"],
             listed.GetProperty("genres").EnumerateArray().Select(genre => genre.GetProperty("name").GetString()));
 
         var songs = (await JsonAsync(client, "/rest/getSongsByGenre.view?genre=jazz"))
@@ -784,7 +784,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(Token));
         XNamespace ns = "http://subsonic.org/restapi";
 
-        Assert.Contains(xml.Descendants(ns + "genre"), genre => genre.Value == "cool jazz");
+        Assert.Contains(xml.Descendants(ns + "genre"), genre => genre.Value == "Cool Jazz");
     }
 
     /// <summary>

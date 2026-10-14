@@ -233,11 +233,13 @@ public static partial class SubsonicEndpoints
     /// The songs carrying one genre, a page at a time.
     /// </summary>
     /// <remarks>
-    /// <c>ILIKE</c> narrows the files in SQL and <see cref="FileGenres"/> decides
-    /// in memory, because a stored column is a joined list and "rock" is a
-    /// substring of "blues rock". ponytail: the page is cut after the filter,
-    /// so a broad genre loads every file carrying it once per page; a genre
-    /// table is the upgrade if a client pages deep.
+    /// SQL narrows the files to those stating a name that carries the genre
+    /// (<see cref="Genres.Stating"/>), since the catalogue stores MusicBrainz's
+    /// names and a client asks for Fonoteca's, and <see cref="FileGenres"/>
+    /// decides in memory, because only the first five stated count. ponytail:
+    /// the page is cut after the filter, so a broad genre loads every file
+    /// carrying it once per page; a genre table is the upgrade if a client
+    /// pages deep.
     /// </remarks>
     private static async Task<IResult> GetSongsByGenre(
         HttpContext http,
@@ -251,11 +253,15 @@ public static partial class SubsonicEndpoints
 
         var count = Number(http, "count", DefaultListSize, MaxListSize);
         var offset = Number(http, "offset", 0, int.MaxValue);
-        var pattern = $"%{Escape(genre)}%";
+        var stated = await CatalogueEndpoints.StatedGenresAsync(db, cancellationToken).ConfigureAwait(false);
+        var patterns = Genres
+            .Stating(stated, carried => carried.Equals(genre, StringComparison.OrdinalIgnoreCase))
+            .Select(name => $"%, {Escape(name)}, %")
+            .ToArray();
 
         var candidates = db.MediaFiles.AsNoTracking().Where(file =>
-            (file.ReleaseGroup != null && EF.Functions.ILike(file.ReleaseGroup.Genres!, pattern, "\\"))
-            || (file.Recording != null && EF.Functions.ILike(file.Recording.Genres!, pattern, "\\")));
+            (file.ReleaseGroup != null && patterns.Any(pattern => EF.Functions.ILike(", " + file.ReleaseGroup.Genres + ", ", pattern)))
+            || (file.Recording != null && patterns.Any(pattern => EF.Functions.ILike(", " + file.Recording.Genres + ", ", pattern))));
 
         var songs = await SongsAsync(db, candidates, cancellationToken).ConfigureAwait(false);
 

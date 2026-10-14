@@ -96,6 +96,15 @@ public static partial class CatalogueEndpoints
             ["banner"] = request.Banner,
         };
 
+        // The form shows the genres folded (Genres); sent back as shown, they
+        // are no correction, and whatever was stated stays stated.
+        var stated = PersonEdits.Apply(PersonEdits.Read(artist.EditsJson), "genres", artist.Genres);
+
+        if (Genres.Carried(FileGenres.Split(stated)).SequenceEqual(FileGenres.Split(wanted["genres"]), StringComparer.Ordinal))
+        {
+            wanted["genres"] = stated;
+        }
+
         var edits = PersonEdits.Diff(wanted, ArtistFields(artist));
 
         artist.EditsJson = PersonEdits.Write(edits);

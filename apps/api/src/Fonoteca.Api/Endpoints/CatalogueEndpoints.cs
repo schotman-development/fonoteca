@@ -314,7 +314,9 @@ public static partial class CatalogueEndpoints
                 + "which on a real library is an order of magnitude more names. `inLibrary` is the "
                 + "counter: by default the artists billed on a held album, listed even with no track "
                 + "of their own; on the other shelves, those holding a track. A followed artist is "
-                + "listed whatever they hold and counted only on those terms.");
+                + "listed whatever they hold and counted only on those terms. `genre` narrows any "
+                + "scope to the artists billed on the held albums carrying that genre (see `/genres`), "
+                + "counting only those albums.");
 
         group.MapGet("/artists/{id:guid}", GetArtist)
             .WithName("GetArtist")
@@ -402,7 +404,9 @@ public static partial class CatalogueEndpoints
                 + "release is legitimately half missing on an audio-only library, which is why "
                 + "the medium formats are returned beside them.\n\n"
                 + "`noRelease` lists the album folders answered as coming from no release, which "
-                + "have no release group: unpaged, outside `total`, filtered on the folder name.");
+                + "have no release group: unpaged, outside `total`, filtered on the folder name.\n\n"
+                + "`genre` keeps the albums carrying one of Fonoteca's genres (see `/genres`), or a "
+                + "subgenre of it, and leaves `noRelease` empty: a folder of no release carries none.");
 
         group.MapGet("/albums/{id:guid}", GetAlbum)
             .WithName("GetAlbum")
@@ -588,6 +592,7 @@ public static partial class CatalogueEndpoints
         MapPortraitEndpoints(group);
         MapProfileEndpoints(group);
         MapOverviewEndpoints(group);
+        MapGenreEndpoints(group);
         MapBrowseEndpoints(group);
         MapPlaylistEndpoints(group);
 
@@ -601,7 +606,8 @@ public static partial class CatalogueEndpoints
         string? sort = null,
         string? scope = null,
         int skip = 0,
-        int take = DefaultTake)
+        int take = DefaultTake,
+        string? genre = null)
     {
         var wanted = Math.Clamp(take, 1, MaxTake);
         var from = Math.Max(skip, 0);
@@ -657,8 +663,14 @@ public static partial class CatalogueEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var albums = await BilledAlbumsAsync(db, cancellationToken).ConfigureAwait(false);
-        var shelf = everyone || following ? null : albums.Keys.ToHashSet();
+        // A genre's artists are those billed on its albums, whatever the scope:
+        // nobody else is in it, a followed artist included.
+        var within = string.IsNullOrWhiteSpace(genre)
+            ? null
+            : await AlbumsOfGenreAsync(db, genre, cancellationToken).ConfigureAwait(false);
+
+        var albums = await BilledAlbumsAsync(db, cancellationToken, within).ConfigureAwait(false);
+        var shelf = (everyone || following) && within is null ? null : albums.Keys.ToHashSet();
         var pieces = await PiecesAsync(db, cancellationToken).ConfigureAwait(false);
 
         var withTracks = named
@@ -682,6 +694,7 @@ public static partial class CatalogueEndpoints
                 || (shelf is not null && shelf.Contains(row.Artist.Id)))
             .Where(row => shelf is null || shelf.Contains(row.Artist.Id) || row.Artist.Followed)
             .Where(row => !following || row.Artist.Followed)
+            .Where(row => within is null || shelf!.Contains(row.Artist.Id))
             .ToList();
 
         // Sorted here rather than in SQL because the list is already in memory:
@@ -1410,7 +1423,8 @@ public static partial class CatalogueEndpoints
         string? query = null,
         string? sort = null,
         int skip = 0,
-        int take = DefaultTake)
+        int take = DefaultTake,
+        string? genre = null)
     {
         take = Math.Clamp(take, 1, MaxTake);
         skip = Math.Max(skip, 0);
@@ -1425,6 +1439,12 @@ public static partial class CatalogueEndpoints
         {
             var pattern = $"%{Escape(query.Trim())}%";
             albums = albums.Where(g => EF.Functions.ILike(g.Title, pattern, "\\"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genre))
+        {
+            var within = await AlbumsOfGenreAsync(db, genre, cancellationToken).ConfigureAwait(false);
+            albums = albums.Where(g => within.Contains(g.Id));
         }
 
         var total = await albums.CountAsync(cancellationToken).ConfigureAwait(false);
@@ -1515,7 +1535,9 @@ public static partial class CatalogueEndpoints
             .Select(row => AlbumSummaryOf(row, editions[row.Id]))
             .ToList();
 
+        // A folder that is nobody's release has no album to carry a genre.
         var noRelease = (await NoReleaseAlbumsAsync(db, cancellationToken).ConfigureAwait(false))
+            .Where(album => string.IsNullOrWhiteSpace(genre))
             .Where(album => string.IsNullOrWhiteSpace(query)
                 || album.Title.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase))
             .OrderBy(album => sort == "artist" ? album.Folder : album.Title, StringComparer.OrdinalIgnoreCase)
@@ -4694,7 +4716,8 @@ public static partial class CatalogueEndpoints
     /// <returns>Each billed artist and how many held albums they are billed on.</returns>
     internal static async Task<Dictionary<ArtistId, int>> BilledAlbumsAsync(
         FonotecaDbContext db,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<ReleaseGroupId>? within = null)
     {
         var own = await db.ArtistCredits
             .AsNoTracking()
@@ -4722,6 +4745,7 @@ public static partial class CatalogueEndpoints
 
         return own.Concat(editions)
             .Distinct()
+            .Where(pair => within is null || within.Contains(pair.Album))
             .GroupBy(pair => pair.ArtistId)
             .ToDictionary(albums => albums.Key, albums => albums.Count());
     }
@@ -5075,7 +5099,7 @@ public static partial class CatalogueEndpoints
             Integer(Field("beganYear", Number(artist.BeganYear))),
             Integer(Field("endedYear", Number(artist.EndedYear))),
             Field("ended", Flag(artist.Ended)) == "true",
-            Split(Field("genres", artist.Genres)),
+            Genres.Carried(Split(Field("genres", artist.Genres))),
             artist.LookupUtc,
             artist.Followed);
     }
@@ -5112,7 +5136,7 @@ public sealed record ArtistListResponse(int Total, int InLibrary, IReadOnlyList<
 /// Whether the life span is over, which is <b>not</b> <c>EndedYear != null</c>:
 /// a band known to have split but never dated carries this with no year.
 /// </param>
-/// <param name="Genres">MusicBrainz's curated genres, most-voted first. Empty until asked.</param>
+/// <param name="Genres">Fonoteca's genres (<see cref="Genres"/>), each with its tops, folded from MusicBrainz's or a person's. Empty until asked.</param>
 /// <param name="DescribedAtUtc">
 /// When MusicBrainz was last asked about them, or null when nobody has.
 /// </param>

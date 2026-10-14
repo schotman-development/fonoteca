@@ -886,7 +886,7 @@
           "Catalogue"
         ],
         "summary": "Album artists in the library, or everyone credited on one.",
-        "description": "Ordered by sort name, by `sort=tracks` for the most songs first (a work's movements count once), or by `sort=albums` for the most held albums billed to them, songs breaking a tie — other ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms.",
+        "description": "Ordered by sort name, by `sort=tracks` for the most songs first (a work's movements count once), or by `sort=albums` for the most held albums billed to them, songs breaking a tie — other ties keep the alphabetical order. `query` filters on the artist's name, case-insensitively, anywhere in the string. By default the list is the artists a held album is billed to: the album's own credit line, collaborators included, or its editions' where the album has none stored. `scope=all` widens it to everyone the catalogue can reach a track through: composers and lyricists of the work, conductors, ensembles and guest features, which on a real library is an order of magnitude more names. `inLibrary` is the counter: by default the artists billed on a held album, listed even with no track of their own; on the other shelves, those holding a track. A followed artist is listed whatever they hold and counted only on those terms. `genre` narrows any scope to the artists billed on the held albums carrying that genre (see `/genres`), counting only those albums.",
         "operationId": "GetArtists",
         "parameters": [
           {
@@ -926,6 +926,13 @@
               "type": "integer",
               "format": "int32",
               "default": 10000
+            }
+          },
+          {
+            "name": "genre",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1232,7 +1239,7 @@
           "Catalogue"
         ],
         "summary": "Albums the library holds at least one track of.",
-        "description": "An album is a release group; `editionId` names the pressing only where every file is filed under the same one. Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the album title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like, and is only given against a claimed pressing — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.\n\n`noRelease` lists the album folders answered as coming from no release, which have no release group: unpaged, outside `total`, filtered on the folder name.",
+        "description": "An album is a release group; `editionId` names the pressing only where every file is filed under the same one. Ordered by title, or by `sort=year` (newest first, undated last), `sort=artist` (the first billed name, uncredited last) or `sort=added` (whichever album gained a file most recently). `query` filters on the album title, case-insensitively, anywhere in the string. `held` against `trackCount` is what an incomplete rip looks like, and is only given against a claimed pressing — though a CD+DVD-Video release is legitimately half missing on an audio-only library, which is why the medium formats are returned beside them.\n\n`noRelease` lists the album folders answered as coming from no release, which have no release group: unpaged, outside `total`, filtered on the folder name.\n\n`genre` keeps the albums carrying one of Fonoteca's genres (see `/genres`), or a subgenre of it, and leaves `noRelease` empty: a folder of no release carries none.",
         "operationId": "GetAlbums",
         "parameters": [
           {
@@ -1265,6 +1272,13 @@
               "type": "integer",
               "format": "int32",
               "default": 10000
+            }
+          },
+          {
+            "name": "genre",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -3476,6 +3490,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LibraryOverviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalogue/genres": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Every genre a held album carries: its tops, how many albums, and sleeves to show it by.",
+        "description": "Most albums first, a tie in the tree's order; a genre no held album carries is left out. `tops` is empty for a top and names two for a fusion, which sits under both. An album counts under each genre it carries and under their tops. `covers` are up to four releases whose stored sleeves stand for the genre, albums with one first. The albums and artists of a genre are `/albums?genre=` and `/artists?genre=`.",
+        "operationId": "GetGenres",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenreListResponse"
                 }
               }
             }
@@ -8107,6 +8143,51 @@
           },
           "detail": {
             "type": "string"
+          }
+        }
+      },
+      "GenreListResponse": {
+        "required": [
+          "genres"
+        ],
+        "type": "object",
+        "properties": {
+          "genres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenreSummary"
+            }
+          }
+        }
+      },
+      "GenreSummary": {
+        "required": [
+          "name",
+          "tops",
+          "albums",
+          "covers"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "tops": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "albums": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "covers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },

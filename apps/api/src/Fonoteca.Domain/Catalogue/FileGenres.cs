@@ -6,8 +6,9 @@ namespace Fonoteca.Domain.Catalogue;
 /// album should sit under one set of genres in any player that browses by
 /// them; a track's own votes differ from its album's often enough — one song
 /// on a rock album tagged "pop" — that preferring them would scatter an album
-/// across a genre list. Spelled as MusicBrainz spells them, most-voted first,
-/// and cut at <see cref="Max"/>, which is Picard's default.
+/// across a genre list. MusicBrainz's, most-voted first and cut at
+/// <see cref="Max"/>, which is Picard's default — then folded into Fonoteca's
+/// own genres, each with its tops (<see cref="Genres.Carried"/>).
 ///
 /// One rule for the tag write and for Subsonic, so what a file says and what a
 /// client is told cannot drift apart.
@@ -21,7 +22,7 @@ public static class FileGenres
     public static IReadOnlyList<string> Of(string? album, string? recording)
     {
         var own = Split(album);
-        return [.. (own.Count > 0 ? own : Split(recording)).Take(Max)];
+        return Genres.Carried((own.Count > 0 ? own : Split(recording)).Take(Max));
     }
 
     /// <summary>
@@ -37,16 +38,16 @@ public static class FileGenres
         ArgumentNullException.ThrowIfNull(recordings);
 
         var own = Split(album);
-        if (own.Count > 0) return [.. own.Take(Max)];
+        if (own.Count > 0) return Genres.Carried(own.Take(Max));
 
-        return [.. recordings
+        return Genres.Carried(recordings
             .SelectMany(Split)
             .GroupBy(genre => genre, StringComparer.Ordinal)
             .Select((group, first) => (Genre: group.Key, Count: group.Count(), First: first))
             .OrderByDescending(entry => entry.Count)
             .ThenBy(entry => entry.First)
             .Take(Max)
-            .Select(entry => entry.Genre)];
+            .Select(entry => entry.Genre));
     }
 
     /// <summary>A stored genre column, as the list it was joined from.</summary>

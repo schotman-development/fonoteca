@@ -910,6 +910,66 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         }
     }
 
+    /// <summary>
+    /// The Genres screen: an album is under the genres it carries and their
+    /// tops, a fusion under both, the most albums first, and the album and
+    /// artist lists narrow to one.
+    /// </summary>
+    [Fact]
+    public async Task AGenreHoldsItsAlbumsAndTheirArtistsAndItsTopsHoldThemToo()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ReleaseGroups
+                .Where(g => g.Id == new ReleaseGroupId(_seed.SeesawAlbum))
+                .ExecuteUpdateAsync(update => update.SetProperty(g => g.Genres, "blues rock"), Token);
+
+            await db.ReleaseGroups
+                .Where(g => g.Title == "Blues Summit 100")
+                .ExecuteUpdateAsync(update => update.SetProperty(g => g.Genres, "classical"), Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var genres = (await client.GetFromJsonAsync<GenreListResponse>(
+            new Uri("/api/catalogue/genres", UriKind.Relative), Token))!.Genres;
+
+        // The symphony album says "classical, symphony": a symphony is Orchestral, under
+        // Classical, which the anthology's "classical" makes two albums and so first. The
+        // rest tie at one and keep the tree's order.
+        Assert.Equal(["Classical", "Rock", "Blues", "Blues Rock", "Orchestral"], genres.Select(genre => genre.Name));
+        Assert.Equal([2, 1, 1, 1, 1], genres.Select(genre => genre.Albums));
+        Assert.Equal(["Blues", "Rock"], genres.Single(genre => genre.Name == "Blues Rock").Tops);
+        Assert.Empty(genres.Single(genre => genre.Name == "Rock").Tops);
+        Assert.NotEmpty(genres.Single(genre => genre.Name == "Orchestral").Covers);
+
+        var rock = await client.GetFromJsonAsync<AlbumListResponse>(
+            new Uri("/api/catalogue/albums?genre=rock", UriKind.Relative), Token);
+
+        Assert.Equal(_seed.SeesawAlbum, Assert.Single(rock!.Items).Id);
+        Assert.Empty(rock.NoRelease);
+
+        var classical = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?genre=Classical", UriKind.Relative), Token);
+
+        var karajan = Assert.Single(classical!.Items);
+        Assert.Equal(_seed.Karajan, karajan.Id);
+        Assert.Equal(1, karajan.AlbumCount);
+
+        var blues = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/artists?genre=Blues&scope=all", UriKind.Relative), Token);
+
+        // Any scope narrows to the albums' billing: the scope widens nothing here.
+        Assert.Equal(
+            new[] { _seed.Hart, _seed.Bonamassa }.Order(),
+            blues!.Items.Select(artist => artist.Id).Order());
+
+        var none = await client.GetFromJsonAsync<AlbumListResponse>(
+            new Uri("/api/catalogue/albums?genre=Jazz", UriKind.Relative), Token);
+
+        Assert.Empty(none!.Items);
+    }
+
     private static async Task<ArtistDetailResponse> ArtistAsync(HttpClient client, Guid id)
     {
         var body = await client.GetFromJsonAsync<ArtistDetailResponse>(
@@ -1373,6 +1433,40 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal("Karajan, Herbert von", restored.Artist.SortName);
     }
 
+    /// <summary>
+    /// The page shows an artist's genres folded into Fonoteca's; the form sends
+    /// them back as shown, which corrects nothing, while a genre typed is kept.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistsFoldedGenresSentBackAreNoCorrection()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Artists
+                .Where(a => a.Id == new ArtistId(_seed.Karajan))
+                .ExecuteUpdateAsync(update => update.SetProperty(a => a.Genres, "classical, symphony"), Token);
+        }
+
+        using var client = _factory!.CreateClient();
+        var uri = new Uri($"/api/catalogue/artists/{_seed.Karajan}/edits", UriKind.Relative);
+
+        var before = await ArtistAsync(client, _seed.Karajan);
+        Assert.Equal(["Classical", "Orchestral"], before.Artist.Genres);
+
+        var unchanged = await client.PostAsJsonAsync(uri, FormOf(before) with { SortName = "Karajan, Heribert" }, Token);
+        Assert.Equal(["sortName"], (await unchanged.Content.ReadFromJsonAsync<EditResponse>(Token))!.Edited);
+
+        var typed = await client.PostAsJsonAsync(uri, FormOf(before) with { Genres = ["opera"] }, Token);
+        Assert.Equal(["genres"], (await typed.Content.ReadFromJsonAsync<EditResponse>(Token))!.Edited);
+
+        var after = await ArtistAsync(client, _seed.Karajan);
+        Assert.Equal(["Classical", "Opera"], after.Artist.Genres);
+
+        var resent = await client.PostAsJsonAsync(uri, FormOf(after), Token);
+        Assert.Equal(["genres"], (await resent.Content.ReadFromJsonAsync<EditResponse>(Token))!.Edited);
+        Assert.Equal(["Classical", "Opera"], (await ArtistAsync(client, _seed.Karajan)).Artist.Genres);
+    }
+
     /// <summary>A picture URL goes into an <c>img src</c>, so only a web address is taken.</summary>
     [Fact]
     public async Task AnArtistEditWithAScriptForAPictureIsRefused()
@@ -1608,6 +1702,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             Title = "Mozart: Symphony no. 40",
             Mbid = new Mbid(Guid.CreateVersion7()),
             PrimaryType = "Album",
+            Genres = "classical, symphony",
         };
 
         var symphony = new Release

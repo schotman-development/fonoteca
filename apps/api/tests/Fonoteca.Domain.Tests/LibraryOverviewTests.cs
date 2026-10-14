@@ -39,11 +39,11 @@ public sealed class LibraryOverviewTests
     {
         var totals = LibraryOverview.OfAlbums(
             [
-                new OverviewAlbum(1979, "rock, blues, rock"),
-                new OverviewAlbum(1970, "rock"),
-                new OverviewAlbum(1980, "jazz"),
-                new OverviewAlbum(null, "blues"),
-                new OverviewAlbum(2001, null),
+                new OverviewAlbum(1979, ["Rock", "Blues", "Rock"]),
+                new OverviewAlbum(1970, ["Rock"]),
+                new OverviewAlbum(1980, ["Jazz"]),
+                new OverviewAlbum(null, ["Blues"]),
+                new OverviewAlbum(2001, []),
             ],
             genres: 2);
 
@@ -51,6 +51,6 @@ public sealed class LibraryOverviewTests
         Assert.Equal(1, totals.Undated);
 
         // Commonest first, a tie by name, cut to the two asked for.
-        Assert.Equal([("blues", 2), ("rock", 2)], totals.Genres);
+        Assert.Equal([("Blues", 2), ("Rock", 2)], totals.Genres);
     }
 }

@@ -42,10 +42,12 @@ internal static class SmartQuery
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        var stated = await CatalogueEndpoints.StatedGenresAsync(db, cancellationToken).ConfigureAwait(false);
+
         var files = await db.MediaFiles
             .AsNoTracking()
             .Where(file => file.RecordingId != null)
-            .Where(Predicate(criteria.Rules, now))
+            .Where(Predicate(criteria.Rules, now, stated))
             .Select(file => new
             {
                 file.Id,
@@ -116,11 +118,12 @@ internal static class SmartQuery
     }
 
     /// <summary>A condition, or a group folded from its rules; an empty group matches every file.</summary>
-    internal static Expression<Func<MediaFile, bool>> Predicate(SmartRule rule, DateTimeOffset now)
+    /// <param name="stated">The genre names the library states, which a genre condition is asked of (<see cref="Genre"/>).</param>
+    internal static Expression<Func<MediaFile, bool>> Predicate(SmartRule rule, DateTimeOffset now, IReadOnlyCollection<string> stated)
     {
         if (rule.Rules is { } children)
         {
-            var parts = children.Select(child => Predicate(child, now)).ToList();
+            var parts = children.Select(child => Predicate(child, now, stated)).ToList();
 
             if (parts.Count == 0) return file => true;
 
@@ -132,6 +135,8 @@ internal static class SmartQuery
 
         return SmartRules.KindOf(field) switch
         {
+            SmartFieldKind.Text when field == SmartField.Genre && op is not (SmartOperator.IsEmpty or SmartOperator.IsNotEmpty) =>
+                Genre(op, rule.Value?.Trim() ?? string.Empty, stated),
             SmartFieldKind.Text => Text(Sources(field), op, rule.Value?.Trim() ?? string.Empty),
             SmartFieldKind.Number => Number(field, op, SmartRules.Number(rule.Value), SmartRules.Number(rule.To)),
             SmartFieldKind.Flag => op == SmartOperator.IsTrue ? Flag(field, true) : Flag(field, false),
@@ -263,6 +268,49 @@ internal static class SmartQuery
         return Expression.Lambda<Func<MediaFile, bool>>(
             op is SmartOperator.IsNot or SmartOperator.DoesNotContain ? Expression.Not(matched) : matched,
             file);
+    }
+
+    /// <summary>
+    /// A genre condition, asked of the genres a file carries (<see cref="Genres"/>)
+    /// while the catalogue stores MusicBrainz's.
+    /// </summary>
+    /// <remarks>
+    /// The library states few names, so which of them carry a matching genre is
+    /// worked out here, and SQL asks only whether the file's stored list holds
+    /// one of those whole. "Blues" therefore matches a file stating "chicago
+    /// blues", and "Other" one stating a name the tree has not placed. A value
+    /// in MusicBrainz's words is folded first, as the files' genres are.
+    /// </remarks>
+    private static Expression<Func<MediaFile, bool>> Genre(SmartOperator op, string value, IReadOnlyCollection<string> stated)
+    {
+        if (Genres.Of(value) is var folded && folded != Genres.Other) value = folded;
+
+        var positive = op is SmartOperator.IsNot ? SmartOperator.Is
+            : op is SmartOperator.DoesNotContain ? SmartOperator.Contains
+            : op;
+
+        var patterns = Genres
+            .Stating(stated, genre => positive switch
+            {
+                SmartOperator.Is => genre.Equals(value, StringComparison.OrdinalIgnoreCase),
+                SmartOperator.StartsWith => genre.StartsWith(value, StringComparison.OrdinalIgnoreCase),
+                SmartOperator.EndsWith => genre.EndsWith(value, StringComparison.OrdinalIgnoreCase),
+                _ => genre.Contains(value, StringComparison.OrdinalIgnoreCase),
+            })
+            .Select(name => $"%, {Escape(name)}, %")
+            .ToArray();
+
+        Expression<Func<MediaFile, bool>> matched = file => patterns.Any(pattern => EF.Functions.ILike(
+            ", "
+                + ((file.ReleaseGroup != null && file.ReleaseGroup.Genres != null && file.ReleaseGroup.Genres != ""
+                    ? file.ReleaseGroup.Genres
+                    : file.Recording!.Genres) ?? string.Empty)
+                + ", ",
+            pattern));
+
+        return op is SmartOperator.IsNot or SmartOperator.DoesNotContain
+            ? Expression.Lambda<Func<MediaFile, bool>>(Expression.Not(matched.Body), matched.Parameters)
+            : matched;
     }
 
     /// <summary>What a test of one source's text says of the file: of the value, or of any of the values.</summary>
