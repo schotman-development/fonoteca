@@ -109,8 +109,8 @@ Subsonic has no field for "these are the same performance in five encodings",
 and no client would render one. So the choice is not between showing the truth
 and hiding it; it is between showing the library as it is and quietly
 suppressing evidence of the defect this application exists to remove. **Dedupe
-is a missing pass, not a rendering problem.** Hashing is still the last item on
-the original list and a dedupe key is what it would be made of; a `/rest` layer
+is a missing pass, not a rendering problem.** Dedupe is still the last item on
+the original list and `AudioHash` is what its key would be made of; a `/rest` layer
 that papered over duplicates would make the pass that fixes them feel less
 necessary, in the client where the owner would otherwise notice them.
 
@@ -359,7 +359,7 @@ that does not exist when unset.
 
 ## When to revisit
 
-**When hashing lands.** A dedupe key changes what "five files, one recording"
+**When dedupe lands.** A dedupe key changes what "five files, one recording"
 means, and it may then be right for `/rest` to show one song — because by then
 the duplicates will have been dealt with rather than hidden.
 

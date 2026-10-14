@@ -647,7 +647,7 @@ public sealed class MediaFile
     /// The file's claim, not the catalogue's: a position is only ever the
     /// catalogue's through a proven pressing (<see cref="TrackId"/>). Read in the
     /// same save as <see cref="ReleaseLookupUtc"/>, which is its "we asked"
-    /// stamp, and cleared with it when the scan sees the bytes change. Null when
+    /// stamp, and cleared with it when the scan sees the audio change. Null when
     /// the tag is absent or the file could not be read.
     /// </remarks>
     public int? TagDiscNumber { get; set; }
@@ -704,7 +704,7 @@ public sealed class MediaFile
     /// </summary>
     public AudioMeasurement? Measurement { get; set; }
 
-    /// <summary>When the measure pass last asked, answer or not. A scan that sees the bytes change clears it.</summary>
+    /// <summary>When the measure pass last asked, answer or not. A scan that sees the audio change clears it.</summary>
     public DateTimeOffset? MeasuredUtc { get; set; }
 }
 
@@ -1150,7 +1150,7 @@ public sealed class ReleaseCandidateSet
     /// <remarks>
     /// The staleness check, and it catches what a timestamp cannot. A component
     /// is a <i>set</i>, and the set moves under the document: a scan clears
-    /// <see cref="MediaFile.ReleaseLookupUtc"/> on a file whose bytes changed,
+    /// <see cref="MediaFile.ReleaseLookupUtc"/> on a file whose audio changed or moved,
     /// and a person answering part of a component takes files out of it. Every
     /// coverage figure in the document is computed against the set that existed
     /// when it was written, so a different count means the numbers describe a

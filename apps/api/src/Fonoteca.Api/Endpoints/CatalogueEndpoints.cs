@@ -2888,7 +2888,7 @@ public static partial class CatalogueEndpoints
     /// file on the worklist. That is a person's click, not a pass, and there is
     /// no cap on how many of them can be in flight. The write is one row's
     /// quality columns and it does not need <c>LibraryWorkGate</c>: no pass
-    /// writes them, and a scan that sees the bytes change clears them along with
+    /// writes them, and a scan that sees the audio change clears them along with
     /// everything else derived — so the worst a race can do is store a
     /// measurement of audio that has just been replaced, which the scan then
     /// removes. Taking the gate would instead refuse the screen for the whole

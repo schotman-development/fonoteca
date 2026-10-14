@@ -28,7 +28,7 @@ namespace Fonoteca.Api.Library;
 /// that will not decode marks one row; a file not on disk, or changed under the
 /// pass, stays pending so an unmounted volume is never recorded as anything;
 /// parallel over a claimed page with no channel; one scope and one save per
-/// file. A scan that sees the bytes change clears the measurement with the rest.
+/// file. A scan that sees the audio change clears the measurement with the rest.
 /// </remarks>
 public sealed class AnalysisService(
     LibraryWorkGate gate,

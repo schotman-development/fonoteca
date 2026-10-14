@@ -799,7 +799,7 @@ public static partial class CatalogueEndpoints
     ///
     /// <b>It takes <see cref="LibraryWorkGate"/>, like every other decision
     /// here.</b> Which excludes the three passes and, as documented on the gate,
-    /// not a scan — a scan that sees the bytes change clears these columns with
+    /// not a scan — a scan that sees the audio change clears these columns with
     /// everything else derived, which is the right answer: the claim was about
     /// audio that is no longer there.
     /// </remarks>

@@ -34,8 +34,8 @@ except `Fonoteca:IdentifyAfterScan`. The tag write is the only one nobody may
 automate — but a download writes its own album folder (ADR 0011, the owner's
 choice).
 
-**Still missing: hashing** — the last of the original list, and what a dedupe
-key would be made of.
+**Still missing: dedupe.** Its key would be `AudioHash`, which the probe fills
+and the scan reads.
 
 ## Six rules the whole codebase turns on
 
@@ -57,9 +57,10 @@ the rest.
    hand-written `UPDATE` — narrow it to the rows that need it.
 
 2. **A write changes the bytes, so the new size and mtime go in the same
-   `SaveChanges`.** Otherwise the next scan reads the file as modified and
-   discards every derived column, including what was just written. Never "fix"
-   this by forging the old mtime back: the file genuinely changed.
+   `SaveChanges`.** Otherwise the next scan reads the file as modified: a hash
+   read at best, and where the row has no `AudioHash` every derived column
+   discarded, including what was just written. Never "fix" this by forging the
+   old mtime back: the file genuinely changed.
 
 3. **Absence of evidence is not evidence of deletion.** The scan counts
    unreadable directories rather than ignoring them, removes nothing when it
@@ -213,6 +214,20 @@ run rather than a no-op.
 
 - **The scan runs in the foreground of the request** — a walk with no file reads
   is seconds even at 100k. Its four edges are rule 3.
+- **The files are leading, and other programs edit them** (the owner's
+  principle). A changed file is hashed (`FfmpegAudioHasher`, the MD5 of its
+  audio packets, which the probe fills); one whose `AudioHash` still matches was
+  retagged, and keeps everything but its tag numbers, which are re-read and
+  reopen its folder where they moved. A file that left its path — vanished, or
+  replaced there by other audio, as a renumbering does — is paired with where
+  one arrived: same size and mtime, else same hash, exactly one each side, only
+  on a complete walk. It keeps its row, and its album stamp only where its album
+  folder moved whole with every name kept; a row whose path another took while
+  its own audio went nowhere is removed. Moves go through a parked path in one
+  transaction, since a swap is a cycle on a unique column. Every read precedes
+  every write, so with ffmpeg unrunnable a scan that needs a hash refuses (503)
+  and changes nothing. A row with no hash still loses everything on a retag,
+  and a bulk retag is a read of every retagged file inside the request.
 - **Identify: one scope and one `SaveChanges` per file, not batched.** That is
   the entire resumability story, and the journal entry only persists because it
   shares the scope — `IEventLog.AppendAsync` does not save itself, by design. The
@@ -365,7 +380,7 @@ analysis filters (`ebur128`, `astats`, `drmeter`, `silencedetect`) talk on the
 same channel. Called Analyse because the dashboard already calls the probe
 "measure". The probe's shape throughout: `MeasuredUtc` is the "we asked" stamp,
 a missing binary ends the pass, a file not on disk stays pending, a scan that
-sees the bytes change clears `Measurement`. **Answers, never rankings**:
+sees the audio change clears `Measurement`. **Answers, never rankings**:
 `AudioMeasurement` keeps readings; `AudioAnalysis` turns them into ReplayGain 2.0
 (−18 LUFS, sample peak), the DR figure, clipping and the **measured bit depth,
 which the upgrade list and album replacement rank by** — 16-bit audio in a
@@ -598,9 +613,8 @@ album to MusicBrainz and two folders on disk. What is there comes from the disk;
 what it means comes from the catalogue.
 
 - **A rename updates the rows — that is the whole reason this is an endpoint and
-  not `mv` plus a rescan.** To the reconciler a rename is a path that vanished
-  and one that arrived, taking every AcoustID, link and human answer with it,
-  reported as nothing at all. Rows first, then the bytes, in one transaction.
+  not `mv` plus a rescan.** The scan follows only a move it can pair, and
+  repoints no playlist line. Rows first, then the bytes, in one transaction.
 - **Nothing is deleted; trash is a move** to `Fonoteca:TrashPath`, **validated to
   sit outside the library root** — a trashed folder inside is re-scanned as new
   files *after* its rows are deleted. Separate from `ReplacedPath` although the

@@ -11,7 +11,7 @@ namespace Fonoteca.Domain.Catalogue;
 ///
 /// Apart from <see cref="AudioQuality"/>, which is what the container declares
 /// and the probe pass fills: these come from a second decode through ffmpeg's
-/// analysis filters, by the measure pass, and a scan that sees the bytes change
+/// analysis filters, by the measure pass, and a scan that sees the audio change
 /// clears both.
 /// </remarks>
 public sealed record AudioMeasurement
