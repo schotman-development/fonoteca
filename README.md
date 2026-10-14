@@ -64,8 +64,7 @@ back into your files, where every player can read them.
   orchestra as well as the composer the credit line names.
 - **Full credits.** Producers, engineers, every player with their instrument,
   lyricists and arrangers, plus genres and ISRCs.
-- **Artist pages.** Portraits from Wikidata, Qobuz and TheAudioDB, articles,
-  banners and discographies.
+- **Artist pages.** Portraits, articles, banners and discographies.
 
 ### Albums from folders
 
@@ -92,8 +91,8 @@ back into your files, where every player can read them.
 
 - **Tags.** Titles, artists, MusicBrainz ids, genres, ISRCs, credits, ReplayGain
   and DR, written for library, artist or album at a time.
-- **Artwork.** The front cover beside the tracks (Cover Art Archive first,
-  Qobuz as fallback), booklets, and Apple Music's looping album videos.
+- **Artwork.** The front cover beside the tracks, booklets, and Apple Music's
+  looping album videos.
 - **Folder naming.** Album folders renamed to a pattern such as
   `{albumartist}/{album}[ ({year})]/[{disc}-]{track} - {title}`, with symlinks
   under every other billed artist of a collaboration.
@@ -112,7 +111,7 @@ back into your files, where every player can read them.
 
 ### Acquire
 
-- **Qobuz search and download** with your own subscription. Every purchase is a
+- **Search and download** with your own store subscription. Every purchase is a
   click; nothing buys on its own.
 - **Upgrade lists.** What is lossy, what is below the best available quality,
   albums with tracks missing, and records by artists you follow that you do not
@@ -198,7 +197,6 @@ to know first:
 | `Fonoteca__MusicBrainzServer` | Point at a mirror to go faster than one request a second. |
 | `Fonoteca__FileNaming` | The folder and file naming pattern. |
 | `Fonoteca__TrashPath`, `Fonoteca__ReplacedPath` | Where trashed and replaced files go. Must be outside the library. |
-| `Fonoteca__Providers__Qobuz__*` | Your Qobuz session, for search and downloads. |
 | `Fonoteca__SubsonicPassword` | Turns on `/rest`. |
 | `Fonoteca__McpToken` | Turns on `/mcp`. |
 
@@ -259,8 +257,8 @@ apps/
       Fonoteca.Domain/      pure rules: entities, matching, quality ranking
       Fonoteca.Ingest/      walk, probe, fingerprint
       Fonoteca.Tagging/     verified write path and undo journal
-      Fonoteca.Providers/   AcoustID, MusicBrainz, Qobuz, Cover Art Archive,
-                            Wikidata, TheAudioDB, Apple Music
+      Fonoteca.Providers/   AcoustID, MusicBrainz, Cover Art Archive, Wikidata,
+                            TheAudioDB, Apple Music
       Fonoteca.Data/        EF Core and migrations
     tests/
   web/                  Vite, React 19, TanStack Router
@@ -305,7 +303,7 @@ part of `pnpm test`.
 | [0012](docs/adr/0012-opensubsonic.md) | OpenSubsonic, and the two things a client may browse |
 | [0013](docs/adr/0013-an-album-folder-is-one-album.md) | An album folder is one album; an edition only on proof |
 | [0014](docs/adr/0014-album-motion-from-public-pages.md) | Album motion artwork, from Apple Music's public pages |
-| [0015](docs/adr/0015-album-booklets.md) | Album booklets, from the Cover Art Archive and Qobuz |
+| [0015](docs/adr/0015-album-booklets.md) | Album booklets |
 
 ## Roadmap
 
