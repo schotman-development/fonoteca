@@ -16,6 +16,7 @@
   <img alt="PostgreSQL 18" src="https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white">
   <img alt="OpenSubsonic" src="https://img.shields.io/badge/OpenSubsonic-server-E76F00">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-server-555555">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
@@ -327,3 +328,7 @@ the [Cover Art Archive](https://coverartarchive.org), [Wikidata](https://www.wik
 [TheAudioDB](https://www.theaudiodb.com), [FFmpeg](https://ffmpeg.org),
 [ATL.NET](https://github.com/Zeugma440/atldotnet) and
 [TagLib#](https://github.com/mono/taglib-sharp).
+
+## License
+
+[MIT](LICENSE)
