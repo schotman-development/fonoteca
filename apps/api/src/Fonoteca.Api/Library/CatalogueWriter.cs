@@ -99,6 +99,20 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
+    /// Puts the file's folder back through attribution, where the attribution
+    /// worklist would take the file: the rule's, and those whose album alone a
+    /// person or agent named. A file a person seated keeps its stamp.
+    /// </summary>
+    internal static void ReopenAttribution(MediaFile file)
+    {
+        if (file.ReleaseDecidedUtc is null
+            || file.AttributionOutcome is ReleaseAttributionOutcome.AlbumByPerson or ReleaseAttributionOutcome.AlbumByAgent)
+        {
+            file.ReleaseLookupUtc = null;
+        }
+    }
+
+    /// <summary>
     /// Moves everything that hangs off the row for a merged MBID onto the
     /// recording it was merged into, and removes that row.
     /// </summary>
@@ -146,12 +160,7 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         foreach (var file in files)
         {
             file.RecordingId = survivor.Id;
-
-            if (file.ReleaseDecidedUtc is null
-                || file.AttributionOutcome is ReleaseAttributionOutcome.AlbumByPerson or ReleaseAttributionOutcome.AlbumByAgent)
-            {
-                file.ReleaseLookupUtc = null;
-            }
+            ReopenAttribution(file);
         }
 
         var tracks = await db.Tracks

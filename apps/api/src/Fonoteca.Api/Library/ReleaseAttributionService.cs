@@ -1060,30 +1060,38 @@ public sealed class ReleaseAttributionService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            try
-            {
-                var tags = await tagReader
-                    .ReadAsync(new LibraryPath(members[index].Path), cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
+            var (disc, track) = await TagNumbersAsync(tagReader, new LibraryPath(members[index].Path), cancellationToken)
+                .ConfigureAwait(false);
 
-                members[index] = members[index] with
-                {
-                    TagDisc = WholeNumber(tags.Find("DISCNUMBER")),
-                    TagTrack = WholeNumber(tags.Find("TRACKNUMBER")),
-                };
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-#pragma warning disable CA1031 // A file that cannot be read has no number of its own, and that is all.
-            catch (Exception)
-#pragma warning restore CA1031
-            {
-            }
+            members[index] = members[index] with { TagDisc = disc, TagTrack = track };
         }
 
         return members;
+    }
+
+    /// <summary>The disc and track numbers the file's own tags state.</summary>
+    /// <remarks>Also what the scan compares when another program retagged a file.</remarks>
+    internal static async Task<(int? Disc, int? Track)> TagNumbersAsync(
+        Fonoteca.Tagging.TagReader tagReader,
+        LibraryPath path,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var tags = await tagReader.ReadAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return (WholeNumber(tags.Find("DISCNUMBER")), WholeNumber(tags.Find("TRACKNUMBER")));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // A file that cannot be read has no number of its own, and that is all.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return (null, null);
+        }
     }
 
     private static int? WholeNumber(string? value) =>
