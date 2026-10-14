@@ -684,6 +684,87 @@ public sealed partial class TagWriteService(
     }
 
     /// <summary>
+    /// The fields of a file whose correction another program's newer edit
+    /// beats, as the container spells them, to the correction's key and the
+    /// file's value.
+    /// </summary>
+    /// <remarks>
+    /// Read off the journal: when each key's correction was last saved, and
+    /// what this application last wrote into each field and when — a tag
+    /// write's or an undo's, the chain <see cref="FilledAsync"/> reads too.
+    /// The rule is <see cref="PersonTags.Superseded"/>.
+    /// </remarks>
+    private static async Task<Dictionary<string, (string Key, string? Value)>> SupersededAsync(
+        FonotecaDbContext db,
+        PendingTagWrite file,
+        LibraryPath path,
+        TagWritePlan plan,
+        CancellationToken cancellationToken)
+    {
+        var subject = file.Id.ToString();
+        string[] types = [EventPrefix + ".written", UndoPrefix + ".written", PersonSavedEvent];
+
+        var entries = await db.DomainEvents
+            .AsNoTracking()
+            .Where(entry => entry.SubjectId == subject && types.Contains(entry.Type))
+            .OrderBy(entry => entry.OccurredAtUtc)
+            .Select(entry => new { entry.Type, entry.OccurredAtUtc, entry.PayloadJson })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var corrected = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var written = new Dictionary<string, (DateTimeOffset At, string? Value)>(StringComparer.Ordinal);
+
+        foreach (var entry in entries)
+        {
+            if (entry.Type == PersonSavedEvent)
+            {
+                if (JsonSerializer.Deserialize<SavedPayload>(entry.PayloadJson) is not { } saved) continue;
+
+                var was = PersonEdits.Read(saved.Before);
+                var now = PersonEdits.Read(saved.After);
+
+                foreach (var key in was.Keys.Union(now.Keys))
+                {
+                    if (was.TryGetValue(key, out var a) != now.TryGetValue(key, out var b) || a != b)
+                    {
+                        corrected[key] = entry.OccurredAtUtc;
+                    }
+                }
+
+                continue;
+            }
+
+            foreach (var change in JsonSerializer.Deserialize(entry.PayloadJson, TaggingJson.Default.TagWritePayload)?.Changes ?? [])
+            {
+                written[change.Field] = (entry.OccurredAtUtc, change.Written);
+            }
+        }
+
+        var superseded = new Dictionary<string, (string Key, string? Value)>(StringComparer.Ordinal);
+
+        foreach (var key in file.Person.Keys)
+        {
+            if ((CatalogueTagFields.Spell(path, key) ?? CatalogueTagFields.Custom(path, key)) is not { } field) continue;
+
+            var onFile = plan.Before.Find(field);
+            var last = written.TryGetValue(field, out var write) ? write : ((DateTimeOffset At, string? Value)?)null;
+
+            if (PersonTags.Superseded(
+                corrected.TryGetValue(key, out var at) ? at : null,
+                file.Person[key],
+                last?.At,
+                last?.Value,
+                onFile))
+            {
+                superseded[field] = (key, onFile);
+            }
+        }
+
+        return superseded;
+    }
+
+    /// <summary>
     /// A page's album-only files, given what the album page shows for their album.
     /// </summary>
     /// <remarks>
@@ -788,6 +869,38 @@ public sealed partial class TagWriteService(
             var plan = await writer
                 .PlanAsync(path, CatalogueTags.For(file.Describe()), person, cancellationToken)
                 .ConfigureAwait(false);
+
+            // A field another program changed since a correction was written
+            // keeps that edit, and the edit becomes the correction (the owner's
+            // choice): the newer one stands. Nothing is written over it.
+            if (plan is not null && person.Count > 0
+                && await SupersededAsync(db, file, path, plan, cancellationToken).ConfigureAwait(false) is { Count: > 0 } superseded)
+            {
+                plan = plan with { Changes = [.. plan.Changes.Where(change => !superseded.ContainsKey(change.Field))] };
+
+                var row = await db.MediaFiles
+                    .FirstAsync(candidate => candidate.Id == file.Id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                var corrections = new Dictionary<string, string?>(PersonEdits.Read(row.TagEditsJson), StringComparer.Ordinal);
+                foreach (var (_, (key, value)) in superseded) corrections[key] = value;
+
+                var before = row.TagEditsJson;
+                row.TagEditsJson = PersonEdits.Write(corrections);
+
+                await provider.GetRequiredService<IEventLog>()
+                    .AppendAsync(
+                        DomainEvent.Create(
+                            PersonSupersededEvent,
+                            TagWriter.FileSubject,
+                            file.Id.ToString(),
+                            _actor,
+                            clock.UtcNow,
+                            JsonSerializer.Serialize(new SavedPayload(before, row.TagEditsJson)),
+                            correlationId),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             // Held to its album alone, a file keeps the track number and the date
             // it already carries — both are its pressing's facts, and nothing here

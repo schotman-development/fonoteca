@@ -10,7 +10,8 @@ namespace Fonoteca.Domain.Catalogue;
 /// (<c>MediaFile.TagEditsJson</c>, read with <see cref="PersonEdits"/>), not
 /// over it, and the tag write lays them over what the catalogue says: they win.
 /// A value of null is an answer too — "this file carries none" — and is how a
-/// field is taken out of a file.
+/// field is taken out of a file. Only a newer edit beats one: another
+/// program's, made since the correction was written (<see cref="Superseded"/>).
 ///
 /// <b>The album's three, where there is an album.</b> The album title and its
 /// artist are corrections to the album when the folder is one, kept on the
@@ -156,6 +157,34 @@ public static class PersonTags
 
         return null;
     }
+
+    /// <summary>
+    /// Whether another program's edit to a field beats a person's correction to it.
+    /// </summary>
+    /// <param name="correctedAt">When the correction's value was saved; null where nothing says.</param>
+    /// <param name="correction">The correction; null for "this file carries none".</param>
+    /// <param name="writtenAt">When this application last wrote the field into the file; null if never.</param>
+    /// <param name="written">What that write put there; null for a field it took out.</param>
+    /// <param name="onFile">What the file carries now; null for none.</param>
+    /// <remarks>
+    /// The file is leading, and the newer edit stands (the owner's choice): a
+    /// file that no longer says what was last written into it was changed by
+    /// something else since, and where that write came after the correction,
+    /// so did the edit. A correction saved after the last write is newer
+    /// still — it is waiting to be written — and so is one nothing records.
+    /// A file already carrying the correction has nothing to beat.
+    /// </remarks>
+    public static bool Superseded(
+        DateTimeOffset? correctedAt,
+        string? correction,
+        DateTimeOffset? writtenAt,
+        string? written,
+        string? onFile) =>
+        correctedAt is { } corrected
+        && writtenAt is { } wrote
+        && wrote > corrected
+        && !string.Equals(onFile, written, StringComparison.Ordinal)
+        && !string.Equals(onFile, correction, StringComparison.Ordinal);
 
     /// <summary>The largest a numeric field may be, or null when the field is text.</summary>
     private static int? Number(string field) => field switch

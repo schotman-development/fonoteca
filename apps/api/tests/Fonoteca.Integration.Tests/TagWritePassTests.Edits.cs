@@ -31,8 +31,7 @@ public sealed partial class TagWritePassTests
         Assert.Equal(1, saved.Written);
         Assert.Equal("So What (take 1)", (await TagsAsync($"{Album}/01 track.flac")).Fields["TITLE"]);
 
-        // Another tagger changes it; the next library write puts the person's back.
-        await OutsideAsync(services, $"{Album}/01 track.flac", CatalogueTags.Title, "Theirs");
+        // Over the catalogue, on every library write after.
         await RunAsync(TagWriteScope.Library, services);
         Assert.Equal("So What (take 1)", (await TagsAsync($"{Album}/01 track.flac")).Fields["TITLE"]);
 
@@ -43,6 +42,57 @@ public sealed partial class TagWritePassTests
         Assert.Equal("So What", title.Catalogue);
         Assert.Equal("So What (take 1)", title.Value);
         Assert.Equal("So What (take 1)", title.File);
+    }
+
+    /// <summary>
+    /// The file is leading: another program's edit since a correction was
+    /// written is the newer one, and stands — as the correction from then on.
+    /// A field nobody corrected is still the catalogue's.
+    /// </summary>
+    [Fact]
+    public async Task AnEditElsewhereSinceACorrectionBeatsItAndANewerSaveBeatsThat()
+    {
+        SkipWithoutTools();
+        await SeedAsync(($"{Album}/01 track.flac", 1));
+
+        var services = Build();
+        await RunAsync(TagWriteScope.Library, services);
+
+        var path = $"{Album}/01 track.flac";
+        var artist = (await TagsAsync(path)).Fields["ARTIST"];
+        var file = await FileIdAsync();
+        await SaveAsync(services, Album, new TagEdit(file, CatalogueTags.Title, "So What (take 1)"));
+
+        await OutsideAsync(services, path, CatalogueTags.Title, "Theirs");
+        await OutsideAsync(services, path, CatalogueTags.Artist, "Somebody else");
+        await RunAsync(TagWriteScope.Library, services);
+
+        var tags = await TagsAsync(path);
+        Assert.Equal("Theirs", tags.Fields["TITLE"]);
+        Assert.Equal(artist, tags.Fields["ARTIST"]);
+
+        var state = await services.GetRequiredService<TagWriteService>().FolderTagsAsync(Album, Token);
+        var title = state!.Files.Single().Cells.Single(cell => cell.Field == CatalogueTags.Title);
+        Assert.True(title.Mine);
+        Assert.Equal("Theirs", title.Value);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Equal(1, await db.DomainEvents.CountAsync(entry => entry.Type == "tagging.person.superseded", Token));
+        }
+
+        // A second run finds nothing left to beat.
+        await RunAsync(TagWriteScope.Library, services);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Equal(1, await db.DomainEvents.CountAsync(entry => entry.Type == "tagging.person.superseded", Token));
+        }
+
+        // A person saving since is newer again, and written.
+        var again = await SaveAsync(services, Album, new TagEdit(file, CatalogueTags.Title, "So What (take 2)"));
+        Assert.Equal(1, again.Written);
+        Assert.Equal("So What (take 2)", (await TagsAsync(path)).Fields["TITLE"]);
     }
 
     [Fact]

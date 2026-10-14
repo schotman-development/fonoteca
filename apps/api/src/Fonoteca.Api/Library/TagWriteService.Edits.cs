@@ -38,6 +38,9 @@ public sealed partial class TagWriteService
     /// <summary>A save's corrections to the album, before and after.</summary>
     private const string AlbumSavedEvent = "tagging.person.album";
 
+    /// <summary>One file's corrections another program's newer edits replaced, before and after.</summary>
+    private const string PersonSupersededEvent = "tagging.person.superseded";
+
     /// <summary>What an album folder's files carry, what the catalogue would write, and what a person set.</summary>
     public async Task<FolderTags?> FolderTagsAsync(string folder, CancellationToken cancellationToken = default)
     {

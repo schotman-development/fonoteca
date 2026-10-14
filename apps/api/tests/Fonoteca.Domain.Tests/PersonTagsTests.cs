@@ -4,6 +4,43 @@ namespace Fonoteca.Domain.Tests;
 
 public sealed class PersonTagsTests
 {
+    private static readonly DateTimeOffset Saved = new(2026, 10, 14, 9, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void AnEditMadeElsewhereSinceTheCorrectionWasWrittenBeatsIt() =>
+        Assert.True(PersonTags.Superseded(Saved, "So What (take 1)", Saved.AddSeconds(1), "So What (take 1)", "Theirs"));
+
+    [Fact]
+    public void AFieldTakenOutAndPutBackElsewhereBeatsItsCorrection() =>
+        Assert.True(PersonTags.Superseded(Saved, null, Saved.AddSeconds(1), null, "Theirs"));
+
+    [Fact]
+    public void AFileStillSayingWhatWasWrittenKeepsItsCorrection() =>
+        Assert.False(PersonTags.Superseded(Saved, "So What (take 1)", Saved.AddSeconds(1), "So What (take 1)", "So What (take 1)"));
+
+    [Fact]
+    public void AFileStillSayingWhatWasLastWrittenWasNotEditedElsewhere() =>
+        Assert.False(PersonTags.Superseded(Saved, "So What (take 1)", Saved.AddSeconds(1), "So What", "So What"));
+
+    [Fact]
+    public void AWriteNoLaterThanTheCorrectionIsNotAfterIt() =>
+        Assert.False(PersonTags.Superseded(Saved, "So What (take 1)", Saved, "So What (take 1)", "Theirs"));
+
+    [Fact]
+    public void ACorrectionAlreadyMatchingTheFileHasNothingToBeat() =>
+        Assert.False(PersonTags.Superseded(Saved, "Theirs", Saved.AddSeconds(1), "So What (take 1)", "Theirs"));
+
+    [Fact]
+    public void ACorrectionSavedSinceTheLastWriteIsNewerAndWins() =>
+        Assert.False(PersonTags.Superseded(Saved, "So What (take 2)", Saved.AddSeconds(-1), "So What", "Theirs"));
+
+    [Fact]
+    public void ACorrectionNeverWrittenOrNeverRecordedWins()
+    {
+        Assert.False(PersonTags.Superseded(Saved, "So What (take 1)", null, null, "Theirs"));
+        Assert.False(PersonTags.Superseded(null, "So What (take 1)", Saved, "So What (take 1)", "Theirs"));
+    }
+
     [Theory]
     [InlineData("TITLE", "So What")]
     [InlineData("TITLE", null)]

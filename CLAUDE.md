@@ -504,7 +504,11 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   prefix, the ID3 version and ID3v1 trailer, repairs, a shelf's carried pictures.
 - **A person's tags (`PersonTags`, the tag editor on Files and on each album
   folder) are stored beside the catalogue's and laid over them by this pass —
-  they win**, over the catalogue and over a tagger that changed the file since.
+  they win**, over the catalogue — except where another program changed a
+  field since the correction was written (`PersonTags.Superseded`, off the
+  journal): the newer edit stands and becomes the file's correction, journalled
+  `tagging.person.superseded`, until a person saves that field again (the
+  owner's choice). The album's own corrections are the catalogue's and replace.
   Per file in `MediaFiles.TagEditsJson` (null = "carries none", the one way a
   removal enters a write); where the folder is one album its title and artist
   are corrections to the album, in `ReleaseGroups.EditsJson` — the album page's
