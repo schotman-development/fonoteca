@@ -10,10 +10,12 @@ import styles from './BrowsePage.module.css'
 import { COMPOSER_SORTS, type ComposerListSearch } from './listSearch.ts'
 
 /**
- * Everyone who wrote something the library holds a recording of.
+ * Everyone who composed a classical piece the library holds a recording of.
  *
- * Songwriters as well as composers, as MusicBrainz credits both; ordered by
- * what they wrote, the classical names and the prolific songwriters come first.
+ * A piece MusicBrainz does not call a song, on a recording or album tagged
+ * classical and not crossover or pop, by its composer and not its lyricist —
+ * so a crossover album's songwriters stay off. The Compositions page still
+ * lists every writer.
  */
 export function ComposersPage() {
   const { query: filter = '', sort = 'name' } = useSearch({ from: '/library/composers' })
@@ -43,8 +45,8 @@ export function ComposersPage() {
           </Text>
         </h1>
         <Text tone="secondary" block>
-          Who wrote the music you hold — composers and songwriters alike, each with the pieces of
-          theirs you have a recording of.
+          Who composed the classical music you hold, each with the pieces of theirs you have a
+          recording of.
         </Text>
       </Stack>
 

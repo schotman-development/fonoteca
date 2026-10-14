@@ -13,6 +13,10 @@ namespace Fonoteca.Api.Endpoints;
  * the work itself where it has none. Its composers are the `composer` links on
  * the works its held recordings perform — the parent is minted from a stub and
  * carries no writers of its own.
+ *
+ * The Composers page is narrower: whoever is credited as composer, not
+ * lyricist, of a classical work (`ClassicalWorks`). The Compositions page
+ * still lists every piece and every writer of it.
  */
 public static partial class CatalogueEndpoints
 {
@@ -20,6 +24,17 @@ public static partial class CatalogueEndpoints
     private const int BrowsePage = 100;
 
     private const string ComposerLink = "composer";
+
+    /// <summary>
+    /// MusicBrainz's <c>[traditional]</c>, <c>[anonymous]</c> and <c>[unknown]</c>,
+    /// credited where nobody is known to have written the piece.
+    /// </summary>
+    private static readonly HashSet<Mbid> Nobody =
+    [
+        new(Guid.Parse("9be7f096-97ec-4615-8957-8d40b5dcbc41")),
+        new(Guid.Parse("f731ccc4-e22a-43af-a747-64213329e088")),
+        new(Guid.Parse("125ec42a-7229-4250-afc5-e057484327fe")),
+    ];
 
     private static void MapBrowseEndpoints(IEndpointRouteBuilder group)
     {
@@ -36,12 +51,16 @@ public static partial class CatalogueEndpoints
 
         group.MapGet("/composers", GetComposers)
             .WithName("GetComposers")
-            .WithSummary("Everyone who wrote a piece the library holds a recording of.")
+            .WithSummary("Everyone who composed a classical piece the library holds a recording of.")
             .WithDescription(
                 "Ordered by sort name, or by `sort=compositions` for the most pieces held first. "
                 + "`compositionCount` counts pieces, a work's movements once; `songCount` is the "
-                + "artist list's. `query` filters on the name as the artist list does. Every "
-                + "songwriter is here, not only the classical composers.");
+                + "artist list's. `query` filters on the name as the artist list does. A classical "
+                + "piece is a work MusicBrainz does not type as a song, with a recording or album of "
+                + "it tagged classical and not `classical crossover` or `pop`; its lyricist is not "
+                + "its composer, and `[traditional]`, "
+                + "`[anonymous]` and `[unknown]` are nobody. Both counts are of the composer's "
+                + "classical pieces alone.");
 
         group.MapGet("/compositions", GetCompositions)
             .WithName("GetCompositions")
@@ -213,14 +232,14 @@ public static partial class CatalogueEndpoints
         string? sort = null)
     {
         var held = await HeldWorksAsync(db, cancellationToken).ConfigureAwait(false);
-        var composers = await ComposersAsync(db, cancellationToken).ConfigureAwait(false);
+        var composers = await ClassicalComposersAsync(db, cancellationToken).ConfigureAwait(false);
 
         var pieces = held
             .Where(recording => recording.ParentId != null)
             .ToDictionary(recording => recording.Id, recording => recording.ParentId!.Value);
 
         var counts = held
-            .SelectMany(recording => composers[recording.Work].Select(composer => (composer.Artist, Recording: recording)))
+            .SelectMany(recording => composers[recording.Work].Select(artist => (Artist: artist, Recording: recording)))
             .GroupBy(pair => pair.Artist)
             .ToDictionary(
                 theirs => theirs.Key,
@@ -466,6 +485,68 @@ public static partial class CatalogueEndpoints
             .ConfigureAwait(false))
             .Where(link => link.Name is not null)
             .ToLookup(link => link.Work, link => (link.Artist, link.Name!));
+
+    /// <summary>Who is credited as composer of each held classical work (<see cref="ClassicalWorks"/>).</summary>
+    /// <remarks>
+    /// Read off <c>Contributions</c>, which keep MusicBrainz's own relation
+    /// name, because the <c>composer</c> link folds the lyricist and the
+    /// librettist in: Rilke and Apollinaire are writers of a Shostakovich
+    /// symphony. A work not yet described again has no contributions, so its
+    /// composer waits for enrichment. A contribution mints no artist row, so
+    /// only a composer the catalogue has a row for is listed. <c>[traditional]</c>
+    /// and its kin are nobody, and are not listed.
+    /// </remarks>
+    private static async Task<ILookup<WorkId, ArtistId>> ClassicalComposersAsync(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var performances = await db.Recordings
+            .AsNoTracking()
+            .Where(recording => recording.WorkId != null && recording.Files.Any())
+            .Select(recording => new
+            {
+                Work = recording.WorkId!.Value,
+                recording.Work!.Type,
+                recording.Genres,
+                Albums = recording.Files
+                    .Select(file => file.ReleaseGroup == null ? null : file.ReleaseGroup.Genres)
+                    .ToList(),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var works = performances
+            .GroupBy(performance => performance.Work)
+            .Where(work => ClassicalWorks.Is(
+                work.First().Type,
+                work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))))
+            .Select(work => work.Key)
+            .ToHashSet();
+
+        var credited = (await db.Contributions
+            .AsNoTracking()
+            .Where(credit => credit.Type == ComposerLink && credit.WorkId != null && credit.ArtistMbid != null)
+            .Select(credit => new { Work = credit.WorkId!.Value, Artist = credit.ArtistMbid!.Value })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .Where(credit => works.Contains(credit.Work) && !Nobody.Contains(credit.Artist))
+            .ToList();
+
+        var mbids = credited.Select(credit => credit.Artist).Distinct().ToList();
+
+        var rows = (await db.Artists
+            .AsNoTracking()
+            .Where(artist => artist.Mbid != null && mbids.Contains(artist.Mbid.Value))
+            .Select(artist => new { artist.Id, Mbid = artist.Mbid!.Value })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .ToLookup(artist => artist.Mbid, artist => artist.Id);
+
+        return credited
+            .SelectMany(credit => rows[credit.Artist].Select(artist => (credit.Work, Artist: artist)))
+            .Distinct()
+            .ToLookup(pair => pair.Work, pair => pair.Artist);
+    }
 
     /// <summary>The last segment of a folder, which is all a row has room for.</summary>
     private static string Leaf(string folder) => folder[(folder.LastIndexOf('/') + 1)..];

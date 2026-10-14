@@ -1630,6 +1630,73 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(1, mozart.SongCount);
     }
 
+    /// <summary>
+    /// A crossover album's song and a classical work's lyricist are writers,
+    /// not classical composers, nor is MusicBrainz's <c>[traditional]</c>, and
+    /// a composer's song is not counted among their pieces; the Compositions
+    /// page still lists every writer.
+    /// </summary>
+    [Fact]
+    public async Task TheComposersAreWhoComposedAClassicalWork()
+    {
+        using var client = _factory!.CreateClient();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var hart = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Hart), Token);
+            var satie = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Satie), Token);
+            var mozart = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Mozart), Token);
+
+            var song = new Work { Id = WorkId.New(), Title = "Nutbush City Limits", Type = "Song" };
+            db.Works.Add(song);
+            db.Relationships.Add(Link(hart, "composer", work: song));
+            db.Contributions.Add(Contributed(hart, "composer", song));
+            db.Relationships.Add(Link(mozart, "composer", work: song));
+            db.Contributions.Add(Contributed(mozart, "composer", song));
+
+            var duet = await db.Recordings.SingleAsync(r => r.Id == new RecordingId(_seed.Duet), Token);
+            duet.WorkId = song.Id;
+
+            var seesaw = await db.ReleaseGroups.SingleAsync(g => g.Id == new ReleaseGroupId(_seed.SeesawAlbum), Token);
+            seesaw.Genres = "classical, pop";
+
+            var symphony = await db.Works.SingleAsync(w => w.Type == "Symphony", Token);
+            db.Relationships.Add(Link(satie, "composer", work: symphony));
+            db.Contributions.Add(Contributed(satie, "lyricist", symphony));
+
+            var traditional = Artist("[traditional]", "[traditional]", "Other");
+            traditional.Mbid = new Mbid(Guid.Parse("9be7f096-97ec-4615-8957-8d40b5dcbc41"));
+            db.Artists.Add(traditional);
+            db.Relationships.Add(Link(traditional, "composer", work: symphony));
+            db.Contributions.Add(Contributed(traditional, "composer", symphony));
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var composers = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/composers", UriKind.Relative), Token);
+
+        var listed = Assert.Single(composers!.Items);
+        Assert.Equal(_seed.Mozart, listed.Id);
+        Assert.Equal(1, listed.CompositionCount);
+        Assert.Equal(2, listed.SongCount);
+
+        var overview = await client.GetFromJsonAsync<LibraryOverviewResponse>(
+            new Uri("/api/catalogue/overview", UriKind.Relative), Token);
+
+        Assert.Equal(1, overview!.Composers);
+
+        var compositions = await client.GetFromJsonAsync<CompositionListResponse>(
+            new Uri("/api/catalogue/compositions", UriKind.Relative), Token);
+
+        Assert.Contains(
+            _seed.Hart,
+            compositions!.Items.Single(piece => piece.Title == "Nutbush City Limits").Composers.Select(c => c.Id));
+        Assert.Contains(
+            _seed.Satie,
+            compositions.Items.Single(piece => piece.Type == "Symphony").Composers.Select(c => c.Id));
+    }
+
     [Fact]
     public async Task TheHomePageCountsComposersAndCompositionsAsTheirPagesDo()
     {
@@ -1689,6 +1756,7 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         // The composer, through the work — which is where MusicBrainz puts them
         // and the join a credit-line-only query cannot make.
         db.Relationships.Add(Link(mozart, "composer", work: work));
+        db.Contributions.Add(Contributed(mozart, "composer", work));
 
         var first = Movement(db, work, "I. Molto allegro", karajan, berliner);
         var second = Movement(db, work, "II. Andante", karajan, berliner);
@@ -2037,6 +2105,16 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         SortName = sortName,
         Type = type,
         Mbid = new Mbid(Guid.CreateVersion7()),
+    };
+
+    private static Contribution Contributed(Artist artist, string type, Work work) => new()
+    {
+        Id = Guid.CreateVersion7(),
+        WorkId = work.Id,
+        Type = type,
+        ArtistMbid = artist.Mbid,
+        Name = artist.Name,
+        Position = 0,
     };
 
     private static Relationship Link(

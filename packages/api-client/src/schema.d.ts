@@ -1313,8 +1313,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Everyone who wrote a piece the library holds a recording of.
-         * @description Ordered by sort name, or by `sort=compositions` for the most pieces held first. `compositionCount` counts pieces, a work's movements once; `songCount` is the artist list's. `query` filters on the name as the artist list does. Every songwriter is here, not only the classical composers.
+         * Everyone who composed a classical piece the library holds a recording of.
+         * @description Ordered by sort name, or by `sort=compositions` for the most pieces held first. `compositionCount` counts pieces, a work's movements once; `songCount` is the artist list's. `query` filters on the name as the artist list does. A classical piece is a work MusicBrainz does not type as a song, with a recording or album of it tagged classical and not `classical crossover` or `pop`; its lyricist is not its composer, and `[traditional]`, `[anonymous]` and `[unknown]` are nobody. Both counts are of the composer's classical pieces alone.
          */
         get: operations["GetComposers"];
         put?: never;
