@@ -111,6 +111,12 @@ builder.Services.AddSingleton<IAudioMeasurer>(sp => new FfmpegAudioMeasurer(
     sp.GetRequiredService<FileSystemAudioFileStore>(),
     sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
 
+// The audio packets' hash, which tells a file another program retagged from one
+// it replaced. Filled by the probe, compared by the scan.
+builder.Services.AddSingleton(sp => new FfmpegAudioHasher(
+    sp.GetRequiredService<FileSystemAudioFileStore>(),
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
+
 builder.Services.AddSingleton<TagReader>();
 
 // The read that answers "what is this file", as opposed to the read that

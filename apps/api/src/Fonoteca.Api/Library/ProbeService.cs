@@ -5,6 +5,7 @@ using Fonoteca.Api.Logging;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Ingest;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -74,15 +75,21 @@ namespace Fonoteca.Api.Library;
 /// twenty keeps everything it measured.</item>
 /// </list>
 ///
-/// A scan that sees the bytes change already clears <c>Quality</c>,
+/// A scan that sees the audio change already clears <c>Quality</c>,
 /// <c>Integrity</c> and <c>LastVerifiedUtc</c> together, so re-measuring a
 /// replaced file needs no work here and no new column: the file simply reappears
 /// on the worklist.
+///
+/// <b>It also hashes the audio packets</b> (<c>AudioHash</c>), because this is
+/// the pass that reads every file anyway and the scan needs the hash from
+/// <i>before</i> another program touched the file. A second read, from the page
+/// cache the decode just filled.
 /// </remarks>
 public sealed class ProbeService(
     LibraryWorkGate gate,
     IServiceScopeFactory scopeFactory,
     IAudioProbe probe,
+    FfmpegAudioHasher hasher,
     IAudioFileStore files,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
@@ -546,6 +553,8 @@ public sealed class ProbeService(
             Log.FileNotProbed(logger, file.Path, cause.Message);
         }
 
+        var hash = await hasher.HashAsync(path, cancellationToken).ConfigureAwait(false);
+
         var scope = scopeFactory.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
         {
@@ -597,6 +606,7 @@ public sealed class ProbeService(
             // from its header after it was found unreadable, and attribution,
             // Subsonic and the upgrade list all read those.
             row.Quality = reading is { DecodedCleanly: true } measured ? measured.Quality : null;
+            row.AudioHash = hash;
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }

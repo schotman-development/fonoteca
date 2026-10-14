@@ -96,6 +96,12 @@ public sealed class ProbePassTests(PostgresFixture postgres) : IAsyncLifetime
         var mp3 = rows[Path.GetFileName(Corpus.Mp3)];
         Assert.Equal(IntegrityState.Intact, mp3.Integrity);
         Assert.False(mp3.Quality!.IsLossless);
+
+        // The audio's hash, which the scan tells a retag from new audio by.
+        Assert.NotNull(flac.AudioHash);
+        Assert.NotNull(mp3.AudioHash);
+        Assert.NotEqual(flac.AudioHash, mp3.AudioHash);
+        Assert.Null(rows[Path.GetFileName(Corpus.NotAudioFlac)].AudioHash);
     }
 
     [Fact]
