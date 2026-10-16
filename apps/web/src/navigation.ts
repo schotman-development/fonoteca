@@ -21,6 +21,7 @@ export type NavItem = {
     | '/library/compositions'
     | '/library/playlists'
     | '/library/matching'
+    | '/library/duplicates'
     | '/files'
     | '/acquire'
   readonly label: string
@@ -125,6 +126,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Identify',
         exact: false,
         keywords: ['matching', 'questions', 'unmatched'],
+      },
+      // Beside Identify: another list only a person can answer.
+      {
+        to: '/library/duplicates',
+        label: 'Duplicates',
+        exact: true,
+        keywords: ['duplicates', 'dedupe', 'twice', 'copies'],
       },
       // Last, and separate from Identify in more than order: that one corrects
       // what is already here, this one spends money on something that is not.

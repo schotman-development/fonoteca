@@ -7,6 +7,7 @@ import { ArtistsPage } from './pages/ArtistsPage.tsx'
 import { ComposersPage } from './pages/ComposersPage.tsx'
 import { CompositionsPage } from './pages/CompositionsPage.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
+import { DuplicatesPage } from './pages/DuplicatesPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
 import { GenrePage, GenresPage } from './pages/GenresPage.tsx'
 import { HomePage } from './pages/HomePage.tsx'
@@ -210,6 +211,13 @@ const matchingRoute = createRoute({
   }),
 })
 
+/** Albums held in two folders and songs held twice in one, for a person to trash a copy of. */
+const duplicatesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/duplicates',
+  component: DuplicatesPage,
+})
+
 /**
  * The library as a directory tree.
  *
@@ -267,6 +275,7 @@ const routeTree = rootRoute.addChildren([
   playlistRoute,
   smartPlaylistRoute,
   matchingRoute,
+  duplicatesRoute,
   filesRoute,
   acquireRoute,
 ])
@@ -285,6 +294,7 @@ export {
   composersRoute,
   compositionsRoute,
   dashboardRoute,
+  duplicatesRoute,
   filesRoute,
   genreRoute,
   genresRoute,

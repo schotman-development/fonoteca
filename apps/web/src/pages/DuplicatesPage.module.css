@@ -1,0 +1,58 @@
+/* The headings exist for semantics; their type comes from the Text inside. */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.count {
+  color: var(--color-text-tertiary);
+  font-weight: normal;
+}
+
+.panel {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-16);
+  border: var(--border-width-thin) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-raised);
+}
+
+/* As wide as the panel and no wider, so it scrolls instead of the page. Positioned,
+   or the hidden "Actions" heading is placed against the page and widens it. */
+.table {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* Scrolls rather than squeezing the path to a word a line on a phone. */
+.table table {
+  min-width: 640px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* The path takes what the counts and the button leave, and wraps. */
+.path {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Text sets its own colour, so a link here owns the decoration and the focus ring only. */
+.link {
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.link:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}

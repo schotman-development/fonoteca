@@ -28,6 +28,7 @@ const SHELF = 20
 export function HomePage() {
   const info = useApiQuery(() => api.get('/api/system/info'), [])
   const overview = useApiQuery(() => api.get('/api/catalogue/overview'), [])
+  const duplicates = useApiQuery(() => api.get('/api/catalogue/duplicates'), [])
   const recent = useApiQuery(
     () => api.get('/api/catalogue/albums', { params: { query: { sort: 'added', take: SHELF } } }),
     [],
@@ -56,6 +57,20 @@ export function HomePage() {
           </dl>
         ) : null}
       </Pending>
+
+      {duplicates.status === 'ready' &&
+      duplicates.data.albums.length + duplicates.data.songs.length > 0 ? (
+        <Text size="sm">
+          <Link to="/library/duplicates">
+            {[
+              counted(duplicates.data.albums.length, 'album', 'in more than one folder'),
+              counted(duplicates.data.songs.length, 'song', 'twice in one folder'),
+            ]
+              .filter((part) => part !== null)
+              .join(', ')}
+          </Link>
+        </Text>
+      ) : null}
 
       <Shelf
         title="Recently added"
@@ -141,6 +156,11 @@ export function HomePage() {
       ) : null}
     </Stack>
   )
+}
+
+/** "2 albums in more than one folder", or null for none. */
+function counted(count: number, noun: string, where: string): string | null {
+  return count === 0 ? null : `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'} ${where}`
 }
 
 /** Loading and failure for the reads named, and nothing once they are in. */
