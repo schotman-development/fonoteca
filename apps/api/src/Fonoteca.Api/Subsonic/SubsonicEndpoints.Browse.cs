@@ -430,6 +430,7 @@ public static partial class SubsonicEndpoints
         writer.Attr("artistId", album.ArtistId is { } id ? SubsonicIds.Artist(id) : null);
         writer.Attr("coverArt", SubsonicIds.Album(album.Id));
         writer.Attr("songCount", album.SongCount);
+        writer.Attr("duration", album.Duration);
         writer.Attr("created", album.Created);
         writer.Attr("year", album.Year);
         writer.Attr("genre", album.Genres.Count > 0 ? album.Genres[0] : null);
@@ -511,6 +512,10 @@ internal sealed record SubsonicArtist(
 /// than from a column: they are UUIDv7 and time-ordered, which is the same thing
 /// the album list already sorts "added" by.
 /// </param>
+/// <param name="Duration">
+/// Seconds, the sum of its songs' durations as each song states it; a song
+/// whose length nothing measured adds nothing.
+/// </param>
 internal sealed record Album(
     ReleaseGroupId Id,
     string Name,
@@ -519,6 +524,7 @@ internal sealed record Album(
     int? Year,
     Mbid? Mbid,
     int SongCount,
+    int Duration,
     Guid Added,
     DateTimeOffset? Created,
     IReadOnlyList<string> Genres);

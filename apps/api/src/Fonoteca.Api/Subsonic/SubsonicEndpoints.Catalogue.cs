@@ -108,7 +108,11 @@ public static partial class SubsonicEndpoints
 
         if (group is { } only) query = query.Where(row => row.Id == only);
 
+        // Split: the files' lengths, their genres and the credits are three
+        // collections, and in one query every file's length is joined to every
+        // file's genres and every credit.
         var rows = await query
+            .AsSplitQuery()
             .Select(row => new
             {
                 row.Id,
@@ -116,6 +120,14 @@ public static partial class SubsonicEndpoints
                 row.Mbid,
                 row.FirstReleaseYear,
                 SongCount = row.Files.Count,
+
+                // Each file's length in the order its song takes it, so the
+                // album lasts what its songs add up to.
+                Lengths = row.Files
+                    .Select(file => file.Quality!.Duration
+                        ?? (file.Track != null ? file.Track.Length : null)
+                        ?? (file.Recording != null ? file.Recording.Duration : null))
+                    .ToList(),
 
                 // Ordered rather than aggregated: PostgreSQL has comparison
                 // operators for uuid but no max() over it, and the query fails
@@ -171,6 +183,7 @@ public static partial class SubsonicEndpoints
                     Year(edits, "firstReleaseYear", CatalogueEndpoints.AlbumYear(row.FirstReleaseYear, editions[row.Id])),
                     row.Mbid,
                     row.SongCount,
+                    row.Lengths.Sum(length => length is { } measured ? (int)Math.Round(measured.TotalSeconds) : 0),
                     row.Added.Value,
                     row.Created,
                     FileGenres.OfAlbum(row.Genres, row.RecordingGenres));

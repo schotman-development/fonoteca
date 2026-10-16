@@ -325,6 +325,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal("Waltz for Debby", same.GetProperty("name").GetString());
         Assert.Equal("Bill Evans", same.GetProperty("artist").GetString());
         Assert.Equal(1962, same.GetProperty("year").GetInt32());
+        Assert.Equal(292, same.GetProperty("duration").GetInt32());
     }
 
     /// <summary>
@@ -515,6 +516,97 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
             var recordings = songs.Select(song => song.Recording.Id).ToList();
             db.Recordings.RemoveRange(await db.Recordings.Where(row => recordings.Contains(row.Id)).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// An album lasts what its songs add up to, each song's length taken the
+    /// way the song states it.
+    /// </summary>
+    /// <remarks>
+    /// One file per source: the probe over the pressing's track length, the
+    /// track length without a probe, the recording's length without either,
+    /// and a file nothing measured, which adds nothing. Removes what it adds,
+    /// because the class shares one database and a test above counts the
+    /// album shelf.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumLastsWhatItsSongsAddUpTo()
+    {
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Lengths" };
+        var pressing = new Release { Id = ReleaseId.New(), Title = "Lengths", ReleaseGroupId = album.Id, TrackCount = 2, DiscCount = 1 };
+        var recordings = Enumerable.Range(1, 4)
+            .Select(n => new Recording { Id = RecordingId.New(), Title = $"Song {n}" })
+            .ToList();
+        recordings[2].Duration = TimeSpan.FromSeconds(30.6);
+        var tracks = new[]
+        {
+            new Track { Id = TrackId.New(), ReleaseId = pressing.Id, RecordingId = recordings[0].Id, Position = 1, DiscNumber = 1, Title = "Song 1", Length = TimeSpan.FromSeconds(999) },
+            new Track { Id = TrackId.New(), ReleaseId = pressing.Id, RecordingId = recordings[1].Id, Position = 2, DiscNumber = 1, Title = "Song 2", Length = TimeSpan.FromSeconds(50.4) },
+        };
+        var files = recordings
+            .Select((recording, i) => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"Lengths/0{i + 1} Song.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = recording.Id,
+                ReleaseId = pressing.Id,
+                ReleaseGroupId = album.Id,
+                TrackId = i < tracks.Length ? tracks[i].Id : null,
+                Quality = i == 0
+                    ? new AudioQuality { Codec = "flac", SampleRateHz = 44_100, Channels = 2, BitDepth = 16, BitrateBps = 900_000, IsLossless = true, Duration = TimeSpan.FromSeconds(100.4) }
+                    : null,
+            })
+            .ToList();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(album);
+            db.Releases.Add(pressing);
+            db.Recordings.AddRange(recordings);
+            db.Tracks.AddRange(tracks);
+            db.MediaFiles.AddRange(files);
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            using var client = _factory!.CreateClient();
+            var id = $"al-{album.Id.Value:N}";
+
+            var body = (await JsonAsync(client, $"/rest/getAlbum.view?id={id}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album");
+
+            Assert.Equal(
+                [null, 31, 50, 100],
+                body.GetProperty("song")
+                    .EnumerateArray()
+                    .Select(song => song.TryGetProperty("duration", out var seconds) ? seconds.GetInt32() : (int?)null)
+                    .Order());
+            Assert.Equal(181, body.GetProperty("duration").GetInt32());
+
+            var listed = (await JsonAsync(client, "/rest/getAlbumList2.view?size=500"))
+                .GetProperty("subsonic-response")
+                .GetProperty("albumList2")
+                .GetProperty("album")
+                .EnumerateArray()
+                .Single(row => row.GetProperty("id").GetString() == id);
+
+            Assert.Equal(181, listed.GetProperty("duration").GetInt32());
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
+            db.Tracks.RemoveRange(await db.Tracks.Where(row => row.ReleaseId == pressing.Id).ToListAsync(Token));
+            db.Releases.Remove(await db.Releases.SingleAsync(row => row.Id == pressing.Id, Token));
+            db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
+            var ids = recordings.Select(recording => recording.Id).ToList();
+            db.Recordings.RemoveRange(await db.Recordings.Where(row => ids.Contains(row.Id)).ToListAsync(Token));
             await db.SaveChangesAsync(Token);
         }
     }
