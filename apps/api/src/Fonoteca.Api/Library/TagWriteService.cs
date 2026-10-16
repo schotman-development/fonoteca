@@ -1773,7 +1773,7 @@ public sealed partial class TagWriteService(
     /// <see cref="MaxPortraitBytes"/>, and 378 KB at 1280; Qobuz's
     /// <c>large</c> reaches 13.3 MB. 1280 is one of the widths Commons keeps.
     /// </remarks>
-    private const int ShelfWidth = 1280;
+    internal const int ShelfWidth = 1280;
 
     /// <summary>
     /// The artist's photograph, written once beside their records as <c>artist.*</c>.
@@ -2120,11 +2120,32 @@ public sealed partial class TagWriteService(
 
         portraits.Fetched[url] = null;
 
+        var (fetched, refused) = await DownloadPortraitAsync(clients, url, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null) Log.PortraitNotWritten(logger, url, refused);
+
+        portraits.Fetched[url] = fetched;
+
+        return fetched;
+    }
+
+    /// <summary>
+    /// A provider's picture, or why it was refused. Throws what the request
+    /// throws, a timeout included.
+    /// </summary>
+    /// <remarks>
+    /// Shared with Subsonic's <c>getCoverArt</c>, which serves the same
+    /// pictures, so one allowlist, cap and timeout hold for both.
+    /// </remarks>
+    internal static async Task<(FetchedImage? Picture, string? Refused)> DownloadPortraitAsync(
+        IHttpClientFactory clients,
+        string url,
+        CancellationToken cancellationToken)
+    {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var address)
             || (address.Scheme != Uri.UriSchemeHttps && address.Scheme != Uri.UriSchemeHttp))
         {
-            Log.PortraitNotWritten(logger, url, "the stored portrait is not an http address");
-            return null;
+            return (null, "the stored portrait is not an http address");
         }
 
         var http = clients.CreateClient(WikidataOptions.PicturesClientName);
@@ -2136,29 +2157,24 @@ public sealed partial class TagWriteService(
 
         if (!response.IsSuccessStatusCode)
         {
-            Log.PortraitNotWritten(logger, url, $"the picture answered {(int)response.StatusCode}");
-            return null;
+            return (null, $"the picture answered {(int)response.StatusCode}");
         }
 
         var mediaType = response.Content.Headers.ContentType?.MediaType;
 
         // The allowlist the upload path holds every cover to, for the same
         // reason: no text/html and no image/svg+xml, both documents that run
-        // script, and this writes the bytes into the library rather than serving
-        // them.
+        // script, and these bytes go into the library and out to clients.
         if (!FilePreview.IsSafeImageMediaType(mediaType))
         {
-            Log.PortraitNotWritten(logger, url, $"it answered with {mediaType ?? "no type"}");
-            return null;
+            return (null, $"it answered with {mediaType ?? "no type"}");
         }
 
-        var fetched = new FetchedImage(
-            await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false),
-            mediaType);
-
-        portraits.Fetched[url] = fetched;
-
-        return fetched;
+        return (
+            new FetchedImage(
+                await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false),
+                mediaType),
+            null);
     }
 
     /// <summary>
@@ -2349,7 +2365,7 @@ public sealed partial class TagWriteService(
     }
 
     /// <summary>A picture downloaded for this run, with the type the host called it.</summary>
-    private sealed record FetchedImage(byte[] Bytes, string? MediaType);
+    internal sealed record FetchedImage(byte[] Bytes, string? MediaType);
 
     /// <param name="Name">As billed: what the tags print.</param>
     /// <param name="Own">The artist's own name, whatever the billing: what a folder is named for.</param>
