@@ -185,7 +185,7 @@ public static partial class SubsonicEndpoints
                     row.SongCount,
                     row.Lengths.Sum(length => length is { } measured ? (int)Math.Round(measured.TotalSeconds) : 0),
                     row.Added.Value,
-                    row.Created,
+                    Minted(row.Added.Value) ?? row.Created,
                     FileGenres.OfAlbum(row.Genres, row.RecordingGenres));
             })
             .ToList();
@@ -193,6 +193,27 @@ public static partial class SubsonicEndpoints
         return artist is { } billedTo
             ? albums.Where(album => album.ArtistId == billedTo).ToList()
             : albums;
+    }
+
+    /// <summary>
+    /// When a UUIDv7 was made: its first 48 bits are Unix milliseconds. Null
+    /// for any other kind of id.
+    /// </summary>
+    private static DateTimeOffset? Minted(Guid id)
+    {
+        if (id.Version != 7)
+        {
+            return null;
+        }
+
+        var bytes = id.ToByteArray(bigEndian: true);
+        var milliseconds = 0L;
+        for (var i = 0; i < 6; i++)
+        {
+            milliseconds = (milliseconds << 8) | bytes[i];
+        }
+
+        return DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
     }
 
     private static int? Year(IReadOnlyDictionary<string, string?> edits, string field, int? stated)

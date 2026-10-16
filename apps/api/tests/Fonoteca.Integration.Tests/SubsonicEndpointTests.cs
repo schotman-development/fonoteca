@@ -326,6 +326,13 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal("Bill Evans", same.GetProperty("artist").GetString());
         Assert.Equal(1962, same.GetProperty("year").GetInt32());
         Assert.Equal(292, same.GetProperty("duration").GetInt32());
+
+        // Added is when the library gained the file, the time in its UUIDv7
+        // id, not the file's own change time.
+        var added = DateTimeOffset.FromUnixTimeMilliseconds(
+            Convert.ToInt64(_filed.Value.ToString("N")[..12], 16));
+        var created = DateTimeOffset.Parse(same.GetProperty("created").GetString()!, CultureInfo.InvariantCulture);
+        Assert.InRange(created, added.AddSeconds(-1), added.AddSeconds(1));
     }
 
     /// <summary>
