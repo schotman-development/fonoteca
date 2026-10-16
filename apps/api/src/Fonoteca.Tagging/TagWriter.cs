@@ -135,6 +135,12 @@ public sealed class TagWriter(
         var changes = new List<TagFieldChange>();
         var mine = person ?? new Dictionary<string, string?>();
 
+        // One change per field. A person's field of their own can be the
+        // container's spelling of a catalogue one — an MP4's "initialkey" is
+        // KEY, an MP3's "Artists" is ARTISTS — and then theirs is the value.
+        var planned = new Dictionary<string, (int At, bool Person)>(StringComparer.OrdinalIgnoreCase);
+        var slots = new List<TagFieldChange?>();
+
         foreach (var canonical in desired.Keys.Union(mine.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
         {
             var field = CatalogueTagFields.Spell(path, canonical)
@@ -142,14 +148,27 @@ public sealed class TagWriter(
 
             if (field is null) continue;
 
-            var current = before.Find(field);
-            var value = mine.TryGetValue(canonical, out var set) ? set : CatalogueTagFields.Render(path, desired[canonical]);
+            var theirs = mine.TryGetValue(canonical, out var set);
 
-            if (!string.Equals(current, value, StringComparison.Ordinal))
+            if (planned.TryGetValue(field, out var earlier) && (earlier.Person || !theirs)) continue;
+
+            var current = before.Find(field);
+            var value = theirs ? set : CatalogueTagFields.Render(path, desired[canonical]);
+            var change = string.Equals(current, value, StringComparison.Ordinal) ? null : new TagFieldChange(field, current, value);
+
+            if (planned.TryGetValue(field, out earlier))
             {
-                changes.Add(new TagFieldChange(field, current, value));
+                slots[earlier.At] = change;
+                planned[field] = (earlier.At, theirs);
+            }
+            else
+            {
+                planned[field] = (slots.Count, theirs);
+                slots.Add(change);
             }
         }
+
+        changes.AddRange(slots.OfType<TagFieldChange>());
 
         // Words the catalogue gives a file are its only words: the same words
         // under foobar2000's name go, or Navidrome shows both.
@@ -446,6 +465,17 @@ public sealed class TagWriter(
             case CatalogueTags.Isrc: track.ISRC = value ?? string.Empty; break;
             case CatalogueTags.Lyricist: track.Lyricist = value ?? string.Empty; break;
             case CatalogueTags.Conductor: track.Conductor = value ?? string.Empty; break;
+            case CatalogueTags.ArtistSort: track.SortArtist = value ?? string.Empty; break;
+            case CatalogueTags.AlbumArtistSort: track.SortAlbumArtist = value ?? string.Empty; break;
+            case CatalogueTags.CatalogNumber: track.CatalogNumber = value ?? string.Empty; break;
+            case CatalogueTags.Language: track.Language = value ?? string.Empty; break;
+            case CatalogueTags.Bpm: track.BPM = value is null ? 0 : Count(value); break;
+            case CatalogueTagFields.Publisher: track.Publisher = value ?? string.Empty; break;
+            case CatalogueTagFields.SeriesTitle: track.SeriesTitle = value ?? string.Empty; break;
+            case CatalogueTagFields.SeriesPart: track.SeriesPart = value ?? string.Empty; break;
+
+            // A year, which ATL writes as one: TDOR "1959", no first of January.
+            case CatalogueTagFields.OriginalReleaseYear: track.OriginalReleaseYear = value is null ? 0 : Count(value); break;
 
             // Every set of words the file held goes, and these are written as
             // given, LRC and all: handed over as text, ATL stores the text. ID3
@@ -667,7 +697,9 @@ public sealed class TagWriter(
                 + $"as '{verified.RecordedDate ?? "none"}'.";
         }
 
-        if (!stripped && !string.Equals(stored.OriginalDate, verified.OriginalDate, StringComparison.Ordinal))
+        if (!stripped
+            && !plan.Changes.Any(change => change.Field == CatalogueTagFields.OriginalReleaseYear)
+            && !string.Equals(stored.OriginalDate, verified.OriginalDate, StringComparison.Ordinal))
         {
             return $"Writing these tags would have rewritten the original date '{stored.OriginalDate ?? "none"}' "
                 + $"as '{verified.OriginalDate ?? "none"}'.";

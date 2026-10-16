@@ -81,6 +81,252 @@ public sealed class CatalogueTagWriteTests : IDisposable
         AlbumDynamicRange = 12,
     };
 
+    /// <summary>The rest of Picard's tags, as a filed, analysed and measured file carries them.</summary>
+    private static CatalogueTagSource Picard => Answered with
+    {
+        ArtistSort = "Davis, Miles",
+        AlbumArtistSort = "Davis, Miles",
+        Artists = ["Miles Davis", "John Coltrane"],
+        AlbumArtists = ["Miles Davis"],
+        ComposerSorts = ["Davis, Miles"],
+        ComposerMbids = [new Mbid(Artist)],
+        Credits = Answered.Credits with { Writers = ["Bill Evans"], Remixers = ["Mark Wilder"], DjMixers = ["Gilles Peterson"] },
+        Website = "https://www.milesdavis.com/",
+        Label = "Columbia",
+        CatalogNumber = "CL 1355",
+        Barcode = "074646493528",
+        ReleaseCountry = "US",
+        ReleaseStatus = "Official",
+        Media = "12\" Vinyl",
+        ReleaseTrackMbid = new Mbid(Cluster),
+        Asin = "B000002ADT",
+        Script = "Latn",
+        DiscSubtitle = "Side A",
+        ReleaseTypes = ["Album", "Compilation"],
+        OriginalYear = 1958,
+        Compilation = true,
+        Work = "Kind of Blue Suite",
+        MovementName = "So What",
+        Movement = 1,
+        MovementTotal = 5,
+        Languages = ["zxx"],
+        AcoustIdFingerprint = "AQADtNIyRUkkJUkiCQ",
+        TrackRange = 7.56,
+        TempoAndKey = new TempoAndKey { Bpm = 136.2, BpmConfidence = 3.1, Key = "D", Scale = "minor", KeyStrength = 0.8 },
+    };
+
+    /// <summary>
+    /// The rest of Picard's tags land under Picard's names, as a tool that is
+    /// neither of ours reads them.
+    /// </summary>
+    /// <remarks>
+    /// ffprobe names some ID3 frames and MP4 atoms its own way — <c>TPUB</c> is
+    /// "publisher", <c>soar</c> "sort_artist", <c>TCMP</c> and <c>cpil</c>
+    /// "compilation" — and reports an ID3 frame's first value only. The MP4
+    /// atoms and the ID3 URL frame it does not report are read as atoms and
+    /// frames below. An MP4 carries no WRITER, WEBSITE, ORIGINALYEAR or ASIN,
+    /// as Picard writes none there.
+    /// </remarks>
+    [Theory]
+    [InlineData("flac", "ARTISTSORT", "Davis, Miles")]
+    [InlineData("flac", "ALBUMARTISTSORT", "Davis, Miles")]
+    [InlineData("flac", "ARTISTS", "Miles Davis;John Coltrane")]
+    [InlineData("flac", "ALBUMARTISTS", "Miles Davis")]
+    [InlineData("flac", "COMPOSERSORT", "Davis, Miles")]
+    [InlineData("flac", "MUSICBRAINZ_COMPOSERID", "44444444-4444-4444-8444-444444444444")]
+    [InlineData("flac", "WRITER", "Bill Evans")]
+    [InlineData("flac", "REMIXER", "Mark Wilder")]
+    [InlineData("flac", "DJMIXER", "Gilles Peterson")]
+    [InlineData("flac", "WEBSITE", "https://www.milesdavis.com/")]
+    [InlineData("flac", "LABEL", "Columbia")]
+    [InlineData("flac", "CATALOGNUMBER", "CL 1355")]
+    [InlineData("flac", "BARCODE", "074646493528")]
+    [InlineData("flac", "RELEASECOUNTRY", "US")]
+    [InlineData("flac", "RELEASESTATUS", "official")]
+    [InlineData("flac", "RELEASETYPE", "album;compilation")]
+    [InlineData("flac", "MEDIA", "12\" Vinyl")]
+    [InlineData("flac", "MUSICBRAINZ_RELEASETRACKID", "55555555-5555-4555-8555-555555555555")]
+    [InlineData("flac", "ASIN", "B000002ADT")]
+    [InlineData("flac", "SCRIPT", "Latn")]
+    [InlineData("flac", "DISCSUBTITLE", "Side A")]
+    [InlineData("flac", "ORIGINALYEAR", "1958")]
+    [InlineData("flac", "COMPILATION", "1")]
+    [InlineData("flac", "WORK", "Kind of Blue Suite")]
+    [InlineData("flac", "MOVEMENTNAME", "So What")]
+    [InlineData("flac", "MOVEMENT", "1")]
+    [InlineData("flac", "MOVEMENTTOTAL", "5")]
+    [InlineData("flac", "SHOWMOVEMENT", "1")]
+    [InlineData("flac", "LANGUAGE", "zxx")]
+    [InlineData("flac", "ACOUSTID_FINGERPRINT", "AQADtNIyRUkkJUkiCQ")]
+    [InlineData("flac", "REPLAYGAIN_TRACK_RANGE", "7.56 dB")]
+    [InlineData("flac", "REPLAYGAIN_REFERENCE_LOUDNESS", "-18.00 LUFS")]
+    [InlineData("flac", "BPM", "136")]
+    [InlineData("flac", "KEY", "Dm")]
+    [InlineData("mp3", "artist-sort", "Davis, Miles")]
+    [InlineData("mp3", "TSO2", "Davis, Miles")]
+    [InlineData("mp3", "Artists", "Miles Davis")]
+    [InlineData("mp3", "ALBUMARTISTS", "Miles Davis")]
+    [InlineData("mp3", "TSOC", "Davis, Miles")]
+    [InlineData("mp3", "MusicBrainz Composer Id", "44444444-4444-4444-8444-444444444444")]
+    [InlineData("mp3", "Writer", "Bill Evans")]
+    [InlineData("mp3", "TPE4", "Mark Wilder")]
+    [InlineData("mp3", "DJMIXER", "Gilles Peterson")]
+    [InlineData("mp3", "publisher", "Columbia")]
+    [InlineData("mp3", "CATALOGNUMBER", "CL 1355")]
+    [InlineData("mp3", "BARCODE", "074646493528")]
+    [InlineData("mp3", "MusicBrainz Album Release Country", "US")]
+    [InlineData("mp3", "MusicBrainz Album Status", "official")]
+    [InlineData("mp3", "MusicBrainz Album Type", "album")]
+    [InlineData("mp3", "TMED", "12\" Vinyl")]
+    [InlineData("mp3", "MusicBrainz Release Track Id", "55555555-5555-4555-8555-555555555555")]
+    [InlineData("mp3", "ASIN", "B000002ADT")]
+    [InlineData("mp3", "SCRIPT", "Latn")]
+    [InlineData("mp3", "TSST", "Side A")]
+    [InlineData("mp3", "TDOR", "1958")]
+    [InlineData("mp3", "compilation", "1")]
+    [InlineData("mp3", "WORK", "Kind of Blue Suite")]
+    [InlineData("mp3", "MOVEMENTNAME", "So What")]
+    [InlineData("mp3", "MOVEMENT", "1")]
+    [InlineData("mp3", "MOVEMENTTOTAL", "5")]
+    [InlineData("mp3", "SHOWMOVEMENT", "1")]
+    [InlineData("mp3", "language", "zxx")]
+    [InlineData("mp3", "Acoustid Fingerprint", "AQADtNIyRUkkJUkiCQ")]
+    [InlineData("mp3", "REPLAYGAIN_TRACK_RANGE", "7.56 dB")]
+    [InlineData("mp3", "REPLAYGAIN_REFERENCE_LOUDNESS", "-18.00 LUFS")]
+    [InlineData("mp3", "TBPM", "136")]
+    [InlineData("mp3", "TKEY", "Dm")]
+    [InlineData("m4a", "sort_artist", "Davis, Miles")]
+    [InlineData("m4a", "sort_album_artist", "Davis, Miles")]
+    [InlineData("m4a", "ARTISTS", "Miles Davis; John Coltrane")]
+    [InlineData("m4a", "ALBUMARTISTS", "Miles Davis")]
+    [InlineData("m4a", "sort_composer", "Davis, Miles")]
+    [InlineData("m4a", "MusicBrainz Composer Id", "44444444-4444-4444-8444-444444444444")]
+    [InlineData("m4a", "REMIXER", "Mark Wilder")]
+    [InlineData("m4a", "DJMIXER", "Gilles Peterson")]
+    [InlineData("m4a", "LABEL", "Columbia")]
+    [InlineData("m4a", "CATALOGNUMBER", "CL 1355")]
+    [InlineData("m4a", "BARCODE", "074646493528")]
+    [InlineData("m4a", "MusicBrainz Album Release Country", "US")]
+    [InlineData("m4a", "MusicBrainz Album Status", "official")]
+    [InlineData("m4a", "MusicBrainz Album Type", "album; compilation")]
+    [InlineData("m4a", "MEDIA", "12\" Vinyl")]
+    [InlineData("m4a", "MusicBrainz Release Track Id", "55555555-5555-4555-8555-555555555555")]
+    [InlineData("m4a", "SCRIPT", "Latn")]
+    [InlineData("m4a", "DISCSUBTITLE", "Side A")]
+    [InlineData("m4a", "compilation", "1")]
+    [InlineData("m4a", "LANGUAGE", "zxx")]
+    [InlineData("m4a", "Acoustid Fingerprint", "AQADtNIyRUkkJUkiCQ")]
+    [InlineData("m4a", "replaygain_track_range", "7.56 dB")]
+    [InlineData("m4a", "replaygain_reference_loudness", "-18.00 LUFS")]
+    [InlineData("m4a", "initialkey", "Dm")]
+    [InlineData("m4a", "WRITER", null)]
+    [InlineData("m4a", "WEBSITE", null)]
+    [InlineData("m4a", "ORIGINALYEAR", null)]
+    [InlineData("m4a", "ASIN", null)]
+    public async Task PicardsOtherTagsLandWherePicardPutsThem(string extension, string tag, string? expected)
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(SourceFor(extension));
+
+        Assert.Equal(TagWriteStatus.Written, (await WritePicard(writer, path)).Status);
+
+        Assert.Equal(expected, Tag(TagsReportedByFfprobe(path), tag));
+    }
+
+    /// <summary>The MP4 atoms and the MP3 URL frame ffprobe does not report, read where the container keeps them.</summary>
+    [Fact]
+    public async Task TheAtomsAndTheUrlFrameFfprobeDoesNotReportAreThere()
+    {
+        SkipWithoutTools();
+
+        var (mp4Writer, mp4) = Given(SourceFor("m4a"));
+        var (mp3Writer, mp3) = Given(SourceFor("mp3"));
+
+        Assert.Equal(TagWriteStatus.Written, (await WritePicard(mp4Writer, mp4)).Status);
+        Assert.Equal(TagWriteStatus.Written, (await WritePicard(mp3Writer, mp3)).Status);
+
+        using (var file = TagLib.File.Create(Path.Combine(_root, mp4.Value)))
+        {
+            var apple = (TagLib.Mpeg4.AppleTag)file.GetTag(TagLib.TagTypes.Apple, false);
+
+            string? Atom(string name) => apple.DataBoxes(TagLib.ByteVector.FromString(name, TagLib.StringType.Latin1))
+                .Select(box => box.Flags == (uint)TagLib.Mpeg4.AppleDataBox.FlagType.ContainsText ? box.Text : string.Join(",", box.Data.Data))
+                .FirstOrDefault();
+
+            Assert.Equal("0,136", Atom("tmpo"));
+            Assert.Equal("Kind of Blue Suite", Atom("©wrk"));
+            Assert.Equal("So What", Atom("©mvn"));
+            Assert.Equal("1", Atom("©mvi"));
+            Assert.Equal("5", Atom("©mvc"));
+            Assert.Equal("1", Atom("shwm"));
+        }
+
+        using (var file = TagLib.File.Create(Path.Combine(_root, mp3.Value)))
+        {
+            var id3 = (TagLib.Id3v2.Tag)file.GetTag(TagLib.TagTypes.Id3v2, false);
+
+            Assert.Equal("https://www.milesdavis.com/", id3.GetFrames("WOAR").Single().ToString());
+        }
+    }
+
+    /// <summary>
+    /// Written once, the same tags are nothing to do: every one reads back
+    /// under the name it was planned by, typed or not.
+    /// </summary>
+    /// <remarks>
+    /// The diff is the worklist, so a field the reading reports under another
+    /// name than the plan's would be rewritten on every run, forever.
+    /// </remarks>
+    [Theory]
+    [InlineData("flac")]
+    [InlineData("mp3")]
+    [InlineData("m4a")]
+    public async Task PicardsOtherTagsWrittenOnceAreNothingToDo(string extension)
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(SourceFor(extension));
+
+        Assert.Equal(TagWriteStatus.Written, (await WritePicard(writer, path)).Status);
+
+        var again = await writer.PlanAsync(path, CatalogueTags.For(Picard), Token);
+
+        Assert.Empty(again!.Changes);
+    }
+
+    /// <summary>
+    /// A person's field of their own under a container's spelling of a
+    /// catalogue field is one change to that field, and the person's value.
+    /// </summary>
+    /// <remarks>
+    /// An MP4's "initialkey" is KEY; planned twice, the write would set it
+    /// twice and fail its own read-back on whichever value lost.
+    /// </remarks>
+    [Fact]
+    public async Task APersonsFieldSpelledAsACatalogueOneIsOneChangeAndTheirs()
+    {
+        SkipWithoutTools();
+
+        var (writer, path) = Given(SourceFor("m4a"));
+
+        var plan = await writer.PlanAsync(
+            path, CatalogueTags.For(Picard), new Dictionary<string, string?> { ["initialkey"] = "Am" }, Token);
+
+        var key = Assert.Single(plan!.Changes, change => change.Field.Equals("initialkey", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("Am", key.To);
+
+        Assert.Equal(
+            TagWriteStatus.Written,
+            (await writer.ApplyAsync(plan, "file-1", "batch", "system", TagWriteServiceEventPrefix, Token)).Status);
+    }
+
+    private async Task<TagWriteResult> WritePicard(TagWriter writer, LibraryPath path)
+    {
+        var plan = await writer.PlanAsync(path, CatalogueTags.For(Picard), Token);
+        return await writer.ApplyAsync(plan, "file-1", "batch", "system", TagWriteServiceEventPrefix, Token);
+    }
+
     /// <summary>An MP4 is never planned an ISRC or a conductor; every other container is.</summary>
     [Fact]
     public void AnMp4IsNotGivenTheFieldsAtlWouldHideInIt()
@@ -178,6 +424,9 @@ public sealed class CatalogueTagWriteTests : IDisposable
     public void AnOpusFileGetsNoReplayGainField()
     {
         Assert.Null(CatalogueTagFields.Spell(new LibraryPath("a.opus"), CatalogueTags.TrackGain));
+        Assert.Null(CatalogueTagFields.Spell(new LibraryPath("a.opus"), CatalogueTags.TrackRange));
+        Assert.Null(CatalogueTagFields.Spell(new LibraryPath("a.opus"), CatalogueTags.ReferenceLoudness));
+        Assert.Equal(CatalogueTags.TrackRange, CatalogueTagFields.Spell(new LibraryPath("a.ogg"), CatalogueTags.TrackRange));
         Assert.Equal(CatalogueTags.TrackGain, CatalogueTagFields.Spell(new LibraryPath("a.ogg"), CatalogueTags.TrackGain));
         Assert.Equal(CatalogueTags.DynamicRange, CatalogueTagFields.Spell(new LibraryPath("a.opus"), CatalogueTags.DynamicRange));
     }

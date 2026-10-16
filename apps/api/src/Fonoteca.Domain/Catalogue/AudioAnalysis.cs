@@ -110,6 +110,10 @@ public static class AudioAnalysis
     public static string Gain(double decibels) =>
         decibels.ToString("0.00", CultureInfo.InvariantCulture) + " dB";
 
+    /// <summary>The reference a gain brings a track to, as loudgain writes it beside the gain.</summary>
+    public static string ReferenceLoudness { get; } =
+        ReferenceLufs.ToString("0.00", CultureInfo.InvariantCulture) + " LUFS";
+
     /// <summary>A peak as the tags carry it: "0.988553".</summary>
     public static string Peak(double amplitude) =>
         amplitude.ToString("0.000000", CultureInfo.InvariantCulture);

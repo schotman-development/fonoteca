@@ -4,12 +4,12 @@ namespace Fonoteca.Domain.Catalogue;
 /// The credit tags a file carries, read off MusicBrainz's links as Picard reads them.
 /// </summary>
 /// <remarks>
-/// Picard's mapping, as far as these eight tags go: a librettist is a lyricist,
+/// Picard's mapping, as far as these eleven tags go: a librettist is a lyricist,
 /// an orchestrator and the instrument and vocal arrangers are arrangers, a
 /// recording engineer is an engineer, and a player is
 /// <c>PERFORMER=Name (instrument)</c>. A <c>writer</c> — a songwriter nobody
-/// split into composer and lyricist — has no tag here, as it has none in the
-/// owner's list; rights holders are nobody's credit.
+/// split into composer and lyricist — is a <c>WRITER</c>, a remixer a
+/// <c>REMIXER</c> and a DJ-mixer a <c>DJMIXER</c>; rights holders are nobody's credit.
 ///
 /// Names as each link credits them, each once, in MusicBrainz's order.
 /// </remarks>
@@ -25,6 +25,9 @@ public sealed record CreditTags
     public IReadOnlyList<string> Engineers { get; init; } = [];
     public IReadOnlyList<string> Mixers { get; init; } = [];
     public IReadOnlyList<string> Performers { get; init; } = [];
+    public IReadOnlyList<string> Writers { get; init; } = [];
+    public IReadOnlyList<string> Remixers { get; init; } = [];
+    public IReadOnlyList<string> DjMixers { get; init; } = [];
 
     /// <param name="links">The recording's contributions and then its work's, in their stored order.</param>
     public static CreditTags From(IEnumerable<(string Type, string? Attributes, string Name)> links)
@@ -52,6 +55,9 @@ public sealed record CreditTags
                 case "producer": Add(CatalogueTags.Producer, name); break;
                 case "engineer" or "recording" or "audio" or "sound": Add(CatalogueTags.Engineer, name); break;
                 case "mix": Add(CatalogueTags.Mixer, name); break;
+                case "writer": Add(CatalogueTags.Writer, name); break;
+                case "remixer": Add(CatalogueTags.Remixer, name); break;
+                case "mix-dj": Add(CatalogueTags.DjMixer, name); break;
                 case "instrument" or "performer":
                     Add(CatalogueTags.Performer, attributes is null ? name : $"{name} ({attributes})");
                     break;
@@ -74,6 +80,9 @@ public sealed record CreditTags
             Engineers = Of(CatalogueTags.Engineer),
             Mixers = Of(CatalogueTags.Mixer),
             Performers = Of(CatalogueTags.Performer),
+            Writers = Of(CatalogueTags.Writer),
+            Remixers = Of(CatalogueTags.Remixer),
+            DjMixers = Of(CatalogueTags.DjMixer),
         };
     }
 }

@@ -29,11 +29,19 @@ namespace Fonoteca.Api.Library;
 /// pass, stays pending so an unmounted volume is never recorded as anything;
 /// parallel over a claimed page with no channel; one scope and one save per
 /// file. A scan that sees the audio change clears the measurement with the rest.
+///
+/// <b>Tempo and key are a second question in the same pass</b>, the owner's
+/// choice over an eighth: another tool (<see cref="ITempoAndKeyMeasurer"/>),
+/// its own stamp (<c>TempoAndKeyMeasuredUtc</c>), so a file analysed before
+/// Essentia was configured is asked that alone. With
+/// <c>Fonoteca:EssentiaPythonPath</c> empty it is not asked at all, and a file
+/// is pending on its loudness only.
 /// </remarks>
 public sealed class AnalysisService(
     LibraryWorkGate gate,
     IServiceScopeFactory scopeFactory,
     IAudioMeasurer measurer,
+    ITempoAndKeyMeasurer tempoAndKey,
     IAudioFileStore files,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
@@ -54,6 +62,8 @@ public sealed class AnalysisService(
     private volatile string? _lastError;
     private Task? _pass;
 
+    private bool AsksTempoAndKey => !string.IsNullOrWhiteSpace(options.Value.EssentiaPythonPath);
+
     public bool IsRunning => _progress is not null;
 
     public AnalysisProgress? Progress => _progress;
@@ -70,14 +80,15 @@ public sealed class AnalysisService(
         await using (scope.ConfigureAwait(false))
         {
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+            var tempo = AsksTempoAndKey;
 
             var counts = await db.MediaFiles
                 .GroupBy(_ => 1)
                 .Select(g => new
                 {
                     Files = g.Count(),
-                    Pending = g.Count(f => f.MeasuredUtc == null),
-                    Measured = g.Count(f => f.MeasuredUtc != null && f.Measurement != null),
+                    Pending = g.Count(f => f.MeasuredUtc == null || (tempo && f.TempoAndKeyMeasuredUtc == null)),
+                    Measured = g.Count(f => f.MeasuredUtc != null && (!tempo || f.TempoAndKeyMeasuredUtc != null) && f.Measurement != null),
                 })
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -275,13 +286,20 @@ public sealed class AnalysisService(
             await using (scope.ConfigureAwait(false))
             {
                 var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+                var tempo = AsksTempoAndKey;
 
                 page = await db.MediaFiles
                     .AsNoTracking()
-                    .Where(f => f.MeasuredUtc == null)
+                    .Where(f => f.MeasuredUtc == null || (tempo && f.TempoAndKeyMeasuredUtc == null))
                     .OrderBy(f => f.Id)
                     .Skip(stuck)
-                    .Select(f => new PendingFile(f.Id, f.Path, f.SizeBytes, f.LastModifiedUtc))
+                    .Select(f => new PendingFile(
+                        f.Id,
+                        f.Path,
+                        f.SizeBytes,
+                        f.LastModifiedUtc,
+                        f.MeasuredUtc == null,
+                        tempo && f.TempoAndKeyMeasuredUtc == null))
                     .Take(PageSize)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -306,16 +324,31 @@ public sealed class AnalysisService(
             return;
         }
 
-        AudioMeasurement? measurement;
+        AudioMeasurement? measurement = null;
+        TempoAndKey? heard = null;
 
-        try
+        if (file.Loudness)
         {
-            measurement = await measurer.MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                measurement = await measurer.MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+            }
+            catch (AudioProbeFailedException cause) when (cause.IsFileFault)
+            {
+                Log.FileNotAnalysed(logger, file.Path, cause.Message);
+            }
         }
-        catch (AudioProbeFailedException cause) when (cause.IsFileFault)
+
+        if (file.Tempo)
         {
-            measurement = null;
-            Log.FileNotAnalysed(logger, file.Path, cause.Message);
+            try
+            {
+                heard = await tempoAndKey.MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+            }
+            catch (AudioProbeFailedException cause) when (cause.IsFileFault)
+            {
+                Log.FileNotAnalysed(logger, file.Path, cause.Message);
+            }
         }
 
         var scope = scopeFactory.CreateAsyncScope();
@@ -334,13 +367,25 @@ public sealed class AnalysisService(
                 return;
             }
 
-            row.Measurement = measurement;
-            row.MeasuredUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+            var now = StoreTime.ToStorePrecision(clock.UtcNow);
+
+            if (file.Loudness)
+            {
+                row.Measurement = measurement;
+                row.MeasuredUtc = now;
+            }
+
+            if (file.Tempo)
+            {
+                row.TempoAndKey = heard;
+                row.TempoAndKeyMeasuredUtc = now;
+            }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        Interlocked.Increment(ref measurement is null ? ref counts.Unmeasurable : ref counts.Measured);
+        var answered = file.Loudness ? measurement is not null : heard is not null;
+        Interlocked.Increment(ref answered ? ref counts.Measured : ref counts.Unmeasurable);
     }
 
     private async Task Report(string jobId, int processed, int total, string? current, string state)
@@ -362,7 +407,15 @@ public sealed class AnalysisService(
         public int Missing;
     }
 
-    private readonly record struct PendingFile(MediaFileId Id, string Path, long SizeBytes, DateTimeOffset LastModifiedUtc);
+    /// <param name="Loudness">ffmpeg's half is pending.</param>
+    /// <param name="Tempo">Essentia's half is pending.</param>
+    private readonly record struct PendingFile(
+        MediaFileId Id,
+        string Path,
+        long SizeBytes,
+        DateTimeOffset LastModifiedUtc,
+        bool Loudness,
+        bool Tempo);
 }
 
 public sealed record AnalysisOutcomeStatus(AnalysisStatus Status, string? JobId);
@@ -375,7 +428,7 @@ public enum AnalysisStatus
 
 public sealed record AnalysisProgress(string JobId, int Processed, int Total, string? CurrentFile);
 
-/// <param name="Unmeasurable">Files ffmpeg would not decode, or that held no audio; stamped all the same.</param>
+/// <param name="Unmeasurable">Files the tool asked would not decode, or that held no audio; stamped all the same.</param>
 /// <param name="Skipped">Not on disk, or changed while being measured. Left pending.</param>
 public sealed record AnalysisSummary(
     string JobId,

@@ -622,6 +622,8 @@ public sealed class LibraryScanService(
                 row.LastVerifiedUtc = null;
                 row.Measurement = null;
                 row.MeasuredUtc = null;
+                row.TempoAndKey = null;
+                row.TempoAndKeyMeasuredUtc = null;
 
                 // The identification too, and for the same reason: an AcoustID
                 // describes audio, and these bytes are not the audio it was

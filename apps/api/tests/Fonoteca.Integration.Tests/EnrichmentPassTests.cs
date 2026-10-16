@@ -25,7 +25,7 @@ namespace Fonoteca.Integration.Tests;
 /// upserts, the migration — is the one the application runs.
 /// </remarks>
 [Collection(nameof(PostgresCollection))]
-public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifetime
+public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly Mbid Recording = Mb("85db2cdf-80c9-4aa2-9789-19328dde47ed");
     private static readonly Mbid SecondRecording = Mb("e52e52b6-ee59-4be4-a858-88d3dd4742b4");
@@ -1360,7 +1360,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
         var stale = await enrichment.CountPendingAsync(Token);
         Assert.Equal(1, stale.Booklets);
-        Assert.Equal(stale.Motion + stale.Banners + stale.Articles + stale.Discographies + stale.Portraits + stale.Artists + stale.Files + 1, stale.Total);
+        Assert.Equal(stale.Motion + stale.Banners + stale.Articles + stale.Discographies + stale.Portraits + stale.Artists + stale.Files + stale.Works + stale.Releases + 1, stale.Total);
 
         await EnrichAsync(services);
         Assert.Equal(3, booklets.Asked.Count);
@@ -2910,8 +2910,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
     /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
-    public void TheRecordingGenreParentWorkAndLyricsStagesAreInTheTotal() =>
-        Assert.Equal(18, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6).Total);
+    public void TheNewerStagesAreInTheTotal() =>
+        Assert.Equal(33, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8).Total);
 
     /// <summary>
     /// A song is asked about as its held file has it, its words are kept, and
@@ -3759,8 +3759,10 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         MusicBrainzArtist? artist = null,
         Func<IReadOnlyList<MusicBrainzReleaseGroup>>? discography = null,
         IReadOnlyDictionary<Mbid, Mbid>? merged = null,
-        IReadOnlyDictionary<Mbid, MusicBrainzWork>? works = null) : IMusicBrainzCatalogue
+        IReadOnlyDictionary<Mbid, MusicBrainzWork>? works = null,
+        IReadOnlyDictionary<Mbid, MusicBrainzRelease>? releases = null) : IMusicBrainzCatalogue
     {
+        private readonly List<Mbid> _releasesAsked = [];
         private int _recordingCalls;
         private int _workCalls;
         private int _artistCalls;
@@ -3818,11 +3820,35 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
                 : recording with { Id = merged?.GetValueOrDefault(id, id) ?? id });
         }
 
+        /// <summary>Every release asked for, in order.</summary>
+        public IReadOnlyList<Mbid> ReleasesAsked
+        {
+            get
+            {
+                lock (_releasesAsked) return [.. _releasesAsked];
+            }
+        }
+
+        /// <summary>True models an outage on the work and release lookups alone.</summary>
+        public bool DescriptionsUnavailable { get; set; }
+
+        /// <summary>The release where <c>releases</c> names it, else null: MusicBrainz no longer knows it.</summary>
         public Task<MusicBrainzRelease?> GetReleaseAsync(
             Mbid id,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException(
-                "Enrichment does not attribute releases; nothing here should call this.");
+            CancellationToken cancellationToken = default)
+        {
+            if (releases is null)
+            {
+                throw new InvalidOperationException(
+                    "Enrichment does not attribute releases; nothing here should call this.");
+            }
+
+            lock (_releasesAsked) _releasesAsked.Add(id);
+
+            if (DescriptionsUnavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
+
+            return Task.FromResult(releases.TryGetValue(id, out var named) ? named : null);
+        }
 
         /// <summary>
         /// What MusicBrainz says a followed artist released.
@@ -3874,6 +3900,9 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _workCalls);
+
+            if (DescriptionsUnavailable) throw new ProviderUnavailableException("MusicBrainz", "Stubbed outage.");
+
             return Task.FromResult(works is not null && works.TryGetValue(id, out var named) ? named : work);
         }
 

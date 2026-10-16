@@ -54,11 +54,22 @@ internal static class MusicBrainzMapper
             Title: source.Title ?? string.Empty,
             Type: NullIfBlank(source.Type),
             Relations: ToRelations(source.Relationships),
-            ParentId: parent is null ? null : new Mbid(parent.Id),
-            ParentTitle: NullIfBlank(parent?.Title));
+            ParentId: parent?.Work is { } whole ? new Mbid(whole.Id) : null,
+            ParentTitle: NullIfBlank(parent?.Work?.Title),
+            Languages: ToLanguages(source),
+            Position: parent?.OrderingKey,
+            PartCount: (source.Relationships ?? []).Count(relationship => relationship.Work is not null
+                && string.Equals(relationship.Type, "parts", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(relationship.Direction, "forward", StringComparison.OrdinalIgnoreCase)));
     }
 
-    /// <summary>The work this one is a part of, if MusicBrainz says so.</summary>
+    /// <summary>The work's languages; the single one an older document states where it lists none.</summary>
+    private static List<string> ToLanguages(IWork source) =>
+        source.Languages is { Count: > 0 } languages
+            ? [.. languages.Where(language => !string.IsNullOrWhiteSpace(language)).Distinct(StringComparer.Ordinal)]
+            : NullIfBlank(source.Language) is { } language ? [language] : [];
+
+    /// <summary>The relation naming the work this one is a part of, and its place there, if MusicBrainz says so.</summary>
     /// <remarks>
     /// <c>parts</c> is stated once, on the whole, and served from both ends:
     /// <c>backward</c> from the movement with the symphony on the far end,
@@ -66,15 +77,15 @@ internal static class MusicBrainzMapper
     /// backward one names a parent; reading the forward ones would make a
     /// symphony a part of its own first movement.
     /// </remarks>
-    private static IWork? ParentWork(IReadOnlyList<IRelationship>? relationships)
+    private static IRelationship? ParentWork(IReadOnlyList<IRelationship>? relationships)
     {
         foreach (var relationship in relationships ?? [])
         {
-            if (relationship.Work is { } work
+            if (relationship.Work is not null
                 && string.Equals(relationship.Type, "parts", StringComparison.OrdinalIgnoreCase)
                 && string.Equals(relationship.Direction, "backward", StringComparison.OrdinalIgnoreCase))
             {
-                return work;
+                return relationship;
             }
         }
 
@@ -253,7 +264,8 @@ internal static class MusicBrainzMapper
             media.Add(new MusicBrainzMediumSummary(
                 Position: medium.Position,
                 Format: NullIfBlank(medium.Format),
-                TrackCount: medium.TrackCount));
+                TrackCount: medium.TrackCount,
+                Title: NullIfBlank(medium.Title)));
 
             foreach (var track in medium.Tracks ?? [])
             {
@@ -267,7 +279,8 @@ internal static class MusicBrainzMapper
                     Title: track.Title ?? string.Empty,
                     Length: track.Length,
                     RecordingId: track.Recording is { } recording ? new Mbid(recording.Id) : null,
-                    Credits: ToCredits(track.ArtistCredit)));
+                    Credits: ToCredits(track.ArtistCredit),
+                    Id: new Mbid(track.Id)));
             }
         }
 
@@ -291,7 +304,9 @@ internal static class MusicBrainzMapper
             SecondaryTypes: group?.SecondaryTypes ?? [],
             Credits: ToCredits(source.ArtistCredit),
             Tracks: tracks,
-            Media: media);
+            Media: media,
+            Asin: NullIfBlank(source.Asin),
+            Script: NullIfBlank(source.TextRepresentation?.Script));
     }
 
     /// <summary>A browse result: a release, counted but not listed.</summary>

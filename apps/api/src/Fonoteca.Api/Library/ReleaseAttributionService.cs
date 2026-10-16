@@ -447,7 +447,7 @@ public sealed class ReleaseAttributionService(
         await using (scope.ConfigureAwait(false))
         {
             var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
-            var writer = new ReleaseWriter(db);
+            var writer = new ReleaseWriter(db, clock);
 
             var releases = new Dictionary<Mbid, (ReleaseId Release, ReleaseGroupId? Group)>();
 
@@ -1312,7 +1312,8 @@ public sealed class ReleaseAttributionService(
     /// Reads through the scope's context so rows added earlier in the same
     /// <c>SaveChanges</c> are found rather than duplicated.
     /// </remarks>
-    internal sealed class ReleaseWriter(FonotecaDbContext db)
+    /// <param name="clock">Where given, a release written from a lookup is stamped described.</param>
+    internal sealed class ReleaseWriter(FonotecaDbContext db, IClock? clock = null)
     {
         private readonly Dictionary<(ReleaseId, int, int), TrackId> _tracks = [];
 
@@ -1417,6 +1418,14 @@ public sealed class ReleaseAttributionService(
             release.MediumFormats = mediumFormats
                 ?? (source.Media is { Count: > 0 } media ? Formats(media) : null)
                 ?? release.MediumFormats;
+
+            // A lookup's own, which a browse never carries: the release is described.
+            if (source.Media is not null)
+            {
+                release.Asin = Clamp(source.Asin, 20);
+                release.Script = Clamp(source.Script, 10);
+                if (clock is not null) release.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+            }
 
             await ApplyTracksAsync(release, source, cancellationToken).ConfigureAwait(false);
             await ApplyRecordingCreditsAsync(source, cancellationToken).ConfigureAwait(false);
@@ -1643,6 +1652,10 @@ public sealed class ReleaseAttributionService(
             }
         }
 
+        /// <summary>A value cut to its column, which would otherwise throw out of the save.</summary>
+        internal static string? Clamp(string? value, int length) =>
+            value is { Length: > 0 } && value.Length > length ? value[..length] : value;
+
         /// <summary>
         /// Replaces the release's track list rather than merging into it.
         /// </summary>
@@ -1745,6 +1758,13 @@ public sealed class ReleaseAttributionService(
                 row.Number = track.Number;
                 row.Title = track.Title;
                 row.Length = track.Length;
+                row.Mbid = track.Id ?? row.Mbid;
+
+                if (source.Media?.FirstOrDefault(medium => medium.Position == track.DiscNumber) is { } disc)
+                {
+                    row.MediumTitle = Clamp(disc.Title, 1000);
+                    row.MediumFormat = Clamp(disc.Format, 100);
+                }
 
                 kept.Add(row.Id);
                 _tracks[(release.Id, row.DiscNumber, row.Position)] = row.Id;

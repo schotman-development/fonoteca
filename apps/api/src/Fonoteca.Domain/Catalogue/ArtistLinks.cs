@@ -19,6 +19,10 @@ public static class ArtistLinks
     public static IReadOnlyList<Entry> Read(string? json) =>
         string.IsNullOrEmpty(json) ? [] : JsonSerializer.Deserialize<List<Entry>>(json) ?? [];
 
+    /// <summary>The artist's official homepage, the first MusicBrainz lists.</summary>
+    public static string? Homepage(string? json) =>
+        Read(json).FirstOrDefault(link => link.Type.Equals("official homepage", StringComparison.OrdinalIgnoreCase))?.Url;
+
     /// <param name="Type">MusicBrainz's relationship type: "discogs", "official homepage".</param>
     public sealed record Entry(string Type, string Url);
 }

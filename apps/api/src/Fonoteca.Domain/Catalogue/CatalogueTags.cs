@@ -92,6 +92,87 @@ public sealed record CatalogueTagSource
 
     /// <summary>The words, as LRC where they are timed — see <see cref="LyricsText"/>.</summary>
     public string? Lyrics { get; init; }
+
+    /// <summary>The recording's billing line in sort names: "Davis, Miles &amp; Coltrane, John".</summary>
+    public string? ArtistSort { get; init; }
+
+    /// <summary>The album artist's, likewise.</summary>
+    public string? AlbumArtistSort { get; init; }
+
+    /// <summary>Each artist the recording bills, as billed, one value each.</summary>
+    public IReadOnlyList<string> Artists { get; init; } = [];
+
+    /// <summary>Each artist the album bills, as billed.</summary>
+    public IReadOnlyList<string> AlbumArtists { get; init; } = [];
+
+    /// <summary>The composers' sort names, in <see cref="CreditTags.Composers"/>' order — none unless every one has one.</summary>
+    public IReadOnlyList<string> ComposerSorts { get; init; } = [];
+
+    /// <summary>The composers' MBIDs, in their order.</summary>
+    public IReadOnlyList<Mbid> ComposerMbids { get; init; } = [];
+
+    /// <summary>The first billed artist's official homepage.</summary>
+    public string? Website { get; init; }
+
+    /// <summary>The pressing's first label. This and the rest of the pressing's facts only where one is proven.</summary>
+    public string? Label { get; init; }
+
+    public string? CatalogNumber { get; init; }
+
+    public string? Barcode { get; init; }
+
+    /// <summary>Where the pressing was released: "US", "XW" for worldwide.</summary>
+    public string? ReleaseCountry { get; init; }
+
+    /// <summary>"official", "promotion", "bootleg", lowercased as Picard writes it.</summary>
+    public string? ReleaseStatus { get; init; }
+
+    /// <summary>The format of the disc the track is on: "CD", "12\" Vinyl".</summary>
+    public string? Media { get; init; }
+
+    /// <summary>The track's own MBID on the pressing.</summary>
+    public Mbid? ReleaseTrackMbid { get; init; }
+
+    public string? Asin { get; init; }
+
+    /// <summary>The script the pressing's titles are written in: "Latn".</summary>
+    public string? Script { get; init; }
+
+    /// <summary>The title of the disc the track is on.</summary>
+    public string? DiscSubtitle { get; init; }
+
+    /// <summary>The album's primary type and then its secondary ones, lowercased: "album", "live".</summary>
+    public IReadOnlyList<string> ReleaseTypes { get; init; } = [];
+
+    /// <summary>The year the album first came out, which a reissue's own year is not.</summary>
+    public int? OriginalYear { get; init; }
+
+    /// <summary>Whether the album is billed to Various Artists, which is what Picard calls a compilation.</summary>
+    public bool Compilation { get; init; }
+
+    /// <summary>The work: the whole piece a movement is part of, else the recording's own work.</summary>
+    public string? Work { get; init; }
+
+    /// <summary>The movement's own name — see <see cref="WorkTags.MovementName"/>.</summary>
+    public string? MovementName { get; init; }
+
+    /// <summary>The movement's number in the piece.</summary>
+    public int? Movement { get; init; }
+
+    /// <summary>How many movements the piece has.</summary>
+    public int? MovementTotal { get; init; }
+
+    /// <summary>The languages the work's words are in, ISO 639-3.</summary>
+    public IReadOnlyList<string> Languages { get; init; } = [];
+
+    /// <summary>The Chromaprint fingerprint the file was identified by.</summary>
+    public string? AcoustIdFingerprint { get; init; }
+
+    /// <summary>The track's loudness range, LU, from the analysis pass.</summary>
+    public double? TrackRange { get; init; }
+
+    /// <summary>Tempo and key, as Essentia heard them — see <see cref="TempoAndKey"/>.</summary>
+    public TempoAndKey? TempoAndKey { get; init; }
 }
 
 /// <summary>
@@ -157,6 +238,46 @@ public static class CatalogueTags
     // The words: a Vorbis comment, an ID3 USLT, an MP4 ©lyr. LRC where timed.
     public const string Lyrics = "LYRICS";
 
+    // The rest of Picard's tags this catalogue can answer, under Picard's
+    // Vorbis names; CatalogueTagFields spells them for each container.
+    public const string ArtistSort = "ARTISTSORT";
+    public const string AlbumArtistSort = "ALBUMARTISTSORT";
+    public const string ComposerSort = "COMPOSERSORT";
+    public const string Artists = "ARTISTS";
+    public const string AlbumArtists = "ALBUMARTISTS";
+    public const string Writer = "WRITER";
+    public const string Remixer = "REMIXER";
+    public const string DjMixer = "DJMIXER";
+    public const string Website = "WEBSITE";
+    public const string Label = "LABEL";
+    public const string CatalogNumber = "CATALOGNUMBER";
+    public const string Barcode = "BARCODE";
+    public const string ReleaseCountry = "RELEASECOUNTRY";
+    public const string ReleaseStatus = "RELEASESTATUS";
+    public const string ReleaseType = "RELEASETYPE";
+    public const string Media = "MEDIA";
+    public const string Asin = "ASIN";
+    public const string Script = "SCRIPT";
+    public const string DiscSubtitle = "DISCSUBTITLE";
+    public const string OriginalYear = "ORIGINALYEAR";
+    public const string Compilation = "COMPILATION";
+    public const string Work = "WORK";
+    public const string MovementName = "MOVEMENTNAME";
+    public const string Movement = "MOVEMENT";
+    public const string MovementTotal = "MOVEMENTTOTAL";
+    public const string ShowMovement = "SHOWMOVEMENT";
+    public const string Language = "LANGUAGE";
+    public const string Bpm = "BPM";
+    public const string Key = "KEY";
+    public const string AcoustIdFingerprint = "ACOUSTID_FINGERPRINT";
+
+    // loudgain's two beside ReplayGain's four: "7.56 dB" and "-18.00 LUFS".
+    public const string TrackRange = "REPLAYGAIN_TRACK_RANGE";
+    public const string ReferenceLoudness = "REPLAYGAIN_REFERENCE_LOUDNESS";
+
+    /// <summary>MusicBrainz's Various Artists, whose album Picard tags a compilation.</summary>
+    public static readonly Mbid VariousArtists = new(Guid.Parse("89ad4ac3-39f7-470e-963a-56509c546377"));
+
     /// <summary>
     /// foobar2000's and Mp3tag's name for the same words, which Navidrome reads
     /// too: a file the catalogue gives words to carries them once, under
@@ -180,6 +301,8 @@ public static class CatalogueTags
     public const string ArtistId = "MUSICBRAINZ_ARTISTID";
     public const string AlbumArtistId = "MUSICBRAINZ_ALBUMARTISTID";
     public const string WorkId = "MUSICBRAINZ_WORKID";
+    public const string ReleaseTrackId = "MUSICBRAINZ_RELEASETRACKID";
+    public const string ComposerId = "MUSICBRAINZ_COMPOSERID";
     public const string AcoustIdField = "ACOUSTID_ID";
 
     /// <summary>
@@ -242,6 +365,50 @@ public static class CatalogueTags
         Add(tags, AlbumDynamicRange, Number(source.AlbumDynamicRange));
 
         Add(tags, Lyrics, source.Lyrics);
+
+        Add(tags, ArtistSort, source.ArtistSort);
+        Add(tags, AlbumArtistSort, source.AlbumArtistSort);
+        Add(tags, Artists, Values(source.Artists));
+        Add(tags, AlbumArtists, Values(source.AlbumArtists));
+        Add(tags, ComposerSort, Values(source.ComposerSorts));
+        Add(tags, ComposerId, Values([.. source.ComposerMbids.Select(id => id.ToString())]));
+        Add(tags, Writer, Values(source.Credits.Writers));
+        Add(tags, Remixer, Values(source.Credits.Remixers));
+        Add(tags, DjMixer, Values(source.Credits.DjMixers));
+        Add(tags, Website, source.Website);
+
+        Add(tags, Label, source.Label);
+        Add(tags, CatalogNumber, source.CatalogNumber);
+        Add(tags, Barcode, source.Barcode);
+        Add(tags, ReleaseCountry, source.ReleaseCountry);
+        Add(tags, ReleaseStatus, source.ReleaseStatus?.ToLowerInvariant());
+        Add(tags, Media, source.Media);
+        Add(tags, ReleaseTrackId, source.ReleaseTrackMbid?.ToString());
+        Add(tags, Asin, source.Asin);
+        Add(tags, Script, source.Script);
+        Add(tags, DiscSubtitle, source.DiscSubtitle);
+
+        Add(tags, ReleaseType, Values([.. source.ReleaseTypes.Select(type => type.ToLowerInvariant())]));
+        Add(tags, OriginalYear, Number(source.OriginalYear));
+        Add(tags, Compilation, source.Compilation ? "1" : null);
+
+        Add(tags, Work, source.Work);
+        Add(tags, Language, Values(source.Languages));
+
+        // The movement's three only together, and only where its number is known.
+        if (source is { MovementName.Length: > 0, Movement: > 0 })
+        {
+            Add(tags, MovementName, source.MovementName);
+            Add(tags, Movement, Number(source.Movement));
+            Add(tags, MovementTotal, Number(source.MovementTotal));
+            Add(tags, ShowMovement, "1");
+        }
+
+        Add(tags, AcoustIdFingerprint, source.AcoustIdFingerprint);
+        Add(tags, TrackRange, source.TrackRange is { } range ? AudioAnalysis.Gain(range) : null);
+        Add(tags, ReferenceLoudness, source.TrackGain is null ? null : AudioAnalysis.ReferenceLoudness);
+        Add(tags, Bpm, Number(TempoAndKey.TagBpm(source.TempoAndKey)));
+        Add(tags, Key, TempoAndKey.TagKey(source.TempoAndKey));
 
         return tags;
     }

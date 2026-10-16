@@ -44,6 +44,8 @@ function pendingSentence(status: {
   readonly pendingGenres: number
   readonly pendingParentWorks: number
   readonly pendingLyrics: number
+  readonly pendingWorks: number
+  readonly pendingReleases: number
 }): string {
   const parts: string[] = []
 
@@ -71,6 +73,24 @@ function pendingSentence(status: {
       `${status.pendingParentWorks.toLocaleString()} work${
         status.pendingParentWorks === 1 ? '' : 's'
       } to trace to the whole piece`,
+    )
+  }
+
+  // Then what the tags need and nothing else reads: each work's language and
+  // movement, each filed release's track ids.
+  if (status.pendingWorks > 0) {
+    parts.push(
+      `${status.pendingWorks.toLocaleString()} work${
+        status.pendingWorks === 1 ? '' : 's'
+      } to ask the language and movements of`,
+    )
+  }
+
+  if (status.pendingReleases > 0) {
+    parts.push(
+      `${status.pendingReleases.toLocaleString()} release${
+        status.pendingReleases === 1 ? '' : 's'
+      } to ask the track ids of`,
     )
   }
 

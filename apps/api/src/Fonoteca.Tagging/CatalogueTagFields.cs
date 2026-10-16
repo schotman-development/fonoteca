@@ -71,7 +71,86 @@ public static class CatalogueTagFields
         CatalogueTags.Lyricist,
         CatalogueTags.Conductor,
         CatalogueTags.Lyrics,
+
+        // Measured on ATL 7.16: each is read into its typed property from the
+        // container's own name, so a field written beside it would be a second
+        // copy — and each typed property writes Picard's name in every container.
+        CatalogueTags.ArtistSort,
+        CatalogueTags.AlbumArtistSort,
+        CatalogueTags.CatalogNumber,
+        CatalogueTags.Bpm,
+        CatalogueTags.Language,
     }.ToFrozenSet(StringComparer.Ordinal);
+
+    // ATL's typed properties that are Picard's field in some containers only,
+    // by the property's own name — which TagReader.Describe reports them under.
+    public const string Publisher = "Publisher";
+    public const string OriginalReleaseYear = "OriginalReleaseYear";
+    public const string SeriesTitle = "SeriesTitle";
+    public const string SeriesPart = "SeriesPart";
+
+    private static readonly FrozenSet<string> Typed = new[] { Publisher, OriginalReleaseYear, SeriesTitle, SeriesPart }
+        .ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The rest of Picard's tags, as Vorbis, ID3v2 and MP4 spell them, null
+    /// where Picard writes none in that container.
+    /// </summary>
+    /// <remarks>
+    /// Picard's own table, held to what ATL 7.16 writes and reads back — each
+    /// written alone into a file of each container and read again by ATL,
+    /// TagLib# and ffprobe. Where Picard's name is a frame or atom ATL knows,
+    /// the name is that frame or atom (<c>TSOC</c>, <c>soco</c>); where ATL reads
+    /// it into a typed property, the property (<see cref="Publisher"/> for
+    /// <c>TPUB</c>, <see cref="OriginalReleaseYear"/> for <c>TDOR</c>, the
+    /// series pair for <c>©mvn</c> and <c>©mvi</c>). Three measured exceptions:
+    /// <list type="bullet">
+    /// <item>ID3's movement frames, <c>MVNM</c> and <c>MVIN</c>, which ATL
+    /// writes as <c>TXXX</c> frames of those names whatever it is handed. The
+    /// three go as <c>TXXX</c> under the Vorbis names, which TagLib-based
+    /// readers read as the same fields.
+    /// ponytail: TXXX, not MVNM/MVIN — revisit if ATL learns the frames.</item>
+    /// <item>An MP4's ASIN: a four-letter name is an atom to ATL, and the
+    /// freeform spelling reads back under a name the diff cannot match.</item>
+    /// <item>The original year on Vorbis is <c>ORIGINALYEAR</c>, never
+    /// <c>ORIGINALDATE</c>: ATL reads a year-only <c>ORIGINALDATE</c> as no
+    /// date, and its typed year writes a field called <c>ORIGINALDATE </c>,
+    /// trailing space and all.</item>
+    /// </list>
+    /// </remarks>
+    private static readonly FrozenDictionary<string, (string? Vorbis, string? Id3, string? Mp4)> Picard =
+        new Dictionary<string, (string? Vorbis, string? Id3, string? Mp4)>(StringComparer.Ordinal)
+        {
+            [CatalogueTags.ComposerSort] = ("COMPOSERSORT", "TSOC", "soco"),
+            [CatalogueTags.Artists] = ("ARTISTS", "Artists", "ARTISTS"),
+            [CatalogueTags.AlbumArtists] = ("ALBUMARTISTS", "ALBUMARTISTS", "ALBUMARTISTS"),
+            [CatalogueTags.Writer] = ("WRITER", "Writer", null),
+            [CatalogueTags.Remixer] = ("REMIXER", "TPE4", "REMIXER"),
+            [CatalogueTags.DjMixer] = ("DJMIXER", "DJMIXER", "DJMIXER"),
+            [CatalogueTags.ComposerId] = ("MUSICBRAINZ_COMPOSERID", "MusicBrainz Composer Id", "MusicBrainz Composer Id"),
+            [CatalogueTags.Website] = ("WEBSITE", "WOAR", null),
+            [CatalogueTags.Label] = ("LABEL", Publisher, "LABEL"),
+            [CatalogueTags.Barcode] = ("BARCODE", "BARCODE", "BARCODE"),
+            [CatalogueTags.ReleaseCountry] = ("RELEASECOUNTRY", "MusicBrainz Album Release Country", "MusicBrainz Album Release Country"),
+            [CatalogueTags.ReleaseStatus] = ("RELEASESTATUS", "MusicBrainz Album Status", "MusicBrainz Album Status"),
+            [CatalogueTags.ReleaseType] = ("RELEASETYPE", "MusicBrainz Album Type", "MusicBrainz Album Type"),
+            [CatalogueTags.Media] = ("MEDIA", "TMED", "MEDIA"),
+            [CatalogueTags.ReleaseTrackId] = ("MUSICBRAINZ_RELEASETRACKID", "MusicBrainz Release Track Id", "MusicBrainz Release Track Id"),
+            [CatalogueTags.Asin] = ("ASIN", "ASIN", null),
+            [CatalogueTags.Script] = ("SCRIPT", "SCRIPT", "SCRIPT"),
+            [CatalogueTags.DiscSubtitle] = ("DISCSUBTITLE", "TSST", "DISCSUBTITLE"),
+            [CatalogueTags.OriginalYear] = ("ORIGINALYEAR", OriginalReleaseYear, null),
+            [CatalogueTags.Compilation] = ("COMPILATION", "TCMP", "cpil"),
+            [CatalogueTags.Work] = ("WORK", "WORK", "©wrk"),
+            [CatalogueTags.MovementName] = ("MOVEMENTNAME", "MOVEMENTNAME", SeriesTitle),
+            [CatalogueTags.Movement] = ("MOVEMENT", "MOVEMENT", SeriesPart),
+            [CatalogueTags.MovementTotal] = ("MOVEMENTTOTAL", "MOVEMENTTOTAL", "©mvc"),
+            [CatalogueTags.ShowMovement] = ("SHOWMOVEMENT", "SHOWMOVEMENT", "shwm"),
+            [CatalogueTags.Key] = ("KEY", "TKEY", "initialkey"),
+            [CatalogueTags.AcoustIdFingerprint] = ("ACOUSTID_FINGERPRINT", "Acoustid Fingerprint", "Acoustid Fingerprint"),
+            [CatalogueTags.TrackRange] = (CatalogueTags.TrackRange, CatalogueTags.TrackRange, "replaygain_track_range"),
+            [CatalogueTags.ReferenceLoudness] = (CatalogueTags.ReferenceLoudness, CatalogueTags.ReferenceLoudness, "replaygain_reference_loudness"),
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>
     /// The credits ATL has no typed property for, which every container takes
@@ -176,8 +255,14 @@ public static class CatalogueTagFields
         AcoustIdTagField.For(path) is null || !PersonTags.IsCustom(name) ? null : name;
 
     /// <summary>Whether a field, as a container spells it, is a person's own rather than the catalogue's.</summary>
+    /// <remarks>
+    /// A catalogue field written under a name a person could have chosen —
+    /// <c>BARCODE</c>, <c>TXXX:SCRIPT</c> — counts as one here too, which is what
+    /// has TagLib# confirm it where the container defines it.
+    /// </remarks>
     public static bool IsCustom(string field) =>
         !Standard.Contains(field)
+        && !Typed.Contains(field)
         && !TitleCased.ContainsKey(field)
         && !TitleCased.Values.Contains(field, StringComparer.OrdinalIgnoreCase)
         && PersonTags.IsCustom(field);
@@ -215,6 +300,24 @@ public static class CatalogueTagFields
 
         // An Opus file states its gain as R128_TRACK_GAIN, and RFC 7845 says not to write these there.
         if (ReplayGain.Contains(canonical)) return path.Value.EndsWith(".opus", StringComparison.OrdinalIgnoreCase) ? null : IsMp4(path) ? canonical.ToLowerInvariant() : canonical;
+
+        if (Picard.TryGetValue(canonical, out var names))
+        {
+            if (canonical is CatalogueTags.TrackRange or CatalogueTags.ReferenceLoudness
+                && path.Value.EndsWith(".opus", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return style switch
+            {
+                AcoustIdTagField.Uppercase => names.Vorbis,
+                AcoustIdTagField.TitleCase => IsMp4(path) ? names.Mp4 : names.Id3,
+
+                // No WMA here, and none of these measured in one.
+                _ => null,
+            };
+        }
 
         if (!TitleCased.TryGetValue(canonical, out var titled)) return null;
 

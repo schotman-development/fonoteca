@@ -520,6 +520,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<int?>("TagTrackNumber")
                         .HasColumnType("integer");
 
+                    b.Property<DateTimeOffset?>("TempoAndKeyMeasuredUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("TrackId")
                         .HasColumnType("uuid");
 
@@ -582,6 +585,26 @@ namespace Fonoteca.Data.Migrations
                                 .HasColumnType("integer");
                         });
 
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "TempoAndKey", "Fonoteca.Domain.Catalogue.MediaFile.TempoAndKey#TempoAndKey", b1 =>
+                        {
+                            b1.Property<double>("Bpm")
+                                .HasColumnType("double precision");
+
+                            b1.Property<double>("BpmConfidence")
+                                .HasColumnType("double precision");
+
+                            b1.Property<string>("Key")
+                                .HasMaxLength(10)
+                                .HasColumnType("character varying(10)");
+
+                            b1.Property<double>("KeyStrength")
+                                .HasColumnType("double precision");
+
+                            b1.Property<string>("Scale")
+                                .HasMaxLength(10)
+                                .HasColumnType("character varying(10)");
+                        });
+
                     b.HasKey("Id");
 
                     b.HasIndex("AcoustId")
@@ -607,6 +630,8 @@ namespace Fonoteca.Data.Migrations
                     b.HasIndex("ReleaseGroupId");
 
                     b.HasIndex("ReleaseId");
+
+                    b.HasIndex("TempoAndKeyMeasuredUtc");
 
                     b.HasIndex("TrackId");
 
@@ -766,6 +791,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Asin")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<string>("Barcode")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -777,6 +806,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<string>("Country")
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
+
+                    b.Property<DateTimeOffset?>("DescribedUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Disambiguation")
                         .HasMaxLength(1000)
@@ -814,6 +846,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<int?>("ReleasedYear")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Script")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<string>("Status")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -829,6 +865,8 @@ namespace Fonoteca.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Barcode");
+
+                    b.HasIndex("DescribedUtc");
 
                     b.HasIndex("Mbid")
                         .IsUnique()
@@ -1000,6 +1038,17 @@ namespace Fonoteca.Data.Migrations
                     b.Property<TimeSpan?>("Length")
                         .HasColumnType("interval");
 
+                    b.Property<Guid?>("Mbid")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MediumFormat")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("MediumTitle")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<string>("Number")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -1032,14 +1081,27 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("DescribedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Languages")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("PartCount")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("PartOfLookupUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Position")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -1051,6 +1113,8 @@ namespace Fonoteca.Data.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DescribedUtc");
 
                     b.HasIndex("Mbid")
                         .IsUnique()

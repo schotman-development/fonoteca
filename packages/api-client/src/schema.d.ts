@@ -2312,6 +2312,10 @@ export interface components {
             pendingParentWorks: number;
             /** Format: int32 */
             pendingLyrics: number;
+            /** Format: int32 */
+            pendingWorks: number;
+            /** Format: int32 */
+            pendingReleases: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {

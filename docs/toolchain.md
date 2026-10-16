@@ -16,6 +16,7 @@ one line in `~/.local/opt/env.sh` — except PostgreSQL, which runs in podman.
 | pnpm | 11.20.0 | via `corepack enable` | workspace package manager |
 | ffmpeg / ffprobe | 8.1.2 static | `~/.local/opt/ffmpeg` | decode-testing files for corruption; probing stream properties |
 | fpcalc | 1.6.1 | `~/.local/opt/chromaprint` | Chromaprint fingerprints for AcoustID |
+| Essentia | 2.1b6.dev1438 | `~/.local/opt/essentia` (a venv) | tempo and key, in the Analyse pass; optional |
 | podman | 4.9.3 | `/usr/bin` (apt) | container runtime |
 | docker-compose | 5.4.0 | `~/.local/bin` | compose provider for `podman compose` |
 | Playwright Chromium | 151.0.7922.34 | `~/.cache/ms-playwright` | real browser for the a11y test suite |
@@ -63,6 +64,32 @@ curl -fsSL https://api.github.com/repos/acoustid/chromaprint/releases/latest \
 
 Extract each to a versioned directory under `~/.local/opt` and symlink the
 unversioned name, as for every other Tier 0 tool.
+
+### Essentia
+
+A Python package, so a venv of its own, and not on `PATH`: the API runs its
+interpreter by absolute path (`Fonoteca__EssentiaPythonPath`), and leaving it
+unset turns tempo and key off. Ubuntu's Python ships without `ensurepip`, and
+installing it is apt, so the venv is made without pip and pip is put in from
+its own wheel. PyPI's JSON API states each file's sha256:
+
+```sh
+curl -fsSL https://pypi.org/pypi/essentia/2.1b6.dev1438/json \
+  | jq -r '.urls[] | select(.filename|test("cp314.*manylinux.*x86_64")) | "\(.digests.sha256)  \(.url)"'
+
+sha256sum -c - <<<'71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e  pip-26.2.1-py3-none-any.whl'
+sha256sum -c - <<<'1ee6107fe63fb3b50f8aa68466951f6ca1e162a700d8deffd46ab0506dab9acb  essentia-2.1b6.dev1438-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl'
+
+python3 -m venv --without-pip ~/.local/opt/essentia-2.1b6.dev1438
+ln -sfn essentia-2.1b6.dev1438 ~/.local/opt/essentia
+~/.local/opt/essentia/bin/python pip-26.2.1-py3-none-any.whl/pip install --no-index pip-26.2.1-py3-none-any.whl
+~/.local/opt/essentia/bin/python -m pip install essentia-2.1b6.dev1438-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+```
+
+A wheel is a zip with pip at its root, which is why the first `install` runs
+pip out of its own file. The second fetches numpy, PyYAML and six from PyPI,
+checked only by TLS. Essentia's AGPL covers the tool, run as a separate
+process; nothing of it is linked into Fonoteca.
 
 ### Playwright Chromium
 
@@ -112,6 +139,7 @@ dotnet --version     # 10.0.302
 node --version       # v24.18.1
 ffmpeg -version      # 8.1.2, from ~/.local/opt
 fpcalc -version      # 1.6.1
+~/.local/opt/essentia/bin/python -I -c 'import essentia; print(essentia.__version__)'   # 2.1-beta6-dev
 podman compose version
 ```
 
@@ -150,6 +178,7 @@ which TS 7.0 does not ship until 7.1. The generator is isolated in
 rm -rf ~/.local/opt/dotnet-10.0.302 ~/.local/opt/dotnet
 rm -rf ~/.local/opt/ffmpeg-8.1.2 ~/.local/opt/ffmpeg
 rm -rf ~/.local/opt/chromaprint-1.6.1 ~/.local/opt/chromaprint
+rm -rf ~/.local/opt/essentia-2.1b6.dev1438 ~/.local/opt/essentia
 rm -rf ~/.nuget/packages                 # NuGet cache, outside the SDK tree
 rm -f  ~/.local/bin/docker-compose
 rm -rf ~/.cache/ms-playwright            # browser cache (shared; check first)

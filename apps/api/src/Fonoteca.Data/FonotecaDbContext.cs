@@ -69,6 +69,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
             e.Property(x => x.Type).HasMaxLength(100);
+            e.Property(x => x.Languages).HasMaxLength(200);
+            e.HasIndex(x => x.DescribedUtc);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
 
@@ -122,9 +124,12 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Status).HasMaxLength(50);
             e.Property(x => x.Disambiguation).HasMaxLength(1000);
             e.Property(x => x.MediumFormats).HasMaxLength(200);
+            e.Property(x => x.Asin).HasMaxLength(20);
+            e.Property(x => x.Script).HasMaxLength(10);
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Barcode);
+            e.HasIndex(x => x.DescribedUtc);
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
             e.HasOne(x => x.ReleaseGroup)
                 .WithMany(g => g.Releases)
@@ -145,6 +150,8 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000);
             e.Property(x => x.Number).HasMaxLength(50);
+            e.Property(x => x.MediumTitle).HasMaxLength(1000);
+            e.Property(x => x.MediumFormat).HasMaxLength(100);
             e.HasOne(x => x.Release)
                 .WithMany(r => r.Tracks)
                 .HasForeignKey(x => x.ReleaseId)
@@ -283,8 +290,16 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // The measurement likewise: read with the file, never on its own.
             e.ComplexProperty(x => x.Measurement, m => m.IsRequired(false));
 
+            e.ComplexProperty(x => x.TempoAndKey, t =>
+            {
+                t.IsRequired(false);
+                t.Property(p => p.Key).HasMaxLength(10);
+                t.Property(p => p.Scale).HasMaxLength(10);
+            });
+
             // The measure pass's worklist.
             e.HasIndex(x => x.MeasuredUtc);
+            e.HasIndex(x => x.TempoAndKeyMeasuredUtc);
         });
 
         modelBuilder.Entity<Artist>(e =>

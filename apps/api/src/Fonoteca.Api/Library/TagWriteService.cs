@@ -602,11 +602,21 @@ public sealed partial class TagWriteService(
                 answered.Any(other => other.Id == file.Id),
                 file.Recording.Contributions
                     .OrderBy(link => link.Position)
-                    .Select(link => new PendingLink(link.Type, link.Attributes, link.Name))
+                    .Select(link => new PendingLink(
+                        link.Type,
+                        link.Attributes,
+                        link.Name,
+                        link.ArtistMbid,
+                        db.Artists.Where(artist => artist.Mbid == link.ArtistMbid).Select(artist => artist.SortName).FirstOrDefault()))
                     .ToList(),
                 file.Recording.Work!.Contributions
                     .OrderBy(link => link.Position)
-                    .Select(link => new PendingLink(link.Type, link.Attributes, link.Name))
+                    .Select(link => new PendingLink(
+                        link.Type,
+                        link.Attributes,
+                        link.Name,
+                        link.ArtistMbid,
+                        db.Artists.Where(artist => artist.Mbid == link.ArtistMbid).Select(artist => artist.SortName).FirstOrDefault()))
                     .ToList(),
                 file.Recording.Credits
                     .OrderBy(credit => credit.Position)
@@ -615,7 +625,9 @@ public sealed partial class TagWriteService(
                         credit.JoinPhrase,
                         credit.Artist!.Mbid,
                         credit.Artist!.Name,
-                        credit.Artist!.LatinName))
+                        credit.Artist!.LatinName,
+                        credit.Artist!.SortName,
+                        credit.Artist!.LinksJson))
                     .ToList(),
                 file.Release!.Credits
                     .OrderBy(credit => credit.Position)
@@ -624,8 +636,36 @@ public sealed partial class TagWriteService(
                         credit.JoinPhrase,
                         credit.Artist!.Mbid,
                         credit.Artist!.Name,
-                        credit.Artist!.LatinName))
-                    .ToList()))
+                        credit.Artist!.LatinName,
+                        credit.Artist!.SortName,
+                        null))
+                    .ToList(),
+                file.Fingerprint,
+                file.TempoAndKey,
+                file.Release != null
+                    ? new PendingPressing(
+                        file.Release.Label,
+                        file.Release.CatalogNumber,
+                        file.Release.Barcode,
+                        file.Release.Country,
+                        file.Release.Status,
+                        file.Release.Asin,
+                        file.Release.Script,
+                        file.Track!.Mbid,
+                        file.Track.MediumTitle,
+                        file.Track.MediumFormat)
+                    : null,
+                file.ReleaseGroup != null
+                    ? new PendingAlbum(file.ReleaseGroup.PrimaryType, file.ReleaseGroup.SecondaryTypes, file.ReleaseGroup.FirstReleaseYear)
+                    : null,
+                file.Recording.Work != null
+                    ? new PendingWork(
+                        file.Recording.Work.Title,
+                        file.Recording.Work.Languages,
+                        file.Recording.Work.Position,
+                        file.Recording.Work.Parent!.Title,
+                        file.Recording.Work.Parent!.PartCount)
+                    : null))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -808,7 +848,9 @@ public sealed partial class TagWriteService(
                         credit.JoinPhrase,
                         credit.Artist!.Mbid,
                         credit.Artist!.Name,
-                        credit.Artist!.LatinName),
+                        credit.Artist!.LatinName,
+                        credit.Artist!.SortName,
+                        null),
                 })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false));
@@ -2284,10 +2326,32 @@ public sealed partial class TagWriteService(
     /// <param name="Name">As billed: what the tags print.</param>
     /// <param name="Own">The artist's own name, whatever the billing: what a folder is named for.</param>
     /// <param name="Latin">The displayed alias, only to recognise a folder named by it.</param>
-    private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid, string Own, string? Latin);
+    /// <param name="Sort">The artist's sort name: "Davis, Miles".</param>
+    /// <param name="Links">The artist's pages elsewhere, read only for the recording's billing — see <see cref="ArtistLinks"/>.</param>
+    private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid, string Own, string? Latin, string? Sort, string? Links);
 
     /// <summary>One link MusicBrainz states on the recording or its work, as <see cref="CreditTags"/> reads it.</summary>
-    private sealed record PendingLink(string Type, string? Attributes, string Name);
+    /// <param name="Sort">The sort name of the artist row the link's MBID names, where there is one.</param>
+    private sealed record PendingLink(string Type, string? Attributes, string Name, Mbid? Mbid, string? Sort);
+
+    /// <summary>The facts of the pressing a file is filed under, and of its place there.</summary>
+    private sealed record PendingPressing(
+        string? Label,
+        string? CatalogNumber,
+        string? Barcode,
+        string? Country,
+        string? Status,
+        string? Asin,
+        string? Script,
+        Mbid? TrackMbid,
+        string? MediumTitle,
+        string? MediumFormat);
+
+    /// <summary>The album's own facts, whatever pressing is filed.</summary>
+    private sealed record PendingAlbum(string? PrimaryType, string? SecondaryTypes, int? FirstReleaseYear);
+
+    /// <summary>The recording's work, and the whole it is a part of.</summary>
+    private sealed record PendingWork(string Title, string? Languages, int? Position, string? ParentTitle, int? PartCount);
 
     /// <summary>
     /// One file's row, flattened out of the entity graph.
@@ -2327,7 +2391,12 @@ public sealed partial class TagWriteService(
         List<PendingLink> RecordingLinks,
         List<PendingLink> WorkLinks,
         List<PendingCredit> RecordingCredits,
-        List<PendingCredit> ReleaseCredits)
+        List<PendingCredit> ReleaseCredits,
+        string? Fingerprint,
+        TempoAndKey? TempoAndKey,
+        PendingPressing? Pressing,
+        PendingAlbum? AlbumFacts,
+        PendingWork? WorkFacts)
     {
         /// <summary>The tags a person set on the file, over everything else.</summary>
         public IReadOnlyDictionary<string, string?> Person => PersonEdits.Read(TagEditsJson);
@@ -2382,9 +2451,12 @@ public sealed partial class TagWriteService(
             DynamicRange = AudioAnalysis.DynamicRange(Measurement),
             AlbumDynamicRange = AlbumLoudness?.DynamicRange,
             Lyrics = Lyrics,
+            AcoustIdFingerprint = Fingerprint,
+            TrackRange = Measurement?.LoudnessRangeLu,
+            TempoAndKey = TempoAndKey,
         };
 
-        private CatalogueTagSource Catalogued() => new()
+        private CatalogueTagSource Catalogued() => Movements(new()
         {
             TrackTitle = TrackTitle,
             RecordingTitle = RecordingTitle,
@@ -2420,7 +2492,68 @@ public sealed partial class TagWriteService(
             DynamicRange = AudioAnalysis.DynamicRange(Measurement),
             AlbumDynamicRange = AlbumLoudness?.DynamicRange,
             Lyrics = Lyrics,
-        };
+            AcoustIdFingerprint = Fingerprint,
+            TrackRange = Measurement?.LoudnessRangeLu,
+            TempoAndKey = TempoAndKey,
+
+            // A person's own artist or album artist leaves the catalogue's
+            // spellings of that billing out, rather than contradict it.
+            ArtistSort = Person.ContainsKey(CatalogueTags.Artist) ? null : SortLine(RecordingCredits),
+            Artists = Person.ContainsKey(CatalogueTags.Artist) ? [] : [.. RecordingCredits.Select(credit => credit.Name)],
+            AlbumArtistSort = AlbumArtistTyped ? null : SortLine(ReleaseCredits),
+            AlbumArtists = AlbumArtistTyped ? [] : [.. ReleaseCredits.Select(credit => credit.Name)],
+            ComposerSorts = ComposerLinks.All(link => link.Sort is { Length: > 0 }) ? [.. ComposerLinks.Select(link => link.Sort!)] : [],
+            ComposerMbids = [.. ComposerLinks.Where(link => link.Mbid is not null).Select(link => link.Mbid!.Value).Distinct()],
+            Website = RecordingCredits.FirstOrDefault() is { } first ? ArtistLinks.Homepage(first.Links) : null,
+            Compilation = Mbids(ReleaseCredits).Contains(CatalogueTags.VariousArtists),
+            ReleaseTypes = AlbumFacts is null ? [] : [.. new[] { AlbumFacts.PrimaryType }.OfType<string>().Concat(FileGenres.Split(AlbumFacts.SecondaryTypes))],
+            OriginalYear = AlbumFacts?.FirstReleaseYear,
+            Languages = FileGenres.Split(WorkFacts?.Languages),
+
+            // The pressing's, which a file held to its album alone has none of.
+            Label = Pressing?.Label,
+            CatalogNumber = Pressing?.CatalogNumber,
+            Barcode = Pressing?.Barcode,
+            ReleaseCountry = Pressing?.Country,
+            ReleaseStatus = Pressing?.Status,
+            Asin = Pressing?.Asin,
+            Script = Pressing?.Script,
+            ReleaseTrackMbid = Pressing?.TrackMbid,
+            DiscSubtitle = Pressing?.MediumTitle,
+            Media = Pressing?.MediumFormat,
+        });
+
+        private bool AlbumArtistTyped => AlbumArtistEdit is not null || Person.ContainsKey(CatalogueTags.AlbumArtist);
+
+        /// <summary>The composers each once by name, as <see cref="CreditTags"/> lists them.</summary>
+        private List<PendingLink> ComposerLinks =>
+            [.. RecordingLinks.Concat(WorkLinks)
+                .Where(link => link.Type.Equals("composer", StringComparison.OrdinalIgnoreCase))
+                .DistinctBy(link => link.Name, StringComparer.Ordinal)];
+
+        /// <summary>
+        /// The work, and where it is a movement of a whole whose order is known,
+        /// the whole as the work and the movement beside it.
+        /// </summary>
+        private CatalogueTagSource Movements(CatalogueTagSource source) =>
+            WorkFacts switch
+            {
+                null => source,
+                { ParentTitle: { } whole, Position: > 0 } work => source with
+                {
+                    Work = whole,
+                    MovementName = WorkTags.MovementName(work.Title, whole),
+                    Movement = work.Position,
+                    MovementTotal = work.PartCount,
+                },
+                var work => source with { Work = work.Title },
+            };
+
+        /// <summary>The billing line in sort names, or null where any artist on it has none.</summary>
+        private static string? SortLine(List<PendingCredit> credits) =>
+            credits.Count > 0 && credits.All(credit => credit.Sort is { Length: > 0 })
+                ? CatalogueEndpoints.CreditLine(credits.Select(credit => (credit.Sort!, credit.JoinPhrase)))
+                : null;
 
         /// <summary>
         /// "Beth Hart &amp; Joe Bonamassa" from the parts that printed it.

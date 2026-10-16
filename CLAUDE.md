@@ -46,7 +46,8 @@ the rest.
    `AcoustIdCheckedUtc`, `RecordingLookupUtc`, `ReleaseLookupUtc`,
    `Artists.LookupUtc`, `PortraitLookupUtc`, `DiscographyLookupUtc`,
    `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`, `Recordings.DescribedUtc`,
-   `ReleaseGroups.GenresLookupUtc`, `Works.PartOfLookupUtc`. A library is full of things the provider has never heard
+   `ReleaseGroups.GenresLookupUtc`, `Works.PartOfLookupUtc`, `Works.DescribedUtc`,
+   `Releases.DescribedUtc`, `TempoAndKeyMeasuredUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -249,7 +250,8 @@ run rather than a no-op.
 **Enrichment's stages run in `RunAsync`, in order, because each depends on what
 the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
-held recordings described again → parent works → album genres → artists → portraits → articles,
+held recordings described again → parent works → works and filed releases
+asked for what the tags need → album genres → artists → portraits → articles,
 banners, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
@@ -384,7 +386,12 @@ analysis filters (`ebur128`, `astats`, `drmeter`, `silencedetect`) talk on the
 same channel. Called Analyse because the dashboard already calls the probe
 "measure". The probe's shape throughout: `MeasuredUtc` is the "we asked" stamp,
 a missing binary ends the pass, a file not on disk stays pending, a scan that
-sees the audio change clears `Measurement`. **Answers, never rankings**:
+sees the audio change clears `Measurement` (and the tempo and key). **Tempo and
+key are a second question in the same pass** (ADR 0017): Essentia, through its
+venv's interpreter (`Fonoteca:EssentiaPythonPath`, empty = not asked), stamped
+apart (`TempoAndKeyMeasuredUtc`) so turning it on asks only that half; every
+reading is kept, `BPM` is tagged only at a confidence of 1 or more, `KEY` always
+(the owner's choices). **Answers, never rankings**:
 `AudioMeasurement` keeps readings; `AudioAnalysis` turns them into ReplayGain 2.0
 (−18 LUFS, sample peak), the DR figure, clipping and the **measured bit depth,
 which the upgrade list and album replacement rank by** — 16-bit audio in a
@@ -398,8 +405,8 @@ as `DYNAMIC RANGE` and `ALBUM DYNAMIC RANGE` — foobar2000's DR Meter's names,
 no standard naming any — the album's only where every track has one.
 **Every analysed file is on the tag write's worklist**, since a gain needs no
 identity — one the catalogue has not answered (`TagWriteService.Answered`) gets
-its ReplayGain and DR alone, and a lyrics file's words beside it: no partial
-answer, no sleeve, no rename. Opus
+its ReplayGain and DR alone, its tempo, key and fingerprint, and a lyrics
+file's words beside it: no partial answer, no sleeve, no rename. Opus
 gets no ReplayGain (RFC 7845 wants `R128_TRACK_GAIN` there; no Opus in the
 library yet).
 
@@ -484,6 +491,19 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   and its `UNSYNCEDLYRICS`; every `.lrc` beside a written track goes to the
   trash once the tag holds the words, its own words going in first where
   LRCLIB has none. All the owner's choices, and nothing in Fonoteca shows them.
+  **And the rest of Picard's tags the catalogue can answer** (ADR 0017, "all tags
+  that are standard", the owner's choice): sort names, ARTISTS/ALBUMARTISTS,
+  WRITER, REMIXER, the composers' ids and sort names, the first artist's
+  homepage, RELEASETYPE, ORIGINALYEAR, COMPILATION, WORK and the movement
+  four, LANGUAGE, the fingerprint, the loudness range and reference, BPM and
+  KEY — each where ATL 7.16 was measured to put it where Picard does
+  (`CatalogueTagFields.Picard`): a typed property where ATL reads one, else the
+  container's frame or atom, else a comment, `TXXX` or freeform atom. ID3's
+  movements are `TXXX`, not `MVNM`/`MVIN`, which ATL cannot write; an MP4 gets
+  no ASIN. The pressing's own — label, catalogue number, barcode, country,
+  status, medium, release track id, ASIN, script, disc title — only with a
+  proven pressing; a person's own artist or album artist drops the
+  catalogue's sort name and list for that billing.
 - **A pressing's tags only with a proven pressing.** A file held to its album
   alone gets the album's facts — title, artist, album, album artist (the display
   edition's billing), year (`AlbumYear`), recording and release-group MBIDs, and

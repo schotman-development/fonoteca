@@ -221,9 +221,18 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var works = await db.Works
+                .Where(UndescribedWork)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var releases = await UndescribedReleases(db)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres, parentWorks, words);
+                recordings, genres, parentWorks, words, works, releases);
         }
     }
 
@@ -397,6 +406,26 @@ public sealed class EnrichmentService(
                 ClaimUnclimbedWorksAsync(cancellationToken),
                 work => ClimbAsync(work, counts, cancellationToken),
                 work => work.Title).ConfigureAwait(false);
+
+            // Then every work's languages and its place among its parent's
+            // parts, after the climb so the parents it minted are asked too;
+            // and the ASIN, script and track ids of every release a file is
+            // filed under. All of it is tags and nothing else reads it.
+            await DrainAsync(
+                ClaimPagesAsync(
+                    db => db.Works.AsNoTracking().Where(UndescribedWork).OrderBy(w => w.Id)
+                        .Select(w => new PendingDescription<WorkId>(w.Id, w.Title, w.Mbid!.Value)),
+                    cancellationToken),
+                work => DescribeWorkAsync(work, counts, cancellationToken),
+                work => work.Title).ConfigureAwait(false);
+
+            await DrainAsync(
+                ClaimPagesAsync(
+                    db => UndescribedReleases(db).AsNoTracking().OrderBy(r => r.Id)
+                        .Select(r => new PendingDescription<ReleaseId>(r.Id, r.Title, r.Mbid!.Value)),
+                    cancellationToken),
+                release => DescribeReleaseAsync(release, counts, cancellationToken),
+                release => release.Title).ConfigureAwait(false);
 
             // The albums' own genres: one request each, and what a file is
             // tagged with before its recording's.
@@ -2790,6 +2819,54 @@ public sealed class EnrichmentService(
             && (work.PartOfLookupUtc == null
                 || (work.ParentId == null && work.PartOfLookupUtc < cutoff)));
 
+    /// <summary>Works MusicBrainz has never been asked for their languages and parts.</summary>
+    private static readonly System.Linq.Expressions.Expression<Func<Work, bool>> UndescribedWork =
+        work => work.Mbid != null && work.DescribedUtc == null;
+
+    /// <summary>Releases a file is filed under, never asked for their ASIN, script and track ids.</summary>
+    private static IQueryable<Release> UndescribedReleases(FonotecaDbContext db) =>
+        db.Releases.Where(release => release.Mbid != null
+            && release.DescribedUtc == null
+            && db.MediaFiles.Any(file => file.ReleaseId == release.Id));
+
+    /// <summary>A worklist a page at a time, each item once.</summary>
+    /// <remarks>
+    /// The other claims' shape, for a query whose rows a handled item leaves
+    /// by being stamped: an item that failed stays in the query and is skipped
+    /// by <c>seen</c>, and a page of nothing new ends it. The query orders by
+    /// id before it projects, as every claim here does: EF cannot order by a
+    /// member of the projection.
+    /// </remarks>
+    private async IAsyncEnumerable<PendingDescription<TId>> ClaimPagesAsync<TId>(
+        Func<FonotecaDbContext, IQueryable<PendingDescription<TId>>> query,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        where TId : notnull
+    {
+        var seen = new HashSet<TId>();
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            List<PendingDescription<TId>> page;
+
+            var scope = scopeFactory.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                page = await query(db)
+                    .Take(PageSize)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var fresh = page.Where(item => seen.Add(item.Id)).ToList();
+
+            if (fresh.Count == 0) yield break;
+
+            foreach (var item in fresh) yield return item;
+        }
+    }
+
     /// <summary>The parent-work worklist, a page at a time, with the same guard.</summary>
     /// <remarks>
     /// A parent minted while the stage runs joins a later page, which is how one
@@ -3043,6 +3120,120 @@ public sealed class EnrichmentService(
                 await new CatalogueWriter(db, new HashSet<Mbid>(), clock)
                     .PartOfAsync(row, work, cancellationToken)
                     .ConfigureAwait(false);
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>One work asked for its languages and its parts, stamped whether or not MusicBrainz still knows it.</summary>
+    /// <remarks>
+    /// Its place is kept only among the parts of the parent this row already
+    /// names: a work can be a part of two, and a movement number is a number
+    /// in one particular order.
+    /// </remarks>
+    private async Task DescribeWorkAsync(
+        PendingDescription<WorkId> item,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        MusicBrainzWork? work;
+
+        try
+        {
+            work = await musicBrainz.GetWorkAsync(item.Mbid, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            counts.Failed++;
+            Log.RecordingNotDescribed(logger, item.Title, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.Works
+                .FirstOrDefaultAsync(w => w.Id == item.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (row is null) return;
+
+            row.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+            if (work is not null)
+            {
+                var parent = row.ParentId is { } parentId
+                    ? await db.Works.Where(w => w.Id == parentId).Select(w => w.Mbid).FirstOrDefaultAsync(cancellationToken)
+                        .ConfigureAwait(false)
+                    : null;
+
+                new CatalogueWriter(db, new HashSet<Mbid>(), clock)
+                    .Describe(row, work, underItsParent: parent is not null && work.ParentId == parent);
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>One filed release asked for its ASIN, script and track ids, stamped whether or not MusicBrainz still knows it.</summary>
+    /// <remarks>
+    /// Onto the track rows already there, slot by slot, and nothing else: the
+    /// track list itself is the attribution pass's to rewrite.
+    /// </remarks>
+    private async Task DescribeReleaseAsync(
+        PendingDescription<ReleaseId> item,
+        Tally counts,
+        CancellationToken cancellationToken)
+    {
+        MusicBrainzRelease? release;
+
+        try
+        {
+            release = await musicBrainz.GetReleaseAsync(item.Mbid, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ProviderUnavailableException cause)
+        {
+            counts.Failed++;
+            Log.RecordingNotDescribed(logger, item.Title, cause.Message);
+            return;
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var row = await db.Releases
+                .Include(r => r.Tracks)
+                .FirstOrDefaultAsync(r => r.Id == item.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (row is null) return;
+
+            row.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+            if (release is not null)
+            {
+                row.Asin = ReleaseAttributionService.ReleaseWriter.Clamp(release.Asin, 20);
+                row.Script = ReleaseAttributionService.ReleaseWriter.Clamp(release.Script, 10);
+
+                var printed = release.Tracks
+                    .GroupBy(track => (track.DiscNumber, track.Position))
+                    .ToDictionary(slot => slot.Key, slot => slot.First());
+
+                foreach (var track in row.Tracks)
+                {
+                    if (!printed.TryGetValue((track.DiscNumber, track.Position), out var slot)) continue;
+
+                    var disc = release.Media?.FirstOrDefault(medium => medium.Position == track.DiscNumber);
+
+                    track.Mbid = slot.Id ?? track.Mbid;
+                    track.MediumTitle = ReleaseAttributionService.ReleaseWriter.Clamp(disc?.Title, 1000);
+                    track.MediumFormat = ReleaseAttributionService.ReleaseWriter.Clamp(disc?.Format, 100) ?? track.MediumFormat;
+                }
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -3362,6 +3553,8 @@ public enum EnrichmentStatus
 /// <param name="Recordings">Held recordings MusicBrainz has not described, or described with no genre a week ago.</param>
 /// <param name="Genres">Held albums whose genres nobody has asked for, or found none of a week ago.</param>
 /// <param name="Lyrics">Held recordings nobody has looked for the words of, or found none of a week ago.</param>
+/// <param name="Works">Works nobody has asked MusicBrainz for their languages and parts.</param>
+/// <param name="Releases">Releases a file is filed under, never asked for their ASIN, script and track ids.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
@@ -3374,7 +3567,9 @@ public sealed record EnrichmentPending(
     int Recordings,
     int Genres,
     int ParentWorks,
-    int Lyrics)
+    int Lyrics,
+    int Works,
+    int Releases)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -3386,7 +3581,7 @@ public sealed record EnrichmentPending(
     /// </remarks>
     public int Total =>
         Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
-        + ParentWorks + Lyrics;
+        + ParentWorks + Lyrics + Works + Releases;
 }
 
 /// <summary>Where a running pass has got to.</summary>

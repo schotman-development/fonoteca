@@ -7206,6 +7206,8 @@
           "pendingGenres",
           "pendingParentWorks",
           "pendingLyrics",
+          "pendingWorks",
+          "pendingReleases",
           "lastCompleted"
         ],
         "type": "object",
@@ -7282,6 +7284,14 @@
             "format": "int32"
           },
           "pendingLyrics": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingWorks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingReleases": {
             "type": "integer",
             "format": "int32"
           },

@@ -407,6 +407,8 @@ public static class LibraryEndpoints
             PendingGenres: pending.Genres,
             PendingParentWorks: pending.ParentWorks,
             PendingLyrics: pending.Lyrics,
+            PendingWorks: pending.Works,
+            PendingReleases: pending.Releases,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -717,6 +719,12 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Held recordings with no words looked for yet, or none found a week ago.</summary>
     int PendingLyrics,
+
+    /// <summary>Works never asked for their languages and parts.</summary>
+    int PendingWorks,
+
+    /// <summary>Filed releases never asked for their ASIN, script and track ids.</summary>
+    int PendingReleases,
 
     EnrichmentSummary? LastCompleted);
 

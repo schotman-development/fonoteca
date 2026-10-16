@@ -235,6 +235,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
             ? (await UpsertParentAsync(parent, source.ParentTitle, cancellationToken).ConfigureAwait(false)).Id
             : null;
 
+        Describe(work, source, underItsParent: work.ParentId is not null);
+
         await ApplyContributionsAsync(null, work.Id, source.Relations, cancellationToken).ConfigureAwait(false);
 
         return work;
@@ -256,6 +258,28 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         row.ParentId = source.ParentId is { } parent && parent != row.Mbid
             ? (await UpsertParentAsync(parent, source.ParentTitle, cancellationToken).ConfigureAwait(false)).Id
             : null;
+
+        Describe(row, source, underItsParent: row.ParentId is not null);
+    }
+
+    /// <summary>
+    /// What a work's own lookup says that only the tags read: its languages,
+    /// and its place among the parts of the parent this same answer names.
+    /// </summary>
+    /// <remarks>
+    /// Stamped wherever a work's whole document arrives, so one the recording
+    /// stage or the climb has just fetched is not asked again by the stage
+    /// that describes the rest.
+    /// </remarks>
+    public void Describe(Work row, MusicBrainzWork source, bool underItsParent)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(source);
+
+        row.Languages = EnrichmentService.Joined(source.Languages ?? []);
+        row.Position = underItsParent ? source.Position : null;
+        row.PartCount = source.PartCount > 0 ? source.PartCount : null;
+        row.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
     }
 
     /// <summary>

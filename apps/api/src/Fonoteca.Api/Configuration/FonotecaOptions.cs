@@ -101,6 +101,12 @@ public sealed class FonotecaOptions : IValidatableObject
     /// <summary>Path to <c>ffmpeg</c>. Resolved from PATH when empty.</summary>
     public string FfmpegPath { get; init; } = "ffmpeg";
 
+    /// <summary>
+    /// The Python interpreter Essentia is installed for, which the analyse pass
+    /// measures tempo and key with. Empty leaves tempo and key unmeasured.
+    /// </summary>
+    public string EssentiaPythonPath { get; init; } = "";
+
     /// <summary>How many files to probe and fingerprint concurrently.</summary>
     [Range(1, 64)]
     public int ScanConcurrency { get; init; } = 4;

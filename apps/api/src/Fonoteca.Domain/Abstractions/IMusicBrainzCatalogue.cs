@@ -396,7 +396,16 @@ public sealed record MusicBrainzWork(
     /// </remarks>
     Mbid? ParentId = null,
 
-    string? ParentTitle = null);
+    string? ParentTitle = null,
+
+    /// <summary>The languages its words are in, ISO 639-3: <c>eng</c>, <c>zxx</c> for none, <c>mul</c> for several.</summary>
+    IReadOnlyList<string>? Languages = null,
+
+    /// <summary>Its place in <see cref="ParentId"/>'s order of parts — the movement's number.</summary>
+    int? Position = null,
+
+    /// <summary>How many parts MusicBrainz lists for it: a symphony's movements.</summary>
+    int PartCount = 0);
 
 /// <summary>One name an artist is also known by.</summary>
 /// <remarks>
@@ -732,7 +741,10 @@ public sealed record MusicBrainzMediumSummary(
     /// <summary>CD, Digital Media, 12" Vinyl, SHM-CD.</summary>
     string? Format,
 
-    int TrackCount);
+    int TrackCount,
+
+    /// <summary>The disc's own title, where the release prints one: "Live at the Fillmore".</summary>
+    string? Title = null);
 
 /// <summary>A release and its whole track list.</summary>
 public sealed record MusicBrainzRelease(
@@ -761,7 +773,13 @@ public sealed record MusicBrainzRelease(
     /// answers, and which disc a file sits on decides which one it is held to.
     /// Null where the caller built the release without them.
     /// </summary>
-    IReadOnlyList<MusicBrainzMediumSummary>? Media = null);
+    IReadOnlyList<MusicBrainzMediumSummary>? Media = null,
+
+    /// <summary>Amazon's identifier for the product.</summary>
+    string? Asin = null,
+
+    /// <summary>The script its titles are written in, ISO 15924: <c>Latn</c>, <c>Jpan</c>.</summary>
+    string? Script = null);
 
 /// <summary>A label and the catalogue number it gave this release.</summary>
 public sealed record MusicBrainzLabel(Mbid? Id, string? Name, string? CatalogNumber);
@@ -777,7 +795,10 @@ public sealed record MusicBrainzTrack(
     /// <summary>The recording this track is an appearance of.</summary>
     Mbid? RecordingId,
 
-    IReadOnlyList<MusicBrainzCredit> Credits)
+    IReadOnlyList<MusicBrainzCredit> Credits,
+
+    /// <summary>The track's own MBID: this position on this release, which the recording's is not.</summary>
+    Mbid? Id = null)
 {
     /// <summary>A position holding no song — see <see cref="TrackTitles"/>.</summary>
     public bool IsPlaceholder => TrackTitles.IsPlaceholder(Title);

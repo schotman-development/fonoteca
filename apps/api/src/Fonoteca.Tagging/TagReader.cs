@@ -278,6 +278,19 @@ public sealed class TagReader(IAudioFileStore files)
         AddIfPresent(fields, "LYRICIST", track.Lyricist);
         AddIfPresent(fields, "CONDUCTOR", track.Conductor);
 
+        // The rest ATL takes into typed properties: the first five under
+        // Picard's name, the four whose container decides under their own —
+        // see CatalogueTagFields.
+        AddIfPresent(fields, "ARTISTSORT", track.SortArtist);
+        AddIfPresent(fields, "ALBUMARTISTSORT", track.SortAlbumArtist);
+        AddIfPresent(fields, "CATALOGNUMBER", track.CatalogNumber);
+        AddIfPresent(fields, "LANGUAGE", track.Language);
+        AddIfPresent(fields, "BPM", Count(track.BPM is { } bpm ? (int)Math.Round(bpm, MidpointRounding.AwayFromZero) : null));
+        AddIfPresent(fields, CatalogueTagFields.Publisher, track.Publisher);
+        AddIfPresent(fields, CatalogueTagFields.OriginalReleaseYear, Count(track.OriginalReleaseYear));
+        AddIfPresent(fields, CatalogueTagFields.SeriesTitle, track.SeriesTitle);
+        AddIfPresent(fields, CatalogueTagFields.SeriesPart, track.SeriesPart);
+
         // The numbers, so a catalogue write can be diffed and verified against
         // them. Reported under the same names CatalogueTags uses, which is what
         // lets one desired-value map serve as both the plan's input and the

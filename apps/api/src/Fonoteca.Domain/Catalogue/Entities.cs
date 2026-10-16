@@ -55,6 +55,23 @@ public sealed class Work
     /// </remarks>
     public DateTimeOffset? PartOfLookupUtc { get; set; }
 
+    /// <summary>The languages its words are in, ISO 639-3, as <see cref="FileGenres.Split"/> reads them.</summary>
+    public string? Languages { get; set; }
+
+    /// <summary>Its place in its parent's order of parts: the movement's number.</summary>
+    public int? Position { get; set; }
+
+    /// <summary>How many parts MusicBrainz lists for it, where it has any.</summary>
+    public int? PartCount { get; set; }
+
+    /// <summary>When MusicBrainz was last asked for this work's languages and parts.</summary>
+    /// <remarks>
+    /// The works stage's "we asked" stamp (rule 1), set when MusicBrainz no
+    /// longer knows the work too. Never asked again: a work's language and its
+    /// parts are not facts MusicBrainz gains over time the way it gains genres.
+    /// </remarks>
+    public DateTimeOffset? DescribedUtc { get; set; }
+
     public ICollection<Recording> Recordings { get; init; } = [];
     public ICollection<Relationship> Relationships { get; init; } = [];
 
@@ -326,6 +343,20 @@ public sealed class Release
     /// </remarks>
     public string? MediumFormats { get; set; }
 
+    /// <summary>Amazon's identifier for the product, as MusicBrainz states it.</summary>
+    public string? Asin { get; set; }
+
+    /// <summary>The script its titles are written in, ISO 15924: <c>Latn</c>, <c>Jpan</c>.</summary>
+    public string? Script { get; set; }
+
+    /// <summary>When MusicBrainz was last asked for this release's ASIN, script and track ids.</summary>
+    /// <remarks>
+    /// The releases stage's "we asked" stamp (rule 1), for releases filed before
+    /// those were kept; the attribution pass sets it on every release it writes
+    /// from a lookup. Set when MusicBrainz no longer knows the release too.
+    /// </remarks>
+    public DateTimeOffset? DescribedUtc { get; set; }
+
     /// <summary>
     /// What a person changed on the album page, by field, as JSON.
     /// </summary>
@@ -362,6 +393,19 @@ public sealed class Track
 
     /// <summary>Track title as printed on this release, which can differ from the recording's.</summary>
     public string? Title { get; set; }
+
+    /// <summary>MusicBrainz's id for this position on this release, which the recording's is not.</summary>
+    public Mbid? Mbid { get; set; }
+
+    /// <summary>The title of the disc this track is on, where the release prints one.</summary>
+    public string? MediumTitle { get; set; }
+
+    /// <summary>The format of the disc this track is on: CD, 12" Vinyl, Hybrid SACD (SACD layer).</summary>
+    /// <remarks>
+    /// Per track rather than read off <see cref="Release.MediumFormats"/>, because
+    /// a CD+DVD-Video set or a hybrid SACD's two layers are two answers.
+    /// </remarks>
+    public string? MediumFormat { get; set; }
 
     /// <summary>
     /// How long this track runs <i>on this release</i>.
@@ -721,6 +765,12 @@ public sealed class MediaFile
 
     /// <summary>When the measure pass last asked, answer or not. A scan that sees the audio change clears it.</summary>
     public DateTimeOffset? MeasuredUtc { get; set; }
+
+    /// <summary>What Essentia heard — tempo and key — or null where it could not listen.</summary>
+    public TempoAndKey? TempoAndKey { get; set; }
+
+    /// <summary>When the analyse pass last asked Essentia, answer or not. A scan that sees the audio change clears it.</summary>
+    public DateTimeOffset? TempoAndKeyMeasuredUtc { get; set; }
 }
 
 /// <summary>

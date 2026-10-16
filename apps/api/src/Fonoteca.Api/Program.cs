@@ -111,6 +111,11 @@ builder.Services.AddSingleton<IAudioMeasurer>(sp => new FfmpegAudioMeasurer(
     sp.GetRequiredService<FileSystemAudioFileStore>(),
     sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
 
+// Tempo and key, in the same pass, where Essentia is configured.
+builder.Services.AddSingleton<ITempoAndKeyMeasurer>(sp => new EssentiaTempoAndKeyMeasurer(
+    sp.GetRequiredService<FileSystemAudioFileStore>(),
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.EssentiaPythonPath is { Length: > 0 } python ? python : "python3"));
+
 // The audio packets' hash, which tells a file another program retagged from one
 // it replaced. Filled by the probe, compared by the scan.
 builder.Services.AddSingleton(sp => new FfmpegAudioHasher(
