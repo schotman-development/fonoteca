@@ -327,7 +327,7 @@ public sealed class FonotecaOptions : IValidatableObject
     /// <summary>How acquisition paces itself.</summary>
     public DownloadSettings Download { get; init; } = new();
 
-    /// <summary>Origins allowed to call the API. The web app's dev server in development.</summary>
+    /// <summary>Origins allowed to call the API, /rest apart. The web app's dev server in development.</summary>
     public IReadOnlyList<string> CorsOrigins { get; init; } = [];
 
     /// <summary>

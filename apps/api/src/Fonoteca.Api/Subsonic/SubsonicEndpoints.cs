@@ -122,7 +122,15 @@ public static partial class SubsonicEndpoints
         // Not part of the contract packages/api-client is generated from. The
         // precedent is MapMcp: without this every build rewrites openapi.json,
         // regenerates the TypeScript client and turns gen:api:check red.
-        var group = app.MapGroup(Route).ExcludeFromDescription();
+        //
+        // Any origin, and no credentials: a Subsonic client is another
+        // program, often a web page served from somewhere else, and its
+        // password travels in the query, so a browser has nothing of the
+        // owner's to attach. Navidrome answers the same. The web UI's policy,
+        // credentialed for SignalR, stays on everything else.
+        var group = app.MapGroup(Route)
+            .ExcludeFromDescription()
+            .RequireCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 
         Map(group, "ping", Ping);
         Map(group, "getLicense", GetLicense);

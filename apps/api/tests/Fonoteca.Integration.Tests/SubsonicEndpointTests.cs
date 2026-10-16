@@ -223,6 +223,40 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A client's page on any origin may call /rest, preflight and all, and
+    /// nothing else opens to it.
+    /// </summary>
+    [Fact]
+    public async Task AClientOnAnyOriginIsLetInToRestAndNowhereElse()
+    {
+        using var client = _factory!.CreateClient();
+
+        using var ping = new HttpRequestMessage(
+            HttpMethod.Get,
+            new Uri($"/rest/ping?u=me&p={Password}&v=1.16.1&c=test&f=json", UriKind.Relative));
+        ping.Headers.Add("Origin", "http://example.org");
+
+        using var pinged = await client.SendAsync(ping, Token);
+        Assert.Equal("*", Assert.Single(pinged.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.False(pinged.Headers.Contains("Access-Control-Allow-Credentials"));
+
+        using var preflight = new HttpRequestMessage(HttpMethod.Options, new Uri("/rest/getOpenSubsonicExtensions", UriKind.Relative));
+        preflight.Headers.Add("Origin", "http://example.org");
+        preflight.Headers.Add("Access-Control-Request-Method", "GET");
+        preflight.Headers.Add("Access-Control-Request-Headers", "content-type");
+
+        using var preflighted = await client.SendAsync(preflight, Token);
+        Assert.True(preflighted.IsSuccessStatusCode, $"{preflighted.StatusCode}");
+        Assert.Equal("*", Assert.Single(preflighted.Headers.GetValues("Access-Control-Allow-Origin")));
+
+        using var api = new HttpRequestMessage(HttpMethod.Get, new Uri("/api/library/scan", UriKind.Relative));
+        api.Headers.Add("Origin", "http://example.org");
+
+        using var refused = await client.SendAsync(api, Token);
+        Assert.False(refused.Headers.Contains("Access-Control-Allow-Origin"));
+    }
+
+    /// <summary>
     /// A wrong password is a 200 carrying error 40, not a 401.
     /// </summary>
     /// <remarks>
