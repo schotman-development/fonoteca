@@ -1120,6 +1120,23 @@ public sealed class CatalogueTagWriteTests : IDisposable
         Assert.Equal(body, FrameBody(path, "UFID"));
     }
 
+    /// <summary>
+    /// A MusicBrainz id trimmed in a tag ATL wrote with no padding leaves one
+    /// byte of it, and ATL reads one to four as audio: a 166-second MP3 timed at
+    /// 887 refused 116 writes here.
+    /// </summary>
+    [Fact]
+    public async Task AnIdTrimmedInATagWithNoPaddingLeavesTheFileItsLength()
+    {
+        SkipWithoutTools();
+
+        var path = await Mp3Tagged("tight.mp3", 3, Frame("UFID", [.. "http://musicbrainz.org"u8, 0, .. System.Text.Encoding.Latin1.GetBytes(Recording.ToString())]));
+        var length = new ATL.Track(Path.Combine(_root, path.Value)).DurationMs;
+
+        Assert.Equal(TagWriteStatus.Written, (await Write(Writer(allowMutation: true), path)).Status);
+        Assert.Equal(length, new ATL.Track(Path.Combine(_root, path.Value)).DurationMs, 1.0);
+    }
+
     /// <summary>An original date ATL would give a day it never had refuses the write.</summary>
     [Fact]
     public async Task AnOriginalDateGivenADayRefusesTheWrite()

@@ -127,20 +127,22 @@ internal static class Id3v2Repair
         if (!changed) return null;
 
         // ATL leaves no padding, so a frame put back longer than ATL wrote it
-        // grows the tag, and the audio after it moves up by as much.
-        if (output.Length > tag.Length)
+        // grows the tag, and the audio after it moves up by as much. So does
+        // padding shorter than a frame header: ATL 7.16 reads one to four bytes
+        // of it as audio, and timed a 166-second MP3 at 887.
+        var length = tag.Length - output.Length is > 0 and < 10 ? output.Length + 10 : Math.Max(output.Length, tag.Length);
+
+        if (length > tag.Length)
         {
-            Streams.Shift(stream, 10 + tag.Length, (int)output.Length - tag.Length);
+            Streams.Shift(stream, 10 + tag.Length, (int)length - tag.Length);
 
             var size = new byte[4];
-            WriteSize(size, (int)output.Length, 4);
+            WriteSize(size, (int)length, 4);
             stream.Position = 6;
             stream.Write(size);
         }
-        else
-        {
-            output.SetLength(tag.Length);
-        }
+
+        output.SetLength(length);
 
         stream.Position = 10;
         stream.Write(output.GetBuffer().AsSpan(0, (int)output.Length));
