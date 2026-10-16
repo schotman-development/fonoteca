@@ -309,6 +309,12 @@ namespace Fonoteca.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<string>("Begin")
+                        .HasColumnType("text");
+
+                    b.Property<string>("End")
+                        .HasColumnType("text");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -728,6 +734,44 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("RecordingLyrics");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.RecordingSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Begin")
+                        .HasColumnType("text");
+
+                    b.Property<string>("End")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("Mbid")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecordingId");
+
+                    b.ToTable("RecordingSessions");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Relationship", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1078,6 +1122,12 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ComposedBegin")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ComposedEnd")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("DescribedUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1309,6 +1359,15 @@ namespace Fonoteca.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.RecordingSession", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithMany("Sessions")
+                        .HasForeignKey("RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Relationship", b =>
                 {
                     b.HasOne("Fonoteca.Domain.Catalogue.Artist", null)
@@ -1396,6 +1455,8 @@ namespace Fonoteca.Data.Migrations
                     b.Navigation("Lyrics");
 
                     b.Navigation("Relationships");
+
+                    b.Navigation("Sessions");
 
                     b.Navigation("Tracks");
                 });

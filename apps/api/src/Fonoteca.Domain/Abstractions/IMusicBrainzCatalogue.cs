@@ -317,6 +317,23 @@ public readonly record struct ReleaseDate(int Year, int? Month, int? Day)
         ({ } m, null) => $"{Year:D4}-{m:D2}",
         _ => $"{Year:D4}",
     };
+
+    /// <summary><see cref="ToString"/> read back; null for anything it did not write.</summary>
+    public static ReleaseDate? Parse(string? text)
+    {
+        var parts = text?.Split('-');
+
+        if (parts is not { Length: >= 1 and <= 3 }) return null;
+
+        var numbers = new int[parts.Length];
+
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out numbers[i])) return null;
+        }
+
+        return new ReleaseDate(numbers[0], parts.Length > 1 ? numbers[1] : null, parts.Length > 2 ? numbers[2] : null);
+    }
 }
 
 /// <summary>A recording as MusicBrainz describes it.</summary>
@@ -376,7 +393,24 @@ public sealed record MusicBrainzRecording(
     string? WorkTitle,
 
     /// <summary>MusicBrainz's curated genres for this recording, most-voted first.</summary>
-    IReadOnlyList<string>? Genres = null);
+    IReadOnlyList<string>? Genres = null,
+
+    /// <summary>Where and when it was performed: its place, area and work links.</summary>
+    IReadOnlyList<MusicBrainzSession>? Sessions = null);
+
+/// <summary>A link from a recording to somewhere or something that is not a person, with its dates.</summary>
+/// <remarks>
+/// <c>recorded at</c> a place, <c>recorded in</c> an area, and the
+/// <c>performance</c> link to the work, which is where MusicBrainz most often
+/// dates a classical session. Every place and area link is kept, whatever its
+/// type; what counts as the performance is the reader's rule.
+/// </remarks>
+public sealed record MusicBrainzSession(
+    string Type,
+    Mbid? TargetId,
+    string Name,
+    ReleaseDate? Begin,
+    ReleaseDate? End);
 
 /// <summary>A composition and the people credited with writing it.</summary>
 public sealed record MusicBrainzWork(
@@ -606,7 +640,12 @@ public sealed record MusicBrainzRelation(
     /// Every qualifier, where <see cref="Attribute"/> is only the first —
     /// "guitar", "bass guitar" and "guest" on one performer.
     /// </summary>
-    IReadOnlyList<string>? Attributes = null);
+    IReadOnlyList<string>? Attributes = null,
+
+    /// <summary>When the link began — a session's first day, the year a piece was begun.</summary>
+    ReleaseDate? Begin = null,
+
+    ReleaseDate? End = null);
 
 /// <summary>An artist's credit, in billing order, as printed.</summary>
 /// <remarks>

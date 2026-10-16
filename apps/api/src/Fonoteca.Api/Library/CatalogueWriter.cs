@@ -83,6 +83,7 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         recording.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
 
         await ApplyContributionsAsync(recording.Id, null, source.Relations, cancellationToken).ConfigureAwait(false);
+        await ApplySessionsAsync(recording.Id, source.Sessions ?? [], cancellationToken).ConfigureAwait(false);
 
         var credits = PrimaryCredits.From(source, work);
 
@@ -264,7 +265,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
 
     /// <summary>
     /// What a work's own lookup says that only the tags read: its languages,
-    /// and its place among the parts of the parent this same answer names.
+    /// and its place among the parts of the parent this same answer names —
+    /// and the years its composer link states, which Subsonic serves.
     /// </summary>
     /// <remarks>
     /// Stamped wherever a work's whole document arrives, so one the recording
@@ -279,6 +281,11 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         row.Languages = EnrichmentService.Joined(source.Languages ?? []);
         row.Position = underItsParent ? source.Position : null;
         row.PartCount = source.PartCount > 0 ? source.PartCount : null;
+
+        var composed = Performance.Composed(source.Relations.Select(relation =>
+            (relation.Type, relation.Begin?.ToString(), relation.End?.ToString())));
+        row.ComposedBegin = composed?.From?.ToString();
+        row.ComposedEnd = composed?.To?.ToString();
         row.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
     }
 
@@ -353,6 +360,43 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
                     : relation.Attribute,
                 ArtistMbid = relation.ArtistId,
                 Name = Clamp(relation.Name, 1000),
+                Position = position,
+                Begin = relation.Begin?.ToString(),
+                End = relation.End?.ToString(),
+            });
+        }
+    }
+
+    /// <summary>
+    /// Every place, area and performance link MusicBrainz states on this recording, replacing the last answer.
+    /// </summary>
+    /// <remarks><see cref="ApplyContributionsAsync"/>'s shape and reasons.</remarks>
+    private async Task ApplySessionsAsync(
+        RecordingId recording,
+        IReadOnlyList<MusicBrainzSession> sessions,
+        CancellationToken cancellationToken)
+    {
+        db.RecordingSessions.RemoveRange(await db.RecordingSessions
+            .Where(session => session.RecordingId == recording)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
+        db.RecordingSessions.RemoveRange(db.RecordingSessions.Local
+            .Where(session => session.RecordingId == recording)
+            .ToList());
+
+        for (var position = 0; position < sessions.Count; position++)
+        {
+            var session = sessions[position];
+
+            db.RecordingSessions.Add(new RecordingSession
+            {
+                Id = Guid.CreateVersion7(),
+                RecordingId = recording,
+                Type = Clamp(session.Type, 100),
+                Mbid = session.TargetId,
+                Name = Clamp(session.Name, 1000),
+                Begin = session.Begin?.ToString(),
+                End = session.End?.ToString(),
                 Position = position,
             });
         }

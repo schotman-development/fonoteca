@@ -42,7 +42,8 @@ internal static class MusicBrainzMapper
             Relations: ToRelations(source.Relationships),
             WorkId: performance is null ? null : new Mbid(performance.Id),
             WorkTitle: NullIfBlank(performance?.Title),
-            Genres: ToGenres(source.Genres));
+            Genres: ToGenres(source.Genres),
+            Sessions: ToSessions(source.Relationships));
     }
 
     public static MusicBrainzWork ToWork(IWork source)
@@ -445,7 +446,8 @@ internal static class MusicBrainzMapper
     /// Relationships to works, releases, places and URLs are dropped here rather
     /// than filtered later: this file exists so that MusicBrainz's shape stops at
     /// its boundary, and a relation with no artist has nothing the catalogue can
-    /// store. The work link is read separately by <see cref="FirstWorkLink"/>.
+    /// store. The work link is read separately by <see cref="FirstWorkLink"/>,
+    /// and the places, areas and the performance's dates by <see cref="ToSessions"/>.
     ///
     /// <see cref="MusicBrainzRelation.Attribute"/> is the first attribute, which
     /// is what <c>Relationship.Attribute</c>'s single column stores;
@@ -476,7 +478,37 @@ internal static class MusicBrainzMapper
                 SortName: NullIfBlank(artist.SortName),
                 ArtistType: NullIfBlank(artist.Type),
                 Disambiguation: NullIfBlank(artist.Disambiguation),
-                Attributes: [.. (relationship.Attributes ?? []).Select(NullIfBlank).OfType<string>()]));
+                Attributes: [.. (relationship.Attributes ?? []).Select(NullIfBlank).OfType<string>()],
+                Begin: ToReleaseDate(relationship.Begin),
+                End: ToReleaseDate(relationship.End)));
+        }
+
+        return mapped;
+    }
+
+    /// <summary>Every place and area link, and the <c>performance</c> link to the work: where and when it was played.</summary>
+    private static List<MusicBrainzSession> ToSessions(IReadOnlyList<IRelationship>? relationships)
+    {
+        var mapped = new List<MusicBrainzSession>();
+
+        foreach (var relationship in relationships ?? [])
+        {
+            var (id, name) = relationship switch
+            {
+                { Place: { } place } => (place.Id, place.Name),
+                { Area: { } area } => (area.Id, area.Name),
+                { Work: { } work } when string.Equals(relationship.Type, "performance", StringComparison.OrdinalIgnoreCase) => (work.Id, work.Title),
+                _ => (Guid.Empty, null),
+            };
+
+            if (id == Guid.Empty) continue;
+
+            mapped.Add(new MusicBrainzSession(
+                Type: relationship.Type ?? string.Empty,
+                TargetId: new Mbid(id),
+                Name: NullIfBlank(relationship.TargetCredit) ?? name ?? string.Empty,
+                Begin: ToReleaseDate(relationship.Begin),
+                End: ToReleaseDate(relationship.End)));
         }
 
         return mapped;

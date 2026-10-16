@@ -736,6 +736,183 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A song names who played on it and wrote it, each once, under the tag
+    /// write's roles; when and where it was played; and when its piece was
+    /// written — in both formats, and a song MusicBrainz says none of this
+    /// about carries an empty list and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task ASongCarriesItsPlayersAndWhenAndWhereItWasPlayed()
+    {
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "The Sleeping Beauty", Genres = "classical" };
+        var previn = new Artist { Id = ArtistId.New(), Name = "André Previn", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var orchestra = new Mbid(Guid.CreateVersion7());
+        var tchaikovsky = new Mbid(Guid.CreateVersion7());
+        var ballet = new Work { Id = WorkId.New(), Title = "The Sleeping Beauty, op. 66", Mbid = new Mbid(Guid.CreateVersion7()), Type = "Ballet", PartCount = 3, ComposedBegin = "1888", ComposedEnd = "1889" };
+        var scene = new Work { Id = WorkId.New(), Title = "The Sleeping Beauty, op. 66: Acte II", ParentId = ballet.Id, Position = 2 };
+        var played = new Recording { Id = RecordingId.New(), Title = "Act Two: Scene", WorkId = scene.Id };
+        var bare = new Recording { Id = RecordingId.New(), Title = "Untold" };
+        var pop = new Recording { Id = RecordingId.New(), Title = "Sultans of Swing" };
+        var guitarist = new Mbid(Guid.CreateVersion7());
+        var traditional = new Mbid(Guid.Parse("9be7f096-97ec-4615-8957-8d40b5dcbc41"));
+        var files = new[] { played, bare, pop }
+            .Select((recording, i) => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"Previn/Sleeping Beauty/0{i + 1} Track.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = recording.Id,
+                ReleaseGroupId = album.Id,
+            })
+            .ToList();
+
+        var position = 0;
+
+        Contribution Link(RecordingId? recording, WorkId? work, string type, Mbid? artist, string name, string? begin = null, string? end = null, string? attributes = null) => new()
+        {
+            Id = Guid.CreateVersion7(),
+            RecordingId = recording,
+            WorkId = work,
+            Type = type,
+            Attributes = attributes,
+            ArtistMbid = artist,
+            Name = name,
+            Position = position++,
+            Begin = begin,
+            End = end,
+        };
+
+        RecordingSession Session(string type, string name, string? begin, string? end) => new()
+        {
+            Id = Guid.CreateVersion7(),
+            RecordingId = played.Id,
+            Type = type,
+            Name = name,
+            Begin = begin,
+            End = end,
+            Position = position++,
+        };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(album);
+            db.Artists.Add(previn);
+            db.Works.AddRange(ballet, scene);
+            db.Recordings.AddRange(played, bare, pop);
+            db.MediaFiles.AddRange(files);
+
+            // Two sessions, so two conductor links to one man; a producer
+            // nobody dated; the years it was written on the whole ballet.
+            db.Contributions.AddRange(
+                Link(played.Id, null, "conductor", previn.Mbid, "Andre Previn", "1974-04-08", "1974-04-09"),
+                Link(played.Id, null, "conductor", previn.Mbid, "Andre Previn", "1974-06-29", "1974-06-29"),
+                Link(played.Id, null, "performing orchestra", orchestra, "London Symphony Orchestra", "1974-04-08", "1974-06-29"),
+                Link(played.Id, null, "producer", null, "Christopher Bishop"),
+                Link(pop.Id, null, "instrument", guitarist, "Mark Knopfler", "1977-07", "1977-07", "guitar"),
+                Link(pop.Id, null, "writer", traditional, "[traditional]"),
+                Link(null, scene.Id, "composer", tchaikovsky, "Пётр Ильич Чайковский"));
+            db.RecordingSessions.AddRange(
+                Session("recorded at", "Abbey Road Studios: Studio 1", "1974-04-08", "1974-04-09"),
+                Session("recorded at", "Abbey Road Studios: Studio 1", "1974-06-29", "1974-06-29"),
+                Session("recorded in", "London", null, null));
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            using var client = _factory!.CreateClient();
+
+            var songs = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{album.Id.Value:N}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album")
+                .GetProperty("song")
+                .EnumerateArray()
+                .ToDictionary(row => row.GetProperty("title").GetString()!);
+
+            var song = songs[played.Title];
+
+            Assert.Equal(
+                [
+                    ("conductor", null, $"ar-{previn.Id.Value:N}", "André Previn", previn.Mbid!.Value.Value.ToString()),
+                    ("performer", "orchestra", "", "London Symphony Orchestra", orchestra.Value.ToString()),
+                    ("producer", null, "", "Christopher Bishop", null),
+                    ("composer", null, "", "Пётр Ильич Чайковский", tchaikovsky.Value.ToString()),
+                ],
+                song.GetProperty("contributors").EnumerateArray().Select(credit =>
+                {
+                    var artist = credit.GetProperty("artist");
+
+                    return (
+                        credit.GetProperty("role").GetString(),
+                        credit.TryGetProperty("subRole", out var part) ? part.GetString() : null,
+                        artist.GetProperty("id").GetString(),
+                        artist.GetProperty("name").GetString(),
+                        artist.TryGetProperty("musicBrainzId", out var mbid) ? mbid.GetString() : null);
+                }));
+
+            var recorded = song.GetProperty("recorded");
+            Assert.Equal("""{"year":1974,"month":4,"day":8}""", recorded.GetProperty("from").GetRawText());
+            Assert.Equal("""{"year":1974,"month":6,"day":29}""", recorded.GetProperty("to").GetRawText());
+            Assert.Equal(["Abbey Road Studios: Studio 1"], recorded.GetProperty("places").EnumerateArray().Select(place => place.GetString()));
+
+            var composed = Assert.Single(song.GetProperty("works").EnumerateArray()).GetProperty("composed");
+            Assert.Equal("""{"year":1888}""", composed.GetProperty("from").GetRawText());
+            Assert.Equal("""{"year":1889}""", composed.GetProperty("to").GetRawText());
+
+            var silent = songs[bare.Title];
+            Assert.Empty(silent.GetProperty("contributors").EnumerateArray());
+            Assert.False(silent.TryGetProperty("recorded", out _));
+
+            // A song of no work: its recording's own links alone, and nobody
+            // [traditional] names stands as a writer.
+            var single = songs[pop.Title];
+            var player = Assert.Single(single.GetProperty("contributors").EnumerateArray());
+            Assert.Equal(("performer", "guitar"), (player.GetProperty("role").GetString(), player.GetProperty("subRole").GetString()));
+            Assert.Equal(("", "Mark Knopfler"), (player.GetProperty("artist").GetProperty("id").GetString(), player.GetProperty("artist").GetProperty("name").GetString()));
+            Assert.Equal("""{"year":1977,"month":7}""", single.GetProperty("recorded").GetProperty("from").GetRawText());
+            Assert.Empty(single.GetProperty("works").EnumerateArray());
+
+            using var response = await client.GetAsync(
+                new Uri($"/rest/getAlbum.view?{Credentials}&id=al-{album.Id.Value:N}", UriKind.Relative),
+                Token);
+
+            var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+            XNamespace ns = "http://subsonic.org/restapi";
+            var element = xml.Descendants(ns + "song").Single(row => row.Attribute("title")?.Value == played.Title);
+
+            Assert.Equal(
+                ["conductor", "performer", "producer", "composer"],
+                element.Elements(ns + "contributors").Select(credit => credit.Attribute("role")?.Value));
+            Assert.Equal("", element.Elements(ns + "contributors").ElementAt(1).Element(ns + "artist")?.Attribute("id")?.Value);
+            Assert.Equal("1974", element.Element(ns + "recorded")?.Element(ns + "from")?.Attribute("year")?.Value);
+            Assert.Equal(["Abbey Road Studios: Studio 1"], element.Element(ns + "recorded")!.Elements(ns + "places").Select(place => place.Value));
+            Assert.Equal("1889", element.Element(ns + "works")?.Element(ns + "composed")?.Element(ns + "to")?.Attribute("year")?.Value);
+
+            var extensions = (await JsonAsync(client, "/rest/getOpenSubsonicExtensions.view"))
+                .GetProperty("subsonic-response")
+                .GetProperty("openSubsonicExtensions")
+                .EnumerateArray()
+                .Select(extension => extension.GetProperty("name").GetString());
+            Assert.Contains("fonotecaPerformance", extensions);
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            var workIds = new[] { ballet.Id, scene.Id };
+            db.Contributions.RemoveRange(await db.Contributions.Where(row => row.WorkId != null && workIds.Contains(row.WorkId.Value)).ToListAsync(Token));
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
+            var ids = new[] { played.Id, bare.Id, pop.Id };
+            db.Recordings.RemoveRange(await db.Recordings.Where(row => ids.Contains(row.Id)).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+            db.Works.RemoveRange(await db.Works.Where(row => workIds.Contains(row.Id)).OrderBy(row => row.ParentId == null).ToListAsync(Token));
+            db.Artists.Remove(await db.Artists.SingleAsync(row => row.Id == previn.Id, Token));
+            db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
     /// Every method this server claims answers, and nothing 500s.
     /// </summary>
     /// <remarks>
@@ -834,7 +1011,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "fonotecaAlbumMotion"], extensions);
+        Assert.Equal(["songLyrics", "fonotecaAlbumMotion", "fonotecaPerformance"], extensions);
     }
 
     /// <summary>

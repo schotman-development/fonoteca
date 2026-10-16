@@ -278,8 +278,18 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   a recording or its work — producer, engineer, each player with all their
   qualifiers, lyricist apart from composer — by MBID and printed name, minting
   **no artist row**, so a session guitarist never joins the artist list. The
-  album page and the tag write read credits from it. Rebuilt wholesale on every
-  describe, including rows the same save added (EF queries the database).
+  album page and the tag write read credits from it, and Subsonic's
+  `contributors` too, under `CreditTags.Role`'s names. Each link keeps its
+  `Begin`/`End` as partial as stated; a recording's place, area and
+  `performance` links go beside it in `RecordingSessions`, which nothing
+  reading credits sees. A work's own composer links date it on the work
+  (`Works.ComposedBegin`/`ComposedEnd`), filled wherever its lookup arrives,
+  the climb's included — **a parent work keeps no links**, or the tag write,
+  smart playlists and `displayComposer` would start reading through the
+  piece. Subsonic serves all three as `fonotecaPerformance` (`Performance`:
+  the sessions' and the players' span, the place over the city, the piece's
+  years). Rebuilt wholesale on every describe, including rows the same save
+  added (EF queries the database).
 - **Every held recording is described again** (`Recordings.DescribedUtc`):
   genres, every ISRC (`Recordings.Isrcs`, apart from the shop's `Isrc`), the
   contributions and the work's parent (`Works.ParentId`, minted from the

@@ -29,6 +29,32 @@ public sealed record CreditTags
     public IReadOnlyList<string> Remixers { get; init; } = [];
     public IReadOnlyList<string> DjMixers { get; init; } = [];
 
+    /// <summary>The tag one link goes under, and for a player what they played; null for a link that is nobody's credit.</summary>
+    /// <remarks>Picard's mapping, once, so Subsonic's contributors and the files cannot disagree.</remarks>
+    public static (string Tag, string? Part)? Role(string type, string? attributes)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+
+        return type.ToLowerInvariant() switch
+        {
+            "composer" => (CatalogueTags.Composer, null),
+            "lyricist" or "librettist" => (CatalogueTags.Lyricist, null),
+            "conductor" => (CatalogueTags.Conductor, null),
+            "arranger" or "orchestrator" or "instrument arranger" or "vocal arranger" => (CatalogueTags.Arranger, null),
+            "producer" => (CatalogueTags.Producer, null),
+            "engineer" or "recording" or "audio" or "sound" => (CatalogueTags.Engineer, null),
+            "mix" => (CatalogueTags.Mixer, null),
+            "writer" => (CatalogueTags.Writer, null),
+            "remixer" => (CatalogueTags.Remixer, null),
+            "mix-dj" => (CatalogueTags.DjMixer, null),
+            "instrument" or "performer" => (CatalogueTags.Performer, attributes),
+            "vocal" => (CatalogueTags.Performer, attributes ?? "vocals"),
+            "performing orchestra" => (CatalogueTags.Performer, "orchestra"),
+            "chorus master" or "concertmaster" => (CatalogueTags.Performer, type),
+            _ => null,
+        };
+    }
+
     /// <param name="links">The recording's contributions and then its work's, in their stored order.</param>
     public static CreditTags From(IEnumerable<(string Type, string? Attributes, string Name)> links)
     {
@@ -44,28 +70,9 @@ public sealed record CreditTags
 
         foreach (var (type, attributes, name) in links)
         {
-            switch (type.ToLowerInvariant())
-            {
-                case "composer": Add(CatalogueTags.Composer, name); break;
-                case "lyricist" or "librettist": Add(CatalogueTags.Lyricist, name); break;
-                case "conductor": Add(CatalogueTags.Conductor, name); break;
-                case "arranger" or "orchestrator" or "instrument arranger" or "vocal arranger":
-                    Add(CatalogueTags.Arranger, name);
-                    break;
-                case "producer": Add(CatalogueTags.Producer, name); break;
-                case "engineer" or "recording" or "audio" or "sound": Add(CatalogueTags.Engineer, name); break;
-                case "mix": Add(CatalogueTags.Mixer, name); break;
-                case "writer": Add(CatalogueTags.Writer, name); break;
-                case "remixer": Add(CatalogueTags.Remixer, name); break;
-                case "mix-dj": Add(CatalogueTags.DjMixer, name); break;
-                case "instrument" or "performer":
-                    Add(CatalogueTags.Performer, attributes is null ? name : $"{name} ({attributes})");
-                    break;
-                case "vocal": Add(CatalogueTags.Performer, $"{name} ({attributes ?? "vocals"})"); break;
-                case "performing orchestra": Add(CatalogueTags.Performer, $"{name} (orchestra)"); break;
-                case "chorus master" or "concertmaster": Add(CatalogueTags.Performer, $"{name} ({type})"); break;
-                default: break;
-            }
+            if (Role(type, attributes) is not { } role) continue;
+
+            Add(role.Tag, role.Part is null ? name : $"{name} ({role.Part})");
         }
 
         IReadOnlyList<string> Of(string tag) => tags.TryGetValue(tag, out var values) ? values : [];

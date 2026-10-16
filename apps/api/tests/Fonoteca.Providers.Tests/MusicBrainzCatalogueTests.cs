@@ -383,6 +383,64 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     }
 
     /// <summary>
+    /// Previn's Sleeping Beauty, five sessions at Abbey Road: every link keeps
+    /// its dates as partial as stated, and the studio and the performance link
+    /// arrive as sessions beside the people.
+    /// </summary>
+    [Fact]
+    public async Task ARecordingsSessionsArriveWithTheirDatesAndPlaces()
+    {
+        var (catalogue, stub) = Build(Recorded("recording-sleeping-beauty-scene.json"));
+
+        var recording = await catalogue.GetRecordingAsync(new Mbid(Guid.Parse("d5fefaf7-9490-4f8f-88d2-67678178abad")), Token);
+
+        Assert.NotNull(recording);
+
+        var query = Assert.Single(stub.Requests).Uri.Query;
+        Assert.Contains("place-rels", query, StringComparison.Ordinal);
+        Assert.Contains("area-rels", query, StringComparison.Ordinal);
+
+        var conductor = recording.Relations.First(r => r.Type == "conductor");
+        Assert.Equal((new ReleaseDate(1974, 4, 8), new ReleaseDate(1974, 4, 9)), (conductor.Begin, conductor.End));
+
+        var producer = Assert.Single(recording.Relations, r => r.Type == "producer");
+        Assert.Equal((null, null), (producer.Begin, producer.End));
+
+        var sessions = recording.Sessions ?? [];
+        Assert.Equal(6, sessions.Count);
+        Assert.Equal(5, sessions.Count(s => s.Type == "recorded at" && s.Name == "Abbey Road Studios: Studio 1"));
+
+        var performance = Assert.Single(sessions, s => s.Type == "performance");
+        Assert.Equal(recording.WorkId, performance.TargetId);
+        Assert.Equal((new ReleaseDate(1974, 4, 8), new ReleaseDate(1974, 6, 27)), (performance.Begin, performance.End));
+    }
+
+    /// <summary>
+    /// Eibenschütz's 1903 Brahms, "recorded in" London with no studio named:
+    /// the city arrives as a session of its own, dated like the pianist.
+    /// </summary>
+    [Fact]
+    public async Task ARecordingMadeInACityNamesTheCity()
+    {
+        var (catalogue, _) = Build(Recorded("recording-brahms-ballade-london.json"));
+
+        var recording = await catalogue.GetRecordingAsync(new Mbid(Guid.Parse("86f373e4-6737-4888-b013-34ac2c23ca54")), Token);
+
+        Assert.NotNull(recording);
+
+        var day = new ReleaseDate(1903, 12, 16);
+        Assert.Equal(
+            [
+                new MusicBrainzSession("recorded in", new Mbid(Guid.Parse("f03d09b3-39dc-4083-afd6-159e3f0d462f")), "London", day, day),
+                new MusicBrainzSession("performance", recording.WorkId, "6 Klavierstücke, op. 118: Nr. 3. Ballade in g-Moll. Allegro energico", day, day),
+            ],
+            recording.Sessions ?? []);
+
+        var pianist = Assert.Single(recording.Relations);
+        Assert.Equal(("instrument", day, day), (pianist.Type, pianist.Begin, pianist.End));
+    }
+
+    /// <summary>
     /// Everything a credit line cannot carry, off an artist document.
     /// </summary>
     /// <remarks>

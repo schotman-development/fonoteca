@@ -246,7 +246,7 @@ public static partial class SubsonicEndpoints
 
     /// <summary>
     /// The extensions this server implements: timed lyrics, and Fonoteca's own
-    /// album motion.
+    /// album motion and performance dates.
     /// </summary>
     /// <remarks>
     /// The presence of the response is how a client learns the server is an
@@ -255,11 +255,14 @@ public static partial class SubsonicEndpoints
     /// version 1 only: version 2's translations, word cues and singers are
     /// nothing LRCLIB or a tag here holds. <c>fonotecaAlbumMotion</c> is
     /// <c>getAlbumMotion</c>, which only a client that looks for it asks for.
+    /// <c>fonotecaPerformance</c> is two fields the protocol has no place for: a
+    /// song's <c>recorded</c> (<c>from</c>, <c>to</c>, <c>places</c>) and its
+    /// piece's <c>composed</c> (<c>from</c>, <c>to</c>), each date an ItemDate.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("fonotecaAlbumMotion", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

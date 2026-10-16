@@ -3193,6 +3193,71 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     }
 
     /// <summary>
+    /// A link's dates are kept as partial as MusicBrainz states them, the
+    /// recording's place and performance links beside its people, and the years
+    /// a work's composer link states on the work — the whole piece's once the
+    /// climb has looked it up, and still no link of the piece's kept as a credit.
+    /// </summary>
+    [Fact]
+    public async Task DatesPlacesAndTheYearsAPieceWasWrittenAreKept()
+    {
+        await SeedAsync(("Previn/Sleeping Beauty/12 - Scene.flac", Cluster(1)));
+
+        var whole = Mb("e2c4a6b8-1d3f-4a5b-9c7d-0f2e4a6c8b0d");
+        var studio = Mb("bd2ad2e0-8ab5-4c11-8b6e-2b9a3b1e1c11");
+
+        var catalogue = new StubCatalogue(
+            recording: RecordingWith(
+                [Credit(Mozart, "Wolfgang Amadeus Mozart")],
+                [Relation("conductor", Karajan, "Herbert von Karajan", "Person") with
+                {
+                    Begin = new ReleaseDate(1974, 4, 8),
+                    End = new ReleaseDate(1974, 4, 9),
+                }]) with
+            {
+                Sessions =
+                [
+                    new MusicBrainzSession("recorded at", studio, "Abbey Road Studios: Studio 1", new ReleaseDate(1974, 4, 8), new ReleaseDate(1974, 4, 9)),
+                    new MusicBrainzSession("performance", WorkId, "Symphony no. 40", new ReleaseDate(1974, 4, null), null),
+                ],
+            },
+            work: WorkWith([Relation("composer", Mozart, "Wolfgang Amadeus Mozart", "Person") with { End = new ReleaseDate(1788, 7, null) }]) with
+            {
+                ParentId = whole,
+                ParentTitle = "Symphony no. 40 in G minor, K. 550",
+            },
+            works: new Dictionary<Mbid, MusicBrainzWork>
+            {
+                [whole] = new(
+                    whole,
+                    "Symphony no. 40 in G minor, K. 550",
+                    "Symphony",
+                    [Relation("composer", Mozart, "Wolfgang Amadeus Mozart", "Person") with { Begin = new ReleaseDate(1788, null, null), End = new ReleaseDate(1788, 7, 25) }]),
+            });
+
+        await EnrichAsync(Build(Answering(Recording), catalogue));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var conductor = await db.Contributions.AsNoTracking().SingleAsync(c => c.RecordingId != null, Token);
+        Assert.Equal("conductor", conductor.Type);
+        Assert.Equal(("1974-04-08", "1974-04-09"), (conductor.Begin, conductor.End));
+
+        var sessions = await db.RecordingSessions.AsNoTracking().OrderBy(s => s.Position).ToListAsync(Token);
+        Assert.Equal(
+            [("recorded at", studio, "Abbey Road Studios: Studio 1", "1974-04-08", "1974-04-09"), ("performance", WorkId, "Symphony no. 40", "1974-04", null)],
+            sessions.Select(s => (s.Type, s.Mbid!.Value, s.Name, s.Begin, s.End)));
+
+        var piece = await db.Works.AsNoTracking().SingleAsync(w => w.Mbid == whole, Token);
+        Assert.Equal(("1788", "1788-07-25"), (piece.ComposedBegin, piece.ComposedEnd));
+        Assert.False(await db.Contributions.AnyAsync(c => c.WorkId == piece.Id, Token));
+
+        var movement = await db.Works.AsNoTracking().SingleAsync(w => w.Mbid == WorkId, Token);
+        Assert.Equal((null, "1788-07"), (movement.ComposedBegin, movement.ComposedEnd));
+        Assert.Equal("1788-07", (await db.Contributions.AsNoTracking().SingleAsync(c => c.WorkId == movement.Id, Token)).End);
+    }
+
+    /// <summary>
     /// An album's genres are asked for once; none found is asked again a week later.
     /// </summary>
     [Fact]

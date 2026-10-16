@@ -26,6 +26,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<ArtistCredit> ArtistCredits => Set<ArtistCredit>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<Contribution> Contributions => Set<Contribution>();
+    public DbSet<RecordingSession> RecordingSessions => Set<RecordingSession>();
     public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
 
     public DbSet<ReleaseCandidateSet> ReleaseCandidateSets => Set<ReleaseCandidateSet>();
@@ -456,6 +457,21 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
 
             e.HasIndex(x => x.RecordingId);
             e.HasIndex(x => x.WorkId);
+        });
+
+        modelBuilder.Entity<RecordingSession>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Type).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(1000).IsRequired();
+
+            // Contribution's reason: a statement about one recording.
+            e.HasOne<Recording>()
+                .WithMany(r => r.Sessions)
+                .HasForeignKey(x => x.RecordingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.RecordingId);
         });
 
         modelBuilder.Entity<DomainEvent>(e =>

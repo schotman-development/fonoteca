@@ -50,6 +50,10 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
         // stub; its composer needs the separate lookup below.
         | Include.ArtistRelationships
         | Include.WorkRelationships
+        // Where it was played: the studio or hall, else the city, with the
+        // session's dates on each link.
+        | Include.PlaceRelationships
+        | Include.AreaRelationships
         // Rides the same request: the votes on this performance, which the
         // album's genres stand in for where nobody has voted on the album.
         | Include.Genres;

@@ -55,6 +55,9 @@ internal interface ISubsonicWriter
     /// <summary>A repeated scalar, which only the extension list needs.</summary>
     void Numbers(string name, IEnumerable<int> values);
 
+    /// <summary>A repeated text: an array in JSON, sibling elements holding it in XML.</summary>
+    void Strings(string name, IEnumerable<string> values);
+
     /// <summary>
     /// The element's own text in XML, a <c>value</c> property in JSON — how a
     /// genre carries its name. After the attributes, like a child.
@@ -346,6 +349,20 @@ internal sealed class SubsonicResult : IResult
             json.WriteEndArray();
         }
 
+        public void Strings(string name, IEnumerable<string> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+
+            json.WriteStartArray(name);
+
+            foreach (var value in values)
+            {
+                json.WriteStringValue(value);
+            }
+
+            json.WriteEndArray();
+        }
+
         public void Value(string value) => json.WriteString("value", value);
     }
 
@@ -416,6 +433,16 @@ internal sealed class SubsonicResult : IResult
             foreach (var value in values)
             {
                 xml.WriteElementString(name, value.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        public void Strings(string name, IEnumerable<string> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+
+            foreach (var value in values)
+            {
+                xml.WriteElementString(name, value);
             }
         }
 

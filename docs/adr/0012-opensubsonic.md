@@ -239,7 +239,11 @@ share, lyrics. *Amended 2026-10-14:* lyrics exist now (ADR 0016):
 `getLyricsBySongId`, timed, as the `songLyrics` extension — the one
 `getOpenSubsonicExtensions` lists — and `getLyrics`, plain. *Amended
 2026-10-15:* `getAlbumMotion` serves an album's motion artwork as an animated
-WebP under Fonoteca's own `fonotecaAlbumMotion` extension (ADR 0014).
+WebP under Fonoteca's own `fonotecaAlbumMotion` extension (ADR 0014). *Amended
+2026-10-15:* a song carries OpenSubsonic's `contributors`, under the tag
+write's role names (`CreditTags.Role`), and under Fonoteca's own
+`fonotecaPerformance` extension when and where it was recorded and when its
+piece was composed (`Performance`).
 
 ### Scope
 

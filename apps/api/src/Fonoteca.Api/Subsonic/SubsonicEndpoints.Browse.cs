@@ -480,16 +480,19 @@ public static partial class SubsonicEndpoints
         writer.Attr("isVideo", false);
         writer.Attr("genre", song.Genres.Count > 0 ? song.Genres[0] : null);
         writer.Attr("musicBrainzId", song.Mbid?.Value.ToString());
-        writer.Children("genres", song.Genres, WriteGenre);
 
         // OpenSubsonic's, for a client that heads a classical album's runs
         // with the piece. Only a classical work names one, so a pop album
-        // stays a plain list.
+        // stays a plain list. An attribute, so before the first child.
         writer.Attr("displayComposer", song.Work?.Composer);
+        writer.Children("genres", song.Genres, WriteGenre);
         writer.Children<SongPiece>("works", song.Work?.Piece is { } piece ? [piece] : [], static (works, piece) =>
         {
             works.Attr("name", piece.Name);
             works.Attr("musicBrainzId", piece.Mbid?.Value.ToString());
+
+            // fonotecaPerformance: the years its composer wrote it.
+            if (piece.Composed is { } composed) works.Child("composed", span => WriteSpan(span, composed));
         });
         writer.Children<SongMovement>("movements", song.Work?.Movement is { } movement ? [movement] : [], static (movements, movement) =>
         {
@@ -497,6 +500,31 @@ public static partial class SubsonicEndpoints
             movements.Attr("number", movement.Number);
             movements.Attr("count", movement.Count);
         });
+
+        // OpenSubsonic's, named as the tag write's credit tags are, so a
+        // client and the files agree on who did what.
+        writer.Children("contributors", song.Contributors, static (contributors, contributor) =>
+        {
+            contributors.Attr("role", contributor.Role);
+            contributors.Attr("subRole", contributor.SubRole);
+            contributors.Child("artist", artist =>
+            {
+                artist.Attr("id", contributor.ArtistId is { } id ? SubsonicIds.Artist(id) : string.Empty);
+                artist.Attr("name", contributor.Name);
+                artist.Attr("musicBrainzId", contributor.Mbid?.Value.ToString());
+            });
+        });
+
+        // fonotecaPerformance: when and where it was played, which the
+        // protocol has no field for.
+        if (song.Recorded is { } recorded)
+        {
+            writer.Child("recorded", session =>
+            {
+                if (recorded.Span is { } span) WriteSpan(session, span);
+                if (recorded.Places.Count > 0) session.Strings("places", recorded.Places);
+            });
+        }
 
         // OpenSubsonic's: the values the tag write puts in the file, for a
         // client that normalises from the API rather than the tags.
@@ -508,6 +536,22 @@ public static partial class SubsonicEndpoints
                 replay.Attr("trackPeak", gain.TrackPeak);
                 replay.Attr("albumGain", gain.AlbumGain);
                 replay.Attr("albumPeak", gain.AlbumPeak);
+            });
+        }
+    }
+
+    /// <summary>Each known side of a span as OpenSubsonic's ItemDate: as partial as it was stated.</summary>
+    private static void WriteSpan(ISubsonicWriter writer, DateSpan span)
+    {
+        foreach (var (name, date) in new[] { ("from", span.From), ("to", span.To) })
+        {
+            if (date is not { } known) continue;
+
+            writer.Child(name, item =>
+            {
+                item.Attr("year", known.Year);
+                item.Attr("month", known.Month);
+                item.Attr("day", known.Day);
             });
         }
     }
@@ -570,7 +614,15 @@ internal sealed record Song(
     DateTimeOffset? Created,
     IReadOnlyList<string> Genres,
     SongReplayGain? ReplayGain,
-    SongWork? Work);
+    SongWork? Work,
+    IReadOnlyList<SongContributor> Contributors,
+    SongRecorded? Recorded);
+
+/// <summary>One credit, by the tag write's role; an artist the catalogue has no row for has no id.</summary>
+internal sealed record SongContributor(string Role, string? SubRole, ArtistId? ArtistId, string Name, Mbid? Mbid);
+
+/// <summary>When the recording was made and where; either may be all there is.</summary>
+internal sealed record SongRecorded(DateSpan? Span, IReadOnlyList<string> Places);
 
 /// <summary>ReplayGain 2.0, dB and linear peaks; the album values cover the song's album folder.</summary>
 internal sealed record SongReplayGain(double? TrackGain, double? TrackPeak, double? AlbumGain, double? AlbumPeak);
@@ -579,7 +631,7 @@ internal sealed record SongReplayGain(double? TrackGain, double? TrackPeak, doub
 internal sealed record SongWork(string? Composer, SongPiece? Piece, SongMovement? Movement);
 
 /// <summary>The whole piece: the top of the work's parts chain, or the work itself.</summary>
-internal sealed record SongPiece(string Name, Mbid? Mbid);
+internal sealed record SongPiece(string Name, Mbid? Mbid, DateSpan? Composed = null);
 
 /// <summary>The part of the piece a song is; a number and a count only where the piece is its parent.</summary>
 internal sealed record SongMovement(string Name, int? Number, int? Count);

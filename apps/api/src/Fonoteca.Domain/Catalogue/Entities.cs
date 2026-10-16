@@ -72,6 +72,19 @@ public sealed class Work
     /// </remarks>
     public DateTimeOffset? DescribedUtc { get; set; }
 
+    /// <summary>When its composer began writing it, as <see cref="ReleaseDate"/> writes a date.</summary>
+    /// <remarks>
+    /// Off this work's own composer links, wherever its lookup arrives — on a
+    /// whole piece the years it was written, which its movements' links do not
+    /// carry. A column rather than the links themselves, so a parent work
+    /// gains no <see cref="Contribution"/> rows for the tag write, the smart
+    /// playlists and the composer to start reading through the piece.
+    /// </remarks>
+    public string? ComposedBegin { get; set; }
+
+    /// <summary>When it was finished; <see cref="ComposedBegin"/>'s twin.</summary>
+    public string? ComposedEnd { get; set; }
+
     public ICollection<Recording> Recordings { get; init; } = [];
     public ICollection<Relationship> Relationships { get; init; } = [];
 
@@ -139,6 +152,9 @@ public sealed class Recording
     /// each player and their instrument — as it states them.
     /// </summary>
     public ICollection<Contribution> Contributions { get; init; } = [];
+
+    /// <summary>Where and when it was performed, as MusicBrainz states it — see <see cref="RecordingSession"/>.</summary>
+    public ICollection<RecordingSession> Sessions { get; init; } = [];
 
     /// <summary>Its words, or the stamp saying nobody had any — see <see cref="RecordingLyrics"/>.</summary>
     public RecordingLyrics? Lyrics { get; set; }
@@ -1971,6 +1987,50 @@ public sealed class Contribution
     public required string Name { get; init; }
 
     /// <summary>Where MusicBrainz listed it, so a page prints the links in its order.</summary>
+    public required int Position { get; init; }
+
+    /// <summary>When the link began, as partial as MusicBrainz states it: "1962", "1962-05", "1974-04-08".</summary>
+    /// <remarks>
+    /// Text in <see cref="ReleaseDate"/>'s form rather than three columns: nothing
+    /// sorts or filters on it in SQL. A player's dates are the session's, a
+    /// composer's the years the piece was written.
+    /// </remarks>
+    public string? Begin { get; init; }
+
+    public string? End { get; init; }
+}
+
+/// <summary>
+/// One link MusicBrainz states from a recording to something that is not a
+/// person: the place it was recorded at, the area it was recorded in, the work
+/// it performs.
+/// </summary>
+/// <remarks>
+/// <see cref="Contribution"/>'s twin for everything that is not an artist, kept
+/// apart so nothing reading credits meets a studio. Kept for its dates and its
+/// name — "Abbey Road Studios: Studio 1", 1974-04-08 to 1974-04-09 — which is
+/// what a classical album page prints as "performed". Replaced wholesale
+/// whenever the recording is described.
+/// </remarks>
+public sealed class RecordingSession
+{
+    public required Guid Id { get; init; }
+
+    public required RecordingId RecordingId { get; init; }
+
+    /// <summary>MusicBrainz's relationship type: "recorded at", "recorded in", "performance", "mixed at".</summary>
+    public required string Type { get; init; }
+
+    /// <summary>The place's, area's or work's MBID.</summary>
+    public Mbid? Mbid { get; init; }
+
+    public required string Name { get; init; }
+
+    /// <summary>As <see cref="Contribution.Begin"/>.</summary>
+    public string? Begin { get; init; }
+
+    public string? End { get; init; }
+
     public required int Position { get; init; }
 }
 

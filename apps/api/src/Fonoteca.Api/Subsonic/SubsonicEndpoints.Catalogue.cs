@@ -274,6 +274,7 @@ public static partial class SubsonicEndpoints
                 file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
                 file.Recording != null ? file.Recording.Genres : null,
                 file.Measurement,
+                file.RecordingId,
                 file.Recording != null ? file.Recording.WorkId : null,
                 // No ternary on the navigation: a null one yields an empty
                 // collection through the join EF writes, where `new List<>()`
@@ -310,6 +311,8 @@ public static partial class SubsonicEndpoints
                 cancellationToken)
             .ConfigureAwait(false);
 
+        var performances = await SongPerformancesAsync(db, rows, cancellationToken).ConfigureAwait(false);
+
         // The album folder first: two rips of one album are one album here, and
         // interleaving them would play every track twice in a row.
         return rows
@@ -322,8 +325,91 @@ public static partial class SubsonicEndpoints
             .Select(row => Describe(
                 row,
                 albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain,
-                row.Work is { } work ? works.GetValueOrDefault(work) : null))
+                row.Work is { } work ? works.GetValueOrDefault(work) : null,
+                row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default))
             .ToList();
+    }
+
+    /// <summary>Who played on each recording and wrote what it plays, and when and where it was played.</summary>
+    /// <remarks>
+    /// <b>The credits are the tag write's</b> (<see cref="CreditTags.Role"/>),
+    /// the recording's links and then its work's, each role, part and artist
+    /// once: a session over five days is five conductor links to one man. An
+    /// artist is the catalogue's where it has a row with that MBID, named as
+    /// the catalogue names them; otherwise as the link credits them, with no
+    /// id, since a contribution mints no artist (the owner's choice: a client
+    /// draws an empty id as text, where an id of nothing opens an error).
+    /// </remarks>
+    private static async Task<Dictionary<RecordingId, (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded)>> SongPerformancesAsync(
+        FonotecaDbContext db,
+        IReadOnlyList<SongRow> rows,
+        CancellationToken cancellationToken)
+    {
+        var recordings = rows.Where(row => row.Recording is not null).Select(row => row.Recording!.Value).Distinct().ToList();
+
+        if (recordings.Count == 0) return [];
+
+        var workOf = rows
+            .Where(row => row.Recording is not null && row.Work is not null)
+            .DistinctBy(row => row.Recording)
+            .ToDictionary(row => row.Recording!.Value, row => row.Work!.Value);
+        var works = workOf.Values.Distinct().ToList();
+
+        var links = await db.Contributions
+            .AsNoTracking()
+            .Where(link => (link.RecordingId != null && recordings.Contains(link.RecordingId.Value))
+                || (link.WorkId != null && works.Contains(link.WorkId.Value)))
+            .OrderBy(link => link.Position)
+            .Select(link => new { link.RecordingId, link.WorkId, link.Type, link.Attributes, link.ArtistMbid, link.Name, link.Begin, link.End })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var sessions = (await db.RecordingSessions
+                .AsNoTracking()
+                .Where(session => recordings.Contains(session.RecordingId))
+                .OrderBy(session => session.Position)
+                .Select(session => new { session.RecordingId, session.Type, session.Name, session.Begin, session.End })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToLookup(session => session.RecordingId);
+
+        var mbids = links.Where(link => link.ArtistMbid is not null).Select(link => link.ArtistMbid!.Value).Distinct().ToList();
+
+        var artists = (await db.Artists
+                .AsNoTracking()
+                .Where(artist => artist.Mbid != null && mbids.Contains(artist.Mbid.Value))
+                .Select(artist => new { Mbid = artist.Mbid!.Value, artist.Id, Name = artist.LatinName ?? artist.Name })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .DistinctBy(artist => artist.Mbid)
+            .ToDictionary(artist => artist.Mbid);
+
+        var onRecording = links.Where(link => link.RecordingId is not null).ToLookup(link => link.RecordingId!.Value);
+        var onWork = links.Where(link => link.WorkId is not null).ToLookup(link => link.WorkId!.Value);
+
+        return recordings.ToDictionary(recording => recording, recording =>
+        {
+            var own = onRecording[recording].ToList();
+            var all = workOf.TryGetValue(recording, out var work) ? own.Concat(onWork[work]) : own;
+
+            IReadOnlyList<SongContributor> contributors =
+            [
+                .. all
+                    .Select(link => (Link: link, Role: CreditTags.Role(link.Type, link.Attributes)))
+                    .Where(credit => credit.Role is not null)
+                    .Where(credit => credit.Link.ArtistMbid is not { } mbid || !CatalogueEndpoints.Nobody.Contains(mbid))
+                    .Select(credit => credit.Link.ArtistMbid is { } mbid && artists.TryGetValue(mbid, out var artist)
+                        ? new SongContributor(credit.Role!.Value.Tag.ToLowerInvariant(), credit.Role.Value.Part, artist.Id, artist.Name, mbid)
+                        : new SongContributor(credit.Role!.Value.Tag.ToLowerInvariant(), credit.Role.Value.Part, null, credit.Link.Name, credit.Link.ArtistMbid))
+                    .DistinctBy(contributor => (contributor.Role, contributor.SubRole, contributor.Mbid?.Value.ToString() ?? contributor.Name)),
+            ];
+
+            var (span, places) = Performance.Recorded(
+                sessions[recording].Select(session => (session.Type, session.Name, session.Begin, session.End)),
+                own.Select(link => (link.Type, link.Attributes, link.Begin, link.End)));
+
+            return (contributors, span is null && places.Count == 0 ? null : new SongRecorded(span, places));
+        });
     }
 
     /// <summary>Who composed each work the songs perform, and the piece and movement of a classical one.</summary>
@@ -363,7 +449,7 @@ public static partial class SubsonicEndpoints
         var works = await db.Works
             .AsNoTracking()
             .Where(work => wanted.Contains(work.Id))
-            .Select(work => new { work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount })
+            .Select(work => new { work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd })
             .ToDictionaryAsync(work => work.Id, cancellationToken)
             .ConfigureAwait(false);
 
@@ -445,7 +531,10 @@ public static partial class SubsonicEndpoints
                     direct ? parent.PartCount : null);
             }
 
-            return new SongWork(composer, new SongPiece(whole.Title, whole.Mbid), movement);
+            return new SongWork(
+                composer,
+                new SongPiece(whole.Title, whole.Mbid, Performance.Span([(whole.ComposedBegin, whole.ComposedEnd)])),
+                movement);
         });
     }
 
@@ -469,7 +558,11 @@ public static partial class SubsonicEndpoints
     /// use</b>, never from the extension itself, so what a client is told a song
     /// is and what the bytes are served as cannot drift apart.
     /// </remarks>
-    private static Song Describe(SongRow row, (double Gain, double Peak)? album, SongWork? work)
+    private static Song Describe(
+        SongRow row,
+        (double Gain, double Peak)? album,
+        SongWork? work,
+        (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded) performance)
     {
         var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
@@ -525,7 +618,9 @@ public static partial class SubsonicEndpoints
                     AudioAnalysis.TrackPeak(row.Measurement),
                     album?.Gain,
                     album?.Peak),
-            work);
+            work,
+            performance.Contributors ?? [],
+            performance.Recorded);
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>
@@ -554,6 +649,7 @@ public static partial class SubsonicEndpoints
         string? AlbumGenres,
         string? RecordingGenres,
         AudioMeasurement? Measurement,
+        RecordingId? Recording,
         WorkId? Work,
         List<CreditRow> AlbumCredits,
         List<CreditRow> GroupCredits,
