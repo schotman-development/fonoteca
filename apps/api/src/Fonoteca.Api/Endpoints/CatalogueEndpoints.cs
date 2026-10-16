@@ -4787,7 +4787,7 @@ public static partial class CatalogueEndpoints
     /// query, and the rows are the works that are a movement of something —
     /// about a thousand here.
     /// </remarks>
-    private static async Task<Dictionary<WorkId, WorkId>> WorkParentsAsync(
+    internal static async Task<Dictionary<WorkId, WorkId>> WorkParentsAsync(
         FonotecaDbContext db,
         CancellationToken cancellationToken) =>
         await db.Works

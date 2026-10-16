@@ -612,6 +612,130 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A classical song names its piece and its movement, a whole piece names
+    /// only itself, and a song names neither; each says who composed it.
+    /// </summary>
+    [Fact]
+    public async Task AClassicalSongNamesItsPieceAndMovement()
+    {
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Beethoven", Genres = "classical" };
+        var pressing = new Release { Id = ReleaseId.New(), Title = "Beethoven", ReleaseGroupId = album.Id, TrackCount = 3, DiscCount = 1 };
+        var beethoven = new Artist
+        {
+            Id = ArtistId.New(),
+            Name = "Ludwig van Beethoven",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+        };
+        var symphony = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Symphony No. 5 in C minor, Op. 67",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Type = "Symphony",
+            PartCount = 4,
+        };
+        var movement = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Symphony No. 5 in C minor, Op. 67: I. Allegro con brio",
+            ParentId = symphony.Id,
+            Position = 1,
+        };
+        var overture = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Overture", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var song = new Work { Id = WorkId.New(), Title = "Adelaide", Type = "Song" };
+        var works = new[] { movement, overture, song };
+        var recordings = works
+            .Select(work => new Recording { Id = RecordingId.New(), Title = work.Title, WorkId = work.Id })
+            .ToList();
+        var files = recordings
+            .Select((recording, i) => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"Beethoven/0{i + 1} Track.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = recording.Id,
+                ReleaseId = pressing.Id,
+                ReleaseGroupId = album.Id,
+            })
+            .ToList();
+
+        Contribution Composer(WorkId work, Mbid? artist, string name) => new()
+        {
+            Id = Guid.CreateVersion7(),
+            WorkId = work,
+            Type = "composer",
+            ArtistMbid = artist,
+            Name = name,
+            Position = 0,
+        };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(album);
+            db.Releases.Add(pressing);
+            db.Artists.Add(beethoven);
+            db.Works.AddRange(symphony, movement, overture, song);
+            db.Recordings.AddRange(recordings);
+            db.MediaFiles.AddRange(files);
+
+            // The movement's own writer, printed under another name than the
+            // catalogue's; the overture's, with no artist row at all.
+            db.Contributions.AddRange(
+                Composer(movement.Id, beethoven.Mbid, "Beethoven"),
+                Composer(overture.Id, null, "L. van Beethoven"));
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            using var client = _factory!.CreateClient();
+
+            var songs = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{album.Id.Value:N}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album")
+                .GetProperty("song")
+                .EnumerateArray()
+                .ToDictionary(row => row.GetProperty("title").GetString()!);
+
+            var first = songs[movement.Title];
+            var piece = Assert.Single(first.GetProperty("works").EnumerateArray());
+            Assert.Equal(symphony.Title, piece.GetProperty("name").GetString());
+            Assert.Equal(symphony.Mbid!.Value.Value.ToString(), piece.GetProperty("musicBrainzId").GetString());
+            var part = Assert.Single(first.GetProperty("movements").EnumerateArray());
+            Assert.Equal("I. Allegro con brio", part.GetProperty("name").GetString());
+            Assert.Equal(1, part.GetProperty("number").GetInt32());
+            Assert.Equal(4, part.GetProperty("count").GetInt32());
+            Assert.Equal("Ludwig van Beethoven", first.GetProperty("displayComposer").GetString());
+
+            var whole = songs[overture.Title];
+            Assert.Equal(overture.Title, Assert.Single(whole.GetProperty("works").EnumerateArray()).GetProperty("name").GetString());
+            Assert.Empty(whole.GetProperty("movements").EnumerateArray());
+            Assert.Equal("L. van Beethoven", whole.GetProperty("displayComposer").GetString());
+
+            var lied = songs[song.Title];
+            Assert.Empty(lied.GetProperty("works").EnumerateArray());
+            Assert.Empty(lied.GetProperty("movements").EnumerateArray());
+            Assert.False(lied.TryGetProperty("displayComposer", out _));
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            var workIds = new[] { symphony.Id, movement.Id, overture.Id, song.Id };
+            db.Contributions.RemoveRange(await db.Contributions.Where(row => row.WorkId != null && workIds.Contains(row.WorkId.Value)).ToListAsync(Token));
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
+            var ids = recordings.Select(recording => recording.Id).ToList();
+            db.Recordings.RemoveRange(await db.Recordings.Where(row => ids.Contains(row.Id)).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+            db.Works.RemoveRange(await db.Works.Where(row => workIds.Contains(row.Id)).OrderBy(row => row.ParentId == null).ToListAsync(Token));
+            db.Artists.Remove(await db.Artists.SingleAsync(row => row.Id == beethoven.Id, Token));
+            db.Releases.Remove(await db.Releases.SingleAsync(row => row.Id == pressing.Id, Token));
+            db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
     /// Every method this server claims answers, and nothing 500s.
     /// </summary>
     /// <remarks>

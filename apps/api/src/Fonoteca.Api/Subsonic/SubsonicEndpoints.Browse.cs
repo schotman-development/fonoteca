@@ -482,6 +482,22 @@ public static partial class SubsonicEndpoints
         writer.Attr("musicBrainzId", song.Mbid?.Value.ToString());
         writer.Children("genres", song.Genres, WriteGenre);
 
+        // OpenSubsonic's, for a client that heads a classical album's runs
+        // with the piece. Only a classical work names one, so a pop album
+        // stays a plain list.
+        writer.Attr("displayComposer", song.Work?.Composer);
+        writer.Children<SongPiece>("works", song.Work?.Piece is { } piece ? [piece] : [], static (works, piece) =>
+        {
+            works.Attr("name", piece.Name);
+            works.Attr("musicBrainzId", piece.Mbid?.Value.ToString());
+        });
+        writer.Children<SongMovement>("movements", song.Work?.Movement is { } movement ? [movement] : [], static (movements, movement) =>
+        {
+            movements.Attr("name", movement.Name);
+            movements.Attr("number", movement.Number);
+            movements.Attr("count", movement.Count);
+        });
+
         // OpenSubsonic's: the values the tag write puts in the file, for a
         // client that normalises from the API rather than the tags.
         if (song.ReplayGain is { } gain)
@@ -553,7 +569,17 @@ internal sealed record Song(
     int? BitDepth,
     DateTimeOffset? Created,
     IReadOnlyList<string> Genres,
-    SongReplayGain? ReplayGain);
+    SongReplayGain? ReplayGain,
+    SongWork? Work);
 
 /// <summary>ReplayGain 2.0, dB and linear peaks; the album values cover the song's album folder.</summary>
 internal sealed record SongReplayGain(double? TrackGain, double? TrackPeak, double? AlbumGain, double? AlbumPeak);
+
+/// <summary>Who composed the work a song performs, and the piece and movement it is of a classical one.</summary>
+internal sealed record SongWork(string? Composer, SongPiece? Piece, SongMovement? Movement);
+
+/// <summary>The whole piece: the top of the work's parts chain, or the work itself.</summary>
+internal sealed record SongPiece(string Name, Mbid? Mbid);
+
+/// <summary>The part of the piece a song is; a number and a count only where the piece is its parent.</summary>
+internal sealed record SongMovement(string Name, int? Number, int? Count);

@@ -24,13 +24,13 @@ public static partial class CatalogueEndpoints
     /// <summary>Rows per page of tracks and of compositions.</summary>
     private const int BrowsePage = 100;
 
-    private const string ComposerLink = "composer";
+    internal const string ComposerLink = "composer";
 
     /// <summary>
     /// MusicBrainz's <c>[traditional]</c>, <c>[anonymous]</c> and <c>[unknown]</c>,
     /// credited where nobody is known to have written the piece.
     /// </summary>
-    private static readonly HashSet<Mbid> Nobody =
+    internal static readonly HashSet<Mbid> Nobody =
     [
         new(Guid.Parse("9be7f096-97ec-4615-8957-8d40b5dcbc41")),
         new(Guid.Parse("f731ccc4-e22a-43af-a747-64213329e088")),

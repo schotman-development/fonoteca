@@ -274,6 +274,7 @@ public static partial class SubsonicEndpoints
                 file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
                 file.Recording != null ? file.Recording.Genres : null,
                 file.Measurement,
+                file.Recording != null ? file.Recording.WorkId : null,
                 // No ternary on the navigation: a null one yields an empty
                 // collection through the join EF writes, where `new List<>()`
                 // is not something it can translate at all.
@@ -303,6 +304,12 @@ public static partial class SubsonicEndpoints
 
         var albums = await AlbumLoudness.ForAsync(db, rows.Select(row => row.Path), cancellationToken).ConfigureAwait(false);
 
+        var works = await SongWorksAsync(
+                db,
+                rows.Where(row => row.Work is not null).Select(row => row.Work!.Value),
+                cancellationToken)
+            .ConfigureAwait(false);
+
         // The album folder first: two rips of one album are one album here, and
         // interleaving them would play every track twice in a row.
         return rows
@@ -312,9 +319,141 @@ public static partial class SubsonicEndpoints
             .ThenBy(row => row.FolderPosition ?? int.MaxValue)
             .ThenBy(row => AlbumFolder.SortKey(row.Path), StringComparer.Ordinal)
             .ThenBy(row => row.Path, StringComparer.Ordinal)
-            .Select(row => Describe(row, albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain))
+            .Select(row => Describe(
+                row,
+                albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain,
+                row.Work is { } work ? works.GetValueOrDefault(work) : null))
             .ToList();
     }
+
+    /// <summary>Who composed each work the songs perform, and the piece and movement of a classical one.</summary>
+    /// <remarks>
+    /// <b>A piece is named only for a classical work</b>, by the Composers
+    /// page's rule (<see cref="ClassicalWorks"/>) over every held performance,
+    /// so a client heading runs with pieces leaves a pop album alone. The type
+    /// asked is the piece's: MusicBrainz types a song cycle's parts <c>Song</c>.
+    /// The piece is the top of the chain, as the album page heads a run with.
+    ///
+    /// <b>A movement's number and count only where its parent is the piece</b>:
+    /// deeper down, a number is its place in an act, not in the opera.
+    ///
+    /// <b>The composers are the work's, else the piece's</b>, since a parent
+    /// minted from a stub has no writers until it is described. Named as the
+    /// catalogue names them where it has a row, so in Latin script.
+    /// </remarks>
+    private static async Task<Dictionary<WorkId, SongWork>> SongWorksAsync(
+        FonotecaDbContext db,
+        IEnumerable<WorkId> performed,
+        CancellationToken cancellationToken)
+    {
+        var ids = performed.Distinct().ToList();
+
+        if (ids.Count == 0) return [];
+
+        var parents = await CatalogueEndpoints.WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+        var pieces = ids.ToDictionary(
+            id => id,
+            id => parents.TryGetValue(id, out var parent) ? WorkTree.Top(parent, parents) : id);
+        var wanted = ids
+            .Concat(pieces.Values)
+            .Concat(ids.Where(parents.ContainsKey).Select(id => parents[id]))
+            .Distinct()
+            .ToList();
+
+        var works = await db.Works
+            .AsNoTracking()
+            .Where(work => wanted.Contains(work.Id))
+            .Select(work => new { work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount })
+            .ToDictionaryAsync(work => work.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        var performances = await db.Recordings
+            .AsNoTracking()
+            .Where(recording => recording.WorkId != null && ids.Contains(recording.WorkId.Value) && recording.Files.Any())
+            .Select(recording => new
+            {
+                Work = recording.WorkId!.Value,
+                recording.Genres,
+                Albums = recording.Files
+                    .Select(file => file.ReleaseGroup == null ? null : file.ReleaseGroup.Genres)
+                    .ToList(),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var classical = performances
+            .GroupBy(performance => performance.Work)
+            .Where(work => ClassicalWorks.Is(
+                works[pieces[work.Key]].Type,
+                work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))))
+            .Select(work => work.Key)
+            .ToHashSet();
+
+        var credited = await db.Contributions
+            .AsNoTracking()
+            .Where(credit => credit.Type == CatalogueEndpoints.ComposerLink
+                && credit.WorkId != null
+                && wanted.Contains(credit.WorkId.Value))
+            .OrderBy(credit => credit.Position)
+            .Select(credit => new { Work = credit.WorkId!.Value, credit.ArtistMbid, credit.Name })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var mbids = credited
+            .Where(credit => credit.ArtistMbid is not null)
+            .Select(credit => credit.ArtistMbid!.Value)
+            .Distinct()
+            .ToList();
+
+        var names = (await db.Artists
+                .AsNoTracking()
+                .Where(artist => artist.Mbid != null && mbids.Contains(artist.Mbid.Value))
+                .Select(artist => new { Mbid = artist.Mbid!.Value, Name = artist.LatinName ?? artist.Name })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .DistinctBy(artist => artist.Mbid)
+            .ToDictionary(artist => artist.Mbid, artist => artist.Name);
+
+        var composers = credited
+            .Where(credit => credit.ArtistMbid is not { } mbid || !CatalogueEndpoints.Nobody.Contains(mbid))
+            .ToLookup(
+                credit => credit.Work,
+                credit => credit.ArtistMbid is { } mbid && names.TryGetValue(mbid, out var name) ? name : credit.Name);
+
+        string? ComposersOf(WorkId work) =>
+            composers[work].Distinct().ToList() is { Count: > 0 } named ? string.Join(", ", named) : null;
+
+        return ids.ToDictionary(id => id, id =>
+        {
+            var piece = pieces[id];
+            var composer = ComposersOf(id) ?? ComposersOf(piece);
+
+            if (!classical.Contains(id)) return new SongWork(composer, null, null);
+
+            var whole = works[piece];
+            SongMovement? movement = null;
+
+            if (piece != id)
+            {
+                var part = works[id];
+                var parent = works[parents[id]];
+                var direct = parent.Id == piece;
+
+                movement = new SongMovement(
+                    Without(part.Title, whole.Title) ?? Without(part.Title, parent.Title) ?? part.Title,
+                    direct ? part.Position : null,
+                    direct ? parent.PartCount : null);
+            }
+
+            return new SongWork(composer, new SongPiece(whole.Title, whole.Mbid), movement);
+        });
+    }
+
+    /// <summary>A part's title with the piece's in front taken off: "I. Allegro con brio".</summary>
+    private static string? Without(string title, string whole) =>
+        title.Length > whole.Length + 2 && title.StartsWith(whole + ": ", StringComparison.Ordinal)
+            ? title[(whole.Length + 2)..]
+            : null;
 
     /// <summary>
     /// One file, as a song.
@@ -330,7 +469,7 @@ public static partial class SubsonicEndpoints
     /// use</b>, never from the extension itself, so what a client is told a song
     /// is and what the bytes are served as cannot drift apart.
     /// </remarks>
-    private static Song Describe(SongRow row, (double Gain, double Peak)? album)
+    private static Song Describe(SongRow row, (double Gain, double Peak)? album, SongWork? work)
     {
         var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
@@ -385,7 +524,8 @@ public static partial class SubsonicEndpoints
                     AudioAnalysis.TrackGain(row.Measurement),
                     AudioAnalysis.TrackPeak(row.Measurement),
                     album?.Gain,
-                    album?.Peak));
+                    album?.Peak),
+            work);
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>
@@ -414,6 +554,7 @@ public static partial class SubsonicEndpoints
         string? AlbumGenres,
         string? RecordingGenres,
         AudioMeasurement? Measurement,
+        WorkId? Work,
         List<CreditRow> AlbumCredits,
         List<CreditRow> GroupCredits,
         List<CreditRow> RecordingCredits);
