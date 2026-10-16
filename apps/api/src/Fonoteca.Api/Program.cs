@@ -122,6 +122,18 @@ builder.Services.AddSingleton(sp => new FfmpegAudioHasher(
     sp.GetRequiredService<FileSystemAudioFileStore>(),
     sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
 
+// getCoverArt's size: each cover scaled once and kept, named by its bytes. In
+// the temp folder, since a cleared one only costs scaling again.
+builder.Services.AddSingleton(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<FonotecaOptions>>().Value;
+
+    return new FfmpegCoverScaler(
+        options.FfmpegPath,
+        options.FfprobePath,
+        Path.Combine(Path.GetTempPath(), "fonoteca-covers"));
+});
+
 builder.Services.AddSingleton<TagReader>();
 
 // The read that answers "what is this file", as opposed to the read that

@@ -949,6 +949,169 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token)).RootElement.Clone();
     }
 
+    /// <summary>
+    /// A cover comes no larger than the size asked for, and is scaled once.
+    /// </summary>
+    /// <remarks>
+    /// A stored cover, so neither the archive nor a folder is asked. Removes
+    /// what it adds and the copies it caused, because the class shares one
+    /// database and the scaler one folder.
+    /// </remarks>
+    [Fact]
+    public async Task ACoverComesNoLargerThanTheSizeAskedForAndIsScaledOnce()
+    {
+        var made = Path.Combine(_root, "cover-1200x800.jpg");
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=1200x800", "-frames:v", "1", made);
+        var original = await File.ReadAllBytesAsync(made, Token);
+        File.Delete(made);
+
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Sleeves" };
+        var pressing = new Release { Id = ReleaseId.New(), Title = "Sleeves", ReleaseGroupId = album.Id, TrackCount = 1, DiscCount = 1 };
+        var recording = new Recording { Id = RecordingId.New(), Title = "Sleeve" };
+        var file = new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = "Sleeves/01 Sleeve.flac",
+            SizeBytes = 1024,
+            LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+            RecordingId = recording.Id,
+            ReleaseId = pressing.Id,
+            ReleaseGroupId = album.Id,
+        };
+        var cover = new ReleaseCover
+        {
+            ReleaseId = pressing.Id,
+            Bytes = original,
+            MediaType = "image/jpeg",
+            SavedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+        };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(album);
+            db.Releases.Add(pressing);
+            db.Recordings.Add(recording);
+            db.MediaFiles.Add(file);
+            db.ReleaseCovers.Add(cover);
+            await db.SaveChangesAsync(Token);
+        }
+
+        var scaler = _factory!.Services.GetRequiredService<Fonoteca.Ingest.FfmpegCoverScaler>();
+        byte[]? changed = null;
+
+        try
+        {
+            using var client = _factory.CreateClient();
+
+            // As it is without a size, and with one larger than the picture.
+            Assert.Equal(original, await CoverAsync(client, album.Id, size: null));
+            Assert.Equal(original, await CoverAsync(client, album.Id, size: 2000));
+
+            var scaled = Path.Combine(_root, "scaled.jpg");
+            await File.WriteAllBytesAsync(scaled, await CoverAsync(client, album.Id, size: 300), Token);
+            Assert.Equal(
+                "300,200",
+                Tool("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", scaled).Trim());
+            File.Delete(scaled);
+
+            // Size 0 is no size, and a scaled answer carries the unscaled one's ETag.
+            Assert.Equal(original, await CoverAsync(client, album.Id, size: 0));
+            Assert.Equal(await ETagAsync(client, album.Id, size: null), await ETagAsync(client, album.Id, size: 300));
+
+            // Asked again, the kept copy answers: change it, and the change is what comes back.
+            var kept = Path.Combine(scaler.Directory, Fonoteca.Ingest.FfmpegCoverScaler.KeyOf(original, 300) + ".jpg");
+            await File.WriteAllBytesAsync(kept, [1, 2, 3], Token);
+            var again = await CoverAsync(client, album.Id, size: 300);
+            Assert.Equal<byte>([1, 2, 3], again);
+
+            // A changed cover is another picture, so the old copy is not served for it.
+            var other = Path.Combine(_root, "cover-800x1200.jpg");
+            Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=800x1200", "-frames:v", "1", other);
+            changed = await File.ReadAllBytesAsync(other, Token);
+            File.Delete(other);
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                var row = await db.ReleaseCovers.SingleAsync(row => row.ReleaseId == pressing.Id, Token);
+                row.Bytes = changed;
+                row.SavedUtc = row.SavedUtc.AddDays(1);
+                await db.SaveChangesAsync(Token);
+            }
+
+            var rescaled = Path.Combine(_root, "rescaled.jpg");
+            await File.WriteAllBytesAsync(rescaled, await CoverAsync(client, album.Id, size: 300), Token);
+            Assert.Equal(
+                "200,300",
+                Tool("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", rescaled).Trim());
+            File.Delete(rescaled);
+        }
+        finally
+        {
+            foreach (var picture in changed is null ? new[] { original } : [original, changed])
+            {
+                foreach (var size in new[] { 300, 2000 })
+                {
+                    foreach (var kind in new[] { ".jpg", ".as-is" })
+                    {
+                        File.Delete(Path.Combine(scaler.Directory, Fonoteca.Ingest.FfmpegCoverScaler.KeyOf(picture, size) + kind));
+                    }
+                }
+            }
+
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.ReleaseCovers.RemoveRange(await db.ReleaseCovers.Where(row => row.ReleaseId == pressing.Id).ToListAsync(Token));
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(row => row.ReleaseGroupId == album.Id).ToListAsync(Token));
+            db.Releases.Remove(await db.Releases.SingleAsync(row => row.Id == pressing.Id, Token));
+            db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
+            db.Recordings.Remove(await db.Recordings.SingleAsync(row => row.Id == recording.Id, Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    private static async Task<byte[]> CoverAsync(HttpClient client, ReleaseGroupId album, int? size)
+    {
+        var sized = size is { } pixels ? $"&size={pixels}" : string.Empty;
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getCoverArt.view?{Credentials}&id=al-{album.Value:N}{sized}", UriKind.Relative),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        return await response.Content.ReadAsByteArrayAsync(Token);
+    }
+
+    private static async Task<string?> ETagAsync(HttpClient client, ReleaseGroupId album, int? size)
+    {
+        var sized = size is { } pixels ? $"&size={pixels}" : string.Empty;
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getCoverArt.view?{Credentials}&id=al-{album.Value:N}{sized}", UriKind.Relative),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        return response.Headers.ETag?.Tag;
+    }
+
+    /// <summary>Runs ffmpeg or ffprobe and returns what it printed.</summary>
+    private static string Tool(string name, params string[] arguments)
+    {
+        using var tool = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(name, arguments)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        })!;
+
+        var output = tool.StandardOutput.ReadToEnd();
+        var error = tool.StandardError.ReadToEnd();
+        tool.WaitForExit();
+
+        Assert.True(tool.ExitCode == 0, $"{name} failed: {error}");
+
+        return output;
+    }
+
     private WebApplicationFactory<Program> Factory(string password) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {

@@ -1,9 +1,11 @@
+using System.Globalization;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Ingest;
 using Fonoteca.Providers.Qobuz;
 using Fonoteca.Tagging;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fonoteca.Api.Subsonic;
@@ -75,7 +77,8 @@ public static partial class SubsonicEndpoints
     /// prefix at all. An album — or a song filed under one — is the stored
     /// <c>ReleaseCover</c>, fetched once and served under an ETag. Anything else
     /// is a path, and a path's picture is the file's embedded cover or the
-    /// folder's own <c>cover.jpg</c>.
+    /// folder's own <c>cover.jpg</c>. Each comes no larger than the <c>size</c>
+    /// asked for (<see cref="SizedAsync"/>).
     ///
     /// <b>A refusal here is a problem document, not a Subsonic error.</b> The
     /// protocol says an error is XML even on a binary endpoint, and clients do
@@ -91,6 +94,7 @@ public static partial class SubsonicEndpoints
         ICoverArtArchive archive,
         QobuzCovers shop,
         IClock clock,
+        FfmpegCoverScaler scaler,
         CancellationToken cancellationToken)
     {
         var id = Text(http, "id");
@@ -109,9 +113,11 @@ public static partial class SubsonicEndpoints
 
             if (CatalogueEndpoints.DisplayEdition(editions[group]) is { } display)
             {
-                return await CatalogueEndpoints
+                var cover = await CatalogueEndpoints
                     .GetReleaseCover(display.Id.Value, db, archive, shop, store, describer, clock, http, cancellationToken)
                     .ConfigureAwait(false);
+
+                return await SizedAsync(http, scaler, cover, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -120,9 +126,72 @@ public static partial class SubsonicEndpoints
 
         if (path is null) return SubsonicResult.Error(70, "No such cover art.");
 
-        return await FileEndpoints
+        var art = await FileEndpoints
             .GetArt(store, describer, http, path, cancellationToken)
             .ConfigureAwait(false);
+
+        return await SizedAsync(http, scaler, art, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The cover no larger than the <c>size</c> the client asked for.
+    /// </summary>
+    /// <remarks>
+    /// A client asks for a size so it need not decode pixels it throws away: a
+    /// page of album tiles drawing 1200px archive fronts at 160px spends its
+    /// time decoding, and a picture shrunk that far by a renderer looks grainier
+    /// than one scaled once, properly. The scaled copy goes out under the
+    /// original's ETag and date, which still say when this picture last changed.
+    /// </remarks>
+    private static async Task<IResult> SizedAsync(
+        HttpContext http,
+        FfmpegCoverScaler scaler,
+        IResult cover,
+        CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(Text(http, "size"), NumberStyles.None, CultureInfo.InvariantCulture, out var size)
+            || size <= 0)
+        {
+            return cover;
+        }
+
+        switch (cover is INestedHttpResult nested ? nested.Result : cover)
+        {
+            case FileContentHttpResult content:
+            {
+                var scaled = await scaler
+                    .ScaleAsync(content.FileContents.ToArray(), size, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return scaled is null
+                    ? cover
+                    : TypedResults.File(scaled, "image/jpeg", lastModified: content.LastModified, entityTag: content.EntityTag);
+            }
+
+            case FileStreamHttpResult stream:
+            {
+                byte[] picture;
+
+                await using (stream.FileStream.ConfigureAwait(false))
+                {
+                    using var copy = new MemoryStream();
+                    await stream.FileStream.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
+                    picture = copy.ToArray();
+                }
+
+                var scaled = await scaler.ScaleAsync(picture, size, cancellationToken).ConfigureAwait(false);
+
+                // Read now, so even a picture served as it is goes out as bytes.
+                return TypedResults.File(
+                    scaled ?? picture,
+                    scaled is null ? stream.ContentType : "image/jpeg",
+                    lastModified: stream.LastModified,
+                    entityTag: stream.EntityTag);
+            }
+
+            default:
+                return cover;
+        }
     }
 
     /// <summary>
