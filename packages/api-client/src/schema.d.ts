@@ -2310,6 +2310,8 @@ export interface components {
             pendingGenres: number;
             /** Format: int32 */
             pendingParentWorks: number;
+            /** Format: int32 */
+            pendingLyrics: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {
@@ -2344,6 +2346,8 @@ export interface components {
             albumsAnimated: number;
             /** Format: int32 */
             albumsWithBooklets: number;
+            /** Format: int32 */
+            recordingsWithLyrics: number;
             cancelled: boolean;
         };
         FileAnalysis: {

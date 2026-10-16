@@ -60,6 +60,9 @@ public sealed partial class TagWriteService
     /// <summary>A booklet file written beside the album; undone with the sleeve.</summary>
     private const string BookletEvent = EventPrefix + ".booklet";
 
+    /// <summary>A lyrics file beside a track moved to the trash once its words were in the tag.</summary>
+    private const string LyricsEvent = EventPrefix + ".lyrics";
+
     private const string FolderSubjectType = "folder";
 
     /// <summary>The edit an undo of this album folder would reverse, or null when there is none.</summary>
@@ -151,6 +154,7 @@ public sealed partial class TagWriteService
                 await MoveBackAsync(db, events, entries, undo).ConfigureAwait(false);
                 await RelinkAsync(db, events, entries, undo).ConfigureAwait(false);
                 await RestoreCoversAsync(events, entries, undo).ConfigureAwait(false);
+                await RestoreLyricsAsync(events, entries, undo).ConfigureAwait(false);
             }
 
             // A person's save: their corrections go back with the files, and the
@@ -267,7 +271,7 @@ public sealed partial class TagWriteService
             if (JsonSerializer.Deserialize<UndonePayload>(marker.PayloadJson)?.Undoes is { } undone) skipped.Add(undone);
         }
 
-        string[] kinds = [WrittenEvent, RenamedEvent, CoverEvent, MotionEvent, BookletEvent, AcoustIdTagWriter.WrittenEventType, PersonSavedEvent];
+        string[] kinds = [WrittenEvent, RenamedEvent, CoverEvent, MotionEvent, BookletEvent, LyricsEvent, AcoustIdTagWriter.WrittenEventType, PersonSavedEvent];
 
         var own = await db.DomainEvents
             .AsNoTracking()
@@ -762,6 +766,58 @@ public sealed partial class TagWriteService
 #pragma warning restore CA1031
             {
                 undo.Problems.Add($"{undo.Here}: the sleeve could not be put back ({Because(cause)})");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The lyrics files the edit moved to the trash, back beside their tracks.
+    /// </summary>
+    /// <remarks>
+    /// Under the name each had, in the album folder where it is now: the
+    /// renames are already undone, so the tracks have their old names back.
+    /// Never over anything, as a move never is.
+    /// </remarks>
+    private async Task RestoreLyricsAsync(IEventLog events, List<UndoEntry> entries, Undo undo)
+    {
+        foreach (var entry in entries.Where(entry => entry.Type == LyricsEvent && entry.SubjectType == TagWriter.FileSubject))
+        {
+            if (Read(entry.Payload, "path") is not { } path || Read(entry.Payload, "trashed") is not { } trashed) continue;
+
+            var back = undo.Here + path[AlbumFolder.Of(path).Length..];
+
+            try
+            {
+                var target = store.AbsolutePathFor(new LibraryPath(back));
+
+                if (!File.Exists(trashed) || Taken(target))
+                {
+                    undo.Problems.Add($"{back}: the lyrics file could not be put back");
+                    continue;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Move(trashed, target);
+
+                await events.AppendAsync(
+                        DomainEvent.Create(
+                            UndoPrefix + ".lyrics",
+                            TagWriter.FileSubject,
+                            entry.Subject,
+                            undo.Actor,
+                            clock.UtcNow,
+                            JsonSerializer.Serialize(new { path = back, from = trashed }),
+                            undo.Run),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                undo.Moved++;
+            }
+#pragma warning disable CA1031 // A lyrics file is not the album: the rest of the undo stands.
+            catch (Exception cause)
+#pragma warning restore CA1031
+            {
+                undo.Problems.Add($"{back}: the lyrics file could not be put back ({Because(cause)})");
             }
         }
     }

@@ -70,11 +70,11 @@ public sealed partial class TagWritePassTests
         SkipWithoutTools();
         await SeedAsync(("Miles Davis/kob rip/CD1/track one.flac", 1));
         await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "kob rip", "cover.jpg"), "sleeve", Token);
-        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "kob rip", "CD1", "track one.lrc"), "lyrics", Token);
+        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "kob rip", "CD1", "track one.cue"), "TRACK 01 AUDIO", Token);
 
         var services = Build(fileNaming: FileNaming.DefaultPattern);
         Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Renamed);
-        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue (1959)/01 - So What.lrc")));
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue (1959)/01 - So What.cue")));
 
         var undone = await UndoAsync(services, "Miles Davis/Kind of Blue (1959)");
 
@@ -83,7 +83,7 @@ public sealed partial class TagWritePassTests
         Assert.Empty(undone.Problems);
 
         Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/kob rip/CD1/track one.flac")));
-        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/kob rip/CD1/track one.lrc")));
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/kob rip/CD1/track one.cue")));
         Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/kob rip/cover.jpg")));
         Assert.False(Directory.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue (1959)")));
 
@@ -567,21 +567,21 @@ public sealed partial class TagWritePassTests
     }
 
     [Fact]
-    public async Task ALyricOfAnotherRipAtTheRenamedPathKeepsItsName()
+    public async Task ACompanionOfAnotherRipAtTheRenamedPathKeepsItsName()
     {
         SkipWithoutTools();
         await SeedAsync(("Miles Davis/kob rip/a.flac", 1), ("Miles Davis/kob rip 2/b.flac", 2));
-        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "kob rip", "a.lrc"), "theirs", Token);
+        await File.WriteAllTextAsync(Path.Combine(_root, "Miles Davis", "kob rip", "a.cue"), "theirs", Token);
 
         var services = Build(fileNaming: FileNaming.DefaultPattern);
         await RunAsync(TagWriteScope.Library, services);
 
         const string renamed = "Miles Davis/Kind of Blue (1959)";
-        Assert.True(File.Exists(Path.Combine(_root, renamed, "01 - So What.lrc")));
+        Assert.True(File.Exists(Path.Combine(_root, renamed, "01 - So What.cue")));
 
         Directory.Move(Path.Combine(_root, renamed), Path.Combine(_root, "Miles Davis", "Away"));
         Directory.Move(Path.Combine(_root, "Miles Davis", "kob rip 2"), Path.Combine(_root, renamed));
-        await File.WriteAllTextAsync(Path.Combine(_root, renamed, "01 - So What.lrc"), "mine", Token);
+        await File.WriteAllTextAsync(Path.Combine(_root, renamed, "01 - So What.cue"), "mine", Token);
 
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
@@ -594,8 +594,8 @@ public sealed partial class TagWritePassTests
         }
 
         Assert.Equal(TagUndoStatus.Undone, (await UndoAsync(services, renamed)).Status);
-        Assert.Equal("mine", await File.ReadAllTextAsync(Path.Combine(_root, renamed, "01 - So What.lrc"), Token));
-        Assert.False(File.Exists(Path.Combine(_root, renamed, "a.lrc")));
+        Assert.Equal("mine", await File.ReadAllTextAsync(Path.Combine(_root, renamed, "01 - So What.cue"), Token));
+        Assert.False(File.Exists(Path.Combine(_root, renamed, "a.cue")));
     }
 
     [Fact]

@@ -50,7 +50,7 @@ the rest.
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
-   answers over time — a portrait, an article, a banner, a cover — a stamp that
+   answers over time — a portrait, an article, a banner, a cover, a song's words — a stamp that
    found nothing expires after a week (`NothingFoundRetryAfter`,
    `CoverRetryAfter`); one that found something never does. Corollary: widening a
    lookup is invisible to everything already stamped, so re-asking is a
@@ -156,7 +156,7 @@ Fonoteca.Api        minimal API, OpenAPI, SignalR, health
 Fonoteca.Domain     PURE — entities, matching, quality ranking
 Fonoteca.Ingest     walk, probe, fingerprint
 Fonoteca.Tagging    read/write, dry-run diff, undo journal
-Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic
+Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic | lrclib
 Fonoteca.Jobs       empty — Hangfire refs, a reference to Domain, no source
 Fonoteca.Data       EF Core, migrations
 ```
@@ -199,6 +199,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | covers | — | `Providers/CoverArt/`, `Api/Endpoints/CatalogueEndpoints.Cover.cs` |
 | motion artwork | — | `Providers/AppleMusic/AppleMusicMotions.cs`, `EnrichmentService.MotionAsync`, `TagWriteService.EnsureMotionAsync` |
 | booklets | — | `Providers/CoverArt/AlbumBooklets.cs`, `EnrichmentService.BookletsAsync`, `TagWriteService.EnsureBookletAsync` |
+| lyrics | `Domain/Catalogue/LyricsText.cs` | `Providers/Lrclib/LrclibLyrics.cs`, `EnrichmentService.LyricsAsync`, `TagWriteService.TrashLyricsAsync`, `Api/Subsonic/SubsonicEndpoints.Lyrics.cs` |
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
@@ -249,7 +250,7 @@ run rather than a no-op.
 the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
 held recordings described again → parent works → album genres → artists → portraits → articles,
-banners, motion, booklets → discographies. `CountPendingAsync` returns one number per
+banners, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
 
@@ -397,7 +398,8 @@ as `DYNAMIC RANGE` and `ALBUM DYNAMIC RANGE` — foobar2000's DR Meter's names,
 no standard naming any — the album's only where every track has one.
 **Every analysed file is on the tag write's worklist**, since a gain needs no
 identity — one the catalogue has not answered (`TagWriteService.Answered`) gets
-its ReplayGain and DR alone: no partial answer, no sleeve, no rename. Opus
+its ReplayGain and DR alone, and a lyrics file's words beside it: no partial
+answer, no sleeve, no rename. Opus
 gets no ReplayGain (RFC 7845 wants `R128_TRACK_GAIN` there; no Opus in the
 library yet).
 
@@ -460,7 +462,11 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   compared per reader as well as across them — and `FlacCommentPictures` puts
   it back as a picture block of its own, the owner's choice. And TagLib# 2.3 times an MP3
   with a LAME `Info` header at double length, so durations are compared per
-  reader too.
+  reader too. It reads timed lyrics into a parse that drops the space after
+  each time and moves a blank timed line to the top, and writes them back from
+  it on every save: the lyrics are read as stored, by TagLib#
+  (`TagReader.StoredLyrics`), and the writer hands one set of words back as
+  stored.
 - **Genres, ISRCs and credits go in too, under Picard's names** — the owner's
   choice, replacing whatever the file carried. A file's genres are its album's,
   its recording's only where the album has none, five at most, spelled as
@@ -473,7 +479,11 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   nothing reads them. On ID3 the five without a frame of ATL's go in `TXXX`,
   where Picard uses `TIPL`/`TMCL`; TagLib-based readers find them either way.
   The tag editor shows several values joined with "; ", and a value a person
-  saves is theirs, as one value.
+  saves is theirs, as one value. **So do lyrics** (ADR 0016): LRCLIB's, timed
+  LRC where there is any, in `LYRICS`/`USLT`/`©lyr`, replacing the file's own
+  and its `UNSYNCEDLYRICS`; every `.lrc` beside a written track goes to the
+  trash once the tag holds the words, its own words going in first where
+  LRCLIB has none. All the owner's choices, and nothing in Fonoteca shows them.
 - **A pressing's tags only with a proven pressing.** A file held to its album
   alone gets the album's facts — title, artist, album, album artist (the display
   edition's billing), year (`AlbumYear`), recording and release-group MBIDs, and
@@ -497,7 +507,7 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   follows links by default and lists each linked track twice, hence
   `ND_SCANNER_FOLLOWSYMLINKS=false` in compose. Unit is the album folder, so a
   loose file or a folder naming two albums stays put. A file under a track's
-  name (`01.lrc`) goes with it, and an artist folder only respelled takes its
+  name (`01.cue`) goes with it — a lyrics file is in the trash by then — and an artist folder only respelled takes its
   pictures along.
 - **Undo steps one album folder back by one edit** (`TagWriteService.Undo.cs`,
   `POST /api/catalogue/folders/undo`): the newest journal correlation that
@@ -915,7 +925,7 @@ unfollow for a year and re-follow, and a year of releases is marked wanted.
 ## Providers
 
 *These are somebody else's production systems and they enforce their limits by
-blocking you.* Six `RequestGate`s, one per provider.
+blocking you.* A `RequestGate` per provider.
 
 - **The rate gate sits underneath the resilience pipeline, not above it.**
   Handlers run outermost-first in registration order, so

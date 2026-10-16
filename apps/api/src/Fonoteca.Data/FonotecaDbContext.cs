@@ -33,6 +33,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<AlbumMotion> AlbumMotions => Set<AlbumMotion>();
     public DbSet<AlbumBooklet> AlbumBooklets => Set<AlbumBooklet>();
     public DbSet<AlbumBookletFile> AlbumBookletFiles => Set<AlbumBookletFile>();
+    public DbSet<RecordingLyrics> RecordingLyrics => Set<RecordingLyrics>();
     public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
     public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
     public DbSet<SmartPlaylist> SmartPlaylists => Set<SmartPlaylist>();
@@ -522,6 +523,16 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasOne<ReleaseGroup>()
                 .WithOne()
                 .HasForeignKey<AlbumMotion>(x => x.ReleaseGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RecordingLyrics>(e =>
+        {
+            e.HasKey(x => x.RecordingId);
+            e.Property(x => x.MatchedBy).HasMaxLength(40);
+            e.HasOne<Recording>()
+                .WithOne(x => x.Lyrics)
+                .HasForeignKey<RecordingLyrics>(x => x.RecordingId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

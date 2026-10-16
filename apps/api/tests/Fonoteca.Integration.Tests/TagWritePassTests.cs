@@ -836,18 +836,18 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     }
 
     [Fact]
-    public async Task ALyricsFileBesideATrackTakesItsNewName()
+    public async Task AFileBesideATrackUnderItsNameTakesItsNewName()
     {
         SkipWithoutTools();
         await SeedAsync(("Miles Davis/kob rip/CD1/01.flac", 1));
         var disc = Path.Combine(_root, "Miles Davis", "kob rip", "CD1");
-        await File.WriteAllTextAsync(Path.Combine(disc, "01.lrc"), "[00:00.00]So What", Token);
+        await File.WriteAllTextAsync(Path.Combine(disc, "01.cue"), "TRACK 01 AUDIO", Token);
         await File.WriteAllTextAsync(Path.Combine(disc, "01.flac.txt"), "a name of its own", Token);
 
         await RunAsync(TagWriteScope.Library, Build(fileNaming: FileNaming.DefaultPattern));
 
         var folder = Path.Combine(_root, "Miles Davis", "Kind of Blue (1959)");
-        Assert.True(File.Exists(Path.Combine(folder, "01 - So What.lrc")));
+        Assert.True(File.Exists(Path.Combine(folder, "01 - So What.cue")));
         Assert.True(File.Exists(Path.Combine(folder, "CD1", "01.flac.txt")));
     }
 

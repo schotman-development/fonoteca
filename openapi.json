@@ -7205,6 +7205,7 @@
           "pendingRecordings",
           "pendingGenres",
           "pendingParentWorks",
+          "pendingLyrics",
           "lastCompleted"
         ],
         "type": "object",
@@ -7280,6 +7281,10 @@
             "type": "integer",
             "format": "int32"
           },
+          "pendingLyrics": {
+            "type": "integer",
+            "format": "int32"
+          },
           "lastCompleted": {
             "oneOf": [
               {
@@ -7310,6 +7315,7 @@
           "artistsPictured",
           "albumsAnimated",
           "albumsWithBooklets",
+          "recordingsWithLyrics",
           "cancelled"
         ],
         "type": "object",
@@ -7374,6 +7380,10 @@
             "format": "int32"
           },
           "albumsWithBooklets": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recordingsWithLyrics": {
             "type": "integer",
             "format": "int32"
           },

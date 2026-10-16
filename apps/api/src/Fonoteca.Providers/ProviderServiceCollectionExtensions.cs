@@ -5,6 +5,7 @@ using Fonoteca.Providers.AcoustId;
 using Fonoteca.Providers.AppleMusic;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.CoverArt;
+using Fonoteca.Providers.Lrclib;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
 using Fonoteca.Providers.Wikidata;
@@ -435,6 +436,44 @@ public static class ProviderServiceCollectionExtensions
     /// </remarks>
     public static IServiceCollection AddAlbumBooklets(this IServiceCollection services) =>
         services.AddSingleton<IAlbumBooklets, AlbumBooklets>();
+
+    /// <summary>Registers <see cref="ISongLyrics"/> over LRCLIB and the client behind it.</summary>
+    /// <remarks>
+    /// <see cref="AddAudioDbPortraits"/>'s shape — gate under the retries,
+    /// contact in the User-Agent, nothing to configure. The retries matter more
+    /// here than anywhere: a busy LRCLIB sheds load with a 503 and
+    /// <c>Retry-After: 1</c>, which the pipeline honours under the gate.
+    /// </remarks>
+    public static IServiceCollection AddLrclib(
+        this IServiceCollection services,
+        Action<LrclibOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(LrclibOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<LrclibOptions>(provider).MinimumRequestInterval));
+
+        var client = services.AddHttpClient(LrclibOptions.HttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = LrclibOptions.Server;
+            http.DefaultRequestHeaders.Add("User-Agent", $"Fonoteca/0.1 ( {Options<LrclibOptions>(provider).Contact} )");
+            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
+        client.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        });
+
+        AddResilienceThenGate(client, LrclibOptions.HttpClientName);
+
+        services.AddSingleton<ISongLyrics, LrclibLyrics>();
+
+        return services;
+    }
 
     private static string AppleUserAgent(IServiceProvider provider) =>
         $"Fonoteca/0.1 ( {Options<AppleMusicOptions>(provider).Contact} )";

@@ -471,6 +471,13 @@ internal static partial class Log
         Message = "No booklet answer for {Title}; asked again after the rest next run: {Reason}")]
     public static partial void BookletAlbumUnanswered(ILogger logger, string title, string reason);
 
+    /// <remarks>Debug: a busy LRCLIB answers a few songs this way on every run, and the next run asks them again.</remarks>
+    [LoggerMessage(
+        EventId = 1298,
+        Level = LogLevel.Debug,
+        Message = "No lyrics answer for {Title}; asked again next run: {Reason}")]
+    public static partial void LyricsUnanswered(ILogger logger, string title, string reason);
+
     /// <remarks>
     /// Debug, like <see cref="ArtistNotDescribed"/>, and for a narrower version
     /// of the same reason: the worklist here is the followed set rather than the
@@ -737,6 +744,13 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Cover not written to {Path}: {Reason}")]
     public static partial void CoverNotWritten(ILogger logger, string path, string reason);
+
+    /// <remarks><see cref="CoverNotWritten"/>'s reasons: a folder this process cannot move a file out of.</remarks>
+    [LoggerMessage(
+        EventId = 1313,
+        Level = LogLevel.Warning,
+        Message = "Lyrics file {Path} not moved to the trash: {Reason}")]
+    public static partial void LyricsFileNotTrashed(ILogger logger, string path, string reason);
 
     [LoggerMessage(
         EventId = 1307,

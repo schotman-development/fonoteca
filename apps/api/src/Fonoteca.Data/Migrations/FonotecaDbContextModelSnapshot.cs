@@ -677,6 +677,35 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("Recordings");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.RecordingLyrics", b =>
+                {
+                    b.Property<Guid>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Instrumental")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("LrclibId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MatchedBy")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Plain")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("SavedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Synced")
+                        .HasColumnType("text");
+
+                    b.HasKey("RecordingId");
+
+                    b.ToTable("RecordingLyrics");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Relationship", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1210,6 +1239,15 @@ namespace Fonoteca.Data.Migrations
                     b.Navigation("Work");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.RecordingLyrics", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithOne("Lyrics")
+                        .HasForeignKey("Fonoteca.Domain.Catalogue.RecordingLyrics", "RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Relationship", b =>
                 {
                     b.HasOne("Fonoteca.Domain.Catalogue.Artist", null)
@@ -1293,6 +1331,8 @@ namespace Fonoteca.Data.Migrations
                     b.Navigation("Credits");
 
                     b.Navigation("Files");
+
+                    b.Navigation("Lyrics");
 
                     b.Navigation("Relationships");
 

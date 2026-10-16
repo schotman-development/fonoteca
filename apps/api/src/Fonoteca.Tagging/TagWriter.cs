@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using LyricsInfo = ATL.LyricsInfo;
 using Track = ATL.Track;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
@@ -147,6 +148,19 @@ public sealed class TagWriter(
             if (!string.Equals(current, value, StringComparison.Ordinal))
             {
                 changes.Add(new TagFieldChange(field, current, value));
+            }
+        }
+
+        // Words the catalogue gives a file are its only words: the same words
+        // under foobar2000's name go, or Navidrome shows both.
+        if (desired.ContainsKey(CatalogueTags.Lyrics))
+        {
+            foreach (var (key, value) in before.Fields)
+            {
+                if (key[(key.LastIndexOf(':') + 1)..].Equals(CatalogueTags.UnsyncedLyrics, StringComparison.OrdinalIgnoreCase))
+                {
+                    changes.Add(new TagFieldChange(key, value, null));
+                }
             }
         }
 
@@ -357,6 +371,17 @@ public sealed class TagWriter(
             if (track.TrackTotal is null or 0 && stored.TrackTotal is { } tracks) track.TrackTotal = tracks;
             if (track.DiscTotal is null or 0 && stored.DiscTotal is { } discs) track.DiscTotal = discs;
 
+            // And the words, which ATL re-renders from its own parse on every
+            // save — see TagReader.StoredLyrics. One set of words goes back as
+            // the file stores it; several are left to the check that the write
+            // changed nothing it did not mean to.
+            if (!plan.Changes.Any(change => change.Field == CatalogueTags.Lyrics)
+                && plan.Before.Find(CatalogueTags.Lyrics) is { } words
+                && track.Lyrics is [var held])
+            {
+                track.Lyrics = [new LyricsInfo { UnsynchronizedLyrics = words, LanguageCode = held.LanguageCode, Description = held.Description }];
+            }
+
             foreach (var change in plan.Changes)
             {
                 Set(track, change);
@@ -421,6 +446,13 @@ public sealed class TagWriter(
             case CatalogueTags.Isrc: track.ISRC = value ?? string.Empty; break;
             case CatalogueTags.Lyricist: track.Lyricist = value ?? string.Empty; break;
             case CatalogueTags.Conductor: track.Conductor = value ?? string.Empty; break;
+
+            // Every set of words the file held goes, and these are written as
+            // given, LRC and all: handed over as text, ATL stores the text. ID3
+            // wants a language, and "XXX" is the frame's own word for unknown.
+            case CatalogueTags.Lyrics:
+                track.Lyrics = value is null ? [] : [new LyricsInfo { UnsynchronizedLyrics = value, LanguageCode = "XXX" }];
+                break;
             case CatalogueTags.TrackNumber: track.TrackNumber = value is null ? 0 : Count(value); break;
             case CatalogueTags.TrackTotal: track.TrackTotal = value is null ? 0 : Count(value); break;
             case CatalogueTags.DiscNumber: track.DiscNumber = value is null ? 0 : Count(value); break;

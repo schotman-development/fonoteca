@@ -597,6 +597,7 @@ public sealed partial class TagWriteService(
                 file.ReleaseGroup!.Genres,
                 file.Recording.Genres,
                 file.Recording.Isrcs,
+                file.Recording.Lyrics!.Synced ?? file.Recording.Lyrics.Plain,
                 file.Measurement,
                 answered.Any(other => other.Id == file.Id),
                 file.Recording.Contributions
@@ -860,6 +861,16 @@ public sealed partial class TagWriteService(
                 return;
             }
 
+            // A lyrics file beside the track under its name: its words go into
+            // the tag where LRCLIB has none, and it goes to the trash once the
+            // tag holds the words — see TrashLyricsAsync. A file the catalogue
+            // has not answered takes a lyrics file's words, which are its own,
+            // and not LRCLIB's, which are part of the answer it waits for.
+            var sidecars = LyricsFiles(path);
+
+            if (!file.Answered) file = file with { Lyrics = null };
+            if (file.Lyrics is null && SidecarWords(sidecars) is { } words) file = file with { Lyrics = words };
+
             // A file one of the two libraries cannot parse throws out of here
             // rather than returning: they have to agree about what is in a file
             // before it is changed. The backstop in RunAsync counts it and
@@ -995,6 +1006,14 @@ public sealed partial class TagWriteService(
                         row.AcoustIdTaggedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
                     }
                 }
+            }
+
+            if (sidecars.Count > 0
+                && writerOptions.AllowFileMutation
+                && write.Status is TagWriteStatus.Written or TagWriteStatus.NothingToDo)
+            {
+                await TrashLyricsAsync(file, sidecars, covers.Stamp, provider, correlationId, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             // A file here for its ReplayGain and DR alone vouches for no album and no shelf.
@@ -1219,6 +1238,126 @@ public sealed partial class TagWriteService(
         catch (Exception cause) when (cause is not OperationCanceledException)
         {
             Log.CoverNotWritten(logger, target, Because(cause));
+        }
+    }
+
+    /// <summary>The largest lyrics file read, Navidrome's own limit for a lyrics tag.</summary>
+    private const int MaxLyricsFileBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The <c>.lrc</c> files beside a track under its name, as
+    /// <c>MoveCompanionsAsync</c> finds a companion: same folder, same stem,
+    /// and not a link.
+    /// </summary>
+    private List<(string Relative, string Absolute)> LyricsFiles(LibraryPath path)
+    {
+        try
+        {
+            var absolute = store.AbsolutePathFor(path);
+            var directory = Path.GetDirectoryName(absolute)!;
+            var stem = Path.GetFileNameWithoutExtension(absolute);
+
+            if (!Directory.Exists(directory)) return [];
+
+            return [.. Directory.EnumerateFiles(directory)
+                .Where(candidate => Path.GetFileNameWithoutExtension(candidate) == stem
+                    && Path.GetExtension(candidate).Equals(".lrc", StringComparison.OrdinalIgnoreCase)
+                    && !IsLink(candidate)
+                    && new FileInfo(candidate).Length <= MaxLyricsFileBytes)
+                .Order(StringComparer.Ordinal)
+                .Select(candidate => (Relative(store.Root, candidate), candidate))];
+        }
+        catch (Exception cause) when (cause is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log.LyricsFileNotTrashed(logger, path.Value, Because(cause));
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// The words of the first lyrics file that holds any, as it holds them.
+    /// </summary>
+    /// <remarks>
+    /// UTF-8, else Latin-1, as a playlist file is read. A file of one or two
+    /// lines is the release group's advert, not lyrics (<see cref="LyricsText.IsLyrics"/>).
+    /// </remarks>
+    private static string? SidecarWords(List<(string Relative, string Absolute)> sidecars)
+    {
+        foreach (var (_, absolute) in sidecars)
+        {
+            string text;
+
+            try
+            {
+                var bytes = File.ReadAllBytes(absolute);
+
+                try
+                {
+                    text = new System.Text.UTF8Encoding(false, true).GetString(bytes);
+                }
+                catch (System.Text.DecoderFallbackException)
+                {
+                    text = System.Text.Encoding.Latin1.GetString(bytes);
+                }
+            }
+            catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            text = text.TrimStart('\uFEFF').Trim();
+
+            if (LyricsText.IsLyrics(text)) return text;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The lyrics files beside a track, to the trash, once its tag holds its words.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every one, the owner's choice</b> — the words are in the file's own
+    /// tag now, LRCLIB's or the lyrics file's own where LRCLIB had none, and an
+    /// advert is nobody's words. Only after a write that left the tag as
+    /// planned, so a refused write keeps both.
+    ///
+    /// <see cref="EnsureCoverAsync"/>'s rules for a file in the way: displaced
+    /// to the run's stamped folder in the trash rather than deleted, journalled
+    /// so Undo puts it back, and a failure the lyrics file's problem rather
+    /// than the track's — the row's new size and mtime still have to be saved.
+    /// </remarks>
+    private async Task TrashLyricsAsync(
+        PendingTagWrite file,
+        List<(string Relative, string Absolute)> sidecars,
+        string stamp,
+        IServiceProvider provider,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var (relative, absolute) in sidecars)
+        {
+            try
+            {
+                var trashed = Displace(relative, absolute, stamp);
+
+                await provider.GetRequiredService<IEventLog>()
+                    .AppendAsync(
+                        DomainEvent.Create(
+                            LyricsEvent,
+                            TagWriter.FileSubject,
+                            file.Id.ToString(),
+                            _actor,
+                            clock.UtcNow,
+                            JsonSerializer.Serialize(new { path = relative, trashed }),
+                            correlationId),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception cause) when (cause is not OperationCanceledException)
+            {
+                Log.LyricsFileNotTrashed(logger, relative, Because(cause));
+            }
         }
     }
 
@@ -2182,6 +2321,7 @@ public sealed partial class TagWriteService(
         string? AlbumGenres,
         string? RecordingGenres,
         string? Isrcs,
+        string? Lyrics,
         AudioMeasurement? Measurement,
         bool Answered,
         List<PendingLink> RecordingLinks,
@@ -2229,8 +2369,9 @@ public sealed partial class TagWriteService(
 
         /// <remarks>
         /// A file the catalogue has not answered is on the worklist for its
-        /// ReplayGain and DR alone, and is given nothing else: what it would otherwise
-        /// carry is the partial answer it is waiting to complete.
+        /// ReplayGain and DR, and is given nothing else of the catalogue's: what it
+        /// would otherwise carry is the partial answer it is waiting to complete.
+        /// Its <see cref="Lyrics"/> are a lyrics file's beside it, never LRCLIB's.
         /// </remarks>
         public CatalogueTagSource Describe() => Answered ? Catalogued() : new()
         {
@@ -2240,6 +2381,7 @@ public sealed partial class TagWriteService(
             AlbumPeak = AlbumLoudness?.ReplayGain?.Peak,
             DynamicRange = AudioAnalysis.DynamicRange(Measurement),
             AlbumDynamicRange = AlbumLoudness?.DynamicRange,
+            Lyrics = Lyrics,
         };
 
         private CatalogueTagSource Catalogued() => new()
@@ -2277,6 +2419,7 @@ public sealed partial class TagWriteService(
             AlbumPeak = AlbumLoudness?.ReplayGain?.Peak,
             DynamicRange = AudioAnalysis.DynamicRange(Measurement),
             AlbumDynamicRange = AlbumLoudness?.DynamicRange,
+            Lyrics = Lyrics,
         };
 
         /// <summary>

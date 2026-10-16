@@ -70,6 +70,7 @@ public static class CatalogueTagFields
         CatalogueTags.Isrc,
         CatalogueTags.Lyricist,
         CatalogueTags.Conductor,
+        CatalogueTags.Lyrics,
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>

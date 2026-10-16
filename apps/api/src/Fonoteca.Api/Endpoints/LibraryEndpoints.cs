@@ -406,6 +406,7 @@ public static class LibraryEndpoints
             PendingRecordings: pending.Recordings,
             PendingGenres: pending.Genres,
             PendingParentWorks: pending.ParentWorks,
+            PendingLyrics: pending.Lyrics,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -713,6 +714,9 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Works other works are part of, not yet asked what they are part of, or found to be the top a week ago.</summary>
     int PendingParentWorks,
+
+    /// <summary>Held recordings with no words looked for yet, or none found a week ago.</summary>
+    int PendingLyrics,
 
     EnrichmentSummary? LastCompleted);
 

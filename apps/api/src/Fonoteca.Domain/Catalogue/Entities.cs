@@ -123,6 +123,9 @@ public sealed class Recording
     /// </summary>
     public ICollection<Contribution> Contributions { get; init; } = [];
 
+    /// <summary>Its words, or the stamp saying nobody had any — see <see cref="RecordingLyrics"/>.</summary>
+    public RecordingLyrics? Lyrics { get; set; }
+
     /// <summary>Every file that holds this recording — the version set for dedupe.</summary>
     public ICollection<MediaFile> Files { get; init; } = [];
 
@@ -1313,6 +1316,41 @@ public sealed class AlbumBookletFile
     public required string MediaType { get; init; }
 
     public required byte[] Bytes { get; init; }
+}
+
+/// <summary>
+/// A recording's words, as LRCLIB holds them, kept until the tag write puts
+/// them in its files (ADR 0016).
+/// </summary>
+/// <remarks>
+/// <b><see cref="AlbumMotion"/>'s rules, keyed on the recording</b>, because
+/// the words are the song's and every file of it gets them. A row with neither
+/// text and not <see cref="Instrumental"/> is a stamp saying the source was
+/// asked and had none; it expires after
+/// <c>EnrichmentService.NothingFoundRetryAfter</c>. A row with words, or
+/// marked instrumental, never expires. An outage writes no row.
+/// </remarks>
+public sealed class RecordingLyrics
+{
+    public required RecordingId RecordingId { get; init; }
+
+    /// <summary>The words as LRC, a time before each line — what goes in the tag where there is any.</summary>
+    public string? Synced { get; set; }
+
+    /// <summary>The words without times.</summary>
+    public string? Plain { get; set; }
+
+    /// <summary>The source says the song has no words: an answer, not a miss.</summary>
+    public bool Instrumental { get; set; }
+
+    /// <summary>LRCLIB's id for the track that answered — the provenance, since the match is by name.</summary>
+    public long? LrclibId { get; set; }
+
+    /// <summary>How far the ask had to widen: "album", "any album" or "first artist".</summary>
+    public string? MatchedBy { get; set; }
+
+    /// <summary>When the source was last asked, or the words last changed.</summary>
+    public required DateTimeOffset SavedUtc { get; set; }
 }
 
 /// <summary>

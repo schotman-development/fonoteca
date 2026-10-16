@@ -235,14 +235,16 @@ static ones through the playlist endpoints' own handlers
 (`SubsonicEndpoints.Playlists.cs`). A smart playlist is read-only to a client.
 
 Also absent: file-based *writing*, video, podcasts, jukebox, chat, bookmarks,
-share, lyrics.
+share, lyrics. *Amended 2026-10-14:* lyrics exist now (ADR 0016):
+`getLyricsBySongId`, timed, as the `songLyrics` extension — the one
+`getOpenSubsonicExtensions` lists — and `getLyrics`, plain.
 
 ### Scope
 
 One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
-`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `stream`, `download`, `getCoverArt`,
+`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`,
 `getPlaylists`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 

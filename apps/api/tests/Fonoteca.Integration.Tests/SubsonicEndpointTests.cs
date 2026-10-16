@@ -513,6 +513,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("getAlbumList2&type=alphabeticalByArtist")]
     [InlineData("getAlbumList2&type=byYear&fromYear=2000&toYear=1900")]
     [InlineData("getAlbumList2&type=frequent")]
+    [InlineData("getLyrics&artist=Nobody&title=Nothing")]
+    [InlineData("getLyrics")]
     public async Task EveryMethodAnswers(string method)
     {
         using var client = _factory!.CreateClient();
@@ -524,6 +526,65 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             route.Length == 1 ? $"/rest/{route[0]}.view" : $"/rest/{route[0]}.view?{route[1]}");
 
         Assert.Equal("ok", json.GetProperty("subsonic-response").GetProperty("status").GetString());
+    }
+
+    /// <summary>
+    /// The words, timed line by line by song id and plain by title; a song
+    /// with none, or a file that cannot be read, answers an empty list.
+    /// </summary>
+    [Fact]
+    public async Task TheWordsAreServedTimedBySongAndPlainByTitle()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.RecordingLyrics.Add(new RecordingLyrics
+            {
+                RecordingId = (await db.MediaFiles.SingleAsync(file => file.Id == _filed, Token)).RecordingId!.Value,
+                Synced = "[offset:-100]\n[00:00.78] My foolish heart\n[00:12.80] How can I",
+                Plain = "My foolish heart\nHow can I",
+                SavedUtc = DateTimeOffset.UtcNow,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var lyrics = (await JsonAsync(client, $"/rest/getLyricsBySongId.view?id=tr-{_filed.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("lyricsList")
+            .GetProperty("structuredLyrics")
+            .EnumerateArray()
+            .Single();
+
+        Assert.True(lyrics.GetProperty("synced").GetBoolean());
+        Assert.Equal(-100, lyrics.GetProperty("offset").GetInt32());
+        Assert.Equal("My Foolish Heart", lyrics.GetProperty("displayTitle").GetString());
+        Assert.Equal(
+            [(780, "My foolish heart"), (12800, "How can I")],
+            lyrics.GetProperty("line").EnumerateArray().Select(line => (line.GetProperty("start").GetInt32(), line.GetProperty("value").GetString())));
+
+        var plain = (await JsonAsync(client, "/rest/getLyrics.view?artist=evans&title=my%20foolish%20heart"))
+            .GetProperty("subsonic-response")
+            .GetProperty("lyrics");
+
+        Assert.Equal("My foolish heart\nHow can I", plain.GetProperty("value").GetString());
+        Assert.Equal("My Foolish Heart", plain.GetProperty("title").GetString());
+
+        var none = (await JsonAsync(client, $"/rest/getLyricsBySongId.view?id=tr-{_scanned.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("lyricsList")
+            .GetProperty("structuredLyrics");
+
+        Assert.Equal(0, none.GetArrayLength());
+
+        var extensions = (await JsonAsync(client, "/rest/getOpenSubsonicExtensions.view"))
+            .GetProperty("subsonic-response")
+            .GetProperty("openSubsonicExtensions")
+            .EnumerateArray()
+            .Select(extension => extension.GetProperty("name").GetString());
+
+        Assert.Equal(["songLyrics"], extensions);
     }
 
     /// <summary>

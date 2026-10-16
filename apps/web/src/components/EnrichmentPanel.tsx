@@ -43,6 +43,7 @@ function pendingSentence(status: {
   readonly pendingRecordings: number
   readonly pendingGenres: number
   readonly pendingParentWorks: number
+  readonly pendingLyrics: number
 }): string {
   const parts: string[] = []
 
@@ -151,6 +152,15 @@ function pendingSentence(status: {
       `${status.pendingBooklets.toLocaleString()} album booklet${
         status.pendingBooklets === 1 ? '' : 's'
       } to look for`,
+    )
+  }
+
+  // Ninth: each held song's words, from LRCLIB.
+  if (status.pendingLyrics > 0) {
+    parts.push(
+      `${status.pendingLyrics.toLocaleString()} song${
+        status.pendingLyrics === 1 ? '' : 's'
+      } to find the words of`,
     )
   }
 
@@ -340,6 +350,13 @@ function Result({ summary }: { readonly summary: Summary }) {
         <Text size="xs" tone="tertiary">
           {summary.albumsWithBooklets.toLocaleString()} album
           {summary.albumsWithBooklets === 1 ? '' : 's'} got a booklet.
+        </Text>
+      ) : null}
+
+      {summary.recordingsWithLyrics > 0 ? (
+        <Text size="xs" tone="tertiary">
+          {summary.recordingsWithLyrics.toLocaleString()} song
+          {summary.recordingsWithLyrics === 1 ? ' was' : 's were'} found on LRCLIB.
         </Text>
       ) : null}
 

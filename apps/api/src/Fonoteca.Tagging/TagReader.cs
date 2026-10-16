@@ -1,5 +1,6 @@
 using ATL;
 using Fonoteca.Domain.Abstractions;
+using CatalogueTags = Fonoteca.Domain.Catalogue.CatalogueTags;
 
 namespace Fonoteca.Tagging;
 
@@ -95,9 +96,13 @@ public sealed class TagReader(IAudioFileStore files)
         var stream = await _files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
         await using (stream.ConfigureAwait(false))
         {
+            TagSnapshot described;
+
+            // ATL's reading whole first — it reads the pictures lazily — so
+            // nothing of it comes from a stream TagLib# has since moved.
             try
             {
-                return Describe(
+                described = Describe(
                     new Track(Id3Prefix.Past(stream, container.Value), ExtensionOf(container)),
                     AcoustIdTagField.For(container));
             }
@@ -111,6 +116,46 @@ public sealed class TagReader(IAudioFileStore files)
             {
                 throw new TagReadFailedException(path, "ATL", cause);
             }
+
+            if (StoredLyrics(container, stream) is not { } lyrics) return described;
+
+            return described with
+            {
+                Fields = new SortedDictionary<string, string>(described.Fields.ToDictionary(), StringComparer.Ordinal) { [CatalogueTags.Lyrics] = lyrics },
+            };
+        }
+    }
+
+    /// <summary>
+    /// The lyrics as the file stores them, read by TagLib#.
+    /// </summary>
+    /// <remarks>
+    /// <b>ATL's own reading of lyrics is a parse, and it loses what it does not
+    /// understand</b>: measured on ATL 7.16, timed LRC comes back with the space
+    /// after each time gone and a blank timed line moved to the top as a
+    /// header. A diff against that would rewrite every timed lyric on every
+    /// run, and a check against it could not see ATL damage one. So this one
+    /// field is read as stored, by the reader that keeps it as text — LRC in a
+    /// Vorbis <c>LYRICS</c>, an ID3 <c>USLT</c> or an MP4 <c>©lyr</c>.
+    ///
+    /// <b>A file TagLib# cannot read has no words here</b> rather than failing
+    /// the reading: the rest of it is ATL's, which the attribution and the
+    /// rename read as before. A write to such a file is refused all the same,
+    /// by the verifier's own reading.
+    /// </remarks>
+    private static string? StoredLyrics(LibraryPath container, Stream stream)
+    {
+        try
+        {
+            stream.Position = 0;
+            using var file = TagLib.File.Create(new StreamFileAbstraction(container.Value, stream), TagLib.ReadStyle.None);
+            return string.IsNullOrEmpty(file.Tag.Lyrics) ? null : file.Tag.Lyrics;
+        }
+#pragma warning disable CA1031 // Whatever TagLib# raises means one thing here: no words it can vouch for.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
         }
     }
 

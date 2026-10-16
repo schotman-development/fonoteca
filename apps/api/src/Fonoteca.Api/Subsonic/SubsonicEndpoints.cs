@@ -137,6 +137,8 @@ public static partial class SubsonicEndpoints
         Map(group, "getAlbum", GetAlbum);
         Map(group, "getAlbumList2", GetAlbumList2);
         Map(group, "getSong", GetSong);
+        Map(group, "getLyrics", GetLyrics);
+        Map(group, "getLyricsBySongId", GetLyricsBySongId);
         Map(group, "search3", Search3);
         Map(group, "getGenres", GetGenres);
         Map(group, "getSongsByGenre", GetSongsByGenre);
@@ -234,18 +236,19 @@ public static partial class SubsonicEndpoints
         SubsonicResult.Ok("license", license => license.Attr("valid", true));
 
     /// <summary>
-    /// The extensions this server implements, which is none of them.
+    /// The extensions this server implements: timed lyrics, and nothing else.
     /// </summary>
     /// <remarks>
-    /// An empty list rather than a missing endpoint: the presence of the
-    /// response is how a client learns the server is an OpenSubsonic one at all,
-    /// and the emptiness is how it learns not to ask for transcode offsets or
-    /// api keys.
+    /// The presence of the response is how a client learns the server is an
+    /// OpenSubsonic one at all, and what is missing from it is how it learns
+    /// not to ask for transcode offsets or api keys. <c>songLyrics</c> is
+    /// version 1 only: version 2's translations, word cues and singers are
+    /// nothing LRCLIB or a tag here holds.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            Array.Empty<(string Name, int[] Versions)>(),
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

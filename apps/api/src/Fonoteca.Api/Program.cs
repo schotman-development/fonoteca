@@ -242,6 +242,10 @@ builder.Services.AddAppleMusic(options =>
     options.FallbackStorefront = fonoteca.AppleMusicFallbackStorefront;
 });
 
+// Lyrics, from LRCLIB, read by an enrichment stage and written into the files
+// by the tag write. No credential; the contact is MusicBrainz's. ADR 0016.
+builder.Services.AddLrclib(options => options.Contact = fonoteca.MusicBrainzContact);
+
 // Manual acquisition. Registered unconditionally like the other two, so an
 // unconfigured instance answers "not configured" from the endpoint rather than
 // failing to resolve a service. Nothing here runs on its own: no hosted

@@ -75,6 +75,7 @@ public sealed class EnrichmentService(
     IArtistBanners banners,
     IAlbumMotions motions,
     IAlbumBooklets booklets,
+    ISongLyrics lyrics,
     IOptions<WikidataOptions> portraitOptions,
     IOptions<FonotecaOptions> options,
     IHubContext<JobsHub, IJobsClient> hub,
@@ -216,9 +217,13 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var words = await UnwordedRecordings(db, NothingFoundCutoff)
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres, parentWorks);
+                recordings, genres, parentWorks, words);
         }
     }
 
@@ -453,6 +458,16 @@ public sealed class EnrichmentService(
                 token => BookletsAsync(BookletBatchSize, bookletRun, counts, token),
                 counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
+            // Tenth, the words, for the booklets' reason: they describe what is
+            // here, and at up to three gated requests a recording they are the
+            // slowest describing stage of all on a first run.
+            var lyricsRun = new LyricsRun();
+
+            await BatchesAsync(
+                "lyrics",
+                token => LyricsAsync(LyricsBatchSize, lyricsRun, counts, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
             // Fifth, and last — and the reason changed out from under this line
             // when the worklist widened past the followed set. It used to be
             // last because it was the cheapest thing here: a handful of followed
@@ -498,6 +513,7 @@ public sealed class EnrichmentService(
             ArtistsPictured: counts.ArtistsPictured,
             AlbumsAnimated: counts.AlbumsAnimated,
             AlbumsWithBooklets: counts.AlbumsWithBooklets,
+            RecordingsWithLyrics: counts.RecordingsWithLyrics,
             Cancelled: cancellationToken.IsCancellationRequested);
 
         Log.EnrichmentCompleted(
@@ -2221,6 +2237,154 @@ public sealed class EnrichmentService(
         }
     }
 
+    /// <summary>Recordings asked about per batch, which is how often progress is reported.</summary>
+    private const int LyricsBatchSize = 25;
+
+    /// <summary>Recordings in a row that may go unanswered before it is taken for an outage.</summary>
+    private const int LyricsFailuresInARow = 3;
+
+    /// <summary>One run of the lyrics stage: the recordings it could not get an answer for, and the current streak.</summary>
+    private sealed class LyricsRun
+    {
+        public HashSet<RecordingId> Unanswered { get; } = [];
+
+        public int InARow { get; set; }
+    }
+
+    /// <summary>
+    /// Held recordings whose words nobody has looked for, or found none of a
+    /// week ago. <see cref="UnanimatedAlbums"/>'s shape, for its reasons; an
+    /// instrumental is an answer, and is not asked about again.
+    /// </summary>
+    private static IQueryable<Recording> UnwordedRecordings(FonotecaDbContext db, DateTimeOffset cutoff) =>
+        db.Recordings.Where(recording => recording.Files.Any()
+            && !db.RecordingLyrics.Any(lyrics => lyrics.RecordingId == recording.Id
+                && (lyrics.Synced != null || lyrics.Plain != null || lyrics.Instrumental || lyrics.SavedUtc >= cutoff)));
+
+    /// <summary>
+    /// Asks LRCLIB for one batch of recordings' words, writing each answer as it comes.
+    /// </summary>
+    /// <remarks>
+    /// <b>A song is asked about as its first held file has it</b>: that file's
+    /// album, and its length as the probe measured it — the audio the times
+    /// will be read against — else as fpcalc did, else MusicBrainz's.
+    ///
+    /// <see cref="BookletsAsync"/>'s rule for one that gets no answer: skipped
+    /// for the rest of the run and never stamped, and
+    /// <see cref="LyricsFailuresInARow"/> in a row is an outage, which ends
+    /// the stage. Unlike a booklet nothing is recorded against it: what fails
+    /// at LRCLIB is a busy server, not one song.
+    /// </remarks>
+    private async Task<int> LyricsAsync(int size, LyricsRun run, Tally counts, CancellationToken cancellationToken)
+    {
+        List<(RecordingId Id, SongToFind? Song)> asks;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+            var skipped = run.Unanswered.ToList();
+
+            var page = await UnwordedRecordings(db, NothingFoundCutoff)
+                .AsNoTracking()
+                .Where(recording => !skipped.Contains(recording.Id))
+                .OrderBy(recording => recording.Id)
+                .Select(recording => new
+                {
+                    recording.Id,
+                    recording.Title,
+                    recording.Duration,
+                    Credits = recording.Credits
+                        .OrderBy(credit => credit.Position)
+                        .Select(credit => new { Name = credit.CreditedAs ?? credit.Artist!.LatinName ?? credit.Artist!.Name, credit.JoinPhrase })
+                        .ToList(),
+                    File = recording.Files
+                        .OrderBy(file => file.Id)
+                        .Select(file => new
+                        {
+                            Album = file.Release != null ? file.Release.Title : file.ReleaseGroup!.Title,
+                            Measured = file.Quality!.Duration,
+                            file.FingerprintDuration,
+                        })
+                        .FirstOrDefault(),
+                })
+                .Take(Math.Max(size, 1))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            asks = page.ConvertAll(recording =>
+            {
+                var line = CatalogueEndpoints.CreditLine(recording.Credits.Select(credit => (credit.Name, credit.JoinPhrase)));
+                var length = recording.File?.Measured ?? recording.File?.FingerprintDuration ?? recording.Duration;
+
+                // Nothing to ask by: answered as a song LRCLIB cannot hold.
+                SongToFind? song = line is null || length is null
+                    ? null
+                    : new SongToFind(
+                        recording.Title,
+                        line,
+                        recording.Credits.Count > 1 ? recording.Credits[0].Name : null,
+                        recording.File?.Album,
+                        length.Value);
+
+                return (recording.Id, song);
+            });
+        }
+
+        foreach (var (id, song) in asks)
+        {
+            SongLyricsFound? found = null;
+
+            if (song is not null)
+            {
+                try
+                {
+                    found = await lyrics.FindAsync(song, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ProviderUnavailableException cause)
+                {
+                    run.Unanswered.Add(id);
+                    Log.LyricsUnanswered(logger, song.Title, cause.Message);
+
+                    if (++run.InARow >= LyricsFailuresInARow) throw;
+
+                    continue;
+                }
+
+                run.InARow = 0;
+            }
+
+            var save = scopeFactory.CreateAsyncScope();
+            await using (save.ConfigureAwait(false))
+            {
+                var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                var row = await db.RecordingLyrics
+                    .FirstOrDefaultAsync(words => words.RecordingId == id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (row is null)
+                {
+                    row = new RecordingLyrics { RecordingId = id, SavedUtc = default };
+                    db.RecordingLyrics.Add(row);
+                }
+
+                row.Synced = found?.Synced;
+                row.Plain = found?.Plain;
+                row.Instrumental = found?.Instrumental ?? false;
+                row.LrclibId = found?.Id;
+                row.MatchedBy = found?.MatchedBy;
+                row.SavedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (found is not null) counts.RecordingsWithLyrics++;
+        }
+
+        return asks.Count;
+    }
+
     /// <summary>
     /// The per-artist picture sources, best first.
     /// </summary>
@@ -3040,6 +3204,8 @@ public sealed class EnrichmentService(
 
         public int AlbumsWithBooklets;
 
+        public int RecordingsWithLyrics;
+
         /// <summary>
         /// Rows a shop named that this run had not written down before.
         /// </summary>
@@ -3195,6 +3361,7 @@ public enum EnrichmentStatus
 /// <param name="Booklets">Held albums nobody has looked for booklets of, or found none of a week ago.</param>
 /// <param name="Recordings">Held recordings MusicBrainz has not described, or described with no genre a week ago.</param>
 /// <param name="Genres">Held albums whose genres nobody has asked for, or found none of a week ago.</param>
+/// <param name="Lyrics">Held recordings nobody has looked for the words of, or found none of a week ago.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
@@ -3206,7 +3373,8 @@ public sealed record EnrichmentPending(
     int Booklets,
     int Recordings,
     int Genres,
-    int ParentWorks)
+    int ParentWorks,
+    int Lyrics)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -3218,7 +3386,7 @@ public sealed record EnrichmentPending(
     /// </remarks>
     public int Total =>
         Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
-        + ParentWorks;
+        + ParentWorks + Lyrics;
 }
 
 /// <summary>Where a running pass has got to.</summary>
@@ -3294,5 +3462,8 @@ public sealed record EnrichmentSummary(
 
     /// <summary>Albums a booklet was found for this run.</summary>
     int AlbumsWithBooklets,
+
+    /// <summary>Recordings LRCLIB answered for this run: their words, or that they have none.</summary>
+    int RecordingsWithLyrics,
 
     bool Cancelled);

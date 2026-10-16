@@ -2910,8 +2910,162 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
 
     /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
-    public void TheRecordingGenreAndParentWorkStagesAreInTheTotal() =>
-        Assert.Equal(12, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5).Total);
+    public void TheRecordingGenreParentWorkAndLyricsStagesAreInTheTotal() =>
+        Assert.Equal(18, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6).Total);
+
+    /// <summary>
+    /// A song is asked about as its held file has it, its words are kept, and
+    /// one LRCLIB holds no words for is asked again a week on — and only it.
+    /// </summary>
+    [Fact]
+    public async Task ASongsWordsAreKeptAndOneWithNoneIsAskedAgainAfterAWeek()
+    {
+        var grace = await SeedSongAsync("Amazing Grace", TimeSpan.FromSeconds(234.4), ("Judy Collins", null));
+        var unknown = await SeedSongAsync("Nobody Wrote This Down", TimeSpan.FromSeconds(200), ("Judy Collins", " & "), ("Friends", null));
+
+        var lyrics = new StubLyrics(("Amazing Grace", new SongLyricsFound(34509973, "[00:00.78] Amazing grace", "Amazing grace", false, "album")));
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), lyrics: lyrics);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, lyrics.Asked.Count);
+        Assert.Equal(
+            new SongToFind("Amazing Grace", "Judy Collins", null, "Both Sides Now", TimeSpan.FromSeconds(234.4)),
+            lyrics.Asked.Single(song => song.Title == "Amazing Grace"));
+        Assert.Equal(
+            ("Judy Collins & Friends", "Judy Collins"),
+            lyrics.Asked.Single(song => song.Title != "Amazing Grace") is var other ? (other.Artist, other.FirstArtist) : default);
+
+        Assert.Equal(1, services.GetRequiredService<EnrichmentService>().LastCompleted!.RecordingsWithLyrics);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var words = await db.RecordingLyrics.AsNoTracking().SingleAsync(row => row.RecordingId == grace, Token);
+            Assert.Equal("[00:00.78] Amazing grace", words.Synced);
+            Assert.Equal("Amazing grace", words.Plain);
+            Assert.Equal(34509973, words.LrclibId);
+            Assert.Equal("album", words.MatchedBy);
+
+            var none = await db.RecordingLyrics.AsNoTracking().SingleAsync(row => row.RecordingId == unknown, Token);
+            Assert.Null(none.Synced);
+            Assert.Null(none.Plain);
+            Assert.False(none.Instrumental);
+        }
+
+        var enrichment = services.GetRequiredService<EnrichmentService>();
+        Assert.Equal(0, (await enrichment.CountPendingAsync(Token)).Lyrics);
+
+        await EnrichAsync(services);
+        Assert.Equal(2, lyrics.Asked.Count);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.RecordingLyrics.ExecuteUpdateAsync(
+                setters => setters.SetProperty(row => row.SavedUtc, DateTimeOffset.UtcNow.AddDays(-8)),
+                Token);
+        }
+
+        Assert.Equal(1, (await enrichment.CountPendingAsync(Token)).Lyrics);
+
+        await EnrichAsync(services);
+        Assert.Equal(3, lyrics.Asked.Count);
+        Assert.Equal("Nobody Wrote This Down", lyrics.Asked[^1].Title);
+    }
+
+    /// <summary>
+    /// An instrumental is an answer and never asked about again; a busy LRCLIB
+    /// stamps nothing, and three songs in a row with no answer end the stage.
+    /// </summary>
+    [Fact]
+    public async Task AnInstrumentalIsAnAnswerAndAnOutageStampsNothing()
+    {
+        foreach (var title in new[] { "One", "Two", "Three", "Four" })
+        {
+            await SeedSongAsync(title, TimeSpan.FromSeconds(180), ("Judy Collins", null));
+        }
+
+        var busy = new StubLyrics { Unavailable = true };
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), lyrics: busy);
+
+        await EnrichAsync(services);
+
+        Assert.Equal(3, busy.Asked.Count);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Empty(await db.RecordingLyrics.AsNoTracking().ToListAsync(Token));
+        }
+
+        Assert.Equal(4, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Lyrics);
+
+        var instrumental = new SongLyricsFound(1, null, null, true, "album");
+        var answering = new StubLyrics(("One", instrumental), ("Two", instrumental), ("Three", instrumental), ("Four", instrumental));
+        var again = Build(Answering(Recording), new StubCatalogue(null, null), lyrics: answering);
+
+        await EnrichAsync(again);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.RecordingLyrics.ExecuteUpdateAsync(
+                setters => setters.SetProperty(row => row.SavedUtc, DateTimeOffset.UtcNow.AddDays(-8)),
+                Token);
+        }
+
+        Assert.Equal(0, (await again.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Lyrics);
+    }
+
+    /// <summary>One held song: a recording billed as given, and a file of it on an album, probed at a length.</summary>
+    private async Task<RecordingId> SeedSongAsync(string title, TimeSpan length, params (string Name, string? JoinPhrase)[] billed)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = new Recording { Id = RecordingId.New(), Title = title, Mbid = new Mbid(Guid.CreateVersion7()) };
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Both Sides Now", Mbid = new Mbid(Guid.CreateVersion7()) };
+
+        db.Recordings.Add(recording);
+        db.ReleaseGroups.Add(album);
+
+        foreach (var (position, (name, join)) in billed.Index())
+        {
+            var artist = await db.Artists.FirstOrDefaultAsync(row => row.Name == name, Token)
+                ?? db.Artists.Add(new Artist { Id = ArtistId.New(), Name = name, Mbid = new Mbid(Guid.CreateVersion7()) }).Entity;
+
+            db.ArtistCredits.Add(new ArtistCredit
+            {
+                Id = Guid.CreateVersion7(),
+                ArtistId = artist.Id,
+                RecordingId = recording.Id,
+                Position = position,
+                JoinPhrase = join,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        db.MediaFiles.Add(new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = $"Judy Collins/Both Sides Now/{title}.flac",
+            SizeBytes = 1024,
+            LastModifiedUtc = DateTimeOffset.UtcNow,
+            RecordingId = recording.Id,
+            ReleaseGroupId = album.Id,
+            Quality = new AudioQuality
+            {
+                Codec = "flac",
+                SampleRateHz = 44100,
+                Channels = 2,
+                BitDepth = 16,
+                BitrateBps = 900_000,
+                IsLossless = true,
+                Duration = length,
+            },
+        });
+
+        await db.SaveChangesAsync(Token);
+
+        return recording.Id;
+    }
 
     /// <summary>Describing a recording again replaces what it said before, rather than adding to it.</summary>
     [Fact]
@@ -3281,7 +3435,8 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         IEncyclopedia? encyclopedia = null,
         IArtistBanners? banners = null,
         IAlbumMotions? motions = null,
-        IAlbumBooklets? booklets = null)
+        IAlbumBooklets? booklets = null,
+        ISongLyrics? lyrics = null)
     {
         var services = new ServiceCollection();
 
@@ -3328,6 +3483,7 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
         services.AddSingleton(banners ?? new StubBanners());
         services.AddSingleton(motions ?? new StubMotions());
         services.AddSingleton(booklets ?? new StubBooklets());
+        services.AddSingleton(lyrics ?? new StubLyrics());
 
         services.Configure<WikidataOptions>(options => options.BatchSize = 2);
         services.AddSingleton<LibraryWorkGate>();
@@ -3444,6 +3600,23 @@ public sealed class EnrichmentPassTests(PostgresFixture postgres) : IAsyncLifeti
             if (Unavailable) throw new ProviderUnavailableException("stub", "Apple Music is down.");
 
             return Task.FromResult(videos.FirstOrDefault(video => video.Barcode == album.Barcode).Found);
+        }
+    }
+
+    /// <summary>Answers words for the titles it was told about, and records the asking.</summary>
+    private sealed class StubLyrics(params (string Title, SongLyricsFound Found)[] songs) : ISongLyrics
+    {
+        public bool Unavailable { get; init; }
+
+        public List<SongToFind> Asked { get; } = [];
+
+        public Task<SongLyricsFound?> FindAsync(SongToFind song, CancellationToken cancellationToken = default)
+        {
+            lock (Asked) Asked.Add(song);
+
+            if (Unavailable) throw new ProviderUnavailableException("stub", "LRCLIB is busy.");
+
+            return Task.FromResult<SongLyricsFound?>(songs.FirstOrDefault(entry => entry.Title == song.Title).Found);
         }
     }
 

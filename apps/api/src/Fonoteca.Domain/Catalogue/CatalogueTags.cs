@@ -89,6 +89,9 @@ public sealed record CatalogueTagSource
 
     /// <summary>The album folder's DR figure — only where every file in it has one.</summary>
     public int? AlbumDynamicRange { get; init; }
+
+    /// <summary>The words, as LRC where they are timed — see <see cref="LyricsText"/>.</summary>
+    public string? Lyrics { get; init; }
 }
 
 /// <summary>
@@ -150,6 +153,16 @@ public static class CatalogueTags
     // no standard names any, and these are the ones already in files here.
     public const string DynamicRange = "DYNAMIC RANGE";
     public const string AlbumDynamicRange = "ALBUM DYNAMIC RANGE";
+
+    // The words: a Vorbis comment, an ID3 USLT, an MP4 ©lyr. LRC where timed.
+    public const string Lyrics = "LYRICS";
+
+    /// <summary>
+    /// foobar2000's and Mp3tag's name for the same words, which Navidrome reads
+    /// too: a file the catalogue gives words to carries them once, under
+    /// <see cref="Lyrics"/> (the owner's choice, fully replaced).
+    /// </summary>
+    public const string UnsyncedLyrics = "UNSYNCEDLYRICS";
 
     /// <summary>
     /// Between the values of a field that holds several — two genres, three producers.
@@ -227,6 +240,8 @@ public static class CatalogueTags
         Add(tags, AlbumPeak, source.AlbumPeak is { } albumPeak ? AudioAnalysis.Peak(albumPeak) : null);
         Add(tags, DynamicRange, Number(source.DynamicRange));
         Add(tags, AlbumDynamicRange, Number(source.AlbumDynamicRange));
+
+        Add(tags, Lyrics, source.Lyrics);
 
         return tags;
     }
