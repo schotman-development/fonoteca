@@ -6,6 +6,7 @@ using Fonoteca.Fixtures;
 using Fonoteca.Providers.Lrclib;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.Options;
 using Polly;
 
 namespace Fonoteca.Providers.Tests;
@@ -103,6 +104,36 @@ public sealed class LrclibLyricsTests : IDisposable
         await Assert.ThrowsAsync<ProviderUnavailableException>(() => lyrics.FindAsync(AmazingGrace, Token));
     }
 
+    /// <summary>LRCLIB's limiter turns asks away in runs, so a song is asked again through seven refusals.</summary>
+    [Fact]
+    public async Task ARunOfRefusalsIsWaitedOut()
+    {
+        var refused = 0;
+        var (lyrics, stub) = Build(
+            _ => refused++ < 7
+                ? Json(HttpStatusCode.TooManyRequests, """{"message":"Too many requests. Please retry later.","name":"RateLimited","statusCode":429}""")
+                : Json(HttpStatusCode.OK, Fixture("lrclib-get-amazing-grace.json")),
+            retriesAsConfigured: true);
+
+        Assert.NotNull(await lyrics.FindAsync(AmazingGrace, Token));
+        Assert.Equal(8, stub.Requests.Count);
+    }
+
+    /// <summary>The waits are LRCLIB's own and fit inside the request's deadline, or the last retries end as a timeout.</summary>
+    [Fact]
+    public void TheWaitsBetweenRetriesFitTheRequestsDeadline()
+    {
+        var services = new ServiceCollection();
+        services.AddLrclib(options => options.Contact = "https://example.test/contact");
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptionsMonitor<HttpStandardResilienceOptions>>()
+            .Get($"{LrclibOptions.HttpClientName}-standard");
+
+        Assert.False(options.Retry.ShouldRetryAfterHeader);
+        Assert.True(options.Retry.MaxRetryAttempts * options.Retry.MaxDelay < options.TotalRequestTimeout.Timeout);
+    }
+
     /// <summary>Longer than LRCLIB takes, so not asked about without the length that guards the match.</summary>
     [Fact]
     public async Task ATrackOverAnHourIsNotAsked()
@@ -133,7 +164,9 @@ public sealed class LrclibLyricsTests : IDisposable
         return reader.ReadToEnd();
     }
 
-    private (ISongLyrics Lyrics, StubHttpHandler Stub) Build(Func<RecordedRequest, HttpResponseMessage> respond)
+    private (ISongLyrics Lyrics, StubHttpHandler Stub) Build(
+        Func<RecordedRequest, HttpResponseMessage> respond,
+        bool retriesAsConfigured = false)
     {
         var stub = new StubHttpHandler(respond);
         var services = new ServiceCollection();
@@ -149,7 +182,7 @@ public sealed class LrclibLyricsTests : IDisposable
 
         services.ConfigureAll<HttpStandardResilienceOptions>(options =>
         {
-            options.Retry.MaxRetryAttempts = 1;
+            if (!retriesAsConfigured) options.Retry.MaxRetryAttempts = 1;
             options.Retry.Delay = TimeSpan.FromMilliseconds(1);
             options.Retry.BackoffType = DelayBackoffType.Constant;
             options.Retry.UseJitter = false;

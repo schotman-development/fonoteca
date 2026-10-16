@@ -25,7 +25,7 @@ namespace Fonoteca.Providers.Lrclib;
 /// where the line bills several, the first artist alone, since a "feat." is
 /// often not on LRCLIB's row. A miss on all of them is "no such song".
 ///
-/// An answer marked instrumental is an answer. A busy server's 503 is retried
+/// An answer marked instrumental is an answer. A refusal or a busy server's 503 is retried
 /// by the pipeline under the gate; one that stays busy is an outage.
 /// </remarks>
 public sealed class LrclibLyrics(IHttpClientFactory clients) : ISongLyrics

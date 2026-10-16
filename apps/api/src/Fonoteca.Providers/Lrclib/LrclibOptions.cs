@@ -15,10 +15,11 @@ public sealed class LrclibOptions
     /// Least time between requests.
     /// </summary>
     /// <remarks>
-    /// One a second. LRCLIB publishes no limit and throttles nobody by name: a
-    /// busy server answers anyone 503 with <c>Retry-After: 1</c>, and did for
-    /// half of a first sample here even at this pace. The retries wait their
-    /// turn here like any request.
+    /// One a second. LRCLIB publishes no limit, and slower buys nothing: its
+    /// limiter, which is not in its published source, turned away a third to
+    /// half of the asks at every pace measured from one a second to one in
+    /// six. The retries wait their turn here like any request, and how they
+    /// wait is in <c>AddLrclib</c>.
     /// </remarks>
     public TimeSpan MinimumRequestInterval { get; set; } = TimeSpan.FromSeconds(1);
 }

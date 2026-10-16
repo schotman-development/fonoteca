@@ -447,8 +447,12 @@ public static class ProviderServiceCollectionExtensions
     /// <remarks>
     /// <see cref="AddAudioDbPortraits"/>'s shape — gate under the retries,
     /// contact in the User-Agent, nothing to configure. The retries matter more
-    /// here than anywhere: a busy LRCLIB sheds load with a 503 and
-    /// <c>Retry-After: 1</c>, which the pipeline honours under the gate.
+    /// here than anywhere, and are LRCLIB's own: its limiter answers 429 with
+    /// <c>Retry-After: 1</c> to a third to half of all asks, at any pace from
+    /// one a second to one in six, and in runs a minute long. Retried after the
+    /// second it names, a run took three songs in a row and ended the stage
+    /// twice in twelve minutes, so the waits double from a
+    /// second to half a minute instead, about a minute in all with the jitter.
     /// </remarks>
     public static IServiceCollection AddLrclib(
         this IServiceCollection services,
@@ -474,7 +478,14 @@ public static class ProviderServiceCollectionExtensions
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
         });
 
-        AddResilienceThenGate(client, LrclibOptions.HttpClientName);
+        AddResilienceThenGate(client, LrclibOptions.HttpClientName, options =>
+        {
+            options.Retry.ShouldRetryAfterHeader = false;
+            options.Retry.MaxRetryAttempts = 7;
+            options.Retry.Delay = TimeSpan.FromSeconds(1);
+            options.Retry.MaxDelay = TimeSpan.FromSeconds(30);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+        });
 
         services.AddSingleton<ISongLyrics, LrclibLyrics>();
 
@@ -516,7 +527,10 @@ public static class ProviderServiceCollectionExtensions
     /// would have been cancelled by the default. Their service is free, shared
     /// and occasionally slow; being patient with it is not optional.
     /// </remarks>
-    private static void AddResilienceThenGate(IHttpClientBuilder client, string gateKey)
+    private static void AddResilienceThenGate(
+        IHttpClientBuilder client,
+        string gateKey,
+        Action<HttpStandardResilienceOptions>? retries = null)
     {
         client.AddStandardResilienceHandler(options =>
         {
@@ -527,6 +541,8 @@ public static class ProviderServiceCollectionExtensions
             // twice one attempt; raising the attempt timeout forces this up
             // with it.
             options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(60);
+
+            retries?.Invoke(options);
         });
 
         client.AddHttpMessageHandler(provider =>
