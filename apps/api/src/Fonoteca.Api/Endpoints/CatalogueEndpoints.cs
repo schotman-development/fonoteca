@@ -592,6 +592,7 @@ public static partial class CatalogueEndpoints
         MapPortraitEndpoints(group);
         MapProfileEndpoints(group);
         MapOverviewEndpoints(group);
+        MapDuplicateEndpoints(group);
         MapGenreEndpoints(group);
         MapBrowseEndpoints(group);
         MapPlaylistEndpoints(group);

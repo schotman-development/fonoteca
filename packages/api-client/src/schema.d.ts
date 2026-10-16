@@ -1265,6 +1265,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Albums held in more than one folder, and songs held twice in one folder. */
+        get: operations["GetDuplicates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/genres": {
         parameters: {
             query?: never;
@@ -2269,6 +2286,44 @@ export interface components {
             monitored: boolean;
             /** Format: int32 */
             editions: number;
+        };
+        DuplicateAlbum: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            artist: null | string;
+            folders: components["schemas"]["DuplicateFolder"][];
+        };
+        DuplicateCopy: {
+            path: string;
+            format: string;
+            /** Format: int64 */
+            sizeBytes: number;
+            damaged: boolean;
+            better: boolean;
+        };
+        DuplicateFolder: {
+            path: string;
+            /** Format: int32 */
+            files: number;
+            /** Format: int32 */
+            songs: number;
+            /** Format: int32 */
+            damaged: number;
+            formats: string[];
+            /** Format: int64 */
+            sizeBytes: number;
+            better: boolean;
+        };
+        DuplicateSong: {
+            folder: string;
+            title: string;
+            sameAudio: boolean;
+            copies: components["schemas"]["DuplicateCopy"][];
+        };
+        DuplicatesResponse: {
+            albums: components["schemas"]["DuplicateAlbum"][];
+            songs: components["schemas"]["DuplicateSong"][];
         };
         EditResponse: {
             edited: string[];
@@ -6297,6 +6352,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryOverviewResponse"];
+                };
+            };
+        };
+    };
+    GetDuplicates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicatesResponse"];
                 };
             };
         };

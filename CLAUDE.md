@@ -34,8 +34,12 @@ except `Fonoteca:IdentifyAfterScan`. The tag write is the only one nobody may
 automate — but a download writes its own album folder (ADR 0011, the owner's
 choice).
 
-**Still missing: dedupe.** Its key would be `AudioHash`, which the probe fills
-and the scan reads.
+**Dedupe is a list, not a pass** (`Duplicates`, the Duplicates screen): an
+album held in more than one album folder, and a song held twice in one beyond
+the slots its pressing prints. A song on its album and again on a best-of is
+two records, not a duplicate. Nothing goes but by a person's click, through
+the file manager's trash — the owner's choice over keeping the best
+automatically. "Better" is marked only where a copy wins on every count.
 
 ## Six rules the whole codebase turns on
 
@@ -204,6 +208,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
+| duplicates | `Domain/Catalogue/Duplicates.cs` | `Api/Endpoints/CatalogueEndpoints.Duplicates.cs`, trashed through `FileManagerService` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
 ## The passes

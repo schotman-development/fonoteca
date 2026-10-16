@@ -3497,6 +3497,27 @@
         }
       }
     },
+    "/api/catalogue/duplicates": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Albums held in more than one folder, and songs held twice in one folder.",
+        "operationId": "GetDuplicates",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DuplicatesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/genres": {
       "get": {
         "tags": [
@@ -7153,6 +7174,153 @@
           "editions": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "DuplicateAlbum": {
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "folders"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateFolder"
+            }
+          }
+        }
+      },
+      "DuplicateCopy": {
+        "required": [
+          "path",
+          "format",
+          "sizeBytes",
+          "damaged",
+          "better"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "damaged": {
+            "type": "boolean"
+          },
+          "better": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DuplicateFolder": {
+        "required": [
+          "path",
+          "files",
+          "songs",
+          "damaged",
+          "formats",
+          "sizeBytes",
+          "better"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "songs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "damaged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "better": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DuplicateSong": {
+        "required": [
+          "folder",
+          "title",
+          "sameAudio",
+          "copies"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "sameAudio": {
+            "type": "boolean"
+          },
+          "copies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateCopy"
+            }
+          }
+        }
+      },
+      "DuplicatesResponse": {
+        "required": [
+          "albums",
+          "songs"
+        ],
+        "type": "object",
+        "properties": {
+          "albums": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateAlbum"
+            }
+          },
+          "songs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateSong"
+            }
           }
         }
       },
