@@ -618,7 +618,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics"], extensions);
+        Assert.Equal(["songLyrics", "fonotecaAlbumMotion"], extensions);
     }
 
     /// <summary>
@@ -1092,6 +1092,128 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         return response.Headers.ETag?.Tag;
+    }
+
+    /// <summary>
+    /// An album's motion artwork comes as an animated picture no larger than the
+    /// size asked for, converted once; an album without one answers as a
+    /// missing cover does.
+    /// </summary>
+    /// <remarks>
+    /// A stand-in video, 320 px square, twenty frames. Removes what it adds and
+    /// the copies it caused, as the cover test does.
+    /// </remarks>
+    [Fact]
+    public async Task AnAlbumsMotionComesAnimatedNoLargerThanAskedAndIsConvertedOnce()
+    {
+        var made = Path.Combine(_root, "motion.mp4");
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x320:rate=10:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", made);
+        var video = await File.ReadAllBytesAsync(made, Token);
+        File.Delete(made);
+
+        var moving = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Moving" };
+        var still = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Still" };
+        var saved = DateTimeOffset.Parse("2026-01-04T00:00:00Z", CultureInfo.InvariantCulture);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.AddRange(moving, still);
+            db.AlbumMotions.Add(new AlbumMotion { ReleaseGroupId = moving.Id, Square = video, SavedUtc = saved });
+
+            // A stamp: the shop was asked and had none.
+            db.AlbumMotions.Add(new AlbumMotion { ReleaseGroupId = still.Id, SavedUtc = saved });
+            await db.SaveChangesAsync(Token);
+        }
+
+        var scaler = _factory!.Services.GetRequiredService<Fonoteca.Ingest.FfmpegCoverScaler>();
+
+        try
+        {
+            using var client = _factory.CreateClient();
+
+            var small = await MotionAsync(client, moving.Id, size: 100);
+            Assert.Equal("image/webp", small.MediaType);
+            Assert.Equal($"\"{saved.UtcTicks}\"", small.ETag);
+            Assert.Equal((100, 100, 20, 0), Animation(small.Bytes));
+
+            // Never larger than the video, with a size or without.
+            Assert.Equal((320, 320, 20, 0), Animation((await MotionAsync(client, moving.Id, size: 1000)).Bytes));
+            Assert.Equal((320, 320, 20, 0), Animation((await MotionAsync(client, moving.Id, size: null)).Bytes));
+
+            // Asked again, the kept copy answers: change it, and the change is what comes back.
+            var kept = Path.Combine(scaler.Directory, Fonoteca.Ingest.FfmpegCoverScaler.KeyOf(video, 100) + ".webp");
+            await File.WriteAllBytesAsync(kept, [1, 2, 3], Token);
+            var again = await MotionAsync(client, moving.Id, size: 100);
+            Assert.Equal<byte>([1, 2, 3], again.Bytes);
+
+            foreach (var none in new[] { $"al-{still.Id.Value:N}", $"al-{ReleaseGroupId.New().Value:N}", "nonsense" })
+            {
+                var answer = (await JsonAsync(client, $"/rest/getAlbumMotion.view?id={none}&size=100"))
+                    .GetProperty("subsonic-response");
+
+                Assert.Equal("failed", answer.GetProperty("status").GetString());
+                Assert.Equal(70, answer.GetProperty("error").GetProperty("code").GetInt32());
+            }
+        }
+        finally
+        {
+            foreach (var size in new[] { 0, 100, 1000 })
+            {
+                File.Delete(Path.Combine(scaler.Directory, Fonoteca.Ingest.FfmpegCoverScaler.KeyOf(video, size) + ".webp"));
+            }
+
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.AlbumMotions.RemoveRange(await db.AlbumMotions.Where(row => row.ReleaseGroupId == moving.Id || row.ReleaseGroupId == still.Id).ToListAsync(Token));
+            db.ReleaseGroups.RemoveRange(await db.ReleaseGroups.Where(row => row.Id == moving.Id || row.Id == still.Id).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    private static async Task<(byte[] Bytes, string? MediaType, string? ETag)> MotionAsync(
+        HttpClient client,
+        ReleaseGroupId album,
+        int? size)
+    {
+        var sized = size is { } pixels ? $"&size={pixels}" : string.Empty;
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getAlbumMotion.view?{Credentials}&id=al-{album.Value:N}{sized}", UriKind.Relative),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        return (
+            await response.Content.ReadAsByteArrayAsync(Token),
+            response.Content.Headers.ContentType?.MediaType,
+            response.Headers.ETag?.Tag);
+    }
+
+    /// <summary>An animated WebP's canvas, frames and loop count, read from its chunks.</summary>
+    private static (int Width, int Height, int Frames, int Loops) Animation(byte[] webp)
+    {
+        Assert.Equal("RIFFWEBPVP8X", Encoding.ASCII.GetString(webp, 0, 4) + Encoding.ASCII.GetString(webp, 8, 8));
+
+        int width = 1 + (webp[24] | webp[25] << 8 | webp[26] << 16), height = 1 + (webp[27] | webp[28] << 8 | webp[29] << 16);
+        int frames = 0, loops = -1;
+
+        for (var at = 12; at + 8 <= webp.Length;)
+        {
+            var size = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(webp.AsSpan(at + 4));
+
+            switch (Encoding.ASCII.GetString(webp, at, 4))
+            {
+                case "ANIM":
+                    loops = webp[at + 12] | webp[at + 13] << 8;
+                    break;
+                case "ANMF":
+                    frames++;
+                    break;
+            }
+
+            at += 8 + size + (size & 1);
+        }
+
+        return (width, height, frames, loops);
     }
 
     /// <summary>Runs ffmpeg or ffprobe and returns what it printed.</summary>

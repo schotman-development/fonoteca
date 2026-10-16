@@ -5,7 +5,8 @@ namespace Fonoteca.Domain.Abstractions;
 /// </summary>
 /// <remarks>
 /// Apple Music is the one source, and calls it album motion: a square video for
-/// a large screen and a tall one for a phone, both silent and made to loop.
+/// a large screen and a tall one for a phone, both silent and made to loop. Only
+/// the square one is kept (ADR 0014, amended 2026-10-15).
 /// Null is "no record they sell that is surely this one carries any", which a
 /// caller may write down and ask again about later; a
 /// <see cref="ProviderException"/> is "I did not get to find out", which it
@@ -33,11 +34,9 @@ public sealed record AlbumToFind(
 /// <param name="AlbumId">The shop's own id for the record the video came from — the provenance.</param>
 /// <param name="Storefront">Which country's shop answered.</param>
 /// <param name="MatchedBy">How that record was recognised: "barcode", "another edition's barcode" or "title".</param>
-/// <param name="Square">The square video, or null where the record has only the tall one.</param>
-/// <param name="Tall">The tall video, or null where the record has only the square one.</param>
+/// <param name="Square">The square video.</param>
 public sealed record AlbumMotionFound(
     string AlbumId,
     string Storefront,
     string MatchedBy,
-    byte[]? Square,
-    byte[]? Tall);
+    byte[] Square);

@@ -237,14 +237,16 @@ static ones through the playlist endpoints' own handlers
 Also absent: file-based *writing*, video, podcasts, jukebox, chat, bookmarks,
 share, lyrics. *Amended 2026-10-14:* lyrics exist now (ADR 0016):
 `getLyricsBySongId`, timed, as the `songLyrics` extension — the one
-`getOpenSubsonicExtensions` lists — and `getLyrics`, plain.
+`getOpenSubsonicExtensions` lists — and `getLyrics`, plain. *Amended
+2026-10-15:* `getAlbumMotion` serves an album's motion artwork as an animated
+WebP under Fonoteca's own `fonotecaAlbumMotion` extension (ADR 0014).
 
 ### Scope
 
 One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
-`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`,
+`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
 `getPlaylists`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 

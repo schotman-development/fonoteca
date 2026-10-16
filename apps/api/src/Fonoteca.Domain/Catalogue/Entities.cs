@@ -1280,9 +1280,10 @@ public sealed class ReleaseCover
 /// edition</b>, because the source sells one video per record and the files
 /// it is written beside are the album folder's.
 ///
-/// <b>A row with neither video is a stamp</b> saying the source was asked and
+/// <b>A row with no video is a stamp</b> saying the source was asked and
 /// had none; it expires after <c>EnrichmentService.NothingFoundRetryAfter</c>.
-/// <b>A row with either never expires.</b> An outage writes no row at all.
+/// <b>A row with one never expires.</b> An outage writes no row at all. The
+/// square video only: the tall one is not kept (ADR 0014, amended 2026-10-15).
 ///
 /// The provenance stays on the row, so a video matched by title can be traced
 /// to the record it came from — the one kind here chosen by matching rather
@@ -1294,9 +1295,6 @@ public sealed class AlbumMotion
 
     /// <summary>The square video, H.264 in MP4.</summary>
     public byte[]? Square { get; set; }
-
-    /// <summary>The tall (3:4) video, H.264 in MP4.</summary>
-    public byte[]? Tall { get; set; }
 
     /// <summary>The shop's id for the record the videos came from.</summary>
     public string? AppleAlbumId { get; set; }

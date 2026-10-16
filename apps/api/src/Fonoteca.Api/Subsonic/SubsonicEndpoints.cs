@@ -154,6 +154,7 @@ public static partial class SubsonicEndpoints
         Map(group, "stream", Stream);
         Map(group, "download", Download);
         Map(group, "getCoverArt", GetCoverArt);
+        Map(group, "getAlbumMotion", GetAlbumMotion);
 
         Map(group, "getUser", GetUser);
         Map(group, "getPlaylists", GetPlaylists);
@@ -244,19 +245,21 @@ public static partial class SubsonicEndpoints
         SubsonicResult.Ok("license", license => license.Attr("valid", true));
 
     /// <summary>
-    /// The extensions this server implements: timed lyrics, and nothing else.
+    /// The extensions this server implements: timed lyrics, and Fonoteca's own
+    /// album motion.
     /// </summary>
     /// <remarks>
     /// The presence of the response is how a client learns the server is an
     /// OpenSubsonic one at all, and what is missing from it is how it learns
     /// not to ask for transcode offsets or api keys. <c>songLyrics</c> is
     /// version 1 only: version 2's translations, word cues and singers are
-    /// nothing LRCLIB or a tag here holds.
+    /// nothing LRCLIB or a tag here holds. <c>fonotecaAlbumMotion</c> is
+    /// <c>getAlbumMotion</c>, which only a client that looks for it asks for.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("fonotecaAlbumMotion", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

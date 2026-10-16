@@ -732,12 +732,16 @@ same raster allowlist with SVG refused.
 An enrichment stage reads it from Apple's *public* pages (barcode lookup,
 the album page's header JSON, the best H.264 rung of each HLS ladder as one
 MP4), never the web player's private API and its scraped token; it keeps the
-square and the tall video in `AlbumMotions`, a row per album shaped like
-`ReleaseCovers` (no video = a stamp that expires in a week), and the tag write
-puts them beside the album as `square_animated_artwork.mp4` and
-`tall_animated_artwork.mp4`, journalled as `tagging.motion` and undone with the
-sleeve. **A page that changes shape stops the stage instead of answering
-"none"**, so a redesign cannot stamp the whole library. Nothing serves them yet.
+square video only (the tall one was dropped on 2026-10-15, the owner's choice)
+in `AlbumMotions`, a row per album shaped like `ReleaseCovers` (no video = a
+stamp that expires in a week), and the tag write puts it beside the album as
+`square_animated_artwork.mp4`, journalled as `tagging.motion` and undone with
+the sleeve; every `tall_animated_artwork.mp4` in a folder it writes is deleted
+for good, not trashed (the owner's choice, 2026-10-15), and journalled with its
+path and length for a record Undo skips. **A page that changes shape stops the stage instead of answering
+"none"**, so a redesign cannot stamp the whole library. `getAlbumMotion` serves
+it to clients as an animated WebP (`FfmpegCoverScaler.AnimateAsync`, kept per
+size) under Fonoteca's own `fonotecaAlbumMotion` extension.
 
 **Album booklets** are ADR 0015 — booklets only, never backs, discs or trays
 (the owner's choice). An enrichment stage lists every edition on the Cover Art

@@ -1406,30 +1406,42 @@ public sealed partial class TagWriteService(
         }
     }
 
-    /// <summary>The names motion artwork is written under, square then tall.</summary>
+    /// <summary>The name motion artwork is written under.</summary>
     /// <remarks>
-    /// The names the most-used Apple Music downloader writes, so a player that
+    /// The name the most-used Apple Music downloader writes, so a player that
     /// learns to read one library's reads this one's. Never <c>cover.*</c>: a
     /// player globbing for the sleeve would find a video.
     /// </remarks>
-    internal static readonly string[] MotionNames = ["square_animated_artwork.mp4", "tall_animated_artwork.mp4"];
+    internal const string MotionName = "square_animated_artwork.mp4";
 
     /// <summary>
-    /// The album's motion artwork, written once beside the music as two MP4s.
+    /// The name the tall video was written under until it stopped being kept
+    /// (ADR 0014, amended 2026-10-15).
+    /// </summary>
+    internal const string TallMotionName = "tall_animated_artwork.mp4";
+
+    /// <summary>
+    /// The album's motion artwork, written once beside the music as an MP4.
     /// </summary>
     /// <remarks>
     /// <see cref="EnsureCoverAsync"/>'s rules throughout — once per album folder,
     /// nothing with mutation off, whatever is in the way displaced to the trash
     /// rather than overwritten, journalled so Undo takes it back, and a failure
-    /// a motion problem rather than a tagging one — with two differences.
+    /// a motion problem rather than a tagging one — with three differences.
     ///
     /// <b>It is the album's</b>, keyed on the release group rather than an
     /// edition, because the shop sells one video per record.
     ///
     /// <b>A video already there is recognised by its length</b>, the way Undo
     /// recognises a sleeve it wrote, rather than read and compared: a row holds
-    /// up to two 25 MB videos, and a second run over the library would otherwise
-    /// read every one of them from the database and the disk to write nothing.
+    /// a 25 MB video, and a second run over the library would otherwise read
+    /// every one of them from the database and the disk to write nothing.
+    ///
+    /// <b>Any tall video in the folder is deleted for good</b>, not trashed:
+    /// the owner chose to have every <see cref="TallMotionName"/> gone, the
+    /// earlier tag writes' and anybody else's alike (ADR 0014, amended
+    /// 2026-10-15). The journal records its path and length, in an entry with
+    /// nothing written for Undo to take back and nothing displaced to return.
     /// </remarks>
     private async Task EnsureMotionAsync(
         PendingTagWrite file,
@@ -1446,98 +1458,99 @@ public sealed partial class TagWriteService(
 
         if (!covers.MotionFolders.Add(folder)) return;
 
+        string Target(string name) => folder.Length == 0 ? name : $"{folder}/{name}";
+
+        // The sleeve's entry in every field, so Undo's sleeve step puts this
+        // back the same way; keyed by the file whose folder got it.
+        async Task JournalAsync(object entry) =>
+            await provider.GetRequiredService<IEventLog>()
+                .AppendAsync(
+                    DomainEvent.Create(
+                        MotionEvent,
+                        TagWriter.FileSubject,
+                        file.Id.ToString(),
+                        _actor,
+                        clock.UtcNow,
+                        JsonSerializer.Serialize(entry),
+                        correlationId),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
         var target = folder;
 
         try
         {
-            var lengths = await db.AlbumMotions
+            // Inside the try: `Resolve` refuses a path reaching outside the
+            // root or through a directory symlink.
+            target = Target(TallMotionName);
+            var tall = store.AbsolutePathFor(new LibraryPath(target));
+
+            if (writerOptions.AllowFileMutation && File.Exists(tall) && !IsLink(tall))
+            {
+                var gone = new FileInfo(tall).Length;
+
+                File.Delete(tall);
+
+                await JournalAsync(new { path = target, mediaType = "video/mp4", length = gone, deleted = true })
+                    .ConfigureAwait(false);
+            }
+
+            var length = await db.AlbumMotions
                 .AsNoTracking()
-                .Where(motion => motion.ReleaseGroupId == album)
-                .Select(motion => new[]
-                {
-                    motion.Square == null ? (int?)null : motion.Square.Length,
-                    motion.Tall == null ? (int?)null : motion.Tall.Length,
-                })
+                .Where(motion => motion.ReleaseGroupId == album && motion.Square != null)
+                .Select(motion => (int?)motion.Square!.Length)
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            if (lengths is null) return;
+            if (length is not { } size) return;
 
-            var written = false;
+            target = Target(MotionName);
+            var absolute = store.AbsolutePathFor(new LibraryPath(target));
 
-            for (var shape = 0; shape < MotionNames.Length; shape++)
+            if (File.Exists(absolute) && !IsLink(absolute) && new FileInfo(absolute).Length == size) return;
+
+            if (!writerOptions.AllowFileMutation)
             {
-                if (lengths[shape] is not { } length) continue;
+                Log.CoverNotWritten(logger, target, "file mutation is off");
+                return;
+            }
 
-                target = folder.Length == 0 ? MotionNames[shape] : $"{folder}/{MotionNames[shape]}";
+            var bytes = await db.AlbumMotions
+                .AsNoTracking()
+                .Where(motion => motion.ReleaseGroupId == album)
+                .Select(motion => motion.Square)
+                .FirstAsync(cancellationToken)
+                .ConfigureAwait(false);
 
-                // Inside the try: `Resolve` refuses a path reaching outside the
-                // root or through a directory symlink.
-                var absolute = store.AbsolutePathFor(new LibraryPath(target));
+            if (bytes is null) return;
 
-                if (File.Exists(absolute) && !IsLink(absolute) && new FileInfo(absolute).Length == length) continue;
+            List<string> displaced = File.Exists(absolute) ? [Displace(target, absolute, covers.Stamp)] : [];
 
-                if (!writerOptions.AllowFileMutation)
-                {
-                    Log.CoverNotWritten(logger, target, "file mutation is off");
-                    continue;
-                }
+            var staged = await store
+                .OpenForCreateAsync(new LibraryPath(target), bytes.Length, cancellationToken)
+                .ConfigureAwait(false);
 
-                var square = shape == 0;
+            await using (staged.ConfigureAwait(false))
+            {
+                await staged.Content.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
 
-                var bytes = await db.AlbumMotions
-                    .AsNoTracking()
-                    .Where(motion => motion.ReleaseGroupId == album)
-                    .Select(motion => square ? motion.Square : motion.Tall)
-                    .FirstAsync(cancellationToken)
-                    .ConfigureAwait(false);
+            Log.CoverWritten(
+                logger,
+                target,
+                displaced.Count == 0 ? string.Empty : $", displacing {string.Join(", ", displaced)}");
 
-                if (bytes is null) continue;
-
-                List<string> displaced = File.Exists(absolute) ? [Displace(target, absolute, covers.Stamp)] : [];
-
-                var staged = await store
-                    .OpenForCreateAsync(new LibraryPath(target), bytes.Length, cancellationToken)
-                    .ConfigureAwait(false);
-
-                await using (staged.ConfigureAwait(false))
-                {
-                    await staged.Content.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-                    await staged.CommitAsync(cancellationToken).ConfigureAwait(false);
-                }
-
-                written = true;
-
-                Log.CoverWritten(
-                    logger,
-                    target,
-                    displaced.Count == 0 ? string.Empty : $", displacing {string.Join(", ", displaced)}");
-
-                // The sleeve's entry in every field, so Undo's sleeve step puts
-                // this back the same way; keyed by the file whose folder got it.
-                var payload = JsonSerializer.Serialize(new
+            await JournalAsync(new
                 {
                     path = target,
                     mediaType = "video/mp4",
                     bytes = bytes.Length,
                     displaced = displaced.Count == 0 ? null : displaced,
-                });
+                })
+                .ConfigureAwait(false);
 
-                await provider.GetRequiredService<IEventLog>()
-                    .AppendAsync(
-                        DomainEvent.Create(
-                            MotionEvent,
-                            TagWriter.FileSubject,
-                            file.Id.ToString(),
-                            _actor,
-                            clock.UtcNow,
-                            payload,
-                            correlationId),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            if (written) counts.MotionWritten++;
+            counts.MotionWritten++;
         }
         // Not a cancellation, for EnsureCoverAsync's reason.
         catch (Exception cause) when (cause is not OperationCanceledException)
@@ -2653,8 +2666,7 @@ public sealed record TagWriteProgress(
 /// </param>
 /// <param name="MotionWritten">
 /// Album folders that got their motion artwork written beside the music, as
-/// <c>square_animated_artwork.mp4</c> and <c>tall_animated_artwork.mp4</c>. Per
-/// folder like the covers.
+/// <c>square_animated_artwork.mp4</c>. Per folder like the covers.
 /// </param>
 /// <param name="BookletsWritten">
 /// Album folders that got their booklets written beside the music, as

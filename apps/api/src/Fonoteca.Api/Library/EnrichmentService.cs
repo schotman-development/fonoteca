@@ -1967,7 +1967,7 @@ public sealed class EnrichmentService(
     private static IQueryable<ReleaseGroup> UnanimatedAlbums(FonotecaDbContext db, DateTimeOffset cutoff) =>
         db.ReleaseGroups.Where(group => group.Files.Any()
             && !db.AlbumMotions.Any(motion => motion.ReleaseGroupId == group.Id
-                && (motion.Square != null || motion.Tall != null || motion.SavedUtc >= cutoff)));
+                && (motion.Square != null || motion.SavedUtc >= cutoff)));
 
     /// <summary>
     /// Asks the shop for one batch of albums' motion artwork, writing each answer as it comes.
@@ -2019,7 +2019,6 @@ public sealed class EnrichmentService(
                 }
 
                 row.Square = found?.Square;
-                row.Tall = found?.Tall;
                 row.AppleAlbumId = found?.AlbumId;
                 row.Storefront = found?.Storefront;
                 row.MatchedBy = found?.MatchedBy;

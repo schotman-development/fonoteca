@@ -117,25 +117,15 @@ public sealed partial class AppleMusicMotions(
 
                 pages++;
 
-                var links = await PageAsync(storefront, record.Id, cancellationToken).ConfigureAwait(false);
+                if (await PageAsync(storefront, record.Id, cancellationToken).ConfigureAwait(false) is not { } link) continue;
 
-                if (links is null) continue;
-
-                var square = links.Value.Square is { } s
-                    ? await VideoAsync(s, cancellationToken).ConfigureAwait(false)
-                    : null;
-                var tall = links.Value.Tall is { } t
-                    ? await VideoAsync(t, cancellationToken).ConfigureAwait(false)
-                    : null;
-
-                if (square is not null || tall is not null)
+                if (await VideoAsync(link, cancellationToken).ConfigureAwait(false) is { } square)
                 {
                     return new AlbumMotionFound(
                         record.Id.ToString(CultureInfo.InvariantCulture),
                         storefront,
                         how,
-                        square,
-                        tall);
+                        square);
                 }
             }
 
@@ -262,7 +252,10 @@ public sealed partial class AppleMusicMotions(
             .Select(row => new AppleRecord(row.CollectionId!.Value, row.CollectionName!, row.ArtistName, Year(row.ReleaseDate)))];
     }
 
-    /// <summary>The motion artwork the album's own page names for its header, or null where it has no page.</summary>
+    /// <summary>
+    /// The square motion artwork the album's own page names for its header, or
+    /// null where it has no page or no square video.
+    /// </summary>
     /// <remarks>
     /// <b>Only the header</b>: the page also lists the artist's other records,
     /// and a video found anywhere in the document could be one of theirs. A page
@@ -270,8 +263,11 @@ public sealed partial class AppleMusicMotions(
     /// shape under this reader — every album would read as having none, so it
     /// throws instead and the caller stops asking. A page with sections and no
     /// header is this one page being different, and reads as nothing here.
+    ///
+    /// <b>Not the tall video</b> the header also names: only the square one is
+    /// kept (ADR 0014, amended 2026-10-15).
     /// </remarks>
-    private async Task<(string? Square, string? Tall)?> PageAsync(
+    private async Task<string?> PageAsync(
         string storefront,
         long album,
         CancellationToken cancellationToken)
@@ -324,15 +320,11 @@ public sealed partial class AppleMusicMotions(
                     continue;
                 }
 
-                var header = items[0];
-
-                return (
-                    Video(header, "videoArtwork", "motionDetailSquare"),
-                    Video(header, "tallVideoArtwork", "motionDetailTall"));
+                return Video(items[0], "videoArtwork", "motionDetailSquare");
             }
 
             ProviderLog.AppleMotionNoHeader(logger, album);
-            return (null, null);
+            return null;
         }
         catch (JsonException cause)
         {

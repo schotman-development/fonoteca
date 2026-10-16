@@ -25,10 +25,8 @@ public sealed class AppleMusicMotionsTests : IDisposable
 
     private static readonly TimeSpan Gate = TimeSpan.FromMilliseconds(1);
 
-    /// <summary>An MP4's opening box, and a byte telling the two videos apart.</summary>
+    /// <summary>An MP4's opening box and a byte.</summary>
     private static readonly byte[] SquareBytes = [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 1];
-
-    private static readonly byte[] TallBytes = [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 2];
 
     private readonly List<ServiceProvider> _providers = [];
 
@@ -43,14 +41,15 @@ public sealed class AppleMusicMotionsTests : IDisposable
         new(title, artist, artist is null ? [] : [artist], year, barcode, editions ?? []);
 
     /// <summary>
-    /// The album's own barcode identifies the record, and both videos are kept.
+    /// The album's own barcode identifies the record, and its square video is kept.
     /// </summary>
     /// <remarks>
-    /// The whole chain, on the fixtures: lookup, page, two ladders, two rungs,
-    /// two files. Nothing searched, because a barcode is not a guess.
+    /// The whole chain, on the fixtures: lookup, page, ladder, rung, file.
+    /// Nothing searched, because a barcode is not a guess, and nothing of the
+    /// tall video the page also names, which is not kept.
     /// </remarks>
     [Fact]
-    public async Task TheBarcodeFindsTheRecordAndBothVideosAreKept()
+    public async Task TheBarcodeFindsTheRecordAndItsSquareVideoIsKept()
     {
         var (motions, stub) = Build(Recorded());
 
@@ -61,9 +60,9 @@ public sealed class AppleMusicMotionsTests : IDisposable
         Assert.Equal("us", found.Storefront);
         Assert.Equal("barcode", found.MatchedBy);
         Assert.Equal(SquareBytes, found.Square);
-        Assert.Equal(TallBytes, found.Tall);
 
         Assert.DoesNotContain(stub.Requests, request => request.Uri.AbsolutePath == "/search");
+        Assert.DoesNotContain(stub.Requests, request => request.Uri.AbsolutePath.Contains("P593751764", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -86,9 +85,7 @@ public sealed class AppleMusicMotionsTests : IDisposable
             .Select(request => Path.GetFileName(request.Uri.AbsolutePath))
             .ToArray();
 
-        Assert.Equal(
-            ["P593753274_Anull_video_gr290_sdr_1080x1080-.mp4", "P593751764_Anull_video_gr290_sdr_1080x1440-.mp4"],
-            files);
+        Assert.Equal(["P593753274_Anull_video_gr290_sdr_1080x1080-.mp4"], files);
     }
 
     /// <summary>
@@ -293,8 +290,7 @@ public sealed class AppleMusicMotionsTests : IDisposable
                 var html = page ?? Fixture("apple-album-bewitched.html");
 
                 return Text(
-                    pageHasVideo ? html : html.Replace("\"videoArtwork\"", "\"x\"", StringComparison.Ordinal)
-                        .Replace("\"tallVideoArtwork\"", "\"y\"", StringComparison.Ordinal),
+                    pageHasVideo ? html : html.Replace("\"videoArtwork\"", "\"x\"", StringComparison.Ordinal),
                     "text/html");
             }
 
@@ -305,13 +301,9 @@ public sealed class AppleMusicMotionsTests : IDisposable
                 return file switch
                 {
                     "P593753274_default.m3u8" => Text(Fixture("apple-motion-square.m3u8"), "application/vnd.apple.mpegurl"),
-                    "P593751764_default.m3u8" => Text(Fixture("apple-motion-tall.m3u8"), "application/vnd.apple.mpegurl"),
                     "P593753274_Anull_video_gr290_sdr_1080x1080.m3u8" =>
                         Text(Fixture("apple-motion-square-1080x1080.m3u8"), "application/vnd.apple.mpegurl"),
-                    "P593751764_Anull_video_gr290_sdr_1080x1440.m3u8" =>
-                        Text(Fixture("apple-motion-tall-1080x1440.m3u8"), "application/vnd.apple.mpegurl"),
                     "P593753274_Anull_video_gr290_sdr_1080x1080-.mp4" => video?.Invoke() ?? Bytes(SquareBytes, videoType),
-                    "P593751764_Anull_video_gr290_sdr_1080x1440-.mp4" => video?.Invoke() ?? Bytes(TallBytes, videoType),
                     _ => new HttpResponseMessage(HttpStatusCode.NotFound),
                 };
             }

@@ -720,7 +720,12 @@ public sealed partial class TagWriteService
                 var absolute = store.AbsolutePathFor(new LibraryPath(here));
                 string? removed = null;
 
-                if (File.Exists(absolute) && !IsLink(absolute) && new FileInfo(absolute).Length == root.GetProperty("bytes").GetInt64())
+                // No length is an entry that wrote nothing: a tall video the
+                // pass deleted for good, which nothing can put back.
+                if (root.TryGetProperty("bytes", out var bytes)
+                    && File.Exists(absolute)
+                    && !IsLink(absolute)
+                    && new FileInfo(absolute).Length == bytes.GetInt64())
                 {
                     removed = Displace(here, absolute, stamp);
                 }

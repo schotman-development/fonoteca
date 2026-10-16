@@ -7,6 +7,7 @@ using Fonoteca.Providers.Qobuz;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Net.Http.Headers;
 
 namespace Fonoteca.Api.Subsonic;
 
@@ -192,6 +193,54 @@ public static partial class SubsonicEndpoints
             default:
                 return cover;
         }
+    }
+
+    /// <summary>
+    /// An album's motion artwork, as an animated WebP no larger than <c>size</c>.
+    /// </summary>
+    /// <remarks>
+    /// Fonoteca's own extension, <c>fonotecaAlbumMotion</c>: the protocol has no
+    /// motion artwork, and the MP4 the shop sells needs a video decoder where an
+    /// animated picture needs only an image one. The square video, the one kept
+    /// (ADR 0014), converted once per size and kept by the covers' scaler, full
+    /// length and never larger than the video. An album with none, or one ffmpeg
+    /// could not convert, answers as a missing cover does.
+    ///
+    /// ponytail: the video is read from the database on every request, since
+    /// the kept copy is named by its bytes — about 25 MB, a few tens of
+    /// milliseconds locally. Name the copy by the row's <c>SavedUtc</c> if that
+    /// read is ever measured to matter.
+    /// </remarks>
+    private static async Task<IResult> GetAlbumMotion(
+        HttpContext http,
+        FonotecaDbContext db,
+        FfmpegCoverScaler scaler,
+        CancellationToken cancellationToken)
+    {
+        var motion = SubsonicIds.AsAlbum(Text(http, "id")) is { } album
+            ? await db.AlbumMotions
+                .AsNoTracking()
+                .Where(row => row.ReleaseGroupId == album && row.Square != null)
+                .Select(row => new { row.Square, row.SavedUtc })
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
+        if (motion?.Square is not { } video) return SubsonicResult.Error(70, "No such album motion.");
+
+        var size = int.TryParse(Text(http, "size"), NumberStyles.None, CultureInfo.InvariantCulture, out var asked)
+            ? asked
+            : 0;
+
+        var animated = await scaler.AnimateAsync(video, size, cancellationToken).ConfigureAwait(false);
+
+        if (animated is null) return SubsonicResult.Error(70, "No such album motion.");
+
+        return TypedResults.File(
+            animated,
+            "image/webp",
+            lastModified: motion.SavedUtc,
+            entityTag: new EntityTagHeaderValue($"\"{motion.SavedUtc.UtcTicks}\""));
     }
 
     /// <summary>

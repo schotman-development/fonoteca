@@ -196,7 +196,7 @@ public sealed partial class TagWritePassTests
     {
         SkipWithoutTools();
         await SeedAsync(($"{Album}/01 track.flac", 1));
-        await SeedMotionAsync(SquareVideo, TallVideo);
+        await SeedMotionAsync(SquareVideo);
 
         var stale = new byte[] { 0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 9 };
         await File.WriteAllBytesAsync(Path.Combine(_root, Album, "square_animated_artwork.mp4"), stale, Token);
@@ -218,7 +218,72 @@ public sealed partial class TagWritePassTests
         Assert.Equal(stale, await File.ReadAllBytesAsync(Path.Combine(_root, Album, "square_animated_artwork.mp4"), Token));
 
         // Trashed, never deleted.
-        Assert.Single(Directory.EnumerateFiles(_root + "-trash", "tall_animated_artwork.mp4", SearchOption.AllDirectories));
+        var trashed = Directory.EnumerateFiles(_root + "-trash", "square_animated_artwork.mp4", SearchOption.AllDirectories).Single();
+        Assert.Equal(SquareVideo, await File.ReadAllBytesAsync(trashed, Token));
+    }
+
+    /// <summary>
+    /// Every tall video is deleted for good now that the tall one is not kept,
+    /// whoever put it there, and Undo copes with it gone: the deleting pass
+    /// undoes with nothing to put back, and so does an older pass that wrote it.
+    /// </summary>
+    [Fact]
+    public async Task ATallVideoIsDeletedForGoodAndUndoCopesWithItGone()
+    {
+        SkipWithoutTools();
+        await SeedAsync(($"{Album}/01 track.flac", 1));
+
+        var tall = Path.Combine(_root, Album, "tall_animated_artwork.mp4");
+        await File.WriteAllBytesAsync(tall, TallVideo, Token);
+
+        // An older pass that wrote it, as the tag write did before the tall one was dropped.
+        var written = $"{{\"path\":\"{Album}/tall_animated_artwork.mp4\",\"mediaType\":\"video/mp4\",\"bytes\":{TallVideo.Length}}}";
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.DomainEvents.Add(DomainEvent.Create(
+                "tagging.catalogue.motion", "file", (await FileIdAsync()).ToString(), "owner",
+                DateTimeOffset.UtcNow.AddMinutes(-5), written, "older-run"));
+            await db.SaveChangesAsync(Token);
+        }
+
+        var services = Build();
+        Assert.Equal(0, (await RunAsync(TagWriteScope.Library, services)).MotionWritten);
+
+        // Gone, and not into the trash.
+        Assert.False(File.Exists(tall));
+        Assert.False(
+            Directory.Exists(_root + "-trash")
+            && Directory.EnumerateFiles(_root + "-trash", "tall_animated_artwork.mp4", SearchOption.AllDirectories).Any());
+
+        // The run's record says what went.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var deletion = await db.DomainEvents
+                .Where(entry => entry.Type == "tagging.catalogue.motion" && entry.CorrelationId != "older-run")
+                .Select(entry => entry.PayloadJson)
+                .SingleAsync(Token);
+
+            using var payload = System.Text.Json.JsonDocument.Parse(deletion);
+
+            Assert.Equal($"{Album}/tall_animated_artwork.mp4", payload.RootElement.GetProperty("path").GetString());
+            Assert.Equal(TallVideo.Length, payload.RootElement.GetProperty("length").GetInt64());
+            Assert.True(payload.RootElement.GetProperty("deleted").GetBoolean());
+        }
+
+        var deleting = await UndoAsync(services, Album);
+
+        Assert.Equal(TagUndoStatus.Undone, deleting.Status);
+        Assert.Empty(deleting.Problems);
+        Assert.Equal(0, deleting.Covers);
+        Assert.False(File.Exists(tall));
+
+        var older = await UndoAsync(services, Album);
+
+        Assert.Equal(TagUndoStatus.Undone, older.Status);
+        Assert.Equal("older-run", older.Edit?.Id);
+        Assert.Empty(older.Problems);
+        Assert.Equal(0, older.Covers);
     }
 
     [Fact]
@@ -275,7 +340,7 @@ public sealed partial class TagWritePassTests
         Assert.Equal(1, (await RunAsync(TagWriteScope.Library, services)).Written);
         var tagged = await TagsAsync($"{Album}/01 track.flac");
 
-        await SeedMotionAsync(SquareVideo, TallVideo);
+        await SeedMotionAsync(SquareVideo);
 
         var videos = await RunAsync(TagWriteScope.Library, services);
         Assert.Equal(0, videos.Written);

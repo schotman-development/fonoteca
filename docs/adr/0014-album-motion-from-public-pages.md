@@ -86,15 +86,17 @@ block the stage forever.
 rung, a rung split across files, a host other than `mvod.itunes.apple.com`,
 anything not an MP4 or over 100 MB. An HTTP failure is an outage and throws.
 
-**The catalogue grows by about 50 MB per album with motion artwork**, held in
+**The catalogue grows by about 50 MB per album with motion artwork** (25 MB
+since the tall video was dropped, below), held in
 PostgreSQL until the tag write copies it out, as a cover's bytes are.
 
 **A video already in the folder is recognised by its length**, not compared
 byte for byte, so a second run over a library does not read every video back
 from the database and the disk.
 
-**Not built:** serving the videos over the API (the client will), artist-page
-motion, and any way for a person to refuse a wrong title match other than SQL.
+**Not built:** serving the videos over the API (the client will — built
+2026-10-15, below), artist-page motion, and any way for a person to refuse a
+wrong title match other than SQL.
 
 ## When to revisit
 
@@ -105,3 +107,22 @@ are the signal; the fix is in `PageAsync`.
 
 **If title matches prove wrong**, for a refusal a person can make, as the
 cover dialog has.
+
+## Amended 2026-10-15: the square video only, served as an animated WebP
+
+**The tall video is gone, at the owner's choice.** The stage fetches only the
+square one, the `AlbumMotions.Tall` column is dropped with what it held, and
+the tag write writes only `square_animated_artwork.mp4`. Every
+`tall_animated_artwork.mp4` is deleted for good on the next write over its
+folder — the 57 that earlier tag writes left there and any other — not moved
+to the trash: the owner chose permanent deletion. The journal records each
+one's path and length; Undo has nothing to put back, and skips it. A record
+with only a tall video now has none.
+
+**Clients get the square video as an animated WebP**, from `getAlbumMotion`
+under Fonoteca's own `fonotecaAlbumMotion` OpenSubsonic extension (ADR 0012).
+The client draws with Slint, which plays no video; an animated picture needs
+only an image decoder, the same on the desktop and in a browser. ffmpeg
+converts it once per size asked for, full length, at most 30 frames a second
+and never larger than the video, and keeps the copy beside the scaled covers.
+A 15-second 1080 video at 440 px takes about 6 s and comes to about 5 MB.

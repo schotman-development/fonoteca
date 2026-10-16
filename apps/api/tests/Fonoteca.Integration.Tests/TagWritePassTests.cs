@@ -111,12 +111,15 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         if (Directory.Exists(_root + "-trash")) Directory.Delete(_root + "-trash", recursive: true);
     }
 
-    /// <summary>Two stand-in videos: an MP4's opening box and a few bytes, different lengths.</summary>
+    /// <summary>
+    /// Two stand-in videos, the square one and a tall one as the pass once
+    /// wrote: an MP4's opening box and a few bytes, different lengths.
+    /// </summary>
     private static readonly byte[] SquareVideo = [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 1, 1];
 
     private static readonly byte[] TallVideo = [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 2, 2, 2];
 
-    private async Task SeedMotionAsync(byte[]? square, byte[]? tall)
+    private async Task SeedMotionAsync(byte[]? square)
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
@@ -129,10 +132,9 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         {
             ReleaseGroupId = album,
             Square = square,
-            Tall = tall,
-            AppleAlbumId = square is null && tall is null ? null : "268443092",
-            Storefront = square is null && tall is null ? null : "us",
-            MatchedBy = square is null && tall is null ? null : "barcode",
+            AppleAlbumId = square is null ? null : "268443092",
+            Storefront = square is null ? null : "us",
+            MatchedBy = square is null ? null : "barcode",
             SavedUtc = DateTimeOffset.UtcNow,
         });
 
@@ -1957,7 +1959,7 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
             ("Miles Davis/Kind of Blue/CD 01/01 track.flac", 1),
             ("Miles Davis/Kind of Blue/CD 02/02 track.flac", 2));
 
-        await SeedMotionAsync(SquareVideo, TallVideo);
+        await SeedMotionAsync(SquareVideo);
 
         var services = Build();
         var summary = await RunAsync(TagWriteScope.Library, services);
@@ -1965,10 +1967,11 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         Assert.Equal(1, summary.MotionWritten);
 
         var square = Path.Combine(_root, "Miles Davis/Kind of Blue/square_animated_artwork.mp4");
-        var tall = Path.Combine(_root, "Miles Davis/Kind of Blue/tall_animated_artwork.mp4");
 
         Assert.Equal(SquareVideo, await File.ReadAllBytesAsync(square, Token));
-        Assert.Equal(TallVideo, await File.ReadAllBytesAsync(tall, Token));
+        Assert.Equal(
+            ["square_animated_artwork.mp4"],
+            Directory.EnumerateFiles(Path.Combine(_root, "Miles Davis/Kind of Blue"), "*.mp4").Select(Path.GetFileName).ToArray());
 
         // Never named as a sleeve, which a player's cover glob would pick up.
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, "Miles Davis/Kind of Blue"), "cover.*"));
@@ -1980,16 +1983,15 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     }
 
     /// <summary>
-    /// A different video already in the folder is displaced, and a shape the
-    /// album has no video of is not invented.
+    /// A different video already in the folder is displaced.
     /// </summary>
     [Fact]
-    public async Task AVideoInTheWayIsDisplacedAndAMissingShapeIsNotWritten()
+    public async Task AVideoInTheWayIsDisplaced()
     {
         SkipWithoutTools();
 
         await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
-        await SeedMotionAsync(SquareVideo, tall: null);
+        await SeedMotionAsync(SquareVideo);
 
         var existing = new byte[] { 0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 9 };
         var square = Path.Combine(_root, "Miles Davis/Kind of Blue/square_animated_artwork.mp4");
@@ -1998,7 +2000,6 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         Assert.Equal(1, (await RunAsync(TagWriteScope.Library)).MotionWritten);
 
         Assert.Equal(SquareVideo, await File.ReadAllBytesAsync(square, Token));
-        Assert.False(File.Exists(Path.Combine(_root, "Miles Davis/Kind of Blue/tall_animated_artwork.mp4")));
 
         var displaced = Directory
             .EnumerateFiles(_root + "-trash", "square_animated_artwork.mp4", SearchOption.AllDirectories)
@@ -2016,7 +2017,7 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         SkipWithoutTools();
 
         await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
-        await SeedMotionAsync(SquareVideo, TallVideo);
+        await SeedMotionAsync(SquareVideo);
 
         Assert.Equal(0, (await RunAsync(TagWriteScope.Library, Build(allowMutation: false))).MotionWritten);
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, "Miles Davis/Kind of Blue"), "*.mp4"));
@@ -2024,9 +2025,7 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
             await db.AlbumMotions.ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(motion => motion.Square, (byte[]?)null)
-                    .SetProperty(motion => motion.Tall, (byte[]?)null),
+                setters => setters.SetProperty(motion => motion.Square, (byte[]?)null),
                 Token);
         }
 

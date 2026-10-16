@@ -102,9 +102,6 @@ namespace Fonoteca.Data.Migrations
                         .HasMaxLength(8)
                         .HasColumnType("character varying(8)");
 
-                    b.Property<byte[]>("Tall")
-                        .HasColumnType("bytea");
-
                     b.HasKey("ReleaseGroupId");
 
                     b.ToTable("AlbumMotions");

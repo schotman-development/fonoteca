@@ -1185,7 +1185,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             await db.SaveChangesAsync(Token);
         }
 
-        var motions = new StubMotions(("0028941502124", new AlbumMotionFound("1440", "us", "barcode", [1, 2], [3, 4, 5])));
+        var motions = new StubMotions(("0028941502124", new AlbumMotionFound("1440", "us", "barcode", [1, 2])));
 
         var services = Build(
             Answering(Recording),
@@ -1210,13 +1210,12 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             Assert.Equal(2, rows.Count);
 
             var found = rows.Single(row => row.Square is not null);
-            Assert.Equal(new byte[] { 3, 4, 5 }, found.Tall);
+            Assert.Equal(new byte[] { 1, 2 }, found.Square);
             Assert.Equal("1440", found.AppleAlbumId);
             Assert.Equal("us", found.Storefront);
             Assert.Equal("barcode", found.MatchedBy);
 
             var none = rows.Single(row => row.Square is null);
-            Assert.Null(none.Tall);
             Assert.Null(none.AppleAlbumId);
         }
 
