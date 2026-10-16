@@ -1,7 +1,11 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Fonoteca.Api.Endpoints;
+using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Catalogue;
 using Fonoteca.Ingest;
 using Fonoteca.Providers.Qobuz;
 using Fonoteca.Tagging;
@@ -71,13 +75,14 @@ public static partial class SubsonicEndpoints
     }
 
     /// <summary>
-    /// A picture of an album, an artist's record, or a folder.
+    /// A picture of an album, an artist, an artist's record, or a folder.
     /// </summary>
     /// <remarks>
-    /// One endpoint over three existing answers, which is why the ids carry a
+    /// One endpoint over four existing answers, which is why the ids carry a
     /// prefix at all. An album — or a song filed under one — is the stored
-    /// <c>ReleaseCover</c>, fetched once and served under an ETag. Anything else
-    /// is a path, and a path's picture is the file's embedded cover or the
+    /// <c>ReleaseCover</c>, fetched once and served under an ETag. An artist is
+    /// the artist page's picture (<see cref="ArtistPortraitAsync"/>). Anything
+    /// else is a path, and a path's picture is the file's embedded cover or the
     /// folder's own <c>cover.jpg</c>. Each comes no larger than the <c>size</c>
     /// asked for (<see cref="SizedAsync"/>).
     ///
@@ -96,9 +101,18 @@ public static partial class SubsonicEndpoints
         QobuzCovers shop,
         IClock clock,
         FfmpegCoverScaler scaler,
+        IHttpClientFactory clients,
         CancellationToken cancellationToken)
     {
         var id = Text(http, "id");
+
+        if (SubsonicIds.AsArtist(id) is { } artist)
+        {
+            var portrait = await ArtistPortraitAsync(http, artist, db, store, clients, cancellationToken)
+                .ConfigureAwait(false);
+
+            return await SizedAsync(http, scaler, portrait, cancellationToken).ConfigureAwait(false);
+        }
 
         var album = SubsonicIds.AsAlbum(id)
             ?? await AlbumOfAsync(db, SubsonicIds.AsSong(id), cancellationToken)
@@ -132,6 +146,78 @@ public static partial class SubsonicEndpoints
             .ConfigureAwait(false);
 
         return await SizedAsync(http, scaler, art, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Where a provider's artist picture is kept once fetched.</summary>
+    private static readonly string KeptPortraits = Path.Combine(Path.GetTempPath(), "fonoteca-portraits");
+
+    /// <summary>
+    /// The artist page's picture, as bytes.
+    /// </summary>
+    /// <remarks>
+    /// <b>Fonoteca serves it, so a client never contacts the CDN</b> (the
+    /// owner's choice, 2026-10-16). The page's own answer is asked —
+    /// an upload, the shelf, then the provider's picture or a person's pick
+    /// of one — and where that answer is a redirect, the picture behind it is
+    /// fetched at the shelf's width, through the tag write's download, and
+    /// kept in the temp folder under its address: a cleared copy costs one
+    /// fetch, and a new pick is a new address. A refusal or an outage is not
+    /// kept, so the next view asks again.
+    /// </remarks>
+    private static async Task<IResult> ArtistPortraitAsync(
+        HttpContext http,
+        ArtistId artist,
+        FonotecaDbContext db,
+        FileSystemAudioFileStore store,
+        IHttpClientFactory clients,
+        CancellationToken cancellationToken)
+    {
+        var answer = await CatalogueEndpoints
+            .GetArtistImage(artist.Value, ArtistImageKind.Portrait, db, store, http, TagWriteService.ShelfWidth, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (answer.Result is not RedirectHttpResult { Url: var url }) return answer;
+
+        var key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
+
+        var kept = Directory.Exists(KeptPortraits)
+            ? Directory.EnumerateFiles(KeptPortraits, key + ".*").FirstOrDefault()
+            : null;
+
+        if (kept is null)
+        {
+            TagWriteService.FetchedImage? picture;
+            string? refused;
+
+            try
+            {
+                (picture, refused) = await TagWriteService
+                    .DownloadPortraitAsync(clients, url, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception cause) when (cause is HttpRequestException
+                || (cause is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+            {
+                (picture, refused) = (null, cause.Message);
+            }
+
+            if (picture is null || FilePreview.ImageExtensionFor(picture.MediaType) is not { } extension)
+            {
+                return TypedResults.Problem(title: "No picture", detail: $"The artist's picture could not be fetched: {refused ?? "no image type"}.", statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            // Written aside and moved, so a concurrent request never reads half.
+            Directory.CreateDirectory(KeptPortraits);
+            var part = Path.Combine(KeptPortraits, Guid.NewGuid().ToString("N") + ".part");
+            kept = Path.Combine(KeptPortraits, $"{key}.{extension}");
+            await File.WriteAllBytesAsync(part, picture.Bytes, cancellationToken).ConfigureAwait(false);
+            File.Move(part, kept, overwrite: true);
+        }
+
+        return TypedResults.File(
+            await File.ReadAllBytesAsync(kept, cancellationToken).ConfigureAwait(false),
+            FilePreview.Of(kept).MediaType,
+            entityTag: new EntityTagHeaderValue($"\"{key[..16]}\""));
     }
 
     /// <summary>

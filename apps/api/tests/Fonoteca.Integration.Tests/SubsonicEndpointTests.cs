@@ -7,10 +7,13 @@ using System.Text.Json;
 using System.Xml.Linq;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
+using Fonoteca.Fixtures;
+using Fonoteca.Providers.Wikidata;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -1056,6 +1059,192 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .GetProperty("song");
 
         Assert.Equal("My Foolish Heart", song.GetProperty("title").GetString());
+    }
+
+    /// <summary>
+    /// An artist with a provider's picture carries a cover art id, and
+    /// getCoverArt serves the picture itself, fetched once and scaled per size,
+    /// so a client never contacts the CDN; an artist with none carries no id.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistsPictureComesFromFonotecaFetchedOnceAndSized()
+    {
+        const string Url = "https://commons.wikimedia.org/wiki/Special:FilePath/Bill_Evans.jpg";
+
+        var made = Path.Combine(_root, "portrait-800x1200.jpg");
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=green:s=800x1200", "-frames:v", "1", made);
+        var original = await File.ReadAllBytesAsync(made, Token);
+        File.Delete(made);
+
+        var cdn = new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(original) { Headers = { ContentType = new("image/jpeg") } },
+        });
+
+        await using var factory = _factory!.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddHttpClient(WikidataOptions.PicturesClientName).ConfigurePrimaryHttpMessageHandler(() => cdn)));
+
+        var scaler = factory.Services.GetRequiredService<Fonoteca.Ingest.FfmpegCoverScaler>();
+        var asked = PortraitRendition.Sized(Url, 1280);
+        var kept = Path.Combine(
+            Path.GetTempPath(),
+            "fonoteca-portraits",
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(asked))) + ".jpg");
+
+        using var client = factory.CreateClient();
+
+        try
+        {
+            var bare = await BillEvansAsync(client);
+            Assert.False(bare.TryGetProperty("coverArt", out _));
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                var evans = await db.Artists.SingleAsync(row => row.Name == "Bill Evans", Token);
+                evans.PortraitUrl = Url;
+                await db.SaveChangesAsync(Token);
+            }
+
+            var pictured = await BillEvansAsync(client);
+            var id = pictured.GetProperty("id").GetString()!;
+            Assert.Equal(id, pictured.GetProperty("coverArt").GetString());
+
+            var scaled = await PictureAsync(client, id, 300);
+            Assert.Equal(scaled, await PictureAsync(client, id, 300));
+            Assert.Equal(original, await PictureAsync(client, id, null));
+
+            // One fetch for all three, at the shelf's width, and kept.
+            Assert.Equal(asked, Assert.Single(cdn.Requests).Uri.AbsoluteUri);
+            Assert.Equal(original, await File.ReadAllBytesAsync(kept, Token));
+
+            var file = Path.Combine(_root, "portrait-scaled.jpg");
+            await File.WriteAllBytesAsync(file, scaled, Token);
+            Assert.Equal(
+                "200,300",
+                Tool("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file).Trim());
+            File.Delete(file);
+        }
+        finally
+        {
+            if (File.Exists(kept)) File.Delete(kept);
+
+            foreach (var kind in new[] { ".jpg", ".as-is" })
+            {
+                File.Delete(Path.Combine(scaler.Directory, Fonoteca.Ingest.FfmpegCoverScaler.KeyOf(original, 300) + kind));
+            }
+
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            (await db.Artists.SingleAsync(row => row.Name == "Bill Evans", Token)).PortraitUrl = null;
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// An upload stands for the artist with no fetch; a person's removal of the
+    /// provider's picture leaves no id; a fetch that fails is a problem
+    /// document and keeps nothing.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistsUploadNeedsNoFetchAndAFailedFetchKeepsNothing()
+    {
+        const string Url = "https://commons.wikimedia.org/wiki/Special:FilePath/Bill_Evans_failing.jpg";
+
+        var cdn = new StubHttpHandler(_ => throw new HttpRequestException("the CDN is down"));
+
+        await using var factory = _factory!.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddHttpClient(WikidataOptions.PicturesClientName).ConfigurePrimaryHttpMessageHandler(() => cdn)));
+
+        var kept = Path.Combine(
+            Path.GetTempPath(),
+            "fonoteca-portraits",
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(PortraitRendition.Sized(Url, 1280)))) + ".jpg");
+
+        using var client = factory.CreateClient();
+        ArtistId evans;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await db.Artists.SingleAsync(artist => artist.Name == "Bill Evans", Token);
+            evans = row.Id;
+            db.ArtistImages.Add(new ArtistImage
+            {
+                ArtistId = evans,
+                Kind = ArtistImageKind.Portrait.Name,
+                Bytes = [0xFF, 0xD8, 0xFF, 0xD9],
+                MediaType = "image/jpeg",
+                SavedUtc = DateTimeOffset.Parse("2026-01-05T00:00:00Z", CultureInfo.InvariantCulture),
+            });
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            var uploaded = await BillEvansAsync(client);
+            var id = uploaded.GetProperty("coverArt").GetString()!;
+            var served = await PictureAsync(client, id, null);
+            Assert.Equal<byte>([0xFF, 0xD8, 0xFF, 0xD9], served);
+            Assert.Empty(cdn.Requests);
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                db.ArtistImages.RemoveRange(await db.ArtistImages.Where(image => image.ArtistId == evans).ToListAsync(Token));
+                var row = await db.Artists.SingleAsync(artist => artist.Id == evans, Token);
+                row.PortraitUrl = Url;
+                row.EditsJson = PersonEdits.Write(new Dictionary<string, string?> { [ArtistImageKind.Portrait.Name] = string.Empty });
+                await db.SaveChangesAsync(Token);
+            }
+
+            Assert.False((await BillEvansAsync(client)).TryGetProperty("coverArt", out _));
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                (await db.Artists.SingleAsync(artist => artist.Id == evans, Token)).EditsJson = null;
+                await db.SaveChangesAsync(Token);
+            }
+
+            Assert.Equal(id, (await BillEvansAsync(client)).GetProperty("coverArt").GetString());
+
+            using var failed = await client.GetAsync(
+                new Uri($"/rest/getCoverArt.view?{Credentials}&id={id}&size=300", UriKind.Relative),
+                Token);
+
+            Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
+            Assert.Equal("application/problem+json", failed.Content.Headers.ContentType?.MediaType);
+            Assert.Single(cdn.Requests);
+            Assert.False(File.Exists(kept));
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.ArtistImages.RemoveRange(await db.ArtistImages.Where(image => image.ArtistId == evans).ToListAsync(Token));
+            var row = await db.Artists.SingleAsync(artist => artist.Id == evans, Token);
+            row.PortraitUrl = null;
+            row.EditsJson = null;
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    private async Task<JsonElement> BillEvansAsync(HttpClient client) =>
+        (await JsonAsync(client, "/rest/getArtists.view"))
+            .GetProperty("subsonic-response")
+            .GetProperty("artists")
+            .GetProperty("index")
+            .EnumerateArray()
+            .SelectMany(index => index.GetProperty("artist").EnumerateArray())
+            .Single(artist => artist.GetProperty("name").GetString() == "Bill Evans");
+
+    private static async Task<byte[]> PictureAsync(HttpClient client, string id, int? size)
+    {
+        var sized = size is { } pixels ? $"&size={pixels}" : string.Empty;
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getCoverArt.view?{Credentials}&id={id}{sized}", UriKind.Relative),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.StartsWith("image/", response.Content.Headers.ContentType?.MediaType, StringComparison.Ordinal);
+
+        return await response.Content.ReadAsByteArrayAsync(Token);
     }
 
     /// <summary>

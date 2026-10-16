@@ -409,10 +409,10 @@ public static partial class SubsonicEndpoints
         writer.Attr("sortName", artist.SortName);
         writer.Attr("musicBrainzId", artist.Mbid?.Value.ToString());
 
-        // A full URL on somebody else's CDN, which is how it is stored — four
-        // services answer here and only they know how their addresses are
-        // shaped. Nothing is proxied; a client that cannot reach the CDN draws
-        // its own monogram, exactly as the web client does.
+        // The artist page's picture, served by getCoverArt so a client never
+        // contacts a CDN; absent where there is none, and the client draws its
+        // placeholder. `artistImageUrl` stays for clients that read only that.
+        writer.Attr("coverArt", artist.Pictured ? SubsonicIds.Artist(artist.Id) : null);
         writer.Attr("artistImageUrl", artist.Portrait);
     }
 
@@ -558,13 +558,19 @@ public static partial class SubsonicEndpoints
 }
 
 /// <summary>An artist, as much of one as a client draws.</summary>
+/// <param name="Pictured">
+/// An upload or a provider's picture stands for them. A picture only on their
+/// shelf is not looked for here, since that is a listing of the library root
+/// per artist; the tag write puts one there from those two.
+/// </param>
 internal sealed record SubsonicArtist(
     ArtistId Id,
     string Name,
     string? SortName,
     Mbid? Mbid,
     string? Portrait,
-    int AlbumCount);
+    int AlbumCount,
+    bool Pictured);
 
 /// <summary>A release group, as an album.</summary>
 /// <param name="Added">

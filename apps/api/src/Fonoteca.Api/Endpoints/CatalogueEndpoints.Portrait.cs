@@ -147,7 +147,7 @@ public static partial class CatalogueEndpoints
     /// mtime and length — because the answer changes whole when the source
     /// does, and <c>no-cache</c> makes the browser revalidate every time.
     /// </remarks>
-    private static async Task<Results<FileContentHttpResult, RedirectHttpResult, ProblemHttpResult>>
+    internal static async Task<Results<FileContentHttpResult, RedirectHttpResult, ProblemHttpResult>>
         GetArtistImage(
             Guid id,
             ArtistImageKind kind,

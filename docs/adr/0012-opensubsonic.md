@@ -77,7 +77,7 @@ repair is finished sees the work in progress, which is the truth.
 | `song.duration` / `bitRate` / `samplingRate` / `channelCount` / `bitDepth` | `MediaFile.Quality` | see below |
 | `song.suffix` / `contentType` | derived from `MediaFile.Path` through `FilePreview.Of` | there is no format column, and adding one would duplicate the extension |
 | `album.year` | `ReleaseGroup.FirstReleaseYear`, else the earliest official stored edition's, else the earliest stored edition's | only the year, as everywhere else — `ReleaseDate` stays partial |
-| `coverArt` | `ReleaseCover`, or embedded/folder art | two existing handlers behind one prefixed id; an artist carries `artistImageUrl` instead |
+| `coverArt` | `ReleaseCover`, embedded/folder art, or the artist page's picture | three existing handlers behind one prefixed id; an artist carries `artistImageUrl` too |
 | `getScanStatus` / `startScan` | `LibraryScanService` | free, and starting a scan from a phone is genuinely useful |
 
 **`AudioQuality` turns out to be the Subsonic `song` record.** Codec, sample
@@ -317,11 +317,15 @@ file's embedded art or the folder's `cover.jpg`. The prefixed id is what routes
 between them, and the one-week negative-cache window on `ReleaseCover` now
 expires under load from clients that request art per song rather than per album.
 
-**An artist is not among them, deliberately.** `Artist.PortraitUrl` is already a
-full URL on whichever provider's CDN answered, and OpenSubsonic has
-`artistImageUrl` for exactly that — so the artist element carries the URL and no
-`coverArt` id at all, nothing is proxied, and a client that cannot reach the CDN
-draws the same monogram the web client does.
+**An artist is among them since 2026-10-16, the owner's choice** ("Fonoteca
+serves them"), so a client never contacts the portrait CDN. An artist with an
+upload or a provider's picture carries `coverArt` = its own `ar-` id, and
+`getCoverArt` answers with what the artist page shows: the upload, the shelf's
+`artist.*`, else the provider's picture, fetched at 1280 wide through the tag
+write's download, kept in the temp folder under its address and scaled per
+`size` as covers are. `artistImageUrl` stays for clients that read only that.
+It was once deliberately absent, the URL alone on the element and nothing
+proxied.
 
 **An audio format the `FilePreview` allowlist does not name is served as an
 attachment.** `ape`, `wv`, `dsf` and `wma` go out as `application/octet-stream`

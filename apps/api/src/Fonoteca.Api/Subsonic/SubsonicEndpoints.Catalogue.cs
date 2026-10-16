@@ -58,6 +58,9 @@ public static partial class SubsonicEndpoints
                 artist.SortName,
                 artist.Mbid,
                 artist.PortraitUrl,
+                artist.EditsJson,
+                Uploaded = db.ArtistImages.Any(image =>
+                    image.ArtistId == artist.Id && image.Kind == ArtistImageKind.Portrait.Name),
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -78,7 +81,10 @@ public static partial class SubsonicEndpoints
                     artist.SortName,
                     artist.Mbid,
                     artist.PortraitUrl,
-                    group.Count());
+                    group.Count(),
+                    Pictured: artist.Uploaded
+                        || PersonEdits.Apply(PersonEdits.Read(artist.EditsJson), ArtistImageKind.Portrait.Name, artist.PortraitUrl)
+                            is { Length: > 0 });
             })
             .OrderBy(artist => artist.SortName ?? artist.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(artist => artist.Name, StringComparer.OrdinalIgnoreCase)
