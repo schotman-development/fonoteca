@@ -28,8 +28,10 @@ identical by path and inode.
    tree, `/mnt/vault/fonoteca-test/music-trash` or `music-replaced`. If one
    does not, it is the only copy: stop and ask. A tag write leaves exactly
    this, so compare the decoded audio
-   (`ffmpeg -v error -i f -map 0:a -f md5 -`) and tell the user whether only
-   the tags differ.
+   (`ffmpeg -nostdin -v error -i f -map 0:a -f md5 -`; without `-nostdin`
+   ffmpeg eats a `while read` loop's input, and ffprobe needs `</dev/null`)
+   and tell the user whether only the tags differ. Also compare the ALBUM tag:
+   if it is unchanged, Aria's album ids hold.
 5. Before asking, count what Aria would lose, read-only. Old ids are
    `sha1(relative path)`. Count favourites from `GET /api/tracks?limit=100000`,
    plays from `GET /api/plays/counts`, and entries from each
@@ -57,7 +59,9 @@ no sqlite3 there, so use `podman unshare python3`, and open it with
    - `tracks.addedAt`, restored from the old row
    - `tracks.favourite`
 
-   Dry-run the script, then apply it.
+   Before writing it, scan every table's every column for the old ids
+   (read-only), so a table this list misses shows up. Dry-run the script,
+   then apply it.
 5. `podman unshare chown 65532:65532` the db files, then `podman start aria`,
    and check `GET /api/plays/counts`.
 
@@ -66,7 +70,8 @@ no sqlite3 there, so use `podman unshare python3`, and open it with
 - Hardlink the new files: `ln "${T:?}/${p:?}" "${P:?}/${p:?}"`.
 - Move the stale and changed production files to
   `/mnt/vault/media/music-trash/<date> sync`, keeping their layout, rather than
-  deleting them. That makes the sync reversible, and the user decides when to
+  deleting them. A second sync on the same day needs its own folder
+  (`<date> sync 2`), since the same paths collide. That makes the sync reversible, and the user decides when to
   empty it.
 - Hardlink the replacements for the changed files.
 - If asked, remove empty folders bottom-up with
