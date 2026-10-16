@@ -244,6 +244,12 @@ public static class ProviderServiceCollectionExtensions
 
         AddResilienceThenGate(client, WikidataOptions.HttpClientName);
 
+        // The pictures themselves, which the tag write downloads onto the shelves.
+        // Static files on CDNs rather than an API, so no gate; but most are
+        // Commons', and Commons refuses a request that does not say who sent it.
+        services.AddHttpClient(WikidataOptions.PicturesClientName, (provider, http) =>
+            http.DefaultRequestHeaders.Add("User-Agent", UserAgentFor(Options<WikidataOptions>(provider))));
+
         services.AddKeyedSingleton<IArtistPortraits, WikidataPortraits>(
             ArtistPortraitSources.Wikidata);
 

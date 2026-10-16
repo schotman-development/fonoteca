@@ -529,6 +529,16 @@ elsewhere and none of it exists; this pass is what makes the answers portable.
   loose file or a folder naming two albums stays put. A file under a track's
   name (`01.cue`) goes with it — a lyrics file is in the trash by then — and an artist folder only respelled takes its
   pictures along.
+- **The artist's pictures go on the shelf named for them** — `artist.*` and
+  `backdrop.*` beside the album folders, from every button (the owner's
+  choice): a shelf is an artist's only where its name is one the album in it
+  bills (`ArtistShelf`), or, from an artist's page, that artist's, so a
+  violinist's face never lands on Bach's. What the catalogue shows displaces
+  what is there to the trash; Lidarr's `folder.jpg` and `logo.png` are not
+  ours and stay. Fetched once per picture per run at 1280 wide
+  (`PortraitRendition`) through a client with Wikimedia's User-Agent — Commons
+  answers 403 without one, and most portraits are Commons'. A folder the run
+  itself renames onto a new shelf gets its picture on the next run.
 - **Undo steps one album folder back by one edit** (`TagWriteService.Undo.cs`,
   `POST /api/catalogue/folders/undo`): the newest journal correlation that
   touched it — a tag write's tags, renames, links and sleeve together, or

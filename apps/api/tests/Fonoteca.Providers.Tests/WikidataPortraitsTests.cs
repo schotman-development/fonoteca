@@ -245,6 +245,33 @@ public sealed class WikidataPortraitsTests : IDisposable
         foreach (var provider in _providers) provider.Dispose();
     }
 
+    /// <summary>
+    /// The client the tag write downloads a picture through says who it is,
+    /// as Commons wants before it serves one.
+    /// </summary>
+    /// <remarks>
+    /// Commons answers a request with no User-Agent 403, and .NET sends none:
+    /// without this every Commons portrait — most of them — stays off the
+    /// shelves while the run reports nothing worse than a log line.
+    /// </remarks>
+    [Fact]
+    public async Task ThePictureClientSaysWhoItIs()
+    {
+        var stub = new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        var services = new ServiceCollection();
+
+        services.AddWikidata(options => options.Contact = "fonoteca@example.test");
+        services.AddHttpClient(WikidataOptions.PicturesClientName).ConfigurePrimaryHttpMessageHandler(() => stub);
+
+        var provider = services.BuildServiceProvider();
+        _providers.Add(provider);
+
+        using var http = provider.GetRequiredService<IHttpClientFactory>().CreateClient(WikidataOptions.PicturesClientName);
+        using var response = await http.GetAsync(new Uri(Commons("Miles Davis.jpg")), Token);
+
+        Assert.Contains("fonoteca@example.test", Assert.Single(stub.Requests).UserAgent ?? "", StringComparison.Ordinal);
+    }
+
     /// <summary>The name is irrelevant to this source, which is worth saying once.</summary>
     private static ArtistToPicture Named(Mbid artist) => new(artist, "ignored by this source");
 

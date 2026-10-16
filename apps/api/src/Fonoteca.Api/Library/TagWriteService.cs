@@ -10,6 +10,7 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Events;
 using Fonoteca.Ingest;
+using Fonoteca.Providers.Wikidata;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -94,12 +95,12 @@ namespace Fonoteca.Api.Library;
 /// <see cref="EnsureCoverAsync"/> for why that is the shape and not an embedded
 /// picture.</item>
 ///
-/// <item><b>The artist's photograph goes out the same way, and only from the
-/// artist button.</b> A picture of a person is a fact about nothing in any file,
-/// so the only thing that can say whose shelf it belongs on is somebody pressing
-/// the button on one artist's page — and even then the folder's name is checked
-/// against the artist's, because most of a violinist's files sit on composers'
-/// shelves. See <see cref="EnsurePortraitAsync"/>.</item>
+/// <item><b>The artist's photograph goes out the same way, onto the shelf named
+/// for them.</b> A picture of a person is a fact about nothing in any file, so
+/// the shelf is the artist's only where its name is one billed on the album in
+/// it — or, from an artist's page, that artist's — because most of a
+/// violinist's files sit on composers' shelves. See
+/// <see cref="EnsurePortraitAsync"/>.</item>
 /// </list>
 /// </remarks>
 public sealed partial class TagWriteService(
@@ -491,7 +492,7 @@ public sealed partial class TagWriteService(
 
         // Rule 6: refusing is an answer, and this one is otherwise invisible —
         // the run finishes clean, the panel says nothing, and no picture arrives.
-        if (portraits is { Artist: not null, Shelved: false, Subject: not null })
+        if (portraits is { Artist: { } named, Shelved: false } && portraits.Subjects.GetValueOrDefault(named) is not null)
         {
             Log.PortraitHasNoShelf(logger, scope.Label);
         }
@@ -638,7 +639,8 @@ public sealed partial class TagWriteService(
                         credit.Artist!.Name,
                         credit.Artist!.LatinName,
                         credit.Artist!.SortName,
-                        null))
+                        null,
+                        credit.ArtistId))
                     .ToList(),
                 file.Fingerprint,
                 file.TempoAndKey,
@@ -850,7 +852,8 @@ public sealed partial class TagWriteService(
                         credit.Artist!.Name,
                         credit.Artist!.LatinName,
                         credit.Artist!.SortName,
-                        null),
+                        null,
+                        credit.ArtistId),
                 })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false));
@@ -1749,28 +1752,38 @@ public sealed partial class TagWriteService(
     private static readonly TimeSpan PortraitTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// The width a provider's picture is asked for at, for a shelf.
+    /// </summary>
+    /// <remarks>
+    /// Through <see cref="PortraitRendition"/>, because an original is no size
+    /// at all: one Commons original here is 33.7 MB, over
+    /// <see cref="MaxPortraitBytes"/>, and 378 KB at 1280; Qobuz's
+    /// <c>large</c> reaches 13.3 MB. 1280 is one of the widths Commons keeps.
+    /// </remarks>
+    private const int ShelfWidth = 1280;
+
+    /// <summary>
     /// The artist's photograph, written once beside their records as <c>artist.*</c>.
     /// </summary>
     /// <remarks>
-    /// <b>The artist page's button is the only one that writes this, and that is
-    /// the design rather than a gap.</b> A picture of a person is not a fact
-    /// about any file, so nothing in a path or a tag says which shelf it belongs
-    /// on — the claim has to come from somewhere, and the only place it exists is
-    /// a person pressing "write tags" on one artist's page. The library-wide and
-    /// album buttons pass through the same code and write nothing, because
-    /// neither one names an artist.
+    /// <b>Every button writes it, onto the shelf named for one of the album's
+    /// billed artists</b> (the owner's choice, "artist pictures in artist
+    /// folders"). A picture of a person is not a fact about any file, so the
+    /// claim comes from two facts that are: the album's billing, and the name of
+    /// the folder the album sits in, which the rename gives the first-billed
+    /// artist. The artist page's button names its artist, and only that
+    /// artist's shelf is considered.
     ///
-    /// <b>Even then the folder's name is checked, and the measurement is why.</b>
-    /// The scope's files are every track the artist page lists, which is not the
-    /// same as every track on their shelf: 47 of Janine Jansen's 54 files sit
-    /// under <c>Johann Sebastian Bach</c> and <c>Antonio Vivaldi</c>, because a
-    /// classical library files a performance under its composer. Writing her
-    /// photograph into every folder her playing reaches would put a violinist's
-    /// portrait on two dead composers' shelves. So the folder is taken only when
-    /// its name <i>is</i> the artist, by <see cref="ArtistNameMatch"/> — the same
-    /// rule that guards the one portrait source keyed on a name. Measured over
-    /// the followed artists, 27 of 28 have a folder that answers to this and the
-    /// twenty-eighth has no folder at all, his music being filed under the band.
+    /// <b>The folder's name is checked, and the measurement is why.</b> An
+    /// artist's files are not all on their shelf: 47 of Janine Jansen's 54
+    /// files sit under <c>Johann Sebastian Bach</c> and <c>Antonio Vivaldi</c>,
+    /// because a classical library files a performance under its composer.
+    /// Writing her photograph into every folder her playing reaches would put a
+    /// violinist's portrait on two dead composers' shelves. So the folder is
+    /// taken only when its name <i>is</i> the artist, by
+    /// <see cref="ArtistNameMatch"/> — the same rule that guards the one
+    /// portrait source keyed on a name. A shelf no album on it bills by its name
+    /// gets nothing, and the first album that does decides it.
     ///
     /// <b>What the catalogue shows is what goes on the shelf, so a picture
     /// already there is displaced.</b> The same rule a sleeve follows, and for
@@ -1787,12 +1800,12 @@ public sealed partial class TagWriteService(
     /// by a JPEG leaves two files for a player's glob to choose between. There
     /// is no undo journal carrying image bytes, so the trash is the undo.
     ///
-    /// <b>The bytes are the worklist, which costs one request.</b> A shelf
-    /// already holding exactly this picture is left untouched — but proving that
-    /// means having the picture to compare, so unlike a sleeve, which is read
-    /// from the database for nothing, this is fetched before it can be skipped.
-    /// One request per run rather than per file, and only when a run names an
-    /// artist who has a portrait and a shelf to put it on.
+    /// <b>The bytes are the worklist, which costs a request a picture.</b> A
+    /// shelf already holding exactly this picture is left untouched — but
+    /// proving that means having the picture to compare, so unlike a sleeve,
+    /// which is read from the database for nothing, this is fetched before it
+    /// can be skipped: once per picture per run, not per file, and only for a
+    /// shelf that is the artist's. Over the library that is about two hundred.
     ///
     /// <b>The bytes come over the wire, which nothing else in this pass does.</b>
     /// <c>Artists.PortraitUrl</c> is a URL rather than stored bytes — the browser
@@ -1816,27 +1829,35 @@ public sealed partial class TagWriteService(
         string correlationId,
         CancellationToken cancellationToken)
     {
-        // The whole library and one album both arrive here naming nobody.
-        if (portraits.Artist is not { } artistId) return;
-
         // The shelf the album sits on, which is a claim about whose it is and is
         // checked below. Empty for a file too shallow to have one.
         var folder = AlbumFolder.ParentOf(file.Path);
 
-        if (folder.Length == 0) return;
+        if (folder.Length == 0 || portraits.Folders.Contains(folder)) return;
+
+        // From an artist's page, theirs; otherwise whichever of the album's
+        // billed artists the folder is named for. Bach's shelf is not Janine
+        // Jansen's, however much of her playing sits on it.
+        var owner = portraits.Artist
+            ?? file.ReleaseCredits
+                .FirstOrDefault(credit => credit.Artist is not null && ArtistShelf.IsNamedFor(folder, credit.Own, credit.Latin))
+                ?.Artist;
+
+        if (owner is not { } artistId) return;
 
         // Every album on the shelf behind the first one is answered by this
         // line — and both kinds are done inside this one visit, or the portrait
         // would take the gate and the banner would never be reached.
-        if (!portraits.Folders.Add(folder)) return;
+        portraits.Folders.Add(folder);
+
+        PortraitSubject? subject;
 
         try
         {
-            if (!portraits.Asked)
+            if (!portraits.Subjects.TryGetValue(artistId, out subject))
             {
-                portraits.Asked = true;
-                portraits.Subject = await SubjectAsync(db, artistId, cancellationToken)
-                    .ConfigureAwait(false);
+                subject = await SubjectAsync(db, artistId, cancellationToken).ConfigureAwait(false);
+                portraits.Subjects[artistId] = subject;
             }
         }
         catch (Exception cause)
@@ -1846,11 +1867,7 @@ public sealed partial class TagWriteService(
             return;
         }
 
-        if (portraits.Subject is not { } subject) return;
-
-        // Bach's shelf is not Janine Jansen's, however much of her playing
-        // sits on it.
-        if (!subject.Owns(folder)) return;
+        if (subject is null || !subject.Owns(folder)) return;
 
         // The shelf was found and it is theirs, whatever happens below.
         portraits.Shelved = true;
@@ -1954,7 +1971,7 @@ public sealed partial class TagWriteService(
             // A person's picture is already here; only a provider's has to be
             // fetched, and an artist with an upload costs no request at all.
             var picture = chosen.Uploaded
-                ?? await PortraitAsync(portraits, kind, chosen.Url!, cancellationToken)
+                ?? await PortraitAsync(portraits, PortraitRendition.Sized(chosen.Url!, ShelfWidth), cancellationToken)
                     .ConfigureAwait(false);
 
             if (picture is null) return;
@@ -2083,13 +2100,12 @@ public sealed partial class TagWriteService(
     /// </remarks>
     private async Task<FetchedImage?> PortraitAsync(
         PortraitRun portraits,
-        ArtistImageKind kind,
         string url,
         CancellationToken cancellationToken)
     {
-        if (portraits.Fetched.TryGetValue(kind.Name, out var already)) return already;
+        if (portraits.Fetched.TryGetValue(url, out var already)) return already;
 
-        portraits.Fetched[kind.Name] = null;
+        portraits.Fetched[url] = null;
 
         if (!Uri.TryCreate(url, UriKind.Absolute, out var address)
             || (address.Scheme != Uri.UriSchemeHttps && address.Scheme != Uri.UriSchemeHttp))
@@ -2098,7 +2114,7 @@ public sealed partial class TagWriteService(
             return null;
         }
 
-        var http = clients.CreateClient();
+        var http = clients.CreateClient(WikidataOptions.PicturesClientName);
 
         http.Timeout = PortraitTimeout;
         http.MaxResponseContentBufferSize = MaxPortraitBytes;
@@ -2127,7 +2143,7 @@ public sealed partial class TagWriteService(
             await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false),
             mediaType);
 
-        portraits.Fetched[kind.Name] = fetched;
+        portraits.Fetched[url] = fetched;
 
         return fetched;
     }
@@ -2244,10 +2260,11 @@ public sealed partial class TagWriteService(
     /// </summary>
     /// <remarks>
     /// Three answers cached rather than two, because unlike a sleeve the picture
-    /// is not in the database: the artist is read once, the image is downloaded
-    /// once, and each shelf is considered once. <see cref="Asked"/> and
-    /// <see cref="Fetched"/> exist so that "no portrait" and "not looked yet" stay
-    /// different — a null without them is a query per file.
+    /// is not in the database: each artist is read once, each image is
+    /// downloaded once, and each shelf is decided once. <see cref="Subjects"/>
+    /// and <see cref="Fetched"/> hold a null for "asked and got nothing", so
+    /// that and "not looked yet" stay different — a null without them is a
+    /// query per file.
     /// </remarks>
     private sealed class PortraitRun(ArtistId? artist, DateTimeOffset startedAt)
     {
@@ -2258,22 +2275,20 @@ public sealed partial class TagWriteService(
         public string Stamp { get; } =
             startedAt.ToString("yyyy-MM-dd HHmmss", CultureInfo.InvariantCulture);
 
-        /// <summary>Whether any folder in this run turned out to be the artist's own.</summary>
+        /// <summary>Whether any folder in this run turned out to be an artist's own.</summary>
         public bool Shelved { get; set; }
 
+        /// <summary>The shelves already given an owner this run.</summary>
         public HashSet<string> Folders { get; } = new(StringComparer.Ordinal);
 
-        public bool Asked { get; set; }
-
-        public PortraitSubject? Subject { get; set; }
+        public Dictionary<ArtistId, PortraitSubject?> Subjects { get; } = [];
 
         /// <summary>
-        /// What each kind's URL answered with, by kind.
+        /// What each URL answered with.
         /// </summary>
         /// <remarks>
-        /// Present-with-null is "asked and got nothing", which is why this is a
-        /// dictionary rather than a pair of fields: a CDN that is down has to
-        /// cost one attempt for the run, not one per shelf.
+        /// Present-with-null is "asked and got nothing": a CDN that is down has
+        /// to cost one attempt for the picture, not one per shelf.
         /// </remarks>
         public Dictionary<string, FetchedImage?> Fetched { get; } = new(StringComparer.Ordinal);
     }
@@ -2328,7 +2343,8 @@ public sealed partial class TagWriteService(
     /// <param name="Latin">The displayed alias, only to recognise a folder named by it.</param>
     /// <param name="Sort">The artist's sort name: "Davis, Miles".</param>
     /// <param name="Links">The artist's pages elsewhere, read only for the recording's billing — see <see cref="ArtistLinks"/>.</param>
-    private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid, string Own, string? Latin, string? Sort, string? Links);
+    /// <param name="Artist">The artist's row, on the album's billing only: whose shelf a folder named for them is.</param>
+    private sealed record PendingCredit(string Name, string? JoinPhrase, Mbid? Mbid, string Own, string? Latin, string? Sort, string? Links, ArtistId? Artist = null);
 
     /// <summary>One link MusicBrainz states on the recording or its work, as <see cref="CreditTags"/> reads it.</summary>
     /// <param name="Sort">The sort name of the artist row the link's MBID names, where there is one.</param>

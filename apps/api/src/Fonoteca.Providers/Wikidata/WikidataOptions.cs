@@ -7,6 +7,12 @@ public sealed class WikidataOptions
     public const string HttpClientName = "wikidata";
 
     /// <summary>
+    /// The client a picture any portrait source named is downloaded through:
+    /// no gate, and Wikimedia's User-Agent, which Commons answers 403 without.
+    /// </summary>
+    public const string PicturesClientName = "pictures";
+
+    /// <summary>
     /// The SPARQL endpoint.
     /// </summary>
     /// <remarks>

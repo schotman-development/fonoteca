@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using Fonoteca.Api.Configuration;
@@ -8,6 +9,7 @@ using Fonoteca.Domain.Events;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
 using Fonoteca.Ingest;
+using Fonoteca.Providers.Wikidata;
 using Fonoteca.Tagging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -60,6 +62,9 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
 
     /// <summary>What the CDN answers with, and every request that reached it.</summary>
     private StubHttpHandler _portraits = null!;
+
+    /// <summary>Every client name the pass asked the factory for.</summary>
+    private readonly ConcurrentQueue<string> _clientNames = new();
 
     /// <summary>Set to make the picture host fail instead of answering.</summary>
     private Exception? _portraitFailure;
@@ -2281,16 +2286,15 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     }
 
     /// <summary>
-    /// The other two buttons name nobody, so they write no picture.
+    /// The library button puts each artist's picture on the shelf named for them.
     /// </summary>
     /// <remarks>
-    /// Not an oversight and not a smaller version of the artist run: a library
-    /// pass walks every shelf in the place, and "which artist is this folder for"
-    /// is a question it has no answer to. The one thing that can answer it is a
-    /// person pressing the button on one artist's page.
+    /// The owner's "artist pictures in artist folders": a library run is the
+    /// one most libraries ever get, so a picture only the artist page could
+    /// write reached six shelves of 250 here.
     /// </remarks>
     [Fact]
-    public async Task TheLibraryButtonWritesNoPicture()
+    public async Task TheLibraryButtonPutsTheirPictureOnTheirShelf()
     {
         SkipWithoutTools();
 
@@ -2299,9 +2303,112 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
 
         var summary = await RunAsync(TagWriteScope.Library);
 
-        Assert.Equal(0, summary.PortraitsWritten);
-        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "Miles Davis"), "artist.*"));
-        Assert.Empty(_portraits.Requests);
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.Equal(
+            PortraitBytes,
+            await File.ReadAllBytesAsync(Path.Combine(_root, "Miles Davis/artist.jpg"), Token));
+    }
+
+    /// <summary>
+    /// Without an artist named, a shelf is the album's billed artist's only by its
+    /// name, so a composer's shelf holding their playing gets nothing.
+    /// </summary>
+    /// <remarks>
+    /// The artist page's rule, asked of the billing instead of the page: the
+    /// album under <c>Johann Sebastian Bach</c> is billed to Miles Davis here,
+    /// and his face does not go on Bach's shelf.
+    /// </remarks>
+    [Fact]
+    public async Task ALibraryRunLeavesAShelfNoBillingNames()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(
+            ("Miles Davis/Kind of Blue/01 track.flac", 1),
+            ("Johann Sebastian Bach/Violin Concertos/01 track.flac", 2));
+
+        await SeedPortraitAsync();
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.True(File.Exists(Path.Combine(_root, "Miles Davis/artist.jpg")));
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "Johann Sebastian Bach"), "artist.*"));
+    }
+
+    /// <summary>A Commons picture is asked for at a shelf's width, never as its original.</summary>
+    /// <remarks>
+    /// One Commons original here is 33.7 MB — over the cap, so it would never
+    /// arrive — and 378 KB at 1280.
+    /// </remarks>
+    [Fact]
+    public async Task ACommonsPictureIsAskedForAtAShelfsWidth()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("Miles Davis/Kind of Blue/01 track.flac", 1));
+        await SeedPortraitAsync("https://commons.wikimedia.org/wiki/Special:FilePath/Miles%20Davis.jpg");
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.Equal(
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Miles%20Davis.jpg?width=1280",
+            Assert.Single(_portraits.Requests).Uri.AbsoluteUri);
+
+        // Through the client that says who it is, which Commons wants before it answers.
+        Assert.Contains(WikidataOptions.PicturesClientName, _clientNames);
+    }
+
+    /// <summary>A shelf named for the album's second-billed artist is theirs, and gets their face.</summary>
+    [Fact]
+    public async Task ASecondBilledArtistsShelfGetsTheirPicture()
+    {
+        SkipWithoutTools();
+
+        await SeedAsync(("John Coltrane/Kind of Blue/01 track.flac", 1));
+        var coltrane = await BillColtraneAsync();
+        await SeedPortraitAsync();
+        await PortraitOfAsync(coltrane, ColtranePortraitUrl);
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.Equal(ColtranePortraitUrl, Assert.Single(_portraits.Requests).Uri.AbsoluteUri);
+        Assert.True(File.Exists(Path.Combine(_root, "John Coltrane/artist.jpg")));
+    }
+
+    /// <summary>
+    /// An album on the shelf that bills nobody by the shelf's name does not
+    /// decide it, so a later album that does still puts the picture there.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumThatBillsSomebodyElseDoesNotDecideTheShelf()
+    {
+        SkipWithoutTools();
+
+        // First in the pass's order, and billed to nobody.
+        await SeedOtherAlbumAsync("John Coltrane/Another Record/01 track.flac");
+        await SeedAsync(("John Coltrane/Kind of Blue/01 track.flac", 1));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var artist = new Artist { Id = ArtistId.New(), Name = "John Coltrane", PortraitUrl = ColtranePortraitUrl };
+            db.Artists.Add(artist);
+            db.ArtistCredits.Add(new ArtistCredit
+            {
+                Id = Guid.CreateVersion7(),
+                ArtistId = artist.Id,
+                ReleaseId = (await db.Releases.SingleAsync(release => release.Mbid == ReleaseMbid, Token)).Id,
+                Position = 1,
+            });
+            await db.SaveChangesAsync(Token);
+        }
+
+        var summary = await RunAsync(TagWriteScope.Library);
+
+        Assert.Equal(1, summary.PortraitsWritten);
+        Assert.True(File.Exists(Path.Combine(_root, "John Coltrane/artist.jpg")));
     }
 
     /// <summary>
@@ -2577,6 +2684,20 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
         await db.SaveChangesAsync(Token);
     }
 
+    private const string ColtranePortraitUrl = "https://static.example/portraits/coltrane.jpg";
+
+    private async Task PortraitOfAsync(ArtistId id, string url)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var artist = await db.Artists.SingleAsync(row => row.Id == id, Token);
+
+        artist.PortraitUrl = url;
+        artist.PortraitLookupUtc = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync(Token);
+    }
+
     private async Task<ArtistId> MilesAsync()
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
@@ -2638,7 +2759,7 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
 
         // The portrait is the one thing this pass fetches rather than reads, so
         // the socket under it is stubbed the way the provider suites stub theirs.
-        services.AddSingleton<IHttpClientFactory>(_ => new StubClients(_portraits));
+        services.AddSingleton<IHttpClientFactory>(_ => new StubClients(_portraits, _clientNames));
 
         services.AddLogging();
         services.AddSignalR();
@@ -2878,9 +2999,12 @@ public sealed partial class TagWritePassTests(PostgresFixture postgres) : IAsync
     /// the pass asks for the plain one — it is downloading a static image from a
     /// CDN, not calling a provider's API through its gate.
     /// </remarks>
-    private sealed class StubClients(StubHttpHandler handler) : IHttpClientFactory
+    private sealed class StubClients(StubHttpHandler handler, ConcurrentQueue<string> names) : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) =>
-            new(handler, disposeHandler: false);
+        public HttpClient CreateClient(string name)
+        {
+            names.Enqueue(name);
+            return new(handler, disposeHandler: false);
+        }
     }
 }
