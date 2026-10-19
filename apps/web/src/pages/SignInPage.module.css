@@ -1,0 +1,22 @@
+/*
+ * The page in place of the whole shell, so it fills the frame app.css fixes
+ * and scrolls itself on a short phone screen.
+ */
+.page {
+  block-size: 100%;
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: var(--space-24) var(--space-16);
+  background: var(--color-surface-base);
+}
+
+.form {
+  inline-size: min(100%, 360px);
+}
+
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}

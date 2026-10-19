@@ -31,13 +31,14 @@ namespace Fonoteca.Integration.Tests;
 [Collection(nameof(PostgresCollection))]
 public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private const string Password = "a-test-password";
+    private const string Password = "A-test-passw0rd";
 
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
     private WebApplicationFactory<Program>? _factory;
     private MediaFileId _filed;
     private MediaFileId _scanned;
+    private Guid _account;
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -50,12 +51,16 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         WriteFile("Somebody/A Bootleg/01 Untitled.flac", new string('y', 512));
         WriteFile("Somebody/Scanned Not Filed/01 Nameless.flac", new string('z', 256));
 
-        _factory = Factory(Password);
+        _factory = Factory();
 
         using (var warm = _factory.CreateClient())
         {
             using var boot = await warm.GetAsync(new Uri("/health", UriKind.Relative), Token);
         }
+
+        var (signedIn, account) = await _factory.SetUpAsync("me", Password, Token);
+        signedIn.Dispose();
+        _account = account;
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
@@ -165,24 +170,22 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
-    /// Without a password the surface does not exist, rather than refusing.
+    /// Before the first account is made nobody signs in, with any password.
     /// </summary>
-    /// <remarks>
-    /// The same posture <c>/mcp</c> takes, and for the same reason: a fresh
-    /// install should offer nothing to its network, and a 401 would still be an
-    /// announcement that there is a library here to log into.
-    /// </remarks>
     [Fact]
-    public async Task WithNoPasswordConfiguredTheEndpointIsNotThere()
+    public async Task BeforeAnyAccountNobodySignsIn()
     {
-        await using var off = Factory(string.Empty);
-        using var client = off.CreateClient();
+        await using var fresh = Factory(await postgres.CreateDatabaseAsync(Token));
+        using var client = fresh.CreateClient();
 
         using var response = await client.GetAsync(
-            new Uri("/rest/ping.view?u=me&p=anything&v=1.16.1&c=test", UriKind.Relative),
+            new Uri("/rest/ping.view?u=me&p=anything&v=1.16.1&c=test&f=json", UriKind.Relative),
             Token);
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token)).RootElement
+            .GetProperty("subsonic-response");
+
+        Assert.Equal(40, body.GetProperty("error").GetProperty("code").GetInt32());
     }
 
     /// <summary>
@@ -1314,7 +1317,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions"], extensions);
     }
 
     /// <summary>
@@ -1595,7 +1598,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         finally
         {
             await using var db = PostgresFixture.CreateContext(_connectionString);
-            db.Loves.RemoveRange(await db.Loves.ToListAsync(Token));
+            db.Loves.RemoveRange(await db.Loves.IgnoreQueryFilters().ToListAsync(Token));
             await db.SaveChangesAsync(Token);
         }
     }
@@ -1716,10 +1719,10 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             // The MP3 loved as itself before it was identified is still that one song.
             await using (var db = PostgresFixture.CreateContext(_connectionString))
             {
-                db.Loves.Add(new Love { Id = Guid.CreateVersion7(), MediaFileId = copy, LovedUtc = DateTimeOffset.UtcNow });
+                db.Loves.Add(new Love { Id = Guid.CreateVersion7(), MediaFileId = copy, AccountId = _account, LovedUtc = DateTimeOffset.UtcNow });
                 await db.SaveChangesAsync(Token);
                 Assert.Equal(new[] { $"tr-{_filed.Value:N}", $"tr-{_scanned.Value:N}" }.Order(), await Listed("song"));
-                db.Loves.Remove(await db.Loves.SingleAsync(love => love.MediaFileId == copy, Token));
+                db.Loves.Remove(await db.Loves.IgnoreQueryFilters().SingleAsync(love => love.MediaFileId == copy, Token));
                 await db.SaveChangesAsync(Token);
             }
 
@@ -1768,7 +1771,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             // any copy takes it off.
             await using (var db = PostgresFixture.CreateContext(_connectionString))
             {
-                db.Loves.Add(new Love { Id = Guid.CreateVersion7(), MediaFileId = copy, LovedUtc = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture) });
+                db.Loves.Add(new Love { Id = Guid.CreateVersion7(), MediaFileId = copy, AccountId = _account, LovedUtc = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture) });
                 await db.SaveChangesAsync(Token);
             }
 
@@ -1781,12 +1784,12 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Assert.Null(await Starred($"/rest/getSong.view?id=tr-{copy.Value:N}", "song"));
 
             await using var check = PostgresFixture.CreateContext(_connectionString);
-            Assert.False(await check.Loves.AnyAsync(Token));
+            Assert.False(await check.Loves.IgnoreQueryFilters().AnyAsync(Token));
         }
         finally
         {
             await using var db = PostgresFixture.CreateContext(_connectionString);
-            db.Loves.RemoveRange(await db.Loves.ToListAsync(Token));
+            db.Loves.RemoveRange(await db.Loves.IgnoreQueryFilters().ToListAsync(Token));
             (await db.MediaFiles.SingleAsync(file => file.Id == _scanned, Token)).RecordingId = null;
             db.MediaFiles.Remove(await db.MediaFiles.SingleAsync(file => file.Id == copy, Token));
             db.MediaFiles.Remove(await db.MediaFiles.SingleAsync(file => file.Id == gloria.Id, Token));
@@ -2397,14 +2400,13 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         return output;
     }
 
-    private WebApplicationFactory<Program> Factory(string password) =>
+    private WebApplicationFactory<Program> Factory(string? connectionString = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
+            builder.UseSetting("ConnectionStrings:Fonoteca", connectionString ?? _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:WarmCandidates", "false");
             builder.UseSetting("Fonoteca:MusicBrainzContact", string.Empty);
-            builder.UseSetting("Fonoteca:SubsonicPassword", password);
         });
 
     private void WriteFile(string relativePath, string content)

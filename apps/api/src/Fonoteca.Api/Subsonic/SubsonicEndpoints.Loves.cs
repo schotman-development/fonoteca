@@ -16,6 +16,10 @@ namespace Fonoteca.Api.Subsonic;
 /// other is part of. One that names none of those refuses the whole
 /// request with error 70, so nothing is half done. Starring twice keeps the
 /// first time; unstarring what is not loved is no error.
+///
+/// <b>Every heart is the signed-in account's</b> (ADR 0018): the context's
+/// query filter scopes each read here to <c>db.AccountId</c>, and a new heart
+/// is written with it.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
@@ -124,6 +128,7 @@ public static partial class SubsonicEndpoints
                     ReleaseGroupId = target.ReleaseGroupId,
                     ArtistId = target.ArtistId,
                     WorkId = target.WorkId,
+                    AccountId = db.AccountId,
                     LovedUtc = now,
                 });
             }

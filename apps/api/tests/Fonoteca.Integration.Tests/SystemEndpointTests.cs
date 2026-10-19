@@ -27,6 +27,7 @@ public sealed class SystemEndpointTests(PostgresFixture postgres) : IAsyncLifeti
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
 

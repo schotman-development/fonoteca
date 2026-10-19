@@ -39,6 +39,7 @@ public sealed class ReleaseCoverEndpointTests(PostgresFixture postgres) : IAsync
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:WarmCandidates", "false");

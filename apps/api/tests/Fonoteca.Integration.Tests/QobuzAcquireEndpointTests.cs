@@ -65,6 +65,7 @@ public sealed class QobuzAcquireEndpointTests(PostgresFixture postgres) : IAsync
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:ReplacedPath", _root + "-replaced");

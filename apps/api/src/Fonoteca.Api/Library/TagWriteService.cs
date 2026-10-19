@@ -129,8 +129,10 @@ public sealed partial class TagWriteService(
     /// Who the journal says did this.
     /// </summary>
     /// <remarks>
-    /// The owner, not <c>SystemCallerContext.SystemId</c>, which is what the
-    /// identification pass records for its own tag writes. The difference is the
+    /// A person, not <c>SystemCallerContext.SystemId</c>, which is what the
+    /// identification pass records for its own tag writes. The account that
+    /// pressed the button where one did (<see cref="Start"/>); this constant
+    /// only where nobody is known. The difference is the
     /// whole design: that pass runs because a scan finished, and this one runs
     /// because a person pressed a button. A journal that attributed both to the
     /// system would lose the only fact worth keeping about a run that rewrote
@@ -220,7 +222,8 @@ public sealed partial class TagWriteService(
     }
 
     /// <summary>Starts a pass, or reports why it did not.</summary>
-    public TagWriteOutcome Start(TagWriteScope scope)
+    /// <param name="actor">Who the journal says did it: the account that pressed the button.</param>
+    public TagWriteOutcome Start(TagWriteScope scope, string actor = Actor)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -247,7 +250,7 @@ public sealed partial class TagWriteService(
             {
                 try
                 {
-                    _lastCompleted = await RunAsync(jobId, scope, cancellation.Token).ConfigureAwait(false);
+                    _lastCompleted = await RunAsync(jobId, scope, cancellation.Token, actor).ConfigureAwait(false);
                 }
 #pragma warning disable CA1031 // A background pass must never take the process down.
                 catch (Exception cause)

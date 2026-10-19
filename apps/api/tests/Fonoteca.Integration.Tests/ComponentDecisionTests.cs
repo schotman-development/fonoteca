@@ -552,6 +552,7 @@ public sealed class ComponentDecisionTests(PostgresFixture postgres) : IAsyncLif
     private WebApplicationFactory<Program> Factory(StubCatalogue catalogue) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", Path.GetTempPath());
 

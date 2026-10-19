@@ -13,6 +13,9 @@ using Fonoteca.Domain.Events;
 using Fonoteca.Ingest;
 using Fonoteca.Providers;
 using Fonoteca.Tagging;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -66,12 +69,12 @@ builder.Services.AddDbContext<FonotecaDbContext>(options =>
 
 // ---------------------------------------------------------------------------
 // Domain seams. Each has exactly one production implementation; tests
-// substitute their own. See the "Designed for, not built" section of the plan
-// for why ICallerContext exists in a single-user application.
+// substitute their own. ICallerContext is the signed-in account (ADR 0018).
 // ---------------------------------------------------------------------------
 
 builder.Services.AddSingleton<IClock, SystemClock>();
-builder.Services.AddScoped<ICallerContext, SingleUserCallerContext>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICallerContext, AccountCallerContext>();
 
 // The library root is configuration, so the store is built from it rather than
 // resolved by convention. Registered twice on purpose: as the interface for
@@ -299,6 +302,53 @@ builder.Services.AddSingleton<QobuzDownloadService>();
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
 
+// Accounts (ADR 0018): ASP.NET Core Identity, without roles, its cookie the
+// web client's session. Every route needs a signed-in account unless it says
+// otherwise — /health, the sign-in endpoints, and /rest and /mcp, which have
+// guards of their own.
+//
+// The application name fixes the Data Protection key ring's discriminator,
+// which by default is the content root's path: without it, moving the
+// checkout would leave every Subsonic password unreadable and every session
+// cookie void.
+builder.Services.AddDataProtection().SetApplicationName("Fonoteca");
+
+builder.Services
+    .AddIdentityCore<Account>()
+    .AddEntityFrameworkStores<FonotecaDbContext>()
+    .AddSignInManager()
+    .AddDefaultTokenProviders();
+
+builder.Services
+    .AddAuthentication(IdentityConstants.ApplicationScheme)
+    .AddIdentityCookies();
+
+// A client asking for data it may not have gets a status, never a redirect to
+// a login page this API does not serve.
+builder.Services.ConfigureApplicationCookie(cookie =>
+{
+    cookie.Cookie.Name = "fonoteca";
+    cookie.Events.OnRedirectToLogin = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    };
+    cookie.Events.OnRedirectToAccessDenied = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
+    };
+});
+
+// A reset password or a removed account ends that account's sessions in
+// other browsers at their next request after a minute, not Identity's default
+// thirty: the check is a primary-key read, once a minute per browser.
+builder.Services.Configure<SecurityStampValidatorOptions>(
+    stamp => stamp.ValidationInterval = TimeSpan.FromMinutes(1));
+
+builder.Services.AddAuthorizationBuilder()
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+
 // The agent endpoint. Registered whether or not Fonoteca:McpToken is set and
 // refused per request without one — see LibraryTools.Guard. Stateless: every
 // tool is one call into a handler the web client already reaches, and nothing
@@ -356,14 +406,19 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
 }
 
+// Authentication before the Subsonic guard, so the account the guard signs in
+// is the one a request acts as, whatever cookie the browser also sent.
 app.UseCors(CorsPolicy);
+app.UseAuthentication();
 app.Use(LibraryTools.Guard);
 app.Use(SubsonicEndpoints.Guard);
+app.UseAuthorization();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous();
+app.MapAccountEndpoints();
 app.MapSystemEndpoints();
 app.MapLibraryEndpoints();
 app.MapFileEndpoints();
@@ -371,13 +426,14 @@ app.MapCatalogueEndpoints();
 app.MapQobuzEndpoints();
 app.MapHub<JobsHub>(JobsHub.Route);
 
-// Not part of the contract packages/api-client is generated from.
-app.MapMcp(LibraryTools.Route).ExcludeFromDescription();
+// Not part of the contract packages/api-client is generated from. Its bearer
+// token is its guard, not an account.
+app.MapMcp(LibraryTools.Route).ExcludeFromDescription().AllowAnonymous();
 
 // Neither is this one: OpenSubsonic is somebody else's contract, and a client
 // generated from it would be a TypeScript wrapper around an API nothing in this
-// workspace calls. Registered whether or not Fonoteca:SubsonicPassword is set
-// and refused per request without one — see SubsonicEndpoints.Guard.
+// workspace calls. Signed in by its own guard, with an account's name and
+// password or an API key — see SubsonicEndpoints.Guard.
 app.MapSubsonicEndpoints();
 
 await app.RunAsync().ConfigureAwait(false);

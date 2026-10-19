@@ -4,14 +4,12 @@ namespace Fonoteca.Domain.Abstractions;
 /// Who is asking, and from where.
 /// </summary>
 /// <remarks>
-/// Fonoteca is single-user today, so <see cref="SingleUserCallerContext"/>
-/// returns a constant. The seam exists anyway because every audit entry, undo
-/// journal row and domain event needs a subject to attribute — and because a
-/// future playback context needs to know which device is asking, so that
-/// "who is playing what, where" has somewhere to hang.
-///
-/// Threading an identity through afterwards is a wide, boring refactor touching
-/// every call site. Declaring it now costs one interface.
+/// A request acts as the account signed in to it (ADR 0018); the
+/// implementation that reads it is the API's <c>AccountCallerContext</c>, since
+/// this assembly knows nothing of HTTP. Every audit entry, undo journal row and
+/// domain event names it — and a future playback context needs to know which
+/// device is asking, so that "who is playing what, where" has somewhere to
+/// hang.
 /// </remarks>
 public interface ICallerContext
 {
@@ -28,7 +26,11 @@ public interface ICallerContext
     string? DeviceId { get; }
 }
 
-/// <summary>The single-user implementation. Replace, do not extend, when users arrive.</summary>
+/// <summary>
+/// A person with no account: what work started without one is attributed to,
+/// and the person the tests act as. No request resolves it since accounts
+/// arrived (ADR 0018).
+/// </summary>
 public sealed class SingleUserCallerContext : ICallerContext
 {
     public const string OwnerId = "owner";

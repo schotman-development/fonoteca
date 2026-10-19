@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 
 import { AppShell } from './AppShell.tsx'
+import { AccountsPage } from './pages/AccountsPage.tsx'
 import { AcquirePage } from './pages/AcquirePage.tsx'
 import { ArtistPage } from './pages/ArtistPage.tsx'
 import { ArtistsPage } from './pages/ArtistsPage.tsx'
@@ -259,9 +260,16 @@ const acquireRoute = createRoute({
   component: AcquirePage,
 })
 
+const accountsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings/accounts',
+  component: AccountsPage,
+})
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   dashboardRoute,
+  accountsRoute,
   artistsRoute,
   artistRoute,
   releasesRoute,
@@ -288,6 +296,7 @@ export const router = createRouter({
 })
 
 export {
+  accountsRoute,
   acquireRoute,
   artistRoute,
   artistsRoute,

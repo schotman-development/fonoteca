@@ -73,6 +73,7 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
 
@@ -712,6 +713,7 @@ public sealed class MatchingEndpointTests(PostgresFixture postgres) : IAsyncLife
         IMusicBrainzCatalogue catalogue) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
 

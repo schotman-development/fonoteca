@@ -425,6 +425,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         TrackId track;
         RecordingId survivorRow;
         DateTimeOffset decided = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        var other = Guid.CreateVersion7();
 
         await using (var seed = PostgresFixture.CreateContext(_connectionString))
         {
@@ -434,8 +435,11 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             survivorRow = survivor.Id;
             seed.Recordings.Add(survivor);
 
-            // A heart on the old row moves to the survivor, unless the survivor has one.
+            // A heart on the old row moves to the survivor, unless the survivor
+            // has one from the same account: another account's always moves.
+            seed.Users.Add(new Account { Id = other, UserName = "other", NormalizedUserName = "OTHER", CreatedUtc = decided });
             seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), RecordingId = old.Id, LovedUtc = decided });
+            seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), RecordingId = old.Id, AccountId = other, LovedUtc = decided });
             if (survivorLoved)
             {
                 seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), RecordingId = survivor.Id, LovedUtc = decided.AddDays(1) });
@@ -561,8 +565,10 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(Recording.Value.ToString(), merge.SubjectId);
         Assert.Equal("system", merge.ActorId);
 
-        var love = await db.Loves.AsNoTracking().SingleAsync(Token);
-        Assert.Equal((survivorRow, survivorLoved ? decided.AddDays(1) : decided), (love.RecordingId!.Value, love.LovedUtc));
+        var loves = await db.Loves.IgnoreQueryFilters().AsNoTracking().ToListAsync(Token);
+        Assert.All(loves, love => Assert.Equal(survivorRow, love.RecordingId));
+        Assert.Equal(survivorLoved ? decided.AddDays(1) : decided, loves.Single(love => love.AccountId == null).LovedUtc);
+        Assert.Equal(decided, loves.Single(love => love.AccountId == other).LovedUtc);
     }
 
     /// <summary>

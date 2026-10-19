@@ -1938,6 +1938,13 @@ public sealed class Love
     /// <summary>A whole piece, as Subsonic's compositions list it.</summary>
     public WorkId? WorkId { get; set; }
 
+    /// <summary>Whose heart it is (ADR 0018).</summary>
+    /// <remarks>
+    /// Null only on a heart given before there were accounts, which the first
+    /// account claims when it is made, so no signed-in person ever sees one.
+    /// </remarks>
+    public Guid? AccountId { get; set; }
+
     public required DateTimeOffset LovedUtc { get; init; }
 }
 

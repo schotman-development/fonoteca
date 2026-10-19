@@ -1,5 +1,6 @@
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Events;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fonoteca.Data;
@@ -12,10 +13,25 @@ namespace Fonoteca.Data;
 /// time-ordered v7 primary keys so inserts stay at the right edge of the index,
 /// <c>pg_trgm</c> indexes for fuzzy title matching, and covering indexes on the
 /// columns the scanner touches on every pass.
+///
+/// Identity's user tables live here too (ADR 0018), without roles, so a
+/// heart can name its account in a foreign key.
 /// </remarks>
 public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> options)
-    : DbContext(options)
+    : IdentityUserContext<Account, Guid>(options)
 {
+    /// <summary>Whose hearts this context sees.</summary>
+    /// <remarks>
+    /// Set by the Subsonic guard for the account it signed in. Every query of
+    /// <see cref="Loves"/> is filtered by it, so a handler cannot show one
+    /// person another's hearts by forgetting a <c>Where</c>; code that moves
+    /// hearts for everybody (<c>CatalogueWriter</c>) says
+    /// <c>IgnoreQueryFilters</c>.
+    /// </remarks>
+    public Guid? AccountId { get; set; }
+
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+
     public DbSet<Work> Works => Set<Work>();
     public DbSet<Recording> Recordings => Set<Recording>();
     public DbSet<ReleaseGroup> ReleaseGroups => Set<ReleaseGroup>();
@@ -58,15 +74,15 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         base.ConfigureConventions(configurationBuilder);
     }
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnModelCreating(ModelBuilder builder)
     {
         // Trigram matching. Titles arrive misspelled, differently punctuated and
         // differently transliterated; exact equality finds almost nothing, and
         // LIKE '%x%' cannot use a B-tree. pg_trgm is what makes fuzzy title
         // lookup usable at this row count.
-        modelBuilder.HasPostgresExtension("pg_trgm");
+        builder.HasPostgresExtension("pg_trgm");
 
-        modelBuilder.Entity<Work>(e =>
+        builder.Entity<Work>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
@@ -85,7 +101,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<Recording>(e =>
+        builder.Entity<Recording>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
@@ -103,7 +119,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<ReleaseGroup>(e =>
+        builder.Entity<ReleaseGroup>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
@@ -116,7 +132,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
         });
 
-        modelBuilder.Entity<Release>(e =>
+        builder.Entity<Release>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
@@ -148,7 +164,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.ReleasedYear);
         });
 
-        modelBuilder.Entity<Track>(e =>
+        builder.Entity<Track>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000);
@@ -168,7 +184,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => new { x.ReleaseId, x.DiscNumber, x.Position }).IsUnique();
         });
 
-        modelBuilder.Entity<MediaFile>(e =>
+        builder.Entity<MediaFile>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.TagEditsJson).HasColumnType("jsonb");
@@ -305,7 +321,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.TempoAndKeyMeasuredUtc);
         });
 
-        modelBuilder.Entity<Artist>(e =>
+        builder.Entity<Artist>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(1000).IsRequired();
@@ -400,7 +416,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .HasFilter("\"Mbid\" IS NOT NULL");
         });
 
-        modelBuilder.Entity<Love>(e =>
+        builder.Entity<Love>(e =>
         {
             e.HasKey(x => x.Id);
             e.HasOne<Recording>().WithMany().HasForeignKey(x => x.RecordingId).OnDelete(DeleteBehavior.Cascade);
@@ -408,14 +424,16 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasOne<ReleaseGroup>().WithMany().HasForeignKey(x => x.ReleaseGroupId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Artist>().WithMany().HasForeignKey(x => x.ArtistId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Work>().WithMany().HasForeignKey(x => x.WorkId).OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(x => x.RecordingId).IsUnique().HasFilter("\"RecordingId\" IS NOT NULL");
-            e.HasIndex(x => x.MediaFileId).IsUnique().HasFilter("\"MediaFileId\" IS NOT NULL");
-            e.HasIndex(x => x.ReleaseGroupId).IsUnique().HasFilter("\"ReleaseGroupId\" IS NOT NULL");
-            e.HasIndex(x => x.ArtistId).IsUnique().HasFilter("\"ArtistId\" IS NOT NULL");
-            e.HasIndex(x => x.WorkId).IsUnique().HasFilter("\"WorkId\" IS NOT NULL");
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(x => x.AccountId == AccountId);
+            e.HasIndex(x => new { x.AccountId, x.RecordingId }).IsUnique().HasFilter("\"RecordingId\" IS NOT NULL");
+            e.HasIndex(x => new { x.AccountId, x.MediaFileId }).IsUnique().HasFilter("\"MediaFileId\" IS NOT NULL");
+            e.HasIndex(x => new { x.AccountId, x.ReleaseGroupId }).IsUnique().HasFilter("\"ReleaseGroupId\" IS NOT NULL");
+            e.HasIndex(x => new { x.AccountId, x.ArtistId }).IsUnique().HasFilter("\"ArtistId\" IS NOT NULL");
+            e.HasIndex(x => new { x.AccountId, x.WorkId }).IsUnique().HasFilter("\"WorkId\" IS NOT NULL");
         });
 
-        modelBuilder.Entity<ArtistCredit>(e =>
+        builder.Entity<ArtistCredit>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.JoinPhrase).HasMaxLength(100);
@@ -429,7 +447,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.ReleaseGroupId);
         });
 
-        modelBuilder.Entity<Relationship>(e =>
+        builder.Entity<Relationship>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.SourceType).HasMaxLength(50).IsRequired();
@@ -452,7 +470,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.ArtistId);
         });
 
-        modelBuilder.Entity<Contribution>(e =>
+        builder.Entity<Contribution>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Type).HasMaxLength(100).IsRequired();
@@ -476,7 +494,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.WorkId);
         });
 
-        modelBuilder.Entity<RecordingSession>(e =>
+        builder.Entity<RecordingSession>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Type).HasMaxLength(100).IsRequired();
@@ -491,7 +509,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.RecordingId);
         });
 
-        modelBuilder.Entity<DomainEvent>(e =>
+        builder.Entity<DomainEvent>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Type).HasMaxLength(200).IsRequired();
@@ -512,7 +530,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.OccurredAtUtc);
         });
 
-        modelBuilder.Entity<ReleaseCandidateSet>(e =>
+        builder.Entity<ReleaseCandidateSet>(e =>
         {
             // The component's own stamp is the key. No surrogate: there is
             // exactly one candidate set per component, the component has no row
@@ -529,7 +547,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.GatheredUtc);
         });
 
-        modelBuilder.Entity<DiscoveredRecord>(e =>
+        builder.Entity<DiscoveredRecord>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Source).HasMaxLength(64).IsRequired();
@@ -551,7 +569,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => new { x.ArtistId, x.Source, x.SourceId }).IsUnique();
         });
 
-        modelBuilder.Entity<ReleaseCover>(e =>
+        builder.Entity<ReleaseCover>(e =>
         {
             e.HasKey(x => x.ReleaseId);
             e.Property(x => x.MediaType).HasMaxLength(100);
@@ -562,7 +580,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AlbumMotion>(e =>
+        builder.Entity<AlbumMotion>(e =>
         {
             e.HasKey(x => x.ReleaseGroupId);
             e.Property(x => x.AppleAlbumId).HasMaxLength(32);
@@ -574,7 +592,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<RecordingLyrics>(e =>
+        builder.Entity<RecordingLyrics>(e =>
         {
             e.HasKey(x => x.RecordingId);
             e.Property(x => x.MatchedBy).HasMaxLength(40);
@@ -584,7 +602,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AlbumBooklet>(e =>
+        builder.Entity<AlbumBooklet>(e =>
         {
             e.HasKey(x => x.ReleaseGroupId);
             e.Property(x => x.QobuzAlbumId).HasMaxLength(32);
@@ -598,7 +616,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AlbumBookletFile>(e =>
+        builder.Entity<AlbumBookletFile>(e =>
         {
             e.HasKey(x => new { x.ReleaseGroupId, x.Position });
             e.Property(x => x.Source).HasMaxLength(16);
@@ -606,7 +624,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.MediaType).HasMaxLength(100);
         });
 
-        modelBuilder.Entity<ArtistImage>(e =>
+        builder.Entity<ArtistImage>(e =>
         {
             // Keyed on the pair, so one artist can have a portrait and a banner.
             // The default is what the rows written before the banner existed
@@ -620,7 +638,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<SmartPlaylist>(e =>
+        builder.Entity<SmartPlaylist>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(SmartPlaylist.NameLength).IsRequired();
@@ -629,6 +647,19 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.CriteriaJson).HasColumnType("jsonb").IsRequired();
         });
 
-        base.OnModelCreating(modelBuilder);
+        base.OnModelCreating(builder);
+
+        // After the base call, which is where Identity configures its own.
+        builder.Entity<Account>(e => e.Property(x => x.SubsonicPassword).HasMaxLength(2000));
+
+        builder.Entity<ApiKey>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(ApiKey.NameLength).IsRequired();
+            e.Property(x => x.Hash).HasMaxLength(32).IsRequired();
+            e.HasIndex(x => x.Hash).IsUnique();
+            e.HasIndex(x => x.AccountId);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

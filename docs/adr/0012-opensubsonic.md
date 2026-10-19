@@ -154,6 +154,12 @@ a separate decision that should be taken deliberately rather than discovered.
 What this ADR owes it is the warning, in `.env.example`, on the setting that
 turns `/rest` on.
 
+*Amended 2026-10-19:* ADR 0018 closed the window. Accounts replace the one
+password: `u` names an account, `p`, `enc:` and `t`+`s` check its password,
+OpenSubsonic's `apiKey` is accepted alone, and `/api` takes the same account's
+sign-in. `Fonoteca:SubsonicPassword` is gone, and with it the 404 — `/rest`
+always exists and refuses with error 40 until an account does.
+
 ### The wire format is the only real work
 
 Subsonic answers in a `subsonic-response` envelope in **both XML and JSON**, and
@@ -400,7 +406,9 @@ question — what URL plays a file — and the answer is `/api/files/content`.
 Not a hash. Anyone with read access to the environment has it, and it is the
 credential to a surface that serves the whole library. That is the protocol's
 design, and the containment is that it is *one* password, for *one* surface,
-that does not exist when unset.
+that does not exist when unset. *Amended 2026-10-19:* it is now one per
+account, protected by Data Protection rather than kept in the environment
+(ADR 0018).
 
 ## When to revisit
 
@@ -413,7 +421,9 @@ transcoding, and not before.
 
 **When a client is measured to need the `apiKey` extension.** It replaces
 `u`/`p`/`t`/`s` with a single key and would let the recoverable password go, at
-the cost of clients that do not implement it. Today most do not.
+the cost of clients that do not implement it. Today most do not. *Amended
+2026-10-19:* served beside the password forms (ADR 0018), the owner's choice of
+the whole standard; the recoverable password stays until clients catch up.
 
 **If `/api` ever gains authentication.** The guard here would be the second
 scheme in the application, and two schemes is the point at which one of them

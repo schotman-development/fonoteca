@@ -85,6 +85,12 @@
       tests use as a client.
     -->
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <!--
+      ASP.NET Core Identity's EF Core store, for the accounts. The rest of
+      Identity ships in the shared framework; this package is the part that does
+      not.
+    -->
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup Label="Transitive security pins">

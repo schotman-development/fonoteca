@@ -230,6 +230,7 @@ public static partial class CatalogueEndpoints
             Guid id,
             FonotecaDbContext db,
             TagWriteService tags,
+            ICallerContext caller,
             CancellationToken cancellationToken)
     {
         var groupId = new ReleaseGroupId(id);
@@ -249,7 +250,7 @@ public static partial class CatalogueEndpoints
         }
 
         return await StartAsync(
-            tags, TagWriteScope.ForAlbum(groupId, title), cancellationToken).ConfigureAwait(false);
+            tags, TagWriteScope.ForAlbum(groupId, title), caller, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
@@ -257,6 +258,7 @@ public static partial class CatalogueEndpoints
             Guid id,
             FonotecaDbContext db,
             TagWriteService tags,
+            ICallerContext caller,
             CancellationToken cancellationToken)
     {
         var artistId = new ArtistId(id);
@@ -276,7 +278,7 @@ public static partial class CatalogueEndpoints
         }
 
         return await StartAsync(
-            tags, TagWriteScope.ForArtist(artistId, name), cancellationToken).ConfigureAwait(false);
+            tags, TagWriteScope.ForArtist(artistId, name), caller, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -290,11 +292,11 @@ public static partial class CatalogueEndpoints
     /// first page and is no better.
     /// </remarks>
     internal static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
-        StartAsync(TagWriteService tags, TagWriteScope scope, CancellationToken cancellationToken)
+        StartAsync(TagWriteService tags, TagWriteScope scope, ICallerContext caller, CancellationToken cancellationToken)
     {
         var pending = await tags.CountAsync(scope, cancellationToken).ConfigureAwait(false);
 
-        var outcome = tags.Start(scope);
+        var outcome = tags.Start(scope, caller.ActorId);
 
         return outcome switch
         {

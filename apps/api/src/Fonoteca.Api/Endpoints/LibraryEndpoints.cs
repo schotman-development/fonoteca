@@ -1,5 +1,6 @@
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Library;
+using Fonoteca.Domain.Abstractions;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
 
@@ -198,8 +199,9 @@ public static class LibraryEndpoints
     /// </remarks>
     private static Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>> StartTagWrite(
         TagWriteService tags,
+        ICallerContext caller,
         CancellationToken cancellationToken) =>
-        CatalogueEndpoints.StartAsync(tags, TagWriteScope.Library, cancellationToken);
+        CatalogueEndpoints.StartAsync(tags, TagWriteScope.Library, caller, cancellationToken);
 
     internal static async Task<Ok<TagWriteStatusResponse>> GetTagWriteStatus(
         TagWriteService tags,

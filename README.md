@@ -176,10 +176,9 @@ follows it on its own; enrich, attribute, probe and analyse are a button each
 on the same page. Write tags when you are happy with what the catalogue says,
 and take a backup before the first real write.
 
-> [!WARNING]
-> Only `/rest` and `/mcp` check credentials. Every `/api` route, including the
-> file manager and the passes, is as open as the port. Do not expose it beyond
-> your own network without something in front of it.
+The first visit makes the first account. The same name and password sign in
+to Subsonic apps at the same address; more accounts are added on the
+**Accounts** page, and every account may do everything (ADR 0018).
 
 ## Configuration
 
@@ -197,7 +196,6 @@ to know first:
 | `Fonoteca__MusicBrainzServer` | Point at a mirror to go faster than one request a second. |
 | `Fonoteca__FileNaming` | The folder and file naming pattern. |
 | `Fonoteca__TrashPath`, `Fonoteca__ReplacedPath` | Where trashed and replaced files go. Must be outside the library. |
-| `Fonoteca__SubsonicPassword` | Turns on `/rest`. |
 | `Fonoteca__McpToken` | Turns on `/mcp`. |
 
 Nothing is required to start, scan or browse. A feature whose credentials are

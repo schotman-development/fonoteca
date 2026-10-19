@@ -5,8 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     // Listen on every interface, not just loopback, so the UI can be opened
-    // from a phone or another machine on the LAN. The API must be reachable
-    // too — see VITE_API_BASE_URL in api.ts and Fonoteca__CorsOrigins.
+    // from a phone or another machine on the LAN. The API comes along through
+    // the proxy below.
     host: true,
     // Off the LAN the UI is opened over NetBird by name — <anything>.dev.internal,
     // or fonoteca.schotman.app through the NetBird proxy — and Vite refuses host
@@ -14,6 +14,12 @@ export default defineConfig({
     allowedHosts: ['.dev.internal', 'fonoteca.schotman.app'],
     port: 5173,
     strictPort: true,
+    // The API on this site's own origin, so the session cookie is first-party
+    // whatever name the UI is opened by. See api.ts.
+    proxy: {
+      '/api': 'http://localhost:5088',
+      '/hubs': { target: 'http://localhost:5088', ws: true },
+    },
   },
   build: {
     // The catalogue view will be the heaviest screen in the app; surface bundle

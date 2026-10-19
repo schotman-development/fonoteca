@@ -24,7 +24,7 @@ namespace Fonoteca.Integration.Tests;
 [Collection(nameof(PostgresCollection))]
 public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private const string Password = "a-test-password";
+    private const string Password = "A-test-passw0rd";
     private const string Credentials = $"u=me&p={Password}&v=1.16.1&c=test&f=json";
 
     private const string Lossless = "Fleetwood Mac/Rumours (1977)/07 - The Chain.flac";
@@ -60,6 +60,9 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         {
             using var boot = await warm.GetAsync(new Uri("/health", UriKind.Relative), Token);
         }
+
+        // The account the Subsonic half signs in as.
+        (await _factory.SetUpAsync("me", Password, Token)).Client.Dispose();
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
@@ -698,6 +701,7 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         var only = Assert.Single(listed.GetProperty("playlists").GetProperty("playlist").EnumerateArray());
 
         Assert.Equal(id, only.GetProperty("id").GetString());
+        Assert.Equal("me", only.GetProperty("owner").GetString());
         Assert.Equal(2, only.GetProperty("songCount").GetInt32());
         Assert.Equal(528, only.GetProperty("duration").GetInt32());
 
@@ -841,13 +845,13 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     private WebApplicationFactory<Program> Factory(string root) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", root);
             builder.UseSetting("Fonoteca:TrashPath", _trash);
             builder.UseSetting("Fonoteca:WarmCandidates", "false");
             builder.UseSetting("Fonoteca:IdentifyAfterScan", "false");
             builder.UseSetting("Fonoteca:MusicBrainzContact", string.Empty);
-            builder.UseSetting("Fonoteca:SubsonicPassword", Password);
         });
 
     private void WriteFile(string relativePath, string content)

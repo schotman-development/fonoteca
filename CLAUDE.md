@@ -1045,8 +1045,32 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
   and the tag editor are, recorded as the agent's (the owner's choice).
 - **`Fonoteca:McpToken` empty is a 404, read per request.** `Guard` is middleware
   rather than a filter so it sits in front of whatever `MapMcp` maps. It locks
-  `/mcp` and nothing else: every `/api` route is as open as the port.
+  `/mcp` and nothing else; `/api` takes a signed-in account (Accounts, below).
 - **Lists default to 50** — a response lands in a model's context.
+
+## Accounts
+
+ADR 0018. **The library has no owner; an account owns only its hearts and its
+API keys.** Never scope a catalogue fact, a file or a playlist by account.
+
+- **ASP.NET Core Identity, no roles; every account may do everything.** A
+  fallback policy closes every route; `/health`, `/openapi`, the sign-in
+  endpoints and `/rest` and `/mcp` (their own guards) say `AllowAnonymous`. A
+  new route is closed without anyone writing a line, which is the point.
+  Integration tests sign every request in with `builder.SignedIn()`
+  (`TestSignIn`); a test of signing in or of Subsonic makes real accounts.
+- **The first visit makes the first account** and claims the hearts from
+  before accounts; the last account cannot be removed.
+- **One password for the web and Subsonic**, so it is kept twice in one save
+  (`AccountEndpoints.SetPasswordAsync`): Identity's hash, and
+  `Account.SubsonicPassword` under Data Protection, because `t=md5(p+s)` needs
+  the password itself. Never set one without the other.
+- **Hearts are filtered, not queried for.** `Love` has a global query filter on
+  `FonotecaDbContext.AccountId`, set per request by the Subsonic guard; code
+  that moves hearts for everybody (`CatalogueWriter`) reads past it with
+  `IgnoreQueryFilters` and carries each account's hearts separately.
+- **The journal names the account** (`AccountCallerContext`); work with no
+  request behind it is `system`, `/mcp` is `agent`.
 
 ## Frontend
 

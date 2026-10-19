@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Text.Json;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
@@ -119,23 +120,32 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     /// a download minted that MusicBrainz names. Saved by the caller.
     /// </summary>
     /// <remarks>
-    /// Once: where the new row is loved already, the old row's love cascades
-    /// away with it. The change tracker is asked as well as the database,
-    /// because two of an album's rows can fold into one before the save.
+    /// Once per account: where that account loves the new row already, its
+    /// love on the old row cascades away with it. The change tracker is asked
+    /// as well as the database, because two of an album's rows can fold into
+    /// one before the save. Every account's hearts, so past the query filter.
     /// </remarks>
     internal static async Task CarryLovesAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
     {
-        if (from == to
-            || db.Loves.Local.Any(love => love.RecordingId == to)
-            || await db.Loves.AnyAsync(love => love.RecordingId == to, cancellationToken).ConfigureAwait(false))
-        {
-            return;
-        }
+        if (from == to) return;
 
-        foreach (var love in await db.Loves.Where(love => love.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        var taken = await LovedByAsync(db, love => love.RecordingId == to, cancellationToken).ConfigureAwait(false);
+
+        foreach (var love in await db.Loves.IgnoreQueryFilters().Where(love => love.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
         {
-            love.RecordingId = to;
+            if (taken.Add(love.AccountId)) love.RecordingId = to;
         }
+    }
+
+    /// <summary>The accounts already loving what <paramref name="loves"/> names, tracked or saved.</summary>
+    private static async Task<HashSet<Guid?>> LovedByAsync(
+        FonotecaDbContext db,
+        Expression<Func<Love, bool>> loves,
+        CancellationToken cancellationToken)
+    {
+        var saved = await db.Loves.IgnoreQueryFilters().Where(loves).Select(love => love.AccountId).ToListAsync(cancellationToken).ConfigureAwait(false);
+
+        return [.. saved, .. db.Loves.Local.Where(loves.Compile()).Select(love => love.AccountId)];
     }
 
     /// <summary>
@@ -159,16 +169,16 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     internal static async Task CarryAlbumLovesAsync(FonotecaDbContext db, ReleaseGroupId from, ReleaseGroupId to, CancellationToken cancellationToken)
     {
         if (from == to
-            || db.Loves.Local.Any(love => love.ReleaseGroupId == to)
-            || await db.Loves.AnyAsync(love => love.ReleaseGroupId == to, cancellationToken).ConfigureAwait(false)
             || !await db.ReleaseGroups.AnyAsync(group => group.Id == from && group.Mbid == null, cancellationToken).ConfigureAwait(false))
         {
             return;
         }
 
-        foreach (var love in await db.Loves.Where(love => love.ReleaseGroupId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        var taken = await LovedByAsync(db, love => love.ReleaseGroupId == to, cancellationToken).ConfigureAwait(false);
+
+        foreach (var love in await db.Loves.IgnoreQueryFilters().Where(love => love.ReleaseGroupId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
         {
-            love.ReleaseGroupId = to;
+            if (taken.Add(love.AccountId)) love.ReleaseGroupId = to;
         }
     }
 

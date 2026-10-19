@@ -582,7 +582,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
 
         var decided = Assert.Single(forChosen, entry => entry.Type == "matching.recording.decided");
         Assert.Contains(Chosen.Value.ToString(), decided.PayloadJson, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(SingleUserCallerContext.OwnerId, decided.ActorId);
+        Assert.Equal(TestSignIn.AccountId.ToString(), decided.ActorId);
 
         // The tag writer's own entry, beside it and not instead of it. Mutation
         // is off here, so it records a refusal — which is exactly the pair this
@@ -1081,6 +1081,7 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         StubCatalogue catalogue) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
 

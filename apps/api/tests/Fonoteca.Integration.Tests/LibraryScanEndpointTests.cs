@@ -35,6 +35,7 @@ public sealed class LibraryScanEndpointTests(PostgresFixture postgres) : IAsyncL
         // too rather than arriving at an already-prepared schema.
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
 

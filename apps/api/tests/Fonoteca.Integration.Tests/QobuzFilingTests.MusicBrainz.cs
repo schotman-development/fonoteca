@@ -71,6 +71,16 @@ public sealed partial class QobuzFilingTests
 
         await LoveEverythingAsync();
 
+        // Another account's heart on the shop's album moves beside the first's.
+        var other = Guid.CreateVersion7();
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            seed.Users.Add(new Account { Id = other, UserName = "other", NormalizedUserName = "OTHER", CreatedUtc = DateTimeOffset.UtcNow });
+            var shops = await seed.ReleaseGroups.SingleAsync(group => group.Mbid == null, Token);
+            seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), ReleaseGroupId = shops.Id, AccountId = other, LovedUtc = DateTimeOffset.UtcNow });
+            await seed.SaveChangesAsync(Token);
+        }
+
         musicBrainz.Releases.Add(Rumours());
         var swept = await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token);
 
@@ -87,6 +97,9 @@ public sealed partial class QobuzFilingTests
         Assert.Single(await db.DomainEvents.Where(entry => entry.Type == MusicBrainzCatchUp.MatchedEvent).ToListAsync(Token));
         await EverythingIsLovedAsync(db);
         Assert.Equal(1, await db.Loves.CountAsync(love => love.ReleaseGroupId != null, Token));
+        Assert.Equal(
+            (await db.ReleaseGroups.SingleAsync(Token)).Id,
+            (await db.Loves.IgnoreQueryFilters().SingleAsync(love => love.AccountId == other, Token)).ReleaseGroupId);
     }
 
     /// <summary>

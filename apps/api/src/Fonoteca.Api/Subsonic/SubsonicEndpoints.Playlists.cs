@@ -344,6 +344,9 @@ public static partial class SubsonicEndpoints
         _ => null,
     };
 
-    /// <summary>The user a client logged in as, since there are no others to own anything.</summary>
-    private static string Owner(HttpContext http) => Text(http, "u") ?? "fonoteca";
+    /// <summary>
+    /// The account signed in, so a client lets it edit every playlist: they are
+    /// everyone's (ADR 0018). Not <c>u</c>, which an API key comes without.
+    /// </summary>
+    private static string Owner(HttpContext http) => http.User.Identity!.Name!;
 }

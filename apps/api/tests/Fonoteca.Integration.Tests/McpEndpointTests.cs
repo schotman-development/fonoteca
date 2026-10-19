@@ -251,6 +251,7 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
     private WebApplicationFactory<Program> Factory(string token) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:WarmCandidates", "false");

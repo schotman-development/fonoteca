@@ -13,6 +13,7 @@ export type NavItem = {
   readonly to:
     | '/'
     | '/settings/status'
+    | '/settings/accounts'
     | '/library'
     | '/library/albums'
     | '/library/tracks'
@@ -61,6 +62,12 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Settings',
         exact: false,
         keywords: ['status', 'foundation', 'dashboard', 'scan', 'passes', 'health'],
+      },
+      {
+        to: '/settings/accounts',
+        label: 'Accounts',
+        exact: false,
+        keywords: ['users', 'people', 'password', 'sign out', 'log out', 'api key', 'subsonic'],
       },
     ],
   },

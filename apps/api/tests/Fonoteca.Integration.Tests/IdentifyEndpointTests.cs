@@ -40,6 +40,7 @@ public sealed class IdentifyEndpointTests(PostgresFixture postgres) : IAsyncLife
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:WarmCandidates", "false");

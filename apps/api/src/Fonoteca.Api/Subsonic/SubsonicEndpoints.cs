@@ -1,10 +1,13 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
 using Fonoteca.Data;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -64,20 +67,19 @@ public static partial class SubsonicEndpoints
     /// <c>/rest/stream</c> answers with bytes and <c>/rest/ping</c> answers with
     /// XML, so a refusal has to be decided before a handler has picked a format.
     ///
-    /// <b>Without <c>Fonoteca:SubsonicPassword</c> the endpoint does not
-    /// exist</b>, answering 404 rather than 401, so a fresh install offers
-    /// nothing to its network.
-    ///
-    /// <b>The password is held recoverably and there is no way round that.</b>
-    /// The protocol's own authentication is <c>t = md5(password + salt)</c>,
-    /// which the server can only check by computing it, so a hash on this side
-    /// is not an option. Containment is that it is one password, for one
-    /// surface, that is absent by default.
-    ///
-    /// <b><c>u</c> is read and ignored.</b> There are no users here —
-    /// <c>SingleUserCallerContext</c> is what it would have to resolve against —
-    /// and a client that cannot name the user it is logging in as is a client
-    /// nobody has.
+    /// <b>An account signs in here with its web name and password</b> (ADR
+    /// 0018, the owner's choice), in all three of the protocol's forms — <c>p</c>,
+    /// <c>p=enc:</c> and <c>t</c>+<c>s</c> — or with an API key
+    /// (<c>apiKeyAuthentication</c>), which must come alone: any of
+    /// <c>u</c>, <c>p</c>, <c>t</c>, <c>s</c> beside it is error 43, the
+    /// spec's stricter reading. Both password forms are checked against
+    /// <see cref="Account.SubsonicPassword"/>, the protected copy the token
+    /// form needs anyway, rather than Identity's hash, which is slow on purpose
+    /// and would be paid on every cover a client asks for. A wrong password
+    /// counts towards Identity's lockout as the web sign-in's does, and a
+    /// locked account is refused as a wrong password. A signed-in request acts
+    /// as that account: <c>context.User</c> for the journal, and
+    /// <c>FonotecaDbContext.AccountId</c> for whose hearts it sees.
     ///
     /// <b>A form body is read as the query</b> (OpenSubsonic's <c>formPost</c>):
     /// a <c>POST</c> of <c>application/x-www-form-urlencoded</c> has its
@@ -93,15 +95,6 @@ public static partial class SubsonicEndpoints
 
         if (!context.Request.Path.StartsWithSegments(Route)) return next(context);
 
-        var password = context.RequestServices
-            .GetRequiredService<IOptions<FonotecaOptions>>().Value.SubsonicPassword;
-
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return Task.CompletedTask;
-        }
-
         // The one endpoint OpenSubsonic requires to be reachable without
         // credentials, because it is how a client discovers what the server can
         // do before it has any. It names capabilities and nothing about the
@@ -112,7 +105,7 @@ public static partial class SubsonicEndpoints
         // not be reached by anything else — but a catch-all lives here now, and
         // the day a parameterised route joins it a substring test is an auth
         // bypass that nothing would fail on.
-        return IsFormPost(context.Request) ? AdmitFormAsync(context, next, password) : Admit(context, next, password);
+        return IsFormPost(context.Request) ? AdmitFormAsync(context, next) : AdmitAsync(context, next);
     }
 
     private static bool IsFormPost(HttpRequest request) =>
@@ -120,7 +113,7 @@ public static partial class SubsonicEndpoints
         && MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
         && type.MediaType.Equals("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase);
 
-    private static async Task AdmitFormAsync(HttpContext context, RequestDelegate next, string password)
+    private static async Task AdmitFormAsync(HttpContext context, RequestDelegate next)
     {
         IFormCollection form;
 
@@ -144,21 +137,84 @@ public static partial class SubsonicEndpoints
 
         context.Request.Query = new QueryCollection(arguments);
 
-        await Admit(context, next, password).ConfigureAwait(false);
+        await AdmitAsync(context, next).ConfigureAwait(false);
     }
 
-    private static Task Admit(HttpContext context, RequestDelegate next, string password)
+    private static async Task AdmitAsync(HttpContext context, RequestDelegate next)
     {
-        if (MethodOf(context.Request.Path) == "getOpenSubsonicExtensions")
+        if (MethodOf(context.Request.Path) != "getOpenSubsonicExtensions"
+            && await SignInAsync(context).ConfigureAwait(false) is { } refusal)
         {
-            return next(context);
+            await refusal.ExecuteAsync(context).ConfigureAwait(false);
+            return;
         }
 
-        return Authenticated(context.Request.Query, password)
-            ? next(context)
-            : SubsonicResult
-                .Error(40, "Wrong username or password.")
-                .ExecuteAsync(context);
+        await next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>What an API key may not come with, even empty.</summary>
+    private static readonly string[] PasswordParameters = ["u", "p", "t", "s"];
+
+    /// <summary>Signs the request in as an account, or answers why not.</summary>
+    private static async Task<SubsonicResult?> SignInAsync(HttpContext context)
+    {
+        var query = context.Request.Query;
+        var users = context.RequestServices.GetRequiredService<UserManager<Account>>();
+        var db = context.RequestServices.GetRequiredService<FonotecaDbContext>();
+        Account? account;
+
+        if (query.ContainsKey("apiKey"))
+        {
+            if (PasswordParameters.Any(query.ContainsKey))
+            {
+                return SubsonicResult.Error(43, "Multiple conflicting authentication mechanisms provided.");
+            }
+
+            var hash = AccountEndpoints.HashOf(query["apiKey"].ToString());
+
+            var owner = await db.ApiKeys
+                .Where(key => key.Hash == hash)
+                .Select(key => (Guid?)key.AccountId)
+                .FirstOrDefaultAsync(context.RequestAborted)
+                .ConfigureAwait(false);
+
+            account = owner is { } id ? await users.FindByIdAsync(id.ToString()).ConfigureAwait(false) : null;
+
+            if (account is null) return SubsonicResult.Error(44, "Invalid API key.");
+        }
+        else
+        {
+            // No name is a wrong one: a client that sent no credentials at all
+            // is told what a client with the wrong ones is.
+            var name = query["u"].ToString();
+
+            account = name.Length == 0 ? null : await users.FindByNameAsync(name).ConfigureAwait(false);
+
+            if (account is null || await users.IsLockedOutAsync(account).ConfigureAwait(false))
+            {
+                return WrongPassword();
+            }
+
+            var password = AccountEndpoints.SubsonicPassword(
+                context.RequestServices.GetRequiredService<IDataProtectionProvider>(), account);
+
+            if (password is null || !Authenticated(query, password))
+            {
+                await users.AccessFailedAsync(account).ConfigureAwait(false);
+                return WrongPassword();
+            }
+
+            if (account.AccessFailedCount > 0) await users.ResetAccessFailedCountAsync(account).ConfigureAwait(false);
+        }
+
+        db.AccountId = account.Id;
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, account.Id.ToString()), new Claim(ClaimTypes.Name, account.UserName!)],
+            "Subsonic"));
+
+        return null;
+
+        static SubsonicResult WrongPassword() => SubsonicResult.Error(40, "Wrong username or password.");
     }
 
     public static IEndpointRouteBuilder MapSubsonicEndpoints(this IEndpointRouteBuilder app)
@@ -174,9 +230,11 @@ public static partial class SubsonicEndpoints
         // password travels in the request, in the query or a form body, so a
         // browser has nothing of the owner's to attach. Navidrome answers the
         // same. The web UI's policy, credentialed for SignalR, stays on
-        // everything else.
+        // everything else. Anonymous to the authorization middleware, because
+        // the guard has signed the request in by then, or refused it.
         var group = app.MapGroup(Route)
             .ExcludeFromDescription()
+            .AllowAnonymous()
             .RequireCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 
         Map(group, "ping", Ping);
@@ -209,6 +267,7 @@ public static partial class SubsonicEndpoints
         Map(group, "getAlbumMotion", GetAlbumMotion);
 
         Map(group, "getUser", GetUser);
+        Map(group, "tokenInfo", TokenInfo);
         Map(group, "getPlaylists", GetPlaylists);
         Map(group, "getPlaylist", GetPlaylist);
         Map(group, "createPlaylist", CreatePlaylist);
@@ -261,7 +320,7 @@ public static partial class SubsonicEndpoints
             $"This server does not implement {MethodOf(http.Request.Path)}.");
 
     /// <summary>
-    /// The one user, and what it is allowed to do.
+    /// An account, and what it is allowed to do.
     /// </summary>
     /// <remarks>
     /// Several clients call this at login to decide which buttons to draw, and a
@@ -271,14 +330,23 @@ public static partial class SubsonicEndpoints
     /// rate, upload, share or administer anything, so a client that reads
     /// this draws none of those.
     ///
-    /// <c>username</c> is echoed back from the request. There are no users — the
-    /// password is the whole credential — and inventing a name the client did
-    /// not use is how a client decides it is logged in as somebody else.
+    /// The signed-in account, or the one <c>username</c> names: every account
+    /// is equal (ADR 0018), so each has the same roles, and one that does not
+    /// exist is error 70.
     /// </remarks>
-    private static IResult GetUser(HttpContext http) =>
-        SubsonicResult.Ok("user", user =>
+    private static async Task<IResult> GetUser(HttpContext http, UserManager<Account> users)
+    {
+        var name = http.User.Identity!.Name!;
+
+        if (Text(http, "username") is { } asked && !string.Equals(asked, name, StringComparison.OrdinalIgnoreCase))
         {
-            user.Attr("username", Text(http, "username") ?? Text(http, "u") ?? "fonoteca");
+            if (await users.FindByNameAsync(asked).ConfigureAwait(false) is not { } other) return SubsonicResult.Error(70, "No such user.");
+            name = other.UserName!;
+        }
+
+        return SubsonicResult.Ok("user", user =>
+        {
+            user.Attr("username", name);
             user.Attr("email", (string?)null);
             user.Attr("scrobblingEnabled", false);
             user.Attr("adminRole", false);
@@ -295,6 +363,11 @@ public static partial class SubsonicEndpoints
             user.Attr("videoConversionRole", false);
             user.Attr("folder", 0);
         });
+    }
+
+    /// <summary>Whose API key this is (<c>apiKeyAuthentication</c>); the guard has refused a wrong one.</summary>
+    private static IResult TokenInfo(HttpContext http) =>
+        SubsonicResult.Ok("tokenInfo", info => info.Attr("username", http.User.Identity!.Name));
 
     private static IResult GetLicense() =>
         SubsonicResult.Ok("license", license => license.Attr("valid", true));
@@ -306,7 +379,8 @@ public static partial class SubsonicEndpoints
     /// <remarks>
     /// The presence of the response is how a client learns the server is an
     /// OpenSubsonic one at all, and what is missing from it is how it learns
-    /// not to ask for transcode offsets or api keys. <c>songLyrics</c> is
+    /// not to ask for transcode offsets. <c>apiKeyAuthentication</c> is API
+    /// keys, made on the accounts page, and <c>tokenInfo</c>. <c>songLyrics</c> is
     /// version 1 only: version 2's translations, word cues and singers are
     /// nothing LRCLIB or a tag here holds. <c>fonotecaAlbumMotion</c> is
     /// <c>getAlbumMotion</c>, which only a client that looks for it asks for.
@@ -320,7 +394,7 @@ public static partial class SubsonicEndpoints
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);
@@ -421,9 +495,9 @@ public static partial class SubsonicEndpoints
         if (token.Length == 0 || salt.Length == 0) return false;
 
         // MD5 because the protocol says MD5. It is not a defence against
-        // anything and is not treated as one: the password it hashes is held in
-        // configuration in the clear, because this is the only way a server can
-        // check a token it did not compute.
+        // anything and is not treated as one: the password it hashes is held
+        // recoverably, because this is the only way a server can check a token
+        // it did not compute.
 #pragma warning disable CA5351 // MD5 is the protocol's, and is not relied on here.
         var expected = Convert.ToHexStringLower(
             MD5.HashData(Encoding.UTF8.GetBytes(password + salt)));

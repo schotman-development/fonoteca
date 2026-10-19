@@ -506,6 +506,7 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.SignedIn();
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
             builder.UseSetting("Fonoteca:ReplacedPath", _root + "-replaced");
