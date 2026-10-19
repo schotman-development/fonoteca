@@ -413,8 +413,10 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     /// <c>MediaFiles.TrackId</c> sets null, so a track deleted and re-added
     /// strips the file's position without a word.
     /// </remarks>
-    [Fact]
-    public async Task AMergedRecordingMovesEveryFileAndTrackToTheSurvivor()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AMergedRecordingMovesEveryFileAndTrackToTheSurvivor(bool survivorLoved)
     {
         await SeedPersonFiledAsync("Concertgebouw/Beethoven 1/01 - Adagio molto.flac");
 
@@ -431,6 +433,13 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             var survivor = new Recording { Id = RecordingId.New(), Title = "Survivor", Mbid = survivorMbid };
             survivorRow = survivor.Id;
             seed.Recordings.Add(survivor);
+
+            // A heart on the old row moves to the survivor, unless the survivor has one.
+            seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), RecordingId = old.Id, LovedUtc = decided });
+            if (survivorLoved)
+            {
+                seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), RecordingId = survivor.Id, LovedUtc = decided.AddDays(1) });
+            }
 
             var release = new Release { Id = ReleaseId.New(), Title = "Symphonies", Mbid = Mb("a0000000-0000-4000-8000-000000000001") };
             seed.Releases.Add(release);
@@ -551,6 +560,9 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         var merge = await db.DomainEvents.AsNoTracking().SingleAsync(e => e.Type == "catalogue.recording.merged", Token);
         Assert.Equal(Recording.Value.ToString(), merge.SubjectId);
         Assert.Equal("system", merge.ActorId);
+
+        var love = await db.Loves.AsNoTracking().SingleAsync(Token);
+        Assert.Equal((survivorRow, survivorLoved ? decided.AddDays(1) : decided), (love.RecordingId!.Value, love.LovedUtc));
     }
 
     /// <summary>

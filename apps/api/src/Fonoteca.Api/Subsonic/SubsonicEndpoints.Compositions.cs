@@ -44,6 +44,9 @@ public static partial class SubsonicEndpoints
     {
         var pieces = await CompositionsAsync(db, cancellationToken).ConfigureAwait(false);
 
+        var loved = await LovedAsync(db.Loves.Where(love => love.ArtistId != null), love => love.ArtistId!.Value, cancellationToken)
+            .ConfigureAwait(false);
+
         var counts = pieces
             .SelectMany(piece => piece.Composers)
             .CountBy(composer => composer.Id)
@@ -69,6 +72,7 @@ public static partial class SubsonicEndpoints
                 writer.Attr("musicBrainzId", composer.Mbid.Value.ToString());
                 writer.Attr("coverArt", composer.Pictured ? SubsonicIds.Artist(composer.Id) : null);
                 writer.Attr("compositionCount", counts[composer.Id]);
+                writer.Attr("starred", loved.TryGetValue(composer.Id, out var starred) ? starred : null);
             });
         }));
     }
@@ -137,6 +141,7 @@ public static partial class SubsonicEndpoints
         writer.Attr("period", piece.Period);
         writer.Attr("movementCount", piece.MovementCount);
         writer.Attr("duration", piece.Duration);
+        writer.Attr("starred", piece.Starred);
         writer.Children("composers", piece.Composers, static (composers, composer) =>
         {
             composers.Attr("id", SubsonicIds.Artist(composer.Id));
@@ -249,6 +254,9 @@ public static partial class SubsonicEndpoints
             .Where(credit => credit.Type != CatalogueEndpoints.ComposerLink)
             .ToLookup(credit => credit.Work);
 
+        var loved = await LovedAsync(db.Loves.Where(love => love.WorkId != null), love => love.WorkId!.Value, cancellationToken)
+            .ConfigureAwait(false);
+
         return classical
             .Select(piece =>
             {
@@ -326,7 +334,8 @@ public static partial class SubsonicEndpoints
                                 ? new Writer(artist.Id, artist.Name)
                                 : new Writer(null, credit.Name)),
                     ],
-                    [.. writers.SelectMany(work => FileGenres.Split(works[work].Languages)).Where(code => code != "zxx").Distinct(StringComparer.Ordinal)]);
+                    [.. writers.SelectMany(work => FileGenres.Split(works[work].Languages)).Where(code => code != "zxx").Distinct(StringComparer.Ordinal)],
+                    loved.TryGetValue(piece.Key, out var starred) ? starred : null);
             })
             .OrderBy(piece => piece.Piece.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(piece => piece.Id.Value)
@@ -350,7 +359,8 @@ public static partial class SubsonicEndpoints
         int? MovementCount,
         int? Duration,
         IReadOnlyList<Writer> Lyricists,
-        IReadOnlyList<string> Languages);
+        IReadOnlyList<string> Languages,
+        DateTimeOffset? Starred);
 
     private sealed record Composer(ArtistId Id, string Name, string? SortName, Mbid Mbid, bool Pictured, int? Born);
 

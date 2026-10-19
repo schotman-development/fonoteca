@@ -219,6 +219,15 @@ and `ReleaseGroup.Monitored` are standing intent about *acquisition*, and a
 listener's star is standing intent about *listening*. They are different facts,
 and folding them would lose the ability to report on either — rule 4, applied to
 a new caller. If starring is wanted it gets its own table, in its own change.
+*Amended 2026-10-19:* it is wanted (the owner's choice), and has its own table,
+`Loves`: `star`/`unstar` take songs, albums, artists and compositions (a whole
+piece, `wk-`) by any of `id`, `albumId` and `artistId`, repeated, refusing the
+whole request with error 70 when one names nothing. A song is loved on its
+recording, so every copy carries the heart and an upgrade keeps it; on its file
+only while no recording is known. `starred` goes on songs, albums, artists and
+compositions; `getStarred2` lists each loved song once, as the copy a playlist
+plays, and `getAlbumList2?type=starred` the loved albums, newest first. Still
+no rating and no play count.
 
 **`scrobble` is accepted and stored nowhere**, which is within the protocol —
 the endpoint exists so a client can tell a server about a play, and a server may
@@ -268,7 +277,7 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
-`getPlaylists`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
+`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 
 `getUser` is there because several clients call it at login to decide which

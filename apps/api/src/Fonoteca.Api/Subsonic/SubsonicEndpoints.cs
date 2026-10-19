@@ -152,6 +152,9 @@ public static partial class SubsonicEndpoints
         Map(group, "getSongsByGenre", GetSongsByGenre);
         Map(group, "getComposers", GetComposers);
         Map(group, "getCompositions", GetCompositions);
+        Map(group, "star", Star);
+        Map(group, "unstar", Unstar);
+        Map(group, "getStarred2", GetStarred2);
 
         Map(group, "stream", Stream);
         Map(group, "download", Download);
@@ -215,7 +218,7 @@ public static partial class SubsonicEndpoints
     /// missing answer reads to them as a broken server. Every role is stated
     /// rather than assumed, and the four that are true are the four this
     /// surface actually does: stream, download, cover art and playlists. Nothing here can
-    /// star, rate, upload, share or administer anything, so a client that reads
+    /// rate, upload, share or administer anything, so a client that reads
     /// this draws none of those.
     ///
     /// <c>username</c> is echoed back from the request. There are no users — the

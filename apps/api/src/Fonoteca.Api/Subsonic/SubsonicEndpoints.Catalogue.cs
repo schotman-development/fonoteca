@@ -32,18 +32,21 @@ public static partial class SubsonicEndpoints
     /// Takes the albums rather than fetching them, because every caller already
     /// has them: an artist here is defined as somebody an album is billed to, so
     /// deriving one from the other twice would be the same expensive query run
-    /// for the same answer.
+    /// for the same answer. <paramref name="also"/> adds artists no album is
+    /// billed to, with no albums: the loved composers <c>getStarred2</c> lists.
     /// </remarks>
     private static async Task<IReadOnlyList<SubsonicArtist>> ArtistsOfAsync(
         FonotecaDbContext db,
         IReadOnlyList<Album> albums,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<ArtistId>? also = null)
     {
-        var billed = albums
+        var counts = albums
             .Where(album => album.ArtistId is not null)
-            .Select(album => album.ArtistId!.Value)
-            .Distinct()
-            .ToList();
+            .CountBy(album => album.ArtistId!.Value)
+            .ToDictionary();
+
+        var billed = counts.Keys.Concat(also ?? []).Distinct().ToList();
 
         if (billed.Count == 0) return [];
 
@@ -65,25 +68,19 @@ public static partial class SubsonicEndpoints
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var byId = described.ToDictionary(artist => artist.Id);
+        var loved = await LovedAsync(db.Loves.Where(love => love.ArtistId != null && billed.Contains(love.ArtistId.Value)), love => love.ArtistId!.Value, cancellationToken)
+            .ConfigureAwait(false);
 
-        return albums
-            .Where(album => album.ArtistId is not null)
-            .GroupBy(album => album.ArtistId!.Value)
-            .Where(group => byId.ContainsKey(group.Key))
-            .Select(group =>
-            {
-                var artist = byId[group.Key];
-
-                return new SubsonicArtist(
-                    artist.Id,
-                    artist.LatinName ?? artist.Name,
-                    artist.SortName,
-                    artist.Mbid,
-                    artist.PortraitUrl,
-                    group.Count(),
-                    Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl));
-            })
+        return described
+            .Select(artist => new SubsonicArtist(
+                artist.Id,
+                artist.LatinName ?? artist.Name,
+                artist.SortName,
+                artist.Mbid,
+                artist.PortraitUrl,
+                counts.GetValueOrDefault(artist.Id),
+                Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl),
+                loved.TryGetValue(artist.Id, out var starred) ? starred : null))
             .OrderBy(artist => artist.SortName ?? artist.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(artist => artist.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -171,6 +168,9 @@ public static partial class SubsonicEndpoints
             .EditionFactsAsync(db, [.. rows.Select(row => row.Id)], cancellationToken)
             .ConfigureAwait(false);
 
+        var loved = await LovedAsync(db.Loves.Where(love => love.ReleaseGroupId != null), love => love.ReleaseGroupId!.Value, cancellationToken)
+            .ConfigureAwait(false);
+
         var albums = rows
             .Select(row =>
             {
@@ -194,7 +194,8 @@ public static partial class SubsonicEndpoints
                     row.Lengths.Sum(length => length is { } measured ? (int)Math.Round(measured.TotalSeconds) : 0),
                     row.Added.Value,
                     Minted(row.Added.Value) ?? row.Created,
-                    FileGenres.OfAlbum(row.Genres, row.RecordingGenres));
+                    FileGenres.OfAlbum(row.Genres, row.RecordingGenres),
+                    loved.TryGetValue(row.Id, out var starred) ? starred : null);
             })
             .ToList();
 
@@ -345,6 +346,13 @@ public static partial class SubsonicEndpoints
 
         var performances = await SongPerformancesAsync(db, rows, cancellationToken).ConfigureAwait(false);
 
+        // A song is loved on its recording, or on itself before it had one.
+        var recordings = rows.Where(row => row.Recording is not null).Select(row => row.Recording!.Value).Distinct().ToList();
+        var ids = rows.Select(row => row.Id).ToList();
+        var lovedSongs = await LovedSongsAsync(db, recordings, cancellationToken).ConfigureAwait(false);
+        var lovedFiles = await LovedAsync(db.Loves.Where(love => love.MediaFileId != null && ids.Contains(love.MediaFileId.Value)), love => love.MediaFileId!.Value, cancellationToken)
+            .ConfigureAwait(false);
+
         // The album folder first: two rips of one album are one album here, and
         // interleaving them would play every track twice in a row.
         return rows
@@ -358,9 +366,48 @@ public static partial class SubsonicEndpoints
                 row,
                 albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain,
                 row.Work is { } work ? works.GetValueOrDefault(work) : null,
-                row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default))
+                row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default,
+                row.Recording is { } song && lovedSongs.TryGetValue(song, out var loved) ? loved
+                    : lovedFiles.TryGetValue(row.Id, out var own) ? own : null))
             .ToList();
     }
+
+    /// <summary>
+    /// When each of these songs was first loved: on its recording, or on any
+    /// copy loved as itself before it was identified, so every copy agrees.
+    /// </summary>
+    private static async Task<Dictionary<RecordingId, DateTimeOffset>> LovedSongsAsync(
+        FonotecaDbContext db,
+        List<RecordingId> recordings,
+        CancellationToken cancellationToken)
+    {
+        var onRecordings = await db.Loves
+            .AsNoTracking()
+            .Where(love => love.RecordingId != null && recordings.Contains(love.RecordingId.Value))
+            .Select(love => new { Recording = love.RecordingId!.Value, love.LovedUtc })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var onCopies = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.RecordingId != null && recordings.Contains(file.RecordingId.Value))
+            .SelectMany(file => db.Loves.Where(love => love.MediaFileId == file.Id), (file, love) => new { Recording = file.RecordingId!.Value, love.LovedUtc })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return onRecordings
+            .Concat(onCopies)
+            .GroupBy(love => love.Recording)
+            .ToDictionary(song => song.Key, song => song.Min(love => love.LovedUtc));
+    }
+
+    /// <summary>When each of these loves was given, by what it loves.</summary>
+    private static async Task<Dictionary<TKey, DateTimeOffset>> LovedAsync<TKey>(
+        IQueryable<Love> loves,
+        Func<Love, TKey> key,
+        CancellationToken cancellationToken)
+        where TKey : notnull =>
+        (await loves.AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false)).ToDictionary(key, love => love.LovedUtc);
 
     /// <summary>Who played on each recording and wrote what it plays, and when and where it was played.</summary>
     /// <remarks>
@@ -598,7 +645,8 @@ public static partial class SubsonicEndpoints
         SongRow row,
         (double Gain, double Peak)? album,
         SongWork? work,
-        (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded) performance)
+        (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded) performance,
+        DateTimeOffset? starred)
     {
         var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
@@ -658,7 +706,8 @@ public static partial class SubsonicEndpoints
                     album?.Peak),
             work,
             performance.Contributors ?? [],
-            performance.Recorded);
+            performance.Recorded,
+            starred);
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>

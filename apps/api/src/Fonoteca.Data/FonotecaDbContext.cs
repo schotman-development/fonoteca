@@ -24,6 +24,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<MediaFile> MediaFiles => Set<MediaFile>();
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<ArtistCredit> ArtistCredits => Set<ArtistCredit>();
+    public DbSet<Love> Loves => Set<Love>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<Contribution> Contributions => Set<Contribution>();
     public DbSet<RecordingSession> RecordingSessions => Set<RecordingSession>();
@@ -397,6 +398,21 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             // makes it usable again.
             e.HasIndex(x => x.DiscographyLookupUtc, "IX_Artists_Unbrowsed")
                 .HasFilter("\"Mbid\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<Love>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne<Recording>().WithMany().HasForeignKey(x => x.RecordingId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<MediaFile>().WithMany().HasForeignKey(x => x.MediaFileId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<ReleaseGroup>().WithMany().HasForeignKey(x => x.ReleaseGroupId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Artist>().WithMany().HasForeignKey(x => x.ArtistId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Work>().WithMany().HasForeignKey(x => x.WorkId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.RecordingId).IsUnique().HasFilter("\"RecordingId\" IS NOT NULL");
+            e.HasIndex(x => x.MediaFileId).IsUnique().HasFilter("\"MediaFileId\" IS NOT NULL");
+            e.HasIndex(x => x.ReleaseGroupId).IsUnique().HasFilter("\"ReleaseGroupId\" IS NOT NULL");
+            e.HasIndex(x => x.ArtistId).IsUnique().HasFilter("\"ArtistId\" IS NOT NULL");
+            e.HasIndex(x => x.WorkId).IsUnique().HasFilter("\"WorkId\" IS NOT NULL");
         });
 
         modelBuilder.Entity<ArtistCredit>(e =>

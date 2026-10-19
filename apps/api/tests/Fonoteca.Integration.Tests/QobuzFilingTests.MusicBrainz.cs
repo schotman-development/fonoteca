@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
+using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
@@ -49,14 +50,26 @@ public sealed partial class QobuzFilingTests
         Assert.Equal(2, (await scope.ServiceProvider.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Files);
     }
 
-    [Fact]
-    public async Task TheSweepMovesAShopsAlbumOntoMusicBrainzOnceItKnowsIt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheSweepMovesAShopsAlbumOntoMusicBrainzOnceItKnowsIt(bool albumHeldAlready)
     {
         Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
 
         var musicBrainz = new StubMusicBrainz();
         var factory = Factory(mutation: false, musicBrainz);
         await DownloadAsync(factory);
+
+        // Held and loved already, the album keeps one heart.
+        if (albumHeldAlready)
+        {
+            await using var seed = PostgresFixture.CreateContext(_connectionString);
+            seed.ReleaseGroups.Add(new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Rumours", Mbid = RumoursGroup });
+            await seed.SaveChangesAsync(Token);
+        }
+
+        await LoveEverythingAsync();
 
         musicBrainz.Releases.Add(Rumours());
         var swept = await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token);
@@ -72,6 +85,46 @@ public sealed partial class QobuzFilingTests
         Assert.Empty(await db.Recordings.Where(recording => recording.Mbid == null).ToListAsync(Token));
         Assert.Empty(await db.ReleaseGroups.Where(group => group.Mbid == null).ToListAsync(Token));
         Assert.Single(await db.DomainEvents.Where(entry => entry.Type == MusicBrainzCatchUp.MatchedEvent).ToListAsync(Token));
+        await EverythingIsLovedAsync(db);
+        Assert.Equal(1, await db.Loves.CountAsync(love => love.ReleaseGroupId != null, Token));
+    }
+
+    /// <summary>
+    /// An album MusicBrainz knows keeps its heart when its folder is named as
+    /// another: it is no download's own row, and stays for its other folders.
+    /// </summary>
+    [Fact]
+    public async Task AHeartOnAnAlbumMusicBrainzKnowsStaysWhenItsFolderIsNamedAnother()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var deluxe = new Mbid(Guid.CreateVersion7());
+        var musicBrainz = new StubMusicBrainz();
+        var factory = Factory(mutation: false, musicBrainz);
+        await DownloadAsync(factory);
+
+        musicBrainz.Releases.Add(Rumours());
+        Assert.Equal((1, 0), await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token));
+        await LoveEverythingAsync();
+
+        var other = new Mbid(Guid.CreateVersion7());
+        musicBrainz.Releases.Add(Rumours() with { Id = other, Barcode = null, ReleaseGroupId = deluxe, ReleaseGroupTitle = "Rumours (Deluxe)" });
+
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsJsonAsync(
+            new Uri("/api/catalogue/matching/folders/album", UriKind.Relative),
+            new FolderAlbumRequest("Fleetwood Mac/Rumours", other.Value),
+            Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var rumours = await db.ReleaseGroups.SingleAsync(group => group.Mbid == RumoursGroup, Token);
+        var named = await db.ReleaseGroups.SingleAsync(group => group.Mbid == deluxe, Token);
+
+        Assert.All(await db.MediaFiles.ToListAsync(Token), file => Assert.Equal(named.Id, file.ReleaseGroupId));
+        Assert.True(await db.Loves.AnyAsync(love => love.ReleaseGroupId == rumours.Id, Token));
+        Assert.False(await db.Loves.AnyAsync(love => love.ReleaseGroupId == named.Id, Token));
     }
 
     [Fact]
@@ -108,6 +161,7 @@ public sealed partial class QobuzFilingTests
         var musicBrainz = new StubMusicBrainz { Isrcs = { ["USWB10101367"] = [Dreams] } };
         var factory = Factory(mutation: false, musicBrainz);
         await DownloadAsync(factory);
+        await LoveEverythingAsync();
 
         var held = new Recording { Id = RecordingId.New(), Title = "Dreams", Mbid = Dreams };
 
@@ -125,6 +179,7 @@ public sealed partial class QobuzFilingTests
         Assert.Equal(held.Id, dreams.RecordingId);
         Assert.Equal(held.Id, dreams.Track!.RecordingId);
         Assert.Equal(1, await check.Recordings.CountAsync(recording => recording.Title == "Dreams", Token));
+        await EverythingIsLovedAsync(check);
     }
 
     [Fact]
@@ -153,6 +208,7 @@ public sealed partial class QobuzFilingTests
 
         // A pressing the barcode search never finds, named by a person.
         musicBrainz.Releases.Add(Rumours() with { Barcode = null });
+        await LoveEverythingAsync();
 
         using var client = factory.CreateClient();
         using var response = await client.PostAsJsonAsync(
@@ -175,16 +231,104 @@ public sealed partial class QobuzFilingTests
 
         Assert.Empty(await db.Releases.Where(release => release.Mbid == null).ToListAsync(Token));
         Assert.Empty(await db.Recordings.Where(recording => recording.Mbid == null).ToListAsync(Token));
+        await EverythingIsLovedAsync(db);
     }
 
-    [Fact]
-    public async Task TwoTracksAnIsrcNamesAsOneRecordingShareIt()
+    /// <summary>A heart on every song and album a download filed, to see each follow its files.</summary>
+    private async Task LoveEverythingAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var recordings = await db.Recordings.Select(recording => recording.Id).ToListAsync(Token);
+        var albums = await db.ReleaseGroups.Select(group => group.Id).ToListAsync(Token);
+        db.Loves.AddRange(recordings.Select(recording => new Love { Id = Guid.CreateVersion7(), RecordingId = recording, LovedUtc = DateTimeOffset.UtcNow }));
+        db.Loves.AddRange(albums.Select(album => new Love { Id = Guid.CreateVersion7(), ReleaseGroupId = album, LovedUtc = DateTimeOffset.UtcNow }));
+        await db.SaveChangesAsync(Token);
+    }
+
+    private async Task EverythingIsLovedAsync(FonotecaDbContext db)
+    {
+        var songs = await db.Loves.Select(love => love.RecordingId).ToListAsync(Token);
+        var albums = await db.Loves.Select(love => love.ReleaseGroupId).ToListAsync(Token);
+        Assert.All(await db.MediaFiles.ToListAsync(Token), file =>
+        {
+            Assert.Contains(file.RecordingId, songs);
+            Assert.Contains(file.ReleaseGroupId, albums);
+        });
+    }
+
+    /// <summary>
+    /// A recording MusicBrainz named by ISRC keeps its heart when the pressing
+    /// later seats the file on another: it is no download's own row, and stays
+    /// for its other copies.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AHeartOnARecordingMusicBrainzKnowsStaysWhenItsFileMoves(bool byHand)
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var named = new Mbid(Guid.CreateVersion7());
+        var musicBrainz = new StubMusicBrainz { Isrcs = { ["USWB10101367"] = [named] } };
+        var factory = Factory(mutation: false, musicBrainz);
+        await DownloadAsync(factory);
+
+        var catchUp = factory.Services.GetRequiredService<MusicBrainzCatchUp>();
+        Assert.Equal((0, 1), await catchUp.SweepAsync(Token));
+        await LoveEverythingAsync();
+
+        if (byHand)
+        {
+            musicBrainz.Releases.Add(Rumours() with { Barcode = null });
+
+            using var client = factory.CreateClient();
+            using var response = await client.PostAsJsonAsync(
+                new Uri("/api/catalogue/matching/folders/album", UriKind.Relative),
+                new FolderAlbumRequest("Fleetwood Mac/Rumours", RumoursRelease.Value),
+                Token);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        else
+        {
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                (await db.Releases.SingleAsync(Token)).ProviderCheckedUtc = null;
+                await db.SaveChangesAsync(Token);
+            }
+
+            musicBrainz.Releases.Add(Rumours());
+            Assert.Equal((1, 0), await catchUp.SweepAsync(Token));
+        }
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        var dreams = await check.MediaFiles.Include(file => file.Recording).SingleAsync(file => file.Path.EndsWith("Dreams.flac"), Token);
+        var held = await check.Recordings.SingleAsync(recording => recording.Mbid == named, Token);
+
+        Assert.Equal(Dreams, dreams.Recording!.Mbid);
+        Assert.True(await check.Loves.AnyAsync(love => love.RecordingId == held.Id, Token));
+        Assert.False(await check.Loves.AnyAsync(love => love.RecordingId == dreams.RecordingId, Token));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TwoTracksAnIsrcNamesAsOneRecordingShareIt(bool heldAlready)
     {
         Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
 
         var musicBrainz = new StubMusicBrainz { Isrcs = { ["USWB10101361"] = [Dreams], ["USWB10101367"] = [Dreams] } };
         var factory = Factory(mutation: false, musicBrainz);
         await DownloadAsync(factory);
+        await LoveEverythingAsync();
+
+        // Held already, both of the shop's rows fold into it in one save, and one heart stays.
+        if (heldAlready)
+        {
+            await using var seed = PostgresFixture.CreateContext(_connectionString);
+            seed.Recordings.Add(new Recording { Id = RecordingId.New(), Title = "Dreams", Mbid = Dreams });
+            await seed.SaveChangesAsync(Token);
+        }
 
         Assert.Equal((0, 2), await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token));
 
@@ -194,6 +338,8 @@ public sealed partial class QobuzFilingTests
         Assert.Single(files.Select(file => file.RecordingId).Distinct());
         Assert.Equal(Dreams, (await db.Recordings.SingleAsync(Token)).Mbid);
         Assert.NotNull((await db.Releases.SingleAsync(Token)).ProviderCheckedUtc);
+        await EverythingIsLovedAsync(db);
+        Assert.Equal(1, await db.Loves.CountAsync(love => love.RecordingId != null, Token));
     }
 
     [Fact]

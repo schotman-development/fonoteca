@@ -1910,6 +1910,38 @@ public sealed class ArtistCredit
 }
 
 /// <summary>
+/// A heart a listener put on a song, an album, an artist or a composition.
+/// </summary>
+/// <remarks>
+/// Standing intent about listening, which nothing can recompute, and a fact of
+/// its own beside <see cref="Artist.Followed"/> and
+/// <see cref="ReleaseGroup.Monitored"/>, which are intent about acquisition
+/// (rule 4). <b>A song is loved on its recording</b>, so every copy shows it —
+/// the album's, a best-of's, an upgrade's once it is filed under the same
+/// recording — and on its file only where no recording is known (the owner's
+/// choice), which is the song's heart once it is. Goes when what it loves
+/// goes, except a recording a merge folds away and a download's own recording
+/// or album MusicBrainz names, whose files carry it
+/// (<c>CatalogueWriter.CarryLovesAsync</c>, <c>CarryAlbumLovesAsync</c>).
+/// </remarks>
+public sealed class Love
+{
+    public required Guid Id { get; init; }
+
+    /// <summary>What is loved. Exactly one of these is set.</summary>
+    public RecordingId? RecordingId { get; set; }
+
+    public MediaFileId? MediaFileId { get; set; }
+    public ReleaseGroupId? ReleaseGroupId { get; set; }
+    public ArtistId? ArtistId { get; set; }
+
+    /// <summary>A whole piece, as Subsonic's compositions list it.</summary>
+    public WorkId? WorkId { get; set; }
+
+    public required DateTimeOffset LovedUtc { get; init; }
+}
+
+/// <summary>
 /// A typed link between two entities.
 /// </summary>
 /// <remarks>

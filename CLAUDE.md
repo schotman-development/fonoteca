@@ -962,8 +962,8 @@ than facts in it, so `Discography.IsGap` runs where each shelf is built and the
 row stops being a gap the moment the catalogue gains the album. *What is cached
 is answers, never rankings*, applied to the one place that was storing a verdict.
 
-**`Artist.Followed`, `ReleaseGroup.Monitored` and `DiscoveredRecord.Monitored`
-are the only facts in the catalogue nothing can recompute** — everything else
+**`Artist.Followed`, `ReleaseGroup.Monitored`, `DiscoveredRecord.Monitored` and
+a listener's `Loves` are the only facts in the catalogue nothing can recompute** — everything else
 derives from audio, a provider or a person's answer; these are standing intent,
 and a rescan must never touch them. Monitoring is a filter, not an instruction: a
 *first* browse is the baseline and writes everything unmonitored, later browses

@@ -406,6 +406,55 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("DiscoveredRecords");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Love", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("LovedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("MediaFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReleaseGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("WorkId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtistId")
+                        .IsUnique()
+                        .HasFilter("\"ArtistId\" IS NOT NULL");
+
+                    b.HasIndex("MediaFileId")
+                        .IsUnique()
+                        .HasFilter("\"MediaFileId\" IS NOT NULL");
+
+                    b.HasIndex("RecordingId")
+                        .IsUnique()
+                        .HasFilter("\"RecordingId\" IS NOT NULL");
+
+                    b.HasIndex("ReleaseGroupId")
+                        .IsUnique()
+                        .HasFilter("\"ReleaseGroupId\" IS NOT NULL");
+
+                    b.HasIndex("WorkId")
+                        .IsUnique()
+                        .HasFilter("\"WorkId\" IS NOT NULL");
+
+                    b.ToTable("Loves");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.MediaFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1311,6 +1360,34 @@ namespace Fonoteca.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Artist");
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.Love", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.Artist", null)
+                        .WithMany()
+                        .HasForeignKey("ArtistId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.MediaFile", null)
+                        .WithMany()
+                        .HasForeignKey("MediaFileId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithMany()
+                        .HasForeignKey("RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.ReleaseGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ReleaseGroupId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Work", null)
+                        .WithMany()
+                        .HasForeignKey("WorkId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.MediaFile", b =>

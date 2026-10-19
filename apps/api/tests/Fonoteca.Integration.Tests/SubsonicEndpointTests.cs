@@ -961,6 +961,26 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Assert.Equal(70, refused.GetProperty("error").GetProperty("code").GetInt32());
         }
 
+        // A heart on a whole piece shows in both modes; a movement is no composition.
+        Assert.Equal(70, (await JsonAsync(client, $"/rest/star.view?id=wk-{first.Id.Value:N}")).GetProperty("subsonic-response").GetProperty("error").GetProperty("code").GetInt32());
+        Assert.Equal("ok", (await JsonAsync(client, $"/rest/star.view?id=wk-{symphony.Id.Value:N}")).GetProperty("subsonic-response").GetProperty("status").GetString());
+        Assert.Equal([symphony.Title], (await CompositionsAsync("")).Where(row => row.TryGetProperty("starred", out _)).Select(row => row.GetProperty("name").GetString()));
+        Assert.True(Assert.Single(await CompositionsAsync($"?id=wk-{symphony.Id.Value:N}")).TryGetProperty("starred", out _));
+        Assert.Equal("ok", (await JsonAsync(client, $"/rest/unstar.view?id=wk-{symphony.Id.Value:N}")).GetProperty("subsonic-response").GetProperty("status").GetString());
+        Assert.DoesNotContain(await CompositionsAsync(""), row => row.TryGetProperty("starred", out _));
+
+        // A composer no album is billed to shows a heart where composers are listed, and among the loved.
+        Assert.Equal("ok", (await JsonAsync(client, $"/rest/star.view?artistId={w}")).GetProperty("subsonic-response").GetProperty("status").GetString());
+        Assert.Equal(
+            [w],
+            (await JsonAsync(client, "/rest/getComposers.view")).GetProperty("subsonic-response").GetProperty("composers").GetProperty("index").EnumerateArray()
+                .SelectMany(index => index.GetProperty("composer").EnumerateArray())
+                .Where(composer => composer.TryGetProperty("starred", out _))
+                .Select(composer => composer.GetProperty("id").GetString()));
+        var lovedComposer = Assert.Single((await JsonAsync(client, "/rest/getStarred2.view")).GetProperty("subsonic-response").GetProperty("starred2").GetProperty("artist").EnumerateArray());
+        Assert.Equal((w, 0), (lovedComposer.GetProperty("id").GetString(), lovedComposer.GetProperty("albumCount").GetInt32()));
+        Assert.Equal("ok", (await JsonAsync(client, $"/rest/unstar.view?artistId={w}")).GetProperty("subsonic-response").GetProperty("status").GetString());
+
         using var response = await client.GetAsync(
             new Uri($"/rest/getCompositions.view?{Credentials}&id=wk-{symphony.Id.Value:N}", UriKind.Relative),
             Token);
@@ -1223,6 +1243,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("getLyrics")]
     [InlineData("getComposers")]
     [InlineData("getCompositions")]
+    [InlineData("getStarred2")]
+    [InlineData("getAlbumList2&type=starred")]
     public async Task EveryMethodAnswers(string method)
     {
         using var client = _factory!.CreateClient();
@@ -1491,6 +1513,204 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             var row = await db.Artists.SingleAsync(artist => artist.Id == evans, Token);
             row.PortraitUrl = null;
             row.EditsJson = null;
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// A heart on a song is on every copy of it, and an album, an artist and a
+    /// whole piece take one too; a request naming anything that is none of
+    /// those changes nothing, and unstarring takes each off again.
+    /// </summary>
+    /// <remarks>
+    /// A best-of's lossy copy of the filed song carries the heart; the scanned
+    /// file, with no recording yet, is loved as itself and keeps it once it
+    /// gains one. Removes what it adds, because the class shares one database.
+    /// </remarks>
+    [Fact]
+    public async Task ALoveIsOnEveryCopyOfASongAndComesOffAgain()
+    {
+        var copy = MediaFileId.New();
+        var later = new Recording { Id = RecordingId.New(), Title = "Nameless" };
+        var piece = new Work { Id = WorkId.New(), Title = "Peace Piece" };
+        var sunday = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Sunday at the Village Vanguard" };
+        var unheld = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Explorations" };
+        var gloria = new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = "Bill Evans/Sunday at the Village Vanguard/01 Gloria's Step.flac",
+            SizeBytes = 1024,
+            LastModifiedUtc = DateTimeOffset.Parse("2026-01-05T00:00:00Z", CultureInfo.InvariantCulture),
+            ReleaseGroupId = sunday.Id,
+        };
+        var part = new Work { Id = WorkId.New(), Title = "Peace Piece: I.", ParentId = piece.Id, Position = 1 };
+        ArtistId artist;
+        ReleaseGroupId album;
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var filed = await seed.MediaFiles.SingleAsync(file => file.Id == _filed, Token);
+            artist = (await seed.Artists.SingleAsync(row => row.Name == "Bill Evans", Token)).Id;
+            album = filed.ReleaseGroupId!.Value;
+
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = copy,
+                Path = "Bill Evans/The Best Of/03 My Foolish Heart.mp3",
+                SizeBytes = 2048,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-04T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = filed.RecordingId,
+                Quality = new AudioQuality { Codec = "mp3", SampleRateHz = 44_100, Channels = 2, BitrateBps = 320_000, IsLossless = false, Duration = TimeSpan.FromSeconds(292) },
+            });
+            seed.Recordings.Add(later);
+            seed.Works.AddRange(piece, part);
+            seed.ReleaseGroups.AddRange(sunday, unheld);
+            seed.MediaFiles.Add(gloria);
+            await seed.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        async Task<JsonElement> Answer(string route) => (await JsonAsync(client, route)).GetProperty("subsonic-response");
+
+        async Task<string?> Starred(string route, string name) =>
+            (await Answer(route)).GetProperty(name).TryGetProperty("starred", out var when) ? when.GetString() : null;
+
+        async Task<List<string?>> Listed(string name)
+        {
+            var starred = (await Answer("/rest/getStarred2.view")).GetProperty("starred2");
+            return starred.TryGetProperty(name, out var rows) ? [.. rows.EnumerateArray().Select(row => row.GetProperty("id").GetString()).Order()] : [];
+        }
+
+        var a = $"al-{album.Value:N}";
+        var song = $"/rest/getSong.view?id=tr-{_filed.Value:N}";
+        var scanned = $"/rest/getSong.view?id=tr-{_scanned.Value:N}";
+
+        try
+        {
+            // All or nothing: the movement is no composition, so the album is not loved either.
+            Assert.Equal(70, (await Answer($"/rest/star.view?albumId={a}&id=wk-{part.Id.Value:N}")).GetProperty("error").GetProperty("code").GetInt32());
+            Assert.Equal(70, (await Answer($"/rest/star.view?id=tr-{Guid.CreateVersion7():N}")).GetProperty("error").GetProperty("code").GetInt32());
+            Assert.Equal(70, (await Answer($"/rest/star.view?artistId=ar-{Guid.CreateVersion7():N}")).GetProperty("error").GetProperty("code").GetInt32());
+            Assert.Equal(70, (await Answer($"/rest/star.view?albumId=al-{Guid.CreateVersion7():N}")).GetProperty("error").GetProperty("code").GetInt32());
+            Assert.Equal(70, (await Answer($"/rest/star.view?albumId=al-{unheld.Id.Value:N}")).GetProperty("error").GetProperty("code").GetInt32());
+            Assert.Equal(10, (await Answer("/rest/star.view")).GetProperty("error").GetProperty("code").GetInt32());
+            Assert.Null(await Starred($"/rest/getAlbum.view?id={a}", "album"));
+
+            // A double tap: the same heart at once, every request answered, one heart kept.
+            foreach (var verb in new[] { "star", "unstar" })
+            {
+                Assert.All(
+                    await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Answer($"/rest/{verb}.view?id=tr-{_filed.Value:N}&albumId={a}"))),
+                    tap => Assert.Equal("ok", tap.GetProperty("status").GetString()));
+            }
+
+            Assert.Null(await Starred(song, "song"));
+
+            // Two copies of one song in one request are one heart.
+            Assert.Equal("ok", (await Answer($"/rest/star.view?id=tr-{_filed.Value:N}&id=tr-{copy.Value:N}")).GetProperty("status").GetString());
+            Assert.Equal("ok", (await Answer($"/rest/unstar.view?id=tr-{_filed.Value:N}&id=tr-{copy.Value:N}")).GetProperty("status").GetString());
+            Assert.Null(await Starred(song, "song"));
+
+            Assert.Equal(
+                "ok",
+                (await Answer($"/rest/star.view?id=%20tr-{copy.Value:N}%20&id=tr-{_scanned.Value:N}&albumId={a}&artistId=ar-{artist.Value:N}&id=wk-{piece.Id.Value:N}")).GetProperty("status").GetString());
+
+            // The best-of's copy was starred; the album's copy shows it too.
+            var first = await Starred(song, "song");
+            Assert.NotNull(first);
+            Assert.NotNull(await Starred($"/rest/getSong.view?id=tr-{copy.Value:N}", "song"));
+            Assert.NotNull(await Starred(scanned, "song"));
+            Assert.NotNull(await Starred($"/rest/getAlbum.view?id={a}", "album"));
+            Assert.NotNull((await Answer($"/rest/getAlbum.view?id={a}")).GetProperty("album").GetProperty("song")[0].GetProperty("starred").GetString());
+            Assert.NotNull(await Starred($"/rest/getArtist.view?id=ar-{artist.Value:N}", "artist"));
+
+            // Each song once, as the copy a playlist plays: the FLAC, not the MP3.
+            Assert.Equal([$"ar-{artist.Value:N}"], await Listed("artist"));
+            Assert.Equal([a], await Listed("album"));
+            Assert.Equal(new[] { $"tr-{_filed.Value:N}", $"tr-{_scanned.Value:N}" }.Order(), await Listed("song"));
+
+            // The MP3 loved as itself before it was identified is still that one song.
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                db.Loves.Add(new Love { Id = Guid.CreateVersion7(), MediaFileId = copy, LovedUtc = DateTimeOffset.UtcNow });
+                await db.SaveChangesAsync(Token);
+                Assert.Equal(new[] { $"tr-{_filed.Value:N}", $"tr-{_scanned.Value:N}" }.Order(), await Listed("song"));
+                db.Loves.Remove(await db.Loves.SingleAsync(love => love.MediaFileId == copy, Token));
+                await db.SaveChangesAsync(Token);
+            }
+
+            Assert.Equal(
+                [a],
+                (await Answer("/rest/getAlbumList2.view?type=starred")).GetProperty("albumList2").GetProperty("album").EnumerateArray().Select(row => row.GetProperty("id").GetString()));
+
+            // Newest love first.
+            var b = $"al-{sunday.Id.Value:N}";
+            Assert.Equal("ok", (await Answer($"/rest/star.view?albumId={b}")).GetProperty("status").GetString());
+            Assert.Equal(
+                [b, a],
+                (await Answer("/rest/getAlbumList2.view?type=starred")).GetProperty("albumList2").GetProperty("album").EnumerateArray().Select(row => row.GetProperty("id").GetString()));
+            Assert.Equal(
+                [b, a],
+                (await Answer("/rest/getStarred2.view")).GetProperty("starred2").GetProperty("album").EnumerateArray().Select(row => row.GetProperty("id").GetString()));
+            Assert.Equal("ok", (await Answer($"/rest/unstar.view?albumId={b}")).GetProperty("status").GetString());
+
+            // Starring again keeps the first time.
+            Assert.Equal("ok", (await Answer($"/rest/star.view?id=tr-{_filed.Value:N}")).GetProperty("status").GetString());
+            Assert.Equal(first, await Starred(song, "song"));
+
+            // The scanned file gains a recording and keeps its heart; unstarring it takes it off.
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                (await db.MediaFiles.SingleAsync(file => file.Id == _scanned, Token)).RecordingId = later.Id;
+                await db.SaveChangesAsync(Token);
+            }
+
+            Assert.NotNull(await Starred(scanned, "song"));
+            Assert.Equal("ok", (await Answer($"/rest/unstar.view?id=tr-{_scanned.Value:N}")).GetProperty("status").GetString());
+            Assert.Null(await Starred(scanned, "song"));
+
+            Assert.Equal(
+                "ok",
+                (await Answer($"/rest/unstar.view?id=tr-{_filed.Value:N}&albumId={a}&artistId=ar-{artist.Value:N}&id=wk-{piece.Id.Value:N}")).GetProperty("status").GetString());
+            Assert.Null(await Starred($"/rest/getSong.view?id=tr-{copy.Value:N}", "song"));
+            Assert.Null(await Starred($"/rest/getAlbum.view?id={a}", "album"));
+            Assert.False((await Answer("/rest/getAlbumList2.view?type=starred")).GetProperty("albumList2").TryGetProperty("album", out var none) && none.GetArrayLength() > 0);
+            Assert.Empty(await Listed("artist"));
+            Assert.Empty(await Listed("song"));
+            Assert.Equal("ok", (await Answer($"/rest/unstar.view?albumId={a}")).GetProperty("status").GetString());
+
+            // A copy loved as itself before it was identified is the song's heart:
+            // every copy shows it, starring again keeps its time, and unstarring
+            // any copy takes it off.
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                db.Loves.Add(new Love { Id = Guid.CreateVersion7(), MediaFileId = copy, LovedUtc = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture) });
+                await db.SaveChangesAsync(Token);
+            }
+
+            var early = await Starred(song, "song");
+            Assert.NotNull(early);
+            Assert.Equal([$"tr-{_filed.Value:N}"], await Listed("song"));
+            Assert.Equal("ok", (await Answer($"/rest/star.view?id=tr-{_filed.Value:N}")).GetProperty("status").GetString());
+            Assert.Equal(early, await Starred(song, "song"));
+            Assert.Equal("ok", (await Answer($"/rest/unstar.view?id=tr-{_filed.Value:N}")).GetProperty("status").GetString());
+            Assert.Null(await Starred($"/rest/getSong.view?id=tr-{copy.Value:N}", "song"));
+
+            await using var check = PostgresFixture.CreateContext(_connectionString);
+            Assert.False(await check.Loves.AnyAsync(Token));
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.Loves.RemoveRange(await db.Loves.ToListAsync(Token));
+            (await db.MediaFiles.SingleAsync(file => file.Id == _scanned, Token)).RecordingId = null;
+            db.MediaFiles.Remove(await db.MediaFiles.SingleAsync(file => file.Id == copy, Token));
+            db.MediaFiles.Remove(await db.MediaFiles.SingleAsync(file => file.Id == gloria.Id, Token));
+            await db.SaveChangesAsync(Token);
+            db.ReleaseGroups.RemoveRange(await db.ReleaseGroups.Where(row => row.Id == sunday.Id || row.Id == unheld.Id).ToListAsync(Token));
+            db.Recordings.Remove(await db.Recordings.SingleAsync(row => row.Id == later.Id, Token));
+            db.Works.RemoveRange(await db.Works.Where(row => row.Id == part.Id || row.Id == piece.Id).ToListAsync(Token));
             await db.SaveChangesAsync(Token);
         }
     }

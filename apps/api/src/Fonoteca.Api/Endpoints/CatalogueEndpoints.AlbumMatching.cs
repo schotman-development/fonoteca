@@ -1266,6 +1266,11 @@ public static partial class CatalogueEndpoints
 
         foreach (var row in rows)
         {
+            if (row.ReleaseGroupId is { } shelved)
+            {
+                await CatalogueWriter.CarryAlbumLovesAsync(db, shelved, album, cancellationToken).ConfigureAwait(false);
+            }
+
             row.ReleaseGroupId = album;
             row.ReleaseId = null;
             row.TrackId = null;
@@ -1281,6 +1286,11 @@ public static partial class CatalogueEndpoints
 
         foreach (var (row, recording) in seats)
         {
+            if (row.RecordingId is { } shopped)
+            {
+                await CatalogueWriter.CarryMintedLovesAsync(db, shopped, recording, cancellationToken).ConfigureAwait(false);
+            }
+
             row.RecordingId = recording;
             row.IdentityDecidedUtc = now;
             row.EnrichmentOutcome = ByCaller(caller, EnrichmentOutcome.LinkedByPerson);

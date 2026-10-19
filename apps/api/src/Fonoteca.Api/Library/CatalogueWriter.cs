@@ -114,6 +114,65 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
+    /// A heart on a song goes with its files to the recording row that now
+    /// holds them, wherever the old row is about to go: a merge, and the rows
+    /// a download minted that MusicBrainz names. Saved by the caller.
+    /// </summary>
+    /// <remarks>
+    /// Once: where the new row is loved already, the old row's love cascades
+    /// away with it. The change tracker is asked as well as the database,
+    /// because two of an album's rows can fold into one before the save.
+    /// </remarks>
+    internal static async Task CarryLovesAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
+    {
+        if (from == to
+            || db.Loves.Local.Any(love => love.RecordingId == to)
+            || await db.Loves.AnyAsync(love => love.RecordingId == to, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        foreach (var love in await db.Loves.Where(love => love.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        {
+            love.RecordingId = to;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="CarryLovesAsync"/> for a file leaving a recording a download
+    /// minted, the one kind its move makes go. A recording MusicBrainz knows
+    /// stays, and keeps its heart for its other copies.
+    /// </summary>
+    internal static async Task CarryMintedLovesAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
+    {
+        if (await db.Recordings.AnyAsync(recording => recording.Id == from && recording.Mbid == null, cancellationToken).ConfigureAwait(false))
+        {
+            await CarryLovesAsync(db, from, to, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// An album's heart goes with its files from a release group a download
+    /// minted to the one they are filed under now, as a song's does. Saved by
+    /// the caller.
+    /// </summary>
+    internal static async Task CarryAlbumLovesAsync(FonotecaDbContext db, ReleaseGroupId from, ReleaseGroupId to, CancellationToken cancellationToken)
+    {
+        if (from == to
+            || db.Loves.Local.Any(love => love.ReleaseGroupId == to)
+            || await db.Loves.AnyAsync(love => love.ReleaseGroupId == to, cancellationToken).ConfigureAwait(false)
+            || !await db.ReleaseGroups.AnyAsync(group => group.Id == from && group.Mbid == null, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        foreach (var love in await db.Loves.Where(love => love.ReleaseGroupId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        {
+            love.ReleaseGroupId = to;
+        }
+    }
+
+    /// <summary>
     /// Moves everything that hangs off the row for a merged MBID onto the
     /// recording it was merged into, and removes that row.
     /// </summary>
@@ -173,6 +232,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         {
             db.Entry(track).Property(t => t.RecordingId).CurrentValue = survivor.Id;
         }
+
+        await CarryLovesAsync(db, stale.Id, survivor.Id, cancellationToken).ConfigureAwait(false);
 
         db.ArtistCredits.RemoveRange(await db.ArtistCredits
             .Where(c => c.RecordingId == stale.Id)

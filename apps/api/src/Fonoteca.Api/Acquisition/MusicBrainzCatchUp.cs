@@ -291,6 +291,8 @@ public sealed class MusicBrainzCatchUp(
                 // merged MusicBrainz recording is.
                 var into = holder.Value;
 
+                await CatalogueWriter.CarryLovesAsync(db, recording, into, cancellationToken).ConfigureAwait(false);
+
                 await db.MediaFiles
                     .Where(file => file.RecordingId == recording)
                     .ExecuteUpdateAsync(update => update.SetProperty(file => file.RecordingId, into), cancellationToken)
@@ -352,6 +354,16 @@ public sealed class MusicBrainzCatchUp(
                 || writer.RecordingIdAt(written, slot.DiscNumber, slot.Position) is not { } recording)
             {
                 continue;
+            }
+
+            if (file.RecordingId is { } shopped)
+            {
+                await CatalogueWriter.CarryMintedLovesAsync(db, shopped, recording, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (file.ReleaseGroupId is { } shelved && group is { } named)
+            {
+                await CatalogueWriter.CarryAlbumLovesAsync(db, shelved, named, cancellationToken).ConfigureAwait(false);
             }
 
             file.ReleaseId = written;

@@ -125,11 +125,12 @@ public static partial class SubsonicEndpoints
     /// A shelf of albums.
     /// </summary>
     /// <remarks>
-    /// <b>Three of the protocol's list types come back empty on purpose.</b>
-    /// <c>frequent</c>, <c>recent</c> and <c>starred</c> are questions about
-    /// listening, and nothing here records a play or a star — so an album list
-    /// is the wrong answer to all three. Empty says "nothing"; a list of albums
-    /// would say "these are your most played", which would be an invention.
+    /// <b>Two of the protocol's list types come back empty on purpose.</b>
+    /// <c>frequent</c> and <c>recent</c> are questions about listening, and
+    /// nothing here records a play — so an album list is the wrong answer to
+    /// both. Empty says "nothing"; a list of albums would say "these are your
+    /// most played", which would be an invention. <c>starred</c> is the loved
+    /// albums, newest love first.
     /// </remarks>
     private static async Task<IResult> GetAlbumList2(
         HttpContext http,
@@ -140,7 +141,7 @@ public static partial class SubsonicEndpoints
         var size = Number(http, "size", DefaultListSize, MaxListSize);
         var offset = Number(http, "offset", 0, int.MaxValue);
 
-        if (type is "frequent" or "recent" or "starred")
+        if (type is "frequent" or "recent")
         {
             return SubsonicResult.Ok(
                 "albumList2",
@@ -169,6 +170,8 @@ public static partial class SubsonicEndpoints
                 : [],
 
             "random" => albums.OrderBy(_ => Random.Shared.Next()),
+
+            "starred" => albums.Where(album => album.Starred is not null).OrderByDescending(album => album.Starred),
 
             _ => albums.OrderBy(album => album.Name, StringComparer.OrdinalIgnoreCase),
         };
@@ -414,6 +417,7 @@ public static partial class SubsonicEndpoints
         // placeholder. `artistImageUrl` stays for clients that read only that.
         writer.Attr("coverArt", artist.Pictured ? SubsonicIds.Artist(artist.Id) : null);
         writer.Attr("artistImageUrl", artist.Portrait);
+        writer.Attr("starred", artist.Starred);
     }
 
     private static void WriteAlbum(ISubsonicWriter writer, Album album)
@@ -432,6 +436,7 @@ public static partial class SubsonicEndpoints
         writer.Attr("songCount", album.SongCount);
         writer.Attr("duration", album.Duration);
         writer.Attr("created", album.Created);
+        writer.Attr("starred", album.Starred);
         writer.Attr("year", album.Year);
         writer.Attr("genre", album.Genres.Count > 0 ? album.Genres[0] : null);
         writer.Attr("musicBrainzId", album.Mbid?.Value.ToString());
@@ -476,6 +481,7 @@ public static partial class SubsonicEndpoints
         writer.Attr("albumId", song.AlbumId is { } owner ? SubsonicIds.Album(owner) : null);
         writer.Attr("artistId", song.ArtistId is { } billed ? SubsonicIds.Artist(billed) : null);
         writer.Attr("created", song.Created);
+        writer.Attr("starred", song.Starred);
         writer.Attr("type", "music");
         writer.Attr("isVideo", false);
         writer.Attr("genre", song.Genres.Count > 0 ? song.Genres[0] : null);
@@ -579,7 +585,8 @@ internal sealed record SubsonicArtist(
     Mbid? Mbid,
     string? Portrait,
     int AlbumCount,
-    bool Pictured);
+    bool Pictured,
+    DateTimeOffset? Starred);
 
 /// <summary>A release group, as an album.</summary>
 /// <param name="Added">
@@ -602,7 +609,8 @@ internal sealed record Album(
     int Duration,
     Guid Added,
     DateTimeOffset? Created,
-    IReadOnlyList<string> Genres);
+    IReadOnlyList<string> Genres,
+    DateTimeOffset? Starred);
 
 /// <summary>A media file, as a song.</summary>
 /// <param name="Id">Already in its wire form: a catalogued file is <c>tr-</c>, anything else <c>fo-</c>.</param>
@@ -632,7 +640,8 @@ internal sealed record Song(
     SongReplayGain? ReplayGain,
     SongWork? Work,
     IReadOnlyList<SongContributor> Contributors,
-    SongRecorded? Recorded);
+    SongRecorded? Recorded,
+    DateTimeOffset? Starred);
 
 /// <summary>One credit, by the tag write's role; an artist the catalogue has no row for has no id.</summary>
 internal sealed record SongContributor(string Role, string? SubRole, ArtistId? ArtistId, string Name, Mbid? Mbid);
