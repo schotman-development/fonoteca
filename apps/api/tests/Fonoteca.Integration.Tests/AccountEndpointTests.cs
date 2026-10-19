@@ -21,7 +21,8 @@ namespace Fonoteca.Integration.Tests;
 [Collection(nameof(PostgresCollection))]
 public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private const string Password = "A-test-passw0rd";
+    // Sixteen lower-case letters: the shortest password there is, and all it needs.
+    private const string Password = "sixteenlowercase";
 
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
@@ -74,7 +75,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             Assert.Equal(HttpStatusCode.Unauthorized, closed.StatusCode);
         }
 
-        using (var weak = await stranger.PostAsJsonAsync(new Uri("/api/account/setup", UriKind.Relative), new { name = "me", password = "short" }, Token))
+        using (var weak = await stranger.PostAsJsonAsync(new Uri("/api/account/setup", UriKind.Relative), new { name = "me", password = new string('a', 15) }, Token))
         {
             Assert.Equal(HttpStatusCode.BadRequest, weak.StatusCode);
         }
@@ -170,7 +171,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         var you = await me.AddAccountAsync("you", Password, Token);
 
         using var client = _factory.CreateClient();
-        Assert.Equal("ok", (await SubsonicAsync(client, $"ping.view?u=you&{TokenFor("A-test-passw0rd")}")).GetProperty("status").GetString());
+        Assert.Equal("ok", (await SubsonicAsync(client, $"ping.view?u=you&{TokenFor(Password)}")).GetProperty("status").GetString());
 
         using var yourBrowser = _factory.CreateClient();
         (await SignInAsync(yourBrowser, "you", Password)).Dispose();
@@ -180,7 +181,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             Assert.Equal(HttpStatusCode.BadRequest, weak.StatusCode);
         }
 
-        using (var reset = await me.PostAsJsonAsync(new Uri($"/api/accounts/{you}/password", UriKind.Relative), new { password = "N3w-password" }, Token))
+        using (var reset = await me.PostAsJsonAsync(new Uri($"/api/accounts/{you}/password", UriKind.Relative), new { password = "a-new-passphrase" }, Token))
         {
             Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
         }
@@ -192,18 +193,18 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         }
 
         Assert.Equal(40, (await SubsonicAsync(client, $"ping.view?u=you&p={Password}")).GetProperty("error").GetProperty("code").GetInt32());
-        Assert.Equal("ok", (await SubsonicAsync(client, $"ping.view?u=you&{TokenFor("N3w-password")}")).GetProperty("status").GetString());
-        Assert.Equal("ok", (await SubsonicAsync(client, "ping.view?u=you&p=N3w-password")).GetProperty("status").GetString());
+        Assert.Equal("ok", (await SubsonicAsync(client, $"ping.view?u=you&{TokenFor("a-new-passphrase")}")).GetProperty("status").GetString());
+        Assert.Equal("ok", (await SubsonicAsync(client, "ping.view?u=you&p=a-new-passphrase")).GetProperty("status").GetString());
 
         using (var old = await SignInAsync(client, "you", Password))
-        using (var current = await SignInAsync(client, "you", "N3w-password"))
+        using (var current = await SignInAsync(client, "you", "a-new-passphrase"))
         {
             Assert.Equal(HttpStatusCode.Unauthorized, old.StatusCode);
             Assert.Equal(HttpStatusCode.OK, current.StatusCode);
         }
 
         // Resetting one's own password keeps one signed in.
-        using (var own = await me.PostAsJsonAsync(new Uri($"/api/accounts/{(await MeAsync(me))}/password", UriKind.Relative), new { password = "An0ther-one" }, Token))
+        using (var own = await me.PostAsJsonAsync(new Uri($"/api/accounts/{(await MeAsync(me))}/password", UriKind.Relative), new { password = "another-passphrase" }, Token))
         {
             Assert.Equal(HttpStatusCode.NoContent, own.StatusCode);
         }

@@ -190,11 +190,7 @@ function AccountActions({
           </Stack>
         }
       >
-        <Field
-          label="Password"
-          hint="At least 6 characters, with an upper- and a lower-case letter, a digit and a symbol."
-          error={error ?? undefined}
-        >
+        <Field label="Password" hint="At least 16 characters." error={error ?? undefined}>
           {(control) => (
             <Input
               {...control}

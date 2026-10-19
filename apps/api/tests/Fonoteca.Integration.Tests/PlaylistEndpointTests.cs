@@ -24,7 +24,7 @@ namespace Fonoteca.Integration.Tests;
 [Collection(nameof(PostgresCollection))]
 public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private const string Password = "A-test-passw0rd";
+    private const string Password = "a-test-passphrase";
     private const string Credentials = $"u=me&p={Password}&v=1.16.1&c=test&f=json";
 
     private const string Lossless = "Fleetwood Mac/Rumours (1977)/07 - The Chain.flac";

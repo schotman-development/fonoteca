@@ -76,14 +76,7 @@ export function SignInPage({
               )}
             </Field>
 
-            <Field
-              label="Password"
-              hint={
-                setUp
-                  ? 'At least 6 characters, with an upper- and a lower-case letter, a digit and a symbol.'
-                  : undefined
-              }
-            >
+            <Field label="Password" hint={setUp ? 'At least 16 characters.' : undefined}>
               {(control) => (
                 <Input
                   {...control}

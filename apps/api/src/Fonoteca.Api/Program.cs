@@ -313,8 +313,17 @@ builder.Services.AddSignalR();
 // cookie void.
 builder.Services.AddDataProtection().SetApplicationName("Fonoteca");
 
+// A password is long and nothing else, the owner's choice: no digit, case or
+// symbol rules.
 builder.Services
-    .AddIdentityCore<Account>()
+    .AddIdentityCore<Account>(identity =>
+    {
+        identity.Password.RequiredLength = 16;
+        identity.Password.RequireDigit = false;
+        identity.Password.RequireLowercase = false;
+        identity.Password.RequireUppercase = false;
+        identity.Password.RequireNonAlphanumeric = false;
+    })
     .AddEntityFrameworkStores<FonotecaDbContext>()
     .AddSignInManager()
     .AddDefaultTokenProviders();

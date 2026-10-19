@@ -31,7 +31,7 @@ namespace Fonoteca.Integration.Tests;
 [Collection(nameof(PostgresCollection))]
 public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private const string Password = "A-test-passw0rd";
+    private const string Password = "a-test-passphrase";
 
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
