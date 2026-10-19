@@ -933,13 +933,16 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     /// A song names who played on it and wrote it, each once, under the tag
     /// write's roles; when and where it was played; and when its piece was
     /// written — in both formats, and a song MusicBrainz says none of this
-    /// about carries an empty list and nothing else.
+    /// about carries an empty list and nothing else. Its artists are whom its
+    /// artist line bills, each once, under the ids the credits carry.
     /// </summary>
     [Fact]
     public async Task ASongCarriesItsPlayersAndWhenAndWhereItWasPlayed()
     {
         var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "The Sleeping Beauty", Genres = "classical" };
         var previn = new Artist { Id = ArtistId.New(), Name = "André Previn", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var haendel = new Artist { Id = ArtistId.New(), Name = "Ида Гендель", LatinName = "Ida Haendel" };
+        var lso = new Artist { Id = ArtistId.New(), Name = "London Symphony Orchestra" };
         var orchestra = new Mbid(Guid.CreateVersion7());
         var tchaikovsky = new Mbid(Guid.CreateVersion7());
         var ballet = new Work { Id = WorkId.New(), Title = "The Sleeping Beauty, op. 66", Mbid = new Mbid(Guid.CreateVersion7()), Type = "Ballet", PartCount = 3, ComposedBegin = "1888", ComposedEnd = "1889" };
@@ -977,6 +980,17 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             End = end,
         };
 
+        ArtistCredit Credit(Artist artist, RecordingId? recording, ReleaseGroupId? album, string? creditedAs, string? join) => new()
+        {
+            Id = Guid.CreateVersion7(),
+            ArtistId = artist.Id,
+            RecordingId = recording,
+            ReleaseGroupId = album,
+            Position = position++,
+            CreditedAs = creditedAs,
+            JoinPhrase = join,
+        };
+
         RecordingSession Session(string type, string name, string? begin, string? end) => new()
         {
             Id = Guid.CreateVersion7(),
@@ -991,7 +1005,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
             db.ReleaseGroups.Add(album);
-            db.Artists.Add(previn);
+            db.Artists.AddRange(previn, haendel, lso);
             db.Works.AddRange(ballet, scene);
             db.Recordings.AddRange(played, bare, pop);
             db.MediaFiles.AddRange(files);
@@ -1010,6 +1024,16 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
                 Session("recorded at", "Abbey Road Studios: Studio 1", "1974-04-08", "1974-04-09"),
                 Session("recorded at", "Abbey Road Studios: Studio 1", "1974-06-29", "1974-06-29"),
                 Session("recorded in", "London", null, null));
+
+            // The recording bills a soloist as the sleeve spells her and the
+            // conductor twice, as MusicBrainz writes "Marvin Gaye = Marvin
+            // Gaye"; the album bills the conductor alone.
+            db.ArtistCredits.AddRange(
+                Credit(haendel, played.Id, null, "Ida Händel", ", "),
+                Credit(lso, played.Id, null, null, ", "),
+                Credit(previn, played.Id, null, "Previn", " = "),
+                Credit(previn, played.Id, null, "Previn", null),
+                Credit(previn, null, album.Id, null, null));
             await db.SaveChangesAsync(Token);
         }
 
@@ -1044,6 +1068,16 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
                         artist.GetProperty("name").GetString(),
                         artist.TryGetProperty("musicBrainzId", out var mbid) ? mbid.GetString() : null);
                 }));
+
+            List<(string?, string?)> Artists(JsonElement row) =>
+                [.. row.GetProperty("artists").EnumerateArray().Select(artist => (artist.GetProperty("id").GetString(), artist.GetProperty("name").GetString()))];
+
+            Assert.Equal("Ida Händel, London Symphony Orchestra, Previn = Previn", song.GetProperty("artist").GetString());
+            Assert.Equal(
+                [($"ar-{haendel.Id.Value:N}", "Ida Haendel"), ($"ar-{lso.Id.Value:N}", "London Symphony Orchestra"), ($"ar-{previn.Id.Value:N}", "André Previn")],
+                Artists(song));
+            Assert.Equal([($"ar-{previn.Id.Value:N}", "André Previn")], Artists(songs[bare.Title]));
+            Assert.All(song.GetProperty("artists").EnumerateArray(), artist => Assert.Equal(2, artist.EnumerateObject().Count()));
 
             var recorded = song.GetProperty("recorded");
             Assert.Equal("""{"year":1974,"month":4,"day":8}""", recorded.GetProperty("from").GetRawText());
@@ -1082,6 +1116,9 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Assert.Equal("1974", element.Element(ns + "recorded")?.Element(ns + "from")?.Attribute("year")?.Value);
             Assert.Equal(["Abbey Road Studios: Studio 1"], element.Element(ns + "recorded")!.Elements(ns + "places").Select(place => place.Value));
             Assert.Equal("1889", element.Element(ns + "works")?.Element(ns + "composed")?.Element(ns + "to")?.Attribute("year")?.Value);
+            Assert.Equal(
+                [$"ar-{haendel.Id.Value:N}", $"ar-{lso.Id.Value:N}", $"ar-{previn.Id.Value:N}"],
+                element.Elements(ns + "artists").Select(artist => artist.Attribute("id")?.Value));
 
             var extensions = (await JsonAsync(client, "/rest/getOpenSubsonicExtensions.view"))
                 .GetProperty("subsonic-response")
@@ -1093,6 +1130,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         finally
         {
             await using var db = PostgresFixture.CreateContext(_connectionString);
+            var artistIds = new[] { previn.Id, haendel.Id, lso.Id };
+            db.ArtistCredits.RemoveRange(await db.ArtistCredits.Where(row => artistIds.Contains(row.ArtistId)).ToListAsync(Token));
             var workIds = new[] { ballet.Id, scene.Id };
             db.Contributions.RemoveRange(await db.Contributions.Where(row => row.WorkId != null && workIds.Contains(row.WorkId.Value)).ToListAsync(Token));
             db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
@@ -1100,7 +1139,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             db.Recordings.RemoveRange(await db.Recordings.Where(row => ids.Contains(row.Id)).ToListAsync(Token));
             await db.SaveChangesAsync(Token);
             db.Works.RemoveRange(await db.Works.Where(row => workIds.Contains(row.Id)).OrderBy(row => row.ParentId == null).ToListAsync(Token));
-            db.Artists.Remove(await db.Artists.SingleAsync(row => row.Id == previn.Id, Token));
+            db.Artists.RemoveRange(await db.Artists.Where(row => artistIds.Contains(row.Id)).ToListAsync(Token));
             db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
             await db.SaveChangesAsync(Token);
         }

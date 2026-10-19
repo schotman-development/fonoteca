@@ -485,6 +485,15 @@ public static partial class SubsonicEndpoints
         // with the piece. Only a classical work names one, so a pop album
         // stays a plain list. An attribute, so before the first child.
         writer.Attr("displayComposer", song.Work?.Composer);
+
+        // OpenSubsonic's: each artist the artist line bills, once, in its
+        // order, with the fields the spec requires and no more. Named as
+        // getArtist names them, not as the sleeve prints them.
+        writer.Children<(ArtistId Id, string Name)>("artists", song.Artists, static (artists, artist) =>
+        {
+            artists.Attr("id", SubsonicIds.Artist(artist.Id));
+            artists.Attr("name", artist.Name);
+        });
         writer.Children("genres", song.Genres, WriteGenre);
         writer.Children<SongPiece>("works", song.Work?.Piece is { } piece ? [piece] : [], static (works, piece) =>
         {
@@ -605,6 +614,7 @@ internal sealed record Song(
     ReleaseGroupId? AlbumId,
     string? Artist,
     ArtistId? ArtistId,
+    IReadOnlyList<(ArtistId Id, string Name)> Artists,
     int? Track,
     int? DiscNumber,
     int? Year,

@@ -250,7 +250,11 @@ composition is the work, never a performance, and the same set a song's
 `works` names — and open one with its movements and every song of it on
 every album (`SubsonicEndpoints.Compositions.cs`). OpenSubsonic has no way to
 list either; a client that does not look for the extension loses nothing
-(the owner's choice).
+(the owner's choice). *Amended 2026-10-19:* a song carries OpenSubsonic's
+`artists`, each artist its `artist` line bills, once and in billing order, with
+an id and a name alone as the spec asks — the name getArtist gives, not the one
+the sleeve prints (the owner's choice, for a client finding who a run of songs
+shares).
 
 ### Scope
 

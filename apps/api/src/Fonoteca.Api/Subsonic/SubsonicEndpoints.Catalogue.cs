@@ -313,21 +313,24 @@ public static partial class SubsonicEndpoints
                     .Select(credit => new CreditRow(
                         credit.ArtistId,
                         credit.CreditedAs ?? (credit.Artist!.LatinName ?? credit.Artist!.Name),
-                        credit.JoinPhrase))
+                        credit.JoinPhrase,
+                        credit.Artist!.LatinName ?? credit.Artist!.Name))
                     .ToList(),
                 file.ReleaseGroup!.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new CreditRow(
                         credit.ArtistId,
                         credit.CreditedAs ?? (credit.Artist!.LatinName ?? credit.Artist!.Name),
-                        credit.JoinPhrase))
+                        credit.JoinPhrase,
+                        credit.Artist!.LatinName ?? credit.Artist!.Name))
                     .ToList(),
                 file.Recording!.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new CreditRow(
                         credit.ArtistId,
                         credit.CreditedAs ?? (credit.Artist!.LatinName ?? credit.Artist!.Name),
-                        credit.JoinPhrase))
+                        credit.JoinPhrase,
+                        credit.Artist!.LatinName ?? credit.Artist!.Name))
                     .ToList()))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -606,6 +609,9 @@ public static partial class SubsonicEndpoints
         var ownLine = CatalogueEndpoints.CreditLine(
             row.RecordingCredits.Select(credit => (credit.Name, credit.JoinPhrase)));
 
+        // Whoever the artist line bills, the recording's own over the album's.
+        var billed = row.RecordingCredits.Count > 0 ? row.RecordingCredits : albumCredits;
+
         var duration = row.Quality?.Duration ?? row.TrackLength ?? row.RecordingDuration;
         var preview = FilePreview.Of(row.Path);
 
@@ -618,9 +624,8 @@ public static partial class SubsonicEndpoints
                 : PersonEdits.Apply(edits, "title", row.AlbumTitle) ?? row.AlbumTitle,
             row.AlbumId,
             ownLine ?? PersonEdits.Apply(edits, "credit", albumLine),
-            (row.RecordingCredits.Count > 0 ? row.RecordingCredits : albumCredits)
-                .Select(credit => (ArtistId?)credit.ArtistId)
-                .FirstOrDefault(),
+            billed.Select(credit => (ArtistId?)credit.ArtistId).FirstOrDefault(),
+            [.. billed.DistinctBy(credit => credit.ArtistId).Select(credit => (credit.ArtistId, credit.ArtistName))],
             // The pressing's numbers where one is claimed, otherwise the file's
             // own: what the file says about itself, never a number made up.
             row.Position ?? row.TagTrack,
@@ -696,6 +701,6 @@ public static partial class SubsonicEndpoints
         string? ComposedBegin,
         string? ComposedEnd);
 
-    /// <summary>One line of a billing, already resolved to what it prints.</summary>
-    private sealed record CreditRow(ArtistId ArtistId, string Name, string? JoinPhrase);
+    /// <summary>One line of a billing, already resolved to what it prints, and the artist's own name.</summary>
+    private sealed record CreditRow(ArtistId ArtistId, string Name, string? JoinPhrase, string ArtistName);
 }
