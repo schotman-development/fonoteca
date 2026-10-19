@@ -150,6 +150,8 @@ public static partial class SubsonicEndpoints
         Map(group, "search3", Search3);
         Map(group, "getGenres", GetGenres);
         Map(group, "getSongsByGenre", GetSongsByGenre);
+        Map(group, "getComposers", GetComposers);
+        Map(group, "getCompositions", GetCompositions);
 
         Map(group, "stream", Stream);
         Map(group, "download", Download);
@@ -246,7 +248,7 @@ public static partial class SubsonicEndpoints
 
     /// <summary>
     /// The extensions this server implements: timed lyrics, and Fonoteca's own
-    /// album motion and performance dates.
+    /// album motion, performance dates and compositions.
     /// </summary>
     /// <remarks>
     /// The presence of the response is how a client learns the server is an
@@ -258,11 +260,14 @@ public static partial class SubsonicEndpoints
     /// <c>fonotecaPerformance</c> is two fields the protocol has no place for: a
     /// song's <c>recorded</c> (<c>from</c>, <c>to</c>, <c>places</c>) and its
     /// piece's <c>composed</c> (<c>from</c>, <c>to</c>), each date an ItemDate.
+    /// <c>fonotecaCompositions</c> is <c>getComposers</c> and
+    /// <c>getCompositions</c>: who wrote the classical pieces held, and each
+    /// piece with its songs.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

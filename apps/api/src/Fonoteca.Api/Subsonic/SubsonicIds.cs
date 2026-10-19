@@ -35,12 +35,16 @@ internal static class SubsonicIds
     private const string PathPrefix = "fo-";
     private const string PlaylistPrefix = "pl-";
     private const string PlaylistFilePrefix = "pf-";
+    private const string WorkPrefix = "wk-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
     internal static string Album(ReleaseGroupId id) => AlbumPrefix + id.Value.ToString("N");
 
     internal static string Song(MediaFileId id) => SongPrefix + id.Value.ToString("N");
+
+    /// <summary>A composition: the whole piece, never a performance of it.</summary>
+    internal static string Work(WorkId id) => WorkPrefix + id.Value.ToString("N");
 
     internal static string Playlist(PlaylistId id) => PlaylistPrefix + id.Value.ToString("N");
 
@@ -59,6 +63,9 @@ internal static class SubsonicIds
 
     internal static MediaFileId? AsSong(string? id) =>
         Guid(id, SongPrefix) is { } value ? new MediaFileId(value) : null;
+
+    internal static WorkId? AsWork(string? id) =>
+        Guid(id, WorkPrefix) is { } value ? new WorkId(value) : null;
 
     internal static PlaylistId? AsPlaylist(string? id) =>
         Guid(id, PlaylistPrefix) is { } value ? new PlaylistId(value) : null;

@@ -746,6 +746,190 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// Whoever composed a held classical piece is listed with how many they
+    /// wrote; the pieces are listed by name, all or one composer's, and one
+    /// opens with its movements in order and every song of it on every album.
+    /// A song, a movement, nobody and a composer with no row are none of these.
+    /// </summary>
+    [Fact]
+    public async Task TheComposersAndTheirCompositionsAreListedAndOneOpensWithItsSongs()
+    {
+        var studio = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Beethoven & Weber", Genres = "classical" };
+        var live = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Beethoven Live", Genres = "classical" };
+        var beethoven = new Artist
+        {
+            Id = ArtistId.New(),
+            Name = "Ludwig van Beethoven",
+            SortName = "Beethoven, Ludwig van",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PortraitUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/Beethoven.jpg",
+        };
+        var brahms = new Artist { Id = ArtistId.New(), Name = "Johannes Brahms", SortName = "Brahms, Johannes", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var weber = new Artist { Id = ArtistId.New(), Name = "Carl Maria von Weber", SortName = "Weber, Carl Maria von", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var traditional = new Artist { Id = ArtistId.New(), Name = "[traditional]", Mbid = new Mbid(Guid.Parse("9be7f096-97ec-4615-8957-8d40b5dcbc41")) };
+        var symphony = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Symphony No. 5 in C minor, Op. 67",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Type = "Symphony",
+            PartCount = 4,
+            ComposedBegin = "1804",
+            ComposedEnd = "1808",
+        };
+        var second = new Work { Id = WorkId.New(), Title = "Symphony No. 5 in C minor, Op. 67: II. Andante con moto", ParentId = symphony.Id, Position = 2 };
+        var first = new Work { Id = WorkId.New(), Title = "Symphony No. 5 in C minor, Op. 67: I. Allegro con brio", ParentId = symphony.Id, Position = 1 };
+        var freischutz = new Work { Id = WorkId.New(), Title = "Der Freischütz, J. 277: Overture" };
+        var festival = new Work { Id = WorkId.New(), Title = "Academic Festival Overture, Op. 80" };
+
+        // Ordered by place, which here is not the titles' order.
+        var egmont = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84" };
+        var lied = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Nr. 1 Lied: Die Trommel gerühret", ParentId = egmont.Id, Position = 2 };
+        var ouverture = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Ouvertüre", ParentId = egmont.Id, Position = 1 };
+        var adelaide = new Work { Id = WorkId.New(), Title = "Adelaide", Type = "Song" };
+        var played = new (Work Work, ReleaseGroup Album)[]
+        {
+            (second, studio), (first, studio), (first, live), (freischutz, studio), (lied, studio), (ouverture, studio), (festival, live), (adelaide, studio),
+        };
+        var recordings = played.Select(row => new Recording { Id = RecordingId.New(), Title = row.Work.Title, WorkId = row.Work.Id }).ToList();
+        var files = played
+            .Select((row, i) => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"{row.Album.Title}/0{i + 1} Track.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = recordings[i].Id,
+                ReleaseGroupId = row.Album.Id,
+            })
+            .ToList();
+
+        Contribution Composer(WorkId work, Mbid artist, string name) => new()
+        {
+            Id = Guid.CreateVersion7(),
+            WorkId = work,
+            Type = "composer",
+            ArtistMbid = artist,
+            Name = name,
+            Position = 0,
+        };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.AddRange(studio, live);
+            db.Artists.AddRange(beethoven, brahms, weber, traditional);
+            db.Works.AddRange(symphony, second, first, freischutz, festival, egmont, lied, ouverture, adelaide);
+            db.Recordings.AddRange(recordings);
+            db.MediaFiles.AddRange(files);
+
+            // The symphony's composer is on its movements, Egmont's on the
+            // piece; the overture's has no artist row; Adelaide is a song.
+            db.Contributions.AddRange(
+                Composer(first.Id, beethoven.Mbid!.Value, "Beethoven"),
+                Composer(second.Id, beethoven.Mbid!.Value, "Beethoven"),
+                Composer(freischutz.Id, weber.Mbid!.Value, "Weber"),
+                Composer(freischutz.Id, traditional.Mbid!.Value, "[traditional]"),
+                Composer(festival.Id, brahms.Mbid!.Value, "Brahms"),
+                Composer(egmont.Id, beethoven.Mbid!.Value, "Beethoven"),
+                Composer(ouverture.Id, new Mbid(Guid.CreateVersion7()), "L. van Beethoven"),
+                Composer(adelaide.Id, beethoven.Mbid!.Value, "Beethoven"));
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var composers = (await JsonAsync(client, "/rest/getComposers.view"))
+            .GetProperty("subsonic-response")
+            .GetProperty("composers")
+            .GetProperty("index")
+            .EnumerateArray()
+            .Select(index => (
+                index.GetProperty("name").GetString(),
+                index.GetProperty("composer").EnumerateArray().Select(composer => (
+                    composer.GetProperty("id").GetString(),
+                    composer.GetProperty("name").GetString(),
+                    composer.GetProperty("sortName").GetString(),
+                    composer.GetProperty("musicBrainzId").GetString(),
+                    composer.TryGetProperty("coverArt", out var cover) ? cover.GetString() : null,
+                    composer.GetProperty("compositionCount").GetInt32()))))
+            .SelectMany(index => index.Item2.Select(composer => (index.Item1, composer)))
+            .ToList();
+
+        var b = $"ar-{beethoven.Id.Value:N}";
+        var w = $"ar-{weber.Id.Value:N}";
+        Assert.Equal(
+            [
+                ("B", (b, "Ludwig van Beethoven", "Beethoven, Ludwig van", beethoven.Mbid!.Value.Value.ToString(), b, 2)),
+                ("B", ($"ar-{brahms.Id.Value:N}", "Johannes Brahms", "Brahms, Johannes", brahms.Mbid!.Value.Value.ToString(), (string?)null, 1)),
+                ("W", (w, "Carl Maria von Weber", "Weber, Carl Maria von", weber.Mbid!.Value.Value.ToString(), (string?)null, 1)),
+            ],
+            composers);
+
+        async Task<List<JsonElement>> CompositionsAsync(string query) =>
+            [.. (await JsonAsync(client, $"/rest/getCompositions.view{query}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("compositions")
+                .GetProperty("composition")
+                .EnumerateArray()];
+
+        static List<(string?, string?)> Writers(JsonElement piece) =>
+            [.. piece.GetProperty("composers").EnumerateArray().Select(composer => (composer.GetProperty("id").GetString(), composer.GetProperty("name").GetString()))];
+
+        var all = await CompositionsAsync("");
+        Assert.Equal([festival.Title, freischutz.Title, egmont.Title, symphony.Title], all.Select(piece => piece.GetProperty("name").GetString()));
+        Assert.Equal([(w, "Carl Maria von Weber")], Writers(all[1]));
+        Assert.Equal([(b, "Ludwig van Beethoven")], Writers(all[2]));
+        Assert.False(all[2].TryGetProperty("composed", out _));
+        Assert.Equal(1, all[2].GetProperty("albumCount").GetInt32());
+
+        var piece = all[3];
+        Assert.Equal($"wk-{symphony.Id.Value:N}", piece.GetProperty("id").GetString());
+        Assert.Equal(symphony.Mbid!.Value.Value.ToString(), piece.GetProperty("musicBrainzId").GetString());
+        Assert.Equal([(b, "Ludwig van Beethoven")], Writers(piece));
+        Assert.Equal("""{"year":1804}""", piece.GetProperty("composed").GetProperty("from").GetRawText());
+        Assert.Equal("""{"year":1808}""", piece.GetProperty("composed").GetProperty("to").GetRawText());
+        Assert.Equal(2, piece.GetProperty("albumCount").GetInt32());
+        Assert.Equal($"al-{studio.Id.Value:N}", piece.GetProperty("coverArt").GetString());
+        Assert.False(piece.TryGetProperty("song", out _));
+
+        Assert.Equal([egmont.Title, symphony.Title], (await CompositionsAsync($"?composerId={b}")).Select(row => row.GetProperty("name").GetString()));
+        Assert.Equal(
+            [("Ouvertüre", 1), ("Nr. 1 Lied: Die Trommel gerühret", 2)],
+            Assert.Single(await CompositionsAsync($"?id=wk-{egmont.Id.Value:N}")).GetProperty("movement").EnumerateArray()
+                .Select(part => (part.GetProperty("name").GetString(), part.GetProperty("number").GetInt32())));
+
+        var opened = Assert.Single(await CompositionsAsync($"?id=wk-{symphony.Id.Value:N}"));
+        Assert.Equal(
+            [("I. Allegro con brio", 1), ("II. Andante con moto", 2)],
+            opened.GetProperty("movement").EnumerateArray().Select(part => (part.GetProperty("name").GetString(), part.GetProperty("number").GetInt32())));
+        var songs = opened.GetProperty("song").EnumerateArray().ToList();
+        Assert.Equal(
+            files.Take(3).Select(file => $"tr-{file.Id.Value:N}").Order(),
+            songs.Select(song => song.GetProperty("id").GetString()).Order());
+        Assert.Contains(songs, song => song.GetProperty("albumId").GetString() == $"al-{live.Id.Value:N}");
+        Assert.All(songs, song => Assert.Equal(symphony.Title, Assert.Single(song.GetProperty("works").EnumerateArray()).GetProperty("name").GetString()));
+
+        foreach (var wrong in new[] { $"composerId=ar-{traditional.Id.Value:N}", $"composerId=ar-{Guid.CreateVersion7():N}", $"id=wk-{first.Id.Value:N}", $"id=wk-{adelaide.Id.Value:N}", "id=al-1" })
+        {
+            var refused = (await JsonAsync(client, $"/rest/getCompositions.view?{wrong}")).GetProperty("subsonic-response");
+            Assert.Equal("failed", refused.GetProperty("status").GetString());
+            Assert.Equal(70, refused.GetProperty("error").GetProperty("code").GetInt32());
+        }
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getCompositions.view?{Credentials}&id=wk-{symphony.Id.Value:N}", UriKind.Relative),
+            Token);
+
+        var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+        XNamespace ns = "http://subsonic.org/restapi";
+        var element = Assert.Single(xml.Descendants(ns + "composition"));
+        Assert.Equal(b, element.Element(ns + "composers")?.Attribute("id")?.Value);
+        Assert.Equal("1804", element.Element(ns + "composed")?.Element(ns + "from")?.Attribute("year")?.Value);
+        Assert.Equal(["1", "2"], element.Elements(ns + "movement").Select(part => part.Attribute("number")?.Value));
+        Assert.Equal(3, element.Elements(ns + "song").Count());
+    }
+
+    /// <summary>
     /// A song names who played on it and wrote it, each once, under the tag
     /// write's roles; when and where it was played; and when its piece was
     /// written — in both formats, and a song MusicBrainz says none of this
@@ -952,6 +1136,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("getAlbumList2&type=frequent")]
     [InlineData("getLyrics&artist=Nobody&title=Nothing")]
     [InlineData("getLyrics")]
+    [InlineData("getComposers")]
+    [InlineData("getCompositions")]
     public async Task EveryMethodAnswers(string method)
     {
         using var client = _factory!.CreateClient();
@@ -1021,7 +1207,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "fonotecaAlbumMotion", "fonotecaPerformance"], extensions);
+        Assert.Equal(["songLyrics", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions"], extensions);
     }
 
     /// <summary>

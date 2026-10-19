@@ -82,14 +82,16 @@ public static partial class SubsonicEndpoints
                     artist.Mbid,
                     artist.PortraitUrl,
                     group.Count(),
-                    Pictured: artist.Uploaded
-                        || PersonEdits.Apply(PersonEdits.Read(artist.EditsJson), ArtistImageKind.Portrait.Name, artist.PortraitUrl)
-                            is { Length: > 0 });
+                    Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl));
             })
             .OrderBy(artist => artist.SortName ?? artist.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(artist => artist.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    /// <summary>Whether an upload or a provider's picture stands for an artist: what getCoverArt serves for their id.</summary>
+    private static bool Pictured(bool uploaded, string? edits, string? portrait) =>
+        uploaded || PersonEdits.Apply(PersonEdits.Read(edits), ArtistImageKind.Portrait.Name, portrait) is { Length: > 0 };
 
     /// <summary>
     /// Every album the library holds files for.
@@ -476,7 +478,7 @@ public static partial class SubsonicEndpoints
         var works = await db.Works
             .AsNoTracking()
             .Where(work => wanted.Contains(work.Id))
-            .Select(work => new { work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd })
+            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd))
             .ToDictionaryAsync(work => work.Id, cancellationToken)
             .ConfigureAwait(false);
 
@@ -544,25 +546,26 @@ public static partial class SubsonicEndpoints
             if (!classical.Contains(id)) return new SongWork(composer, null, null);
 
             var whole = works[piece];
-            SongMovement? movement = null;
-
-            if (piece != id)
-            {
-                var part = works[id];
-                var parent = works[parents[id]];
-                var direct = parent.Id == piece;
-
-                movement = new SongMovement(
-                    Without(part.Title, whole.Title) ?? Without(part.Title, parent.Title) ?? part.Title,
-                    direct ? part.Position : null,
-                    direct ? parent.PartCount : null);
-            }
 
             return new SongWork(
                 composer,
-                new SongPiece(whole.Title, whole.Mbid, Performance.Span([(whole.ComposedBegin, whole.ComposedEnd)])),
-                movement);
+                PieceOf(whole),
+                piece == id ? null : MovementOf(works[id], works[parents[id]], whole));
         });
+    }
+
+    private static SongPiece PieceOf(WorkFacts whole) =>
+        new(whole.Title, whole.Mbid, Performance.Span([(whole.ComposedBegin, whole.ComposedEnd)]));
+
+    /// <summary>A part of the piece, named without the piece in front; numbered only where the piece is its parent.</summary>
+    private static SongMovement MovementOf(WorkFacts part, WorkFacts parent, WorkFacts whole)
+    {
+        var direct = parent.Id == whole.Id;
+
+        return new SongMovement(
+            Without(part.Title, whole.Title) ?? Without(part.Title, parent.Title) ?? part.Title,
+            direct ? part.Position : null,
+            direct ? parent.PartCount : null);
     }
 
     /// <summary>A part's title with the piece's in front taken off: "I. Allegro con brio".</summary>
@@ -681,6 +684,17 @@ public static partial class SubsonicEndpoints
         List<CreditRow> AlbumCredits,
         List<CreditRow> GroupCredits,
         List<CreditRow> RecordingCredits);
+
+    /// <summary>What a song's piece and movement are worded from.</summary>
+    private sealed record WorkFacts(
+        WorkId Id,
+        string Title,
+        Mbid? Mbid,
+        string? Type,
+        int? Position,
+        int? PartCount,
+        string? ComposedBegin,
+        string? ComposedEnd);
 
     /// <summary>One line of a billing, already resolved to what it prints.</summary>
     private sealed record CreditRow(ArtistId ArtistId, string Name, string? JoinPhrase);

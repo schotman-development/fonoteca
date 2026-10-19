@@ -243,14 +243,21 @@ WebP under Fonoteca's own `fonotecaAlbumMotion` extension (ADR 0014). *Amended
 2026-10-15:* a song carries OpenSubsonic's `contributors`, under the tag
 write's role names (`CreditTags.Role`), and under Fonoteca's own
 `fonotecaPerformance` extension when and where it was recorded and when its
-piece was composed (`Performance`).
+piece was composed (`Performance`). *Amended 2026-10-17:* `getComposers` and
+`getCompositions`, under Fonoteca's own `fonotecaCompositions` extension,
+list who composed the classical pieces held and the pieces themselves — a
+composition is the work, never a performance, and the same set a song's
+`works` names — and open one with its movements and every song of it on
+every album (`SubsonicEndpoints.Compositions.cs`). OpenSubsonic has no way to
+list either; a client that does not look for the extension loses nothing
+(the owner's choice).
 
 ### Scope
 
 One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
-`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
+`getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
 `getPlaylists`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 
