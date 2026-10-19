@@ -750,6 +750,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     /// wrote; the pieces are listed by name, all or one composer's, and one
     /// opens with its movements in order and every song of it on every album.
     /// A song, a movement, nobody and a composer with no row are none of these.
+    /// Each carries its form, key, period, movements, longest performance,
+    /// lyricists and languages; a film score's suite stays with its form.
     /// </summary>
     [Fact]
     public async Task TheComposersAndTheirCompositionsAreListedAndOneOpensWithItsSongs()
@@ -763,9 +765,11 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             SortName = "Beethoven, Ludwig van",
             Mbid = new Mbid(Guid.CreateVersion7()),
             PortraitUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/Beethoven.jpg",
+            BeganYear = 1770,
         };
-        var brahms = new Artist { Id = ArtistId.New(), Name = "Johannes Brahms", SortName = "Brahms, Johannes", Mbid = new Mbid(Guid.CreateVersion7()) };
-        var weber = new Artist { Id = ArtistId.New(), Name = "Carl Maria von Weber", SortName = "Weber, Carl Maria von", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var brahms = new Artist { Id = ArtistId.New(), Name = "Johannes Brahms", SortName = "Brahms, Johannes", Mbid = new Mbid(Guid.CreateVersion7()), BeganYear = 1833 };
+        var weber = new Artist { Id = ArtistId.New(), Name = "Carl Maria von Weber", SortName = "Weber, Carl Maria von", Mbid = new Mbid(Guid.CreateVersion7()), BeganYear = 1786 };
+        var goethe = new Artist { Id = ArtistId.New(), Name = "Johann Wolfgang von Goethe", Mbid = new Mbid(Guid.CreateVersion7()) };
         var traditional = new Artist { Id = ArtistId.New(), Name = "[traditional]", Mbid = new Mbid(Guid.Parse("9be7f096-97ec-4615-8957-8d40b5dcbc41")) };
         var symphony = new Work
         {
@@ -773,25 +777,34 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Title = "Symphony No. 5 in C minor, Op. 67",
             Mbid = new Mbid(Guid.CreateVersion7()),
             Type = "Symphony",
+            Key = "C minor",
             PartCount = 4,
             ComposedBegin = "1804",
             ComposedEnd = "1808",
         };
         var second = new Work { Id = WorkId.New(), Title = "Symphony No. 5 in C minor, Op. 67: II. Andante con moto", ParentId = symphony.Id, Position = 2 };
         var first = new Work { Id = WorkId.New(), Title = "Symphony No. 5 in C minor, Op. 67: I. Allegro con brio", ParentId = symphony.Id, Position = 1 };
-        var freischutz = new Work { Id = WorkId.New(), Title = "Der Freischütz, J. 277: Overture" };
+        var freischutz = new Work { Id = WorkId.New(), Title = "Der Freischütz, J. 277: Overture", Type = "Overture" };
         var festival = new Work { Id = WorkId.New(), Title = "Academic Festival Overture, Op. 80" };
 
         // Ordered by place, which here is not the titles' order.
-        var egmont = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84" };
-        var lied = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Nr. 1 Lied: Die Trommel gerühret", ParentId = egmont.Id, Position = 2 };
-        var ouverture = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Ouvertüre", ParentId = egmont.Id, Position = 1 };
+        var egmont = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84", Languages = "zxx" };
+        var lied = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Nr. 1 Lied: Die Trommel gerühret", ParentId = egmont.Id, Position = 2, Languages = "deu" };
+        var ouverture = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Ouvertüre", ParentId = egmont.Id, Position = 1, Languages = "zxx, deu" };
         var adelaide = new Work { Id = WorkId.New(), Title = "Adelaide", Type = "Song" };
+
+        // Typed on the whole, recorded by its movement: kept, as its form.
+        var suite = new Work { Id = WorkId.New(), Title = "The Empire Strikes Back: Suite", Type = "Soundtrack", ComposedBegin = "1980" };
+        var throne = new Work { Id = WorkId.New(), Title = "The Empire Strikes Back: Suite: The Imperial March", ParentId = suite.Id, Position = 1 };
         var played = new (Work Work, ReleaseGroup Album)[]
         {
-            (second, studio), (first, studio), (first, live), (freischutz, studio), (lied, studio), (ouverture, studio), (festival, live), (adelaide, studio),
+            (second, studio), (first, studio), (first, live), (freischutz, studio), (lied, studio), (ouverture, studio), (festival, live), (adelaide, studio), (throne, studio),
         };
-        var recordings = played.Select(row => new Recording { Id = RecordingId.New(), Title = row.Work.Title, WorkId = row.Work.Id }).ToList();
+
+        // The studio's two movements together outlast the live one, and one
+        // of its files was measured longer than its recording says.
+        var lengths = new Dictionary<WorkId, TimeSpan> { [second.Id] = TimeSpan.FromSeconds(600), [first.Id] = TimeSpan.FromSeconds(420) };
+        var recordings = played.Select(row => new Recording { Id = RecordingId.New(), Title = row.Work.Title, WorkId = row.Work.Id, Duration = lengths.TryGetValue(row.Work.Id, out var length) ? length : null }).ToList();
         var files = played
             .Select((row, i) => new MediaFile
             {
@@ -801,14 +814,17 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
                 LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
                 RecordingId = recordings[i].Id,
                 ReleaseGroupId = row.Album.Id,
+                Quality = row.Album == studio && row.Work == second
+                    ? new AudioQuality { Codec = "flac", SampleRateHz = 44_100, Channels = 2, BitDepth = 16, BitrateBps = 900_000, IsLossless = true, Duration = TimeSpan.FromSeconds(800) }
+                    : null,
             })
             .ToList();
 
-        Contribution Composer(WorkId work, Mbid artist, string name) => new()
+        Contribution Composer(WorkId work, Mbid artist, string name, string type = "composer") => new()
         {
             Id = Guid.CreateVersion7(),
             WorkId = work,
-            Type = "composer",
+            Type = type,
             ArtistMbid = artist,
             Name = name,
             Position = 0,
@@ -817,8 +833,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
             db.ReleaseGroups.AddRange(studio, live);
-            db.Artists.AddRange(beethoven, brahms, weber, traditional);
-            db.Works.AddRange(symphony, second, first, freischutz, festival, egmont, lied, ouverture, adelaide);
+            db.Artists.AddRange(beethoven, brahms, weber, traditional, goethe);
+            db.Works.AddRange(symphony, second, first, freischutz, festival, egmont, lied, ouverture, adelaide, suite, throne);
             db.Recordings.AddRange(recordings);
             db.MediaFiles.AddRange(files);
 
@@ -832,7 +848,14 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
                 Composer(festival.Id, brahms.Mbid!.Value, "Brahms"),
                 Composer(egmont.Id, beethoven.Mbid!.Value, "Beethoven"),
                 Composer(ouverture.Id, new Mbid(Guid.CreateVersion7()), "L. van Beethoven"),
-                Composer(adelaide.Id, beethoven.Mbid!.Value, "Beethoven"));
+                Composer(adelaide.Id, beethoven.Mbid!.Value, "Beethoven"),
+
+                // Goethe twice, once on the piece; a writer with no row; nobody.
+                Composer(lied.Id, goethe.Mbid!.Value, "Goethe", "lyricist"),
+                Composer(egmont.Id, goethe.Mbid!.Value, "Goethe", "librettist"),
+                Composer(ouverture.Id, new Mbid(Guid.CreateVersion7()), "Friedrich Mosengeil", "librettist"),
+                Composer(lied.Id, new Mbid(Guid.CreateVersion7()), "Friedrich Schiller", "lyricist"),
+                Composer(lied.Id, traditional.Mbid!.Value, "[traditional]", "lyricist"));
             await db.SaveChangesAsync(Token);
         }
 
@@ -875,8 +898,30 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         static List<(string?, string?)> Writers(JsonElement piece) =>
             [.. piece.GetProperty("composers").EnumerateArray().Select(composer => (composer.GetProperty("id").GetString(), composer.GetProperty("name").GetString()))];
 
+        static string? Fact(JsonElement piece, string name) =>
+            piece.TryGetProperty(name, out var fact) ? fact.ValueKind == JsonValueKind.Number ? fact.GetInt32().ToString(CultureInfo.InvariantCulture) : fact.GetString() : null;
+
         var all = await CompositionsAsync("");
-        Assert.Equal([festival.Title, freischutz.Title, egmont.Title, symphony.Title], all.Select(piece => piece.GetProperty("name").GetString()));
+        Assert.Equal([festival.Title, freischutz.Title, egmont.Title, symphony.Title, suite.Title], all.Select(piece => piece.GetProperty("name").GetString()));
+        Assert.Equal(
+            [
+                (null, null, "Romantic", null, null),
+                ("Overture", null, "Classical", null, null),
+                (null, null, "Classical", "2", null),
+                ("Symphony", "C minor", "Classical", "4", "1220"),
+                ("Soundtrack", null, "Contemporary", "1", null),
+            ],
+            all.Select(piece => (Fact(piece, "form"), Fact(piece, "key"), Fact(piece, "period"), Fact(piece, "movementCount"), Fact(piece, "duration"))));
+        Assert.Equal(
+            [("", "Friedrich Mosengeil"), ("", "Friedrich Schiller"), ($"ar-{goethe.Id.Value:N}", "Johann Wolfgang von Goethe")],
+            all[2].GetProperty("lyricists").EnumerateArray().Select(writer => (writer.GetProperty("id").GetString(), writer.GetProperty("name").GetString())).Order());
+        Assert.Equal(["deu"], all[2].GetProperty("languages").EnumerateArray().Select(code => code.GetString()));
+        Assert.Empty(all[3].GetProperty("lyricists").EnumerateArray());
+        Assert.False(all[3].TryGetProperty("languages", out _));
+        Assert.Equal(
+            suite.Title,
+            Assert.Single(Assert.Single(await CompositionsAsync($"?id=wk-{suite.Id.Value:N}")).GetProperty("song").EnumerateArray())
+                .GetProperty("works").EnumerateArray().Single().GetProperty("name").GetString());
         Assert.Equal([(w, "Carl Maria von Weber")], Writers(all[1]));
         Assert.Equal([(b, "Ludwig van Beethoven")], Writers(all[2]));
         Assert.False(all[2].TryGetProperty("composed", out _));
@@ -924,6 +969,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         XNamespace ns = "http://subsonic.org/restapi";
         var element = Assert.Single(xml.Descendants(ns + "composition"));
         Assert.Equal(b, element.Element(ns + "composers")?.Attribute("id")?.Value);
+        Assert.Equal(("Symphony", "C minor", "1220"), (element.Attribute("form")?.Value, element.Attribute("key")?.Value, element.Attribute("duration")?.Value));
         Assert.Equal("1804", element.Element(ns + "composed")?.Element(ns + "from")?.Attribute("year")?.Value);
         Assert.Equal(["1", "2"], element.Elements(ns + "movement").Select(part => part.Attribute("number")?.Value));
         Assert.Equal(3, element.Elements(ns + "song").Count());

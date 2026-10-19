@@ -231,7 +231,6 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
             work.Title = source.Title;
         }
 
-        work.Type = source.Type;
         work.ParentId = source.ParentId is { } parent
             ? (await UpsertParentAsync(parent, source.ParentTitle, cancellationToken).ConfigureAwait(false)).Id
             : null;
@@ -266,7 +265,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     /// <summary>
     /// What a work's own lookup says that only the tags read: its languages,
     /// and its place among the parts of the parent this same answer names —
-    /// and the years its composer link states, which Subsonic serves.
+    /// and its type, its key and the years its composer link states, which
+    /// Subsonic serves. A parent's type too, which the climb used to drop.
     /// </summary>
     /// <remarks>
     /// Stamped wherever a work's whole document arrives, so one the recording
@@ -278,6 +278,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(source);
 
+        row.Type = source.Type;
+        row.Key = source.Key;
         row.Languages = EnrichmentService.Joined(source.Languages ?? []);
         row.Position = underItsParent ? source.Position : null;
         row.PartCount = source.PartCount > 0 ? source.PartCount : null;

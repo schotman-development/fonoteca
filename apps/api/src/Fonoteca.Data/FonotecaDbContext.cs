@@ -71,6 +71,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
             e.Property(x => x.Type).HasMaxLength(100);
             e.Property(x => x.Languages).HasMaxLength(200);
+            e.Property(x => x.Key).HasMaxLength(100);
             e.HasIndex(x => x.DescribedUtc);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");

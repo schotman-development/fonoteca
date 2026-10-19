@@ -64,7 +64,10 @@ public sealed class Work
     /// <summary>How many parts MusicBrainz lists for it, where it has any.</summary>
     public int? PartCount { get; set; }
 
-    /// <summary>When MusicBrainz was last asked for this work's languages and parts.</summary>
+    /// <summary>Its key as MusicBrainz states it: "B-flat minor".</summary>
+    public string? Key { get; set; }
+
+    /// <summary>When MusicBrainz was last asked for this work's type, key, languages and parts.</summary>
     /// <remarks>
     /// The works stage's "we asked" stamp (rule 1), set when MusicBrainz no
     /// longer knows the work too. Never asked again: a work's language and its

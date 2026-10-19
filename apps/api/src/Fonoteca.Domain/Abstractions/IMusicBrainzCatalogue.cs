@@ -439,7 +439,10 @@ public sealed record MusicBrainzWork(
     int? Position = null,
 
     /// <summary>How many parts MusicBrainz lists for it: a symphony's movements.</summary>
-    int PartCount = 0);
+    int PartCount = 0,
+
+    /// <summary>Its <c>Key</c> attribute as MusicBrainz writes it: "B-flat minor".</summary>
+    string? Key = null);
 
 /// <summary>One name an artist is also known by.</summary>
 /// <remarks>

@@ -448,8 +448,11 @@ public static partial class SubsonicEndpoints
     /// <remarks>
     /// <b>A piece is named only for a classical work</b>, by the Composers
     /// page's rule (<see cref="ClassicalWorks"/>) over every held performance,
-    /// so a client heading runs with pieces leaves a pop album alone. The type
-    /// asked is the piece's: MusicBrainz types a song cycle's parts <c>Song</c>.
+    /// so a client heading runs with pieces leaves a pop album alone. A type is
+    /// asked only of a piece recorded whole, never of a movement: MusicBrainz
+    /// types a song cycle's parts <c>Song</c>, and a film score's suites
+    /// <c>Soundtrack</c> on the whole, which the owner keeps among the pieces
+    /// (2026-10-19) — there the piece's type is its form and nothing more.
     /// The piece is the top of the chain, as the album page heads a run with.
     ///
     /// <b>A movement's number and count only where its parent is the piece</b>:
@@ -481,7 +484,7 @@ public static partial class SubsonicEndpoints
         var works = await db.Works
             .AsNoTracking()
             .Where(work => wanted.Contains(work.Id))
-            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd))
+            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd, work.Key, work.Languages))
             .ToDictionaryAsync(work => work.Id, cancellationToken)
             .ConfigureAwait(false);
 
@@ -502,7 +505,7 @@ public static partial class SubsonicEndpoints
         var classical = performances
             .GroupBy(performance => performance.Work)
             .Where(work => ClassicalWorks.Is(
-                works[pieces[work.Key]].Type,
+                pieces[work.Key] == work.Key ? works[work.Key].Type : null,
                 work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))))
             .Select(work => work.Key)
             .ToHashSet();
@@ -699,7 +702,9 @@ public static partial class SubsonicEndpoints
         int? Position,
         int? PartCount,
         string? ComposedBegin,
-        string? ComposedEnd);
+        string? ComposedEnd,
+        string? Key,
+        string? Languages);
 
     /// <summary>One line of a billing, already resolved to what it prints, and the artist's own name.</summary>
     private sealed record CreditRow(ArtistId ArtistId, string Name, string? JoinPhrase, string ArtistName);

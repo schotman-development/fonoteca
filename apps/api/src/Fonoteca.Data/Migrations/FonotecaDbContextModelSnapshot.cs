@@ -1131,6 +1131,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<DateTimeOffset?>("DescribedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("Languages")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");

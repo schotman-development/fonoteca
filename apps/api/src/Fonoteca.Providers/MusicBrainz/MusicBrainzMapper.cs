@@ -61,7 +61,8 @@ internal static class MusicBrainzMapper
             Position: parent?.OrderingKey,
             PartCount: (source.Relationships ?? []).Count(relationship => relationship.Work is not null
                 && string.Equals(relationship.Type, "parts", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(relationship.Direction, "forward", StringComparison.OrdinalIgnoreCase)));
+                && string.Equals(relationship.Direction, "forward", StringComparison.OrdinalIgnoreCase)),
+            Key: NullIfBlank(source.Attributes?.FirstOrDefault(attribute => string.Equals(attribute.Type, "Key", StringComparison.Ordinal))?.Value));
     }
 
     /// <summary>The work's languages; the single one an older document states where it lists none.</summary>

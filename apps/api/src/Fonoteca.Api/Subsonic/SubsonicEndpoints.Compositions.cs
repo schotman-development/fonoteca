@@ -15,10 +15,10 @@ namespace Fonoteca.Api.Subsonic;
 /// as <c>getAlbumMotion</c> is.
 ///
 /// <b>A composition is what a song's <c>works</c> names</b>: the top of a
-/// work's parts chain, where <see cref="ClassicalWorks"/> asked with the
-/// piece's type over its held performances says classical, as
-/// <c>SongWorksAsync</c> asks it. Never a performance: its recordings are the
-/// songs under it.
+/// work's parts chain, where <see cref="ClassicalWorks"/> over its held
+/// performances says classical, asked with the piece's type only where the
+/// piece itself was recorded, as <c>SongWorksAsync</c> asks it. Never a
+/// performance: its recordings are the songs under it.
 ///
 /// <b>Its composers are the <c>composer</c> contributions</b> on the piece
 /// and on each held part, as <c>contributors</c> names them and with the
@@ -26,7 +26,15 @@ namespace Fonoteca.Api.Subsonic;
 /// browse by, and is left out — which a describe cannot produce: it writes a
 /// work's contributions in the same save as <see cref="PrimaryCredits"/>
 /// mints a row for each of its writers, and no artist row is ever deleted
-/// (1,060 of 1,060 composers had one on 2026-10-17).
+/// (1,060 of 1,060 composers had one on 2026-10-17). Its lyricists and
+/// librettists are listed rowless too, with no id, as <c>contributors</c>
+/// lists them.
+///
+/// <b>Its facts are MusicBrainz's where it states them</b> — its type as its
+/// form, its key, its part count (else the held movements), the languages of
+/// its words and its parts' — <b>and two are computed</b>: the period
+/// (<see cref="ClassicalWorks.Period"/>), and the duration, the longest album
+/// folder's recordings of it summed, so an excerpt is not taken for the whole.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
@@ -124,11 +132,23 @@ public static partial class SubsonicEndpoints
         writer.Attr("musicBrainzId", piece.Piece.Mbid?.Value.ToString());
         writer.Attr("albumCount", piece.AlbumCount);
         writer.Attr("coverArt", piece.Cover is { } album ? SubsonicIds.Album(album) : null);
+        writer.Attr("form", piece.Form);
+        writer.Attr("key", piece.Key);
+        writer.Attr("period", piece.Period);
+        writer.Attr("movementCount", piece.MovementCount);
+        writer.Attr("duration", piece.Duration);
         writer.Children("composers", piece.Composers, static (composers, composer) =>
         {
             composers.Attr("id", SubsonicIds.Artist(composer.Id));
             composers.Attr("name", composer.Name);
         });
+        writer.Children("lyricists", piece.Lyricists, static (lyricists, lyricist) =>
+        {
+            lyricists.Attr("id", lyricist.Id is { } id ? SubsonicIds.Artist(id) : string.Empty);
+            lyricists.Attr("name", lyricist.Name);
+        });
+
+        if (piece.Languages.Count > 0) writer.Strings("languages", piece.Languages);
 
         if (piece.Piece.Composed is { } composed) writer.Child("composed", span => WriteSpan(span, composed));
     }
@@ -152,10 +172,13 @@ public static partial class SubsonicEndpoints
             {
                 Work = recording.WorkId!.Value,
                 recording.Genres,
+                recording.Duration,
                 Files = recording.Files
                     .Select(file => new
                     {
                         file.ReleaseGroupId,
+                        file.Path,
+                        file.Quality,
                         Genres = file.ReleaseGroup == null ? null : file.ReleaseGroup.Genres,
                     })
                     .ToList(),
@@ -165,7 +188,7 @@ public static partial class SubsonicEndpoints
 
         var works = await db.Works
             .AsNoTracking()
-            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd))
+            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd, work.Key, work.Languages))
             .ToDictionaryAsync(work => work.Id, cancellationToken)
             .ConfigureAwait(false);
 
@@ -173,7 +196,7 @@ public static partial class SubsonicEndpoints
         var classical = held
             .GroupBy(recording => parents.TryGetValue(recording.Work, out var parent) ? WorkTree.Top(parent, parents) : recording.Work)
             .Where(piece => ClassicalWorks.Is(
-                works[piece.Key].Type,
+                piece.Any(recording => recording.Work == piece.Key) ? works[piece.Key].Type : null,
                 piece.SelectMany(recording => recording.Files.Select(file => file.Genres).Prepend(recording.Genres))))
             .ToList();
 
@@ -184,12 +207,12 @@ public static partial class SubsonicEndpoints
 
         var credited = (await db.Contributions
                 .AsNoTracking()
-                .Where(credit => credit.Type == CatalogueEndpoints.ComposerLink
+                .Where(credit => (credit.Type == CatalogueEndpoints.ComposerLink || credit.Type == "lyricist" || credit.Type == "librettist")
                     && credit.WorkId != null
                     && credit.ArtistMbid != null
                     && wanted.Contains(credit.WorkId.Value))
                 .OrderBy(credit => credit.Position)
-                .Select(credit => new { Work = credit.WorkId!.Value, Artist = credit.ArtistMbid!.Value })
+                .Select(credit => new { Work = credit.WorkId!.Value, Artist = credit.ArtistMbid!.Value, credit.Type, credit.Name })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false))
             .Where(credit => !CatalogueEndpoints.Nobody.Contains(credit.Artist))
@@ -206,6 +229,7 @@ public static partial class SubsonicEndpoints
                     Mbid = artist.Mbid!.Value,
                     Name = artist.LatinName ?? artist.Name,
                     artist.SortName,
+                    artist.BeganYear,
                     artist.PortraitUrl,
                     artist.EditsJson,
                     Uploaded = db.ArtistImages.Any(image =>
@@ -215,11 +239,15 @@ public static partial class SubsonicEndpoints
                 .ConfigureAwait(false))
             .ToDictionary(
                 artist => artist.Mbid,
-                artist => new Composer(artist.Id, artist.Name, artist.SortName, artist.Mbid, Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl)));
+                artist => new Composer(artist.Id, artist.Name, artist.SortName, artist.Mbid, Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl), artist.BeganYear));
 
         var composers = credited
-            .Where(credit => artists.ContainsKey(credit.Artist))
+            .Where(credit => credit.Type == CatalogueEndpoints.ComposerLink && artists.ContainsKey(credit.Artist))
             .ToLookup(credit => credit.Work, credit => artists[credit.Artist]);
+
+        var lyricists = credited
+            .Where(credit => credit.Type != CatalogueEndpoints.ComposerLink)
+            .ToLookup(credit => credit.Work);
 
         return classical
             .Select(piece =>
@@ -262,14 +290,43 @@ public static partial class SubsonicEndpoints
                     .Select(part => MovementOf(works[part], works[parents[part]], whole))
                     .ToList();
 
+                var writers = performed.Prepend(piece.Key).ToList();
+                var wrote = writers.SelectMany(work => composers[work]).Distinct().ToList();
+                var shape = PieceOf(whole);
+
+                // One album folder's recordings of it are one performance: a
+                // second rip of the album is another folder, not twice as long.
+                var longest = piece
+                    .SelectMany(recording => recording.Files.Select(file => (
+                        Folder: AlbumFolder.Of(file.Path),
+                        Length: file.Quality?.Duration ?? recording.Duration)))
+                    .GroupBy(file => file.Folder, StringComparer.Ordinal)
+                    .Select(folder => folder.Sum(file => file.Length?.TotalSeconds ?? 0))
+                    .DefaultIfEmpty()
+                    .Max();
+
                 return new Composition(
                     piece.Key,
-                    PieceOf(whole),
-                    [.. performed.Prepend(piece.Key).SelectMany(work => composers[work]).Distinct()],
+                    shape,
+                    wrote,
                     albums.Count,
                     albums.Count > 0 ? albums[0] : null,
                     performed,
-                    movements);
+                    movements,
+                    whole.Type,
+                    whole.Key,
+                    ClassicalWorks.Period(shape.Composed?.From?.Year, wrote.Select(composer => composer.Born)),
+                    whole.PartCount ?? (movements.Count > 0 ? movements.Count : null),
+                    longest > 0 ? (int)Math.Round(longest) : null,
+                    [
+                        .. writers
+                            .SelectMany(work => lyricists[work])
+                            .DistinctBy(credit => credit.Artist)
+                            .Select(credit => artists.TryGetValue(credit.Artist, out var artist)
+                                ? new Writer(artist.Id, artist.Name)
+                                : new Writer(null, credit.Name)),
+                    ],
+                    [.. writers.SelectMany(work => FileGenres.Split(works[work].Languages)).Where(code => code != "zxx").Distinct(StringComparer.Ordinal)]);
             })
             .OrderBy(piece => piece.Piece.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(piece => piece.Id.Value)
@@ -278,6 +335,7 @@ public static partial class SubsonicEndpoints
 
     /// <param name="Performed">The piece and each part of it a held recording performs.</param>
     /// <param name="Cover">The album holding the most of its recordings.</param>
+    /// <param name="Duration">Seconds, its longest album folder's recordings of it summed.</param>
     private sealed record Composition(
         WorkId Id,
         SongPiece Piece,
@@ -285,7 +343,17 @@ public static partial class SubsonicEndpoints
         int AlbumCount,
         ReleaseGroupId? Cover,
         IReadOnlyList<WorkId> Performed,
-        IReadOnlyList<SongMovement> Movements);
+        IReadOnlyList<SongMovement> Movements,
+        string? Form,
+        string? Key,
+        string? Period,
+        int? MovementCount,
+        int? Duration,
+        IReadOnlyList<Writer> Lyricists,
+        IReadOnlyList<string> Languages);
 
-    private sealed record Composer(ArtistId Id, string Name, string? SortName, Mbid Mbid, bool Pictured);
+    private sealed record Composer(ArtistId Id, string Name, string? SortName, Mbid Mbid, bool Pictured, int? Born);
+
+    /// <summary>A lyricist or librettist; one the catalogue has no row for has no id.</summary>
+    private sealed record Writer(ArtistId? Id, string Name);
 }

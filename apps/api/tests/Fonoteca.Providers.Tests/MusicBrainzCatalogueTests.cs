@@ -570,6 +570,19 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         var composer = Assert.Single(work.Relations, r => r.Type == "composer");
         Assert.Equal("Wolfgang Amadeus Mozart", composer.Name);
         Assert.Equal("Person", composer.ArtistType);
+        Assert.Null(work.Key);
+    }
+
+    /// <summary>A work's key is an attribute of its own, as MusicBrainz writes it.</summary>
+    [Fact]
+    public async Task AWorkCarriesItsTypeAndItsKey()
+    {
+        var (catalogue, _) = Build(Recorded("work-sonata-facile.json"));
+
+        var work = await catalogue.GetWorkAsync(new Mbid(Guid.Parse("a2ad223d-d73b-3775-9580-fd25b4d986e1")), Token);
+
+        Assert.NotNull(work);
+        Assert.Equal(("Sonata", "C major"), (work.Type, work.Key));
     }
 
     /// <summary>

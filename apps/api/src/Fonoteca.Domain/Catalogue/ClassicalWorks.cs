@@ -28,6 +28,29 @@ public static class ClassicalWorks
         return type is not ("Song" or "Soundtrack") && genres.Select(FileGenres.Split).Any(Classical);
     }
 
+    /// <summary>The era a piece is of: by the year it was begun, else its earliest-born composer at thirty.</summary>
+    /// <remarks>
+    /// Derived, since MusicBrainz states no period; the bounds and the thirty
+    /// years are the ones the owner's client proposed for its Period column
+    /// (2026-10-19). Null where neither year is known.
+    /// </remarks>
+    public static string? Period(int? begun, IEnumerable<int?> born)
+    {
+        ArgumentNullException.ThrowIfNull(born);
+
+        return (begun ?? born.Min() + 30) switch
+        {
+            null => null,
+            < 1400 => "Medieval",
+            < 1600 => "Renaissance",
+            < 1750 => "Baroque",
+            < 1820 => "Classical",
+            < 1910 => "Romantic",
+            < 1975 => "Modern",
+            _ => "Contemporary",
+        };
+    }
+
     private static bool Classical(IReadOnlyList<string> genres) =>
         genres.Any(genre => genre == "classical" || genre.EndsWith(" classical", StringComparison.Ordinal))
         && !genres.Any(genre => genre is "classical crossover" or "pop");

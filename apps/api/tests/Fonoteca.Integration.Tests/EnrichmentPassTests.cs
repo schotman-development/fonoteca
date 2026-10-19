@@ -3161,7 +3161,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             {
                 [number] = Part(number, "Act III, no. 19: Pas de six", act, "Act III"),
                 [act] = Part(act, "Act III", ballet, "Swan Lake, op. 20"),
-                [ballet] = Part(ballet, "Swan Lake, op. 20", null, null),
+                [ballet] = Part(ballet, "Swan Lake, op. 20", null, null) with { Type = "Ballet", Key = "B minor" },
             });
 
         var services = Build(Answering(Recording), catalogue);
@@ -3178,6 +3178,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             Assert.Equal(rows[act].Id, rows[number].ParentId);
             Assert.Equal(rows[ballet].Id, rows[act].ParentId);
             Assert.Null(rows[ballet].ParentId);
+            Assert.Equal(("Ballet", "B minor"), (rows[ballet].Type, rows[ballet].Key));
             Assert.All([rows[number], rows[act], rows[ballet]], w => Assert.NotNull(w.PartOfLookupUtc));
 
             // A week on, the top may have gained a parent; the two below it are answered.

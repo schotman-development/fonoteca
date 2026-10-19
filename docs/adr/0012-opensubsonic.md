@@ -254,7 +254,13 @@ list either; a client that does not look for the extension loses nothing
 `artists`, each artist its `artist` line bills, once and in billing order, with
 an id and a name alone as the spec asks — the name getArtist gives, not the one
 the sleeve prints (the owner's choice, for a client finding who a run of songs
-shares).
+shares). *Amended 2026-10-19:* a composition carries its form (the piece's
+MusicBrainz type, stored by the climb now too, and never asked of the classical
+rule for a piece recorded movement by movement, so film scores stay — the
+owner's choice), its key, a period (`ClassicalWorks.Period`), its movement
+count, its longest performance, its lyricists and librettists, and the
+languages of its words; catalogue numbers are left out, since MusicBrainz
+states them only in titles (the owner's choice).
 
 ### Scope
 
