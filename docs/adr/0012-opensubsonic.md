@@ -279,6 +279,13 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
 `getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
+*Amended 2026-10-19:* each also takes `POST` with an
+`application/x-www-form-urlencoded` body, read as the query (OpenSubsonic's
+`formPost`, advertised), so a client can keep the password out of the URL and
+the logs (the owner's choice). The guard joins the body's arguments to the
+query's before it checks the password, a key in the body replacing the same
+key in the URL, since a handler reading one value would otherwise read both
+joined by a comma; any other body is not read.
 
 `getUser` is there because several clients call it at login to decide which
 buttons to draw, and a server that does not answer reads to them as broken

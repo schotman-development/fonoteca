@@ -1314,7 +1314,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions"], extensions);
     }
 
     /// <summary>
@@ -1513,6 +1513,89 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             var row = await db.Artists.SingleAsync(artist => artist.Id == evans, Token);
             row.PortraitUrl = null;
             row.EditsJson = null;
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// A form body is read as the query (<c>formPost</c>): the password, the
+    /// format and the arguments in it, or split between it and the URL with
+    /// the body's winning a key both name, a wrong password still refused, a
+    /// method this server lacks still in the envelope, a body past the form
+    /// limits answered in it, and a browser elsewhere let in to send it.
+    /// </summary>
+    [Fact]
+    public async Task AFormBodyIsReadAsTheQuery()
+    {
+        using var client = _factory!.CreateClient();
+
+        async Task<JsonElement> PostAsync(string route, params (string Key, string Value)[] fields)
+        {
+            using var content = new FormUrlEncodedContent(fields.Select(field => KeyValuePair.Create(field.Key, field.Value)));
+            using var response = await client.PostAsync(new Uri(route, UriKind.Relative), content, Token);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+
+            return JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response").Clone();
+        }
+
+        (string, string)[] login = [("u", "me"), ("p", Password), ("v", "1.16.1"), ("c", "test"), ("f", "json")];
+        var song = $"tr-{_filed.Value:N}";
+
+        try
+        {
+            Assert.Equal("ok", (await PostAsync("/rest/ping.view", login)).GetProperty("status").GetString());
+            Assert.Equal("ok", (await PostAsync("/rest/star", [.. login, ("id", song)])).GetProperty("status").GetString());
+            Assert.NotNull((await JsonAsync(client, $"/rest/getSong.view?id={song}")).GetProperty("subsonic-response").GetProperty("song").GetProperty("starred").GetString());
+
+            // Split between the URL and the body, which wins a key both name, in any case.
+            Assert.Equal("ok", (await PostAsync($"/rest/unstar.view?u=me&p=not-it&v=1.16.1&c=test&f=xml&id={song}", ("P", Password), ("f", "json"))).GetProperty("status").GetString());
+            Assert.False((await JsonAsync(client, $"/rest/getSong.view?id={song}")).GetProperty("subsonic-response").GetProperty("song").TryGetProperty("starred", out _));
+
+            var wrong = await PostAsync("/rest/star", ("u", "me"), ("p", "not-it"), ("v", "1.16.1"), ("c", "test"), ("f", "json"), ("id", song));
+            Assert.Equal(40, wrong.GetProperty("error").GetProperty("code").GetInt32());
+
+            var missing = await PostAsync("/rest/getPodcasts", login);
+            Assert.Equal(0, missing.GetProperty("error").GetProperty("code").GetInt32());
+
+            // Past the form limits, f=json is in the body that went unread.
+            using var flood = new FormUrlEncodedContent([.. login.Select(field => KeyValuePair.Create(field.Item1, field.Item2)), .. Enumerable.Repeat(KeyValuePair.Create("id", song), 1100)]);
+            using var flooded = await client.PostAsync(new Uri("/rest/star", UriKind.Relative), flood, Token);
+            Assert.Equal(HttpStatusCode.OK, flooded.StatusCode);
+            Assert.Contains("code=\"0\"", await flooded.Content.ReadAsStringAsync(Token), StringComparison.Ordinal);
+
+            using var preflight = new HttpRequestMessage(HttpMethod.Options, new Uri("/rest/star", UriKind.Relative));
+            preflight.Headers.Add("Origin", "http://example.org");
+            preflight.Headers.Add("Access-Control-Request-Method", "POST");
+            preflight.Headers.Add("Access-Control-Request-Headers", "content-type");
+
+            using var preflighted = await client.SendAsync(preflight, Token);
+            Assert.True(preflighted.IsSuccessStatusCode, $"{preflighted.StatusCode}");
+            Assert.Equal("*", Assert.Single(preflighted.Headers.GetValues("Access-Control-Allow-Origin")));
+
+            // Any other body is not read: no password is found in it.
+            using var multipart = new MultipartFormDataContent();
+            foreach (var (key, value) in login)
+            {
+                multipart.Add(new StringContent(value), key);
+            }
+
+            using var refused = await client.PostAsync(new Uri("/rest/ping.view", UriKind.Relative), multipart, Token);
+            Assert.Contains("code=\"40\"", await refused.Content.ReadAsStringAsync(Token), StringComparison.Ordinal);
+
+            using var misnamed = new StringContent($"u=me&p={Password}&v=1.16.1&c=test&f=json");
+            misnamed.Headers.Remove("Content-Type");
+            misnamed.Headers.TryAddWithoutValidation("Content-Type", "application/x-www-form-urlencodedx");
+
+            using var unread = await client.PostAsync(new Uri("/rest/ping.view", UriKind.Relative), misnamed, Token);
+            Assert.Equal(HttpStatusCode.OK, unread.StatusCode);
+            Assert.Contains("code=\"40\"", await unread.Content.ReadAsStringAsync(Token), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.Loves.RemoveRange(await db.Loves.ToListAsync(Token));
             await db.SaveChangesAsync(Token);
         }
     }

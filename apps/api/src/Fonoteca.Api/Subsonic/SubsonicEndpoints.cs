@@ -7,6 +7,8 @@ using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
+using Microsoft.Net.Http.Headers;
 
 namespace Fonoteca.Api.Subsonic;
 
@@ -76,6 +78,13 @@ public static partial class SubsonicEndpoints
     /// <c>SingleUserCallerContext</c> is what it would have to resolve against —
     /// and a client that cannot name the user it is logging in as is a client
     /// nobody has.
+    ///
+    /// <b>A form body is read as the query</b> (OpenSubsonic's <c>formPost</c>):
+    /// a <c>POST</c> of <c>application/x-www-form-urlencoded</c> has its
+    /// arguments joined to the query string's before the check, a key in the
+    /// body replacing the same key in the URL, so the password can stay out of
+    /// the URL and every handler finds the arguments where it always has. Any
+    /// other body is not read.
     /// </remarks>
     internal static Task Guard(HttpContext context, RequestDelegate next)
     {
@@ -103,6 +112,43 @@ public static partial class SubsonicEndpoints
         // not be reached by anything else — but a catch-all lives here now, and
         // the day a parameterised route joins it a substring test is an auth
         // bypass that nothing would fail on.
+        return IsFormPost(context.Request) ? AdmitFormAsync(context, next, password) : Admit(context, next, password);
+    }
+
+    private static bool IsFormPost(HttpRequest request) =>
+        HttpMethods.IsPost(request.Method)
+        && MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
+        && type.MediaType.Equals("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task AdmitFormAsync(HttpContext context, RequestDelegate next, string password)
+    {
+        IFormCollection form;
+
+        try
+        {
+            form = await context.Request.ReadFormAsync(context.RequestAborted).ConfigureAwait(false);
+        }
+        catch (InvalidDataException)
+        {
+            // Past the form limits: refused in the envelope, as every answer is.
+            await SubsonicResult.Error(0, "The form body could not be read.").ExecuteAsync(context).ConfigureAwait(false);
+            return;
+        }
+
+        var arguments = new Dictionary<string, StringValues>(context.Request.Query, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, value) in form)
+        {
+            arguments[key] = value;
+        }
+
+        context.Request.Query = new QueryCollection(arguments);
+
+        await Admit(context, next, password).ConfigureAwait(false);
+    }
+
+    private static Task Admit(HttpContext context, RequestDelegate next, string password)
+    {
         if (MethodOf(context.Request.Path) == "getOpenSubsonicExtensions")
         {
             return next(context);
@@ -125,9 +171,10 @@ public static partial class SubsonicEndpoints
         //
         // Any origin, and no credentials: a Subsonic client is another
         // program, often a web page served from somewhere else, and its
-        // password travels in the query, so a browser has nothing of the
-        // owner's to attach. Navidrome answers the same. The web UI's policy,
-        // credentialed for SignalR, stays on everything else.
+        // password travels in the request, in the query or a form body, so a
+        // browser has nothing of the owner's to attach. Navidrome answers the
+        // same. The web UI's policy, credentialed for SignalR, stays on
+        // everything else.
         var group = app.MapGroup(Route)
             .ExcludeFromDescription()
             .RequireCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
@@ -176,10 +223,13 @@ public static partial class SubsonicEndpoints
         // broken" and stop, where error 0 is a method they asked for and did not
         // get. Literal routes win over a catch-all, so this only ever sees what
         // nothing above matched.
-        group.MapGet("/{**method}", NotImplemented);
+        group.MapMethods("/{**method}", Verbs, NotImplemented);
 
         return app;
     }
+
+    /// <summary>A query string, or the same arguments as a form body (<c>formPost</c>).</summary>
+    private static readonly string[] Verbs = [HttpMethods.Get, HttpMethods.Post];
 
     /// <summary>
     /// Both spellings of one method.
@@ -191,8 +241,8 @@ public static partial class SubsonicEndpoints
     /// </remarks>
     private static void Map(RouteGroupBuilder group, string method, Delegate handler)
     {
-        group.MapGet($"/{method}", handler);
-        group.MapGet($"/{method}.view", handler);
+        group.MapMethods($"/{method}", Verbs, handler);
+        group.MapMethods($"/{method}.view", Verbs, handler);
     }
 
     private static IResult Ping() => SubsonicResult.Ok();
@@ -270,7 +320,7 @@ public static partial class SubsonicEndpoints
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);
