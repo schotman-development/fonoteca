@@ -673,6 +673,48 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.Equal(expected, actual);
     }
 
+    [Fact]
+    public async Task InternetRadioIsEveryonesToListAndAnAdminsToChange()
+    {
+        using var me = (await _factory!.SetUpAsync("me", Password, Token)).Client;
+        using var client = _factory.CreateClient();
+        var asMe = $"u=me&p={Password}";
+        var asYou = "u=you&p=a-test-passphrase";
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"createUser.view?{asMe}&username=you&password=a-test-passphrase&email=you@example.org")));
+
+        Assert.Equal(10, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=ftp://example.org/live")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/live&homepageUrl=javascript:alert(1)")));
+        Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asYou}&name=Radio&streamUrl=https://example.org/live")));
+
+        var stream = Uri.EscapeDataString("https://example.org/live?format=mp3&bitrate=128");
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl={stream}&homepageUrl=https://example.org")));
+
+        var station = Assert.Single((await SubsonicAsync(client, $"getInternetRadioStations.view?{asYou}"))
+            .GetProperty("internetRadioStations").GetProperty("internetRadioStation").EnumerateArray());
+        Assert.Equal("Radio", station.GetProperty("name").GetString());
+        Assert.Equal("https://example.org/live?format=mp3&bitrate=128", station.GetProperty("streamUrl").GetString());
+        Assert.Equal("https://example.org", station.GetProperty("homePageUrl").GetString());
+        var id = station.GetProperty("id").GetString();
+
+        Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asYou}&id={id}&name=Mine&streamUrl=https://example.org/live")));
+        Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asYou}&id={id}")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={Guid.NewGuid():N}&name=Other&streamUrl=https://example.org/live")));
+
+        // An update restates the station: no home page sent is none kept.
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl=http://example.org/other")));
+        station = Assert.Single((await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"))
+            .GetProperty("internetRadioStations").GetProperty("internetRadioStation").EnumerateArray());
+        Assert.Equal("Renamed", station.GetProperty("name").GetString());
+        Assert.Equal("http://example.org/other", station.GetProperty("streamUrl").GetString());
+        Assert.False(station.TryGetProperty("homePageUrl", out _));
+
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
+        Assert.Equal(0, (await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"))
+            .GetProperty("internetRadioStations").TryGetProperty("internetRadioStation", out var none) ? none.GetArrayLength() : 0);
+    }
+
     private static string[] Roles(JsonElement account) =>
         [.. account.GetProperty("roles").EnumerateArray().Select(role => role.GetString()!)];
 

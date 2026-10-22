@@ -134,6 +134,31 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("ApiKeys");
                 });
 
+            modelBuilder.Entity("Fonoteca.Data.RadioStation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("HomePageUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("StreamUrl")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("RadioStations");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.AlbumBooklet", b =>
                 {
                     b.Property<Guid>("ReleaseGroupId")

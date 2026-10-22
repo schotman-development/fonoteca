@@ -288,6 +288,10 @@ public static partial class SubsonicEndpoints
         Map(group, "scrobble", Scrobble);
         Map(group, "getScanStatus", GetScanStatus);
         Map(group, "startScan", StartScan);
+        Map(group, "getInternetRadioStations", GetInternetRadioStations);
+        Map(group, "createInternetRadioStation", CreateInternetRadioStation);
+        Map(group, "updateInternetRadioStation", UpdateInternetRadioStation);
+        Map(group, "deleteInternetRadioStation", DeleteInternetRadioStation);
 
         // Anything else, in the protocol's own envelope. A catch-all rather than
         // a 404, because several clients read an HTTP error as "this server is

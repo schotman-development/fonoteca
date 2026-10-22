@@ -292,7 +292,7 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
-`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword` — each at both `/rest/x`
+`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 *Amended 2026-10-19:* each also takes `POST` with an
 `application/x-www-form-urlencoded` body, read as the query (OpenSubsonic's
@@ -319,6 +319,15 @@ roles where none are named, and `updateUser` changes only the roles it names.
 admin, and a refusal is error 50. One music folder, no LDAP and no scrobbling,
 so `musicFolderId` and `ldapAuthenticated` are read by nothing and
 `scrobblingEnabled` is false.
+
+*Amended 2026-10-21:* internet radio, asked for by Fonoteca's own client and
+kept in a table (`RadioStations`, the owner's choice) rather than a file
+beside the playlists: every account's to list, an admin's to create, update
+and delete, as the protocol says (`SubsonicEndpoints.Radio.cs`). Fonoteca never
+opens a station's addresses; both are held to absolute http or https URLs,
+since a client plays one and shows the other as a link. An update restates the
+whole station, so a home page it leaves out is none. Nothing on the web edits
+them.
 
 **Everything else under `/rest` answers error 0 naming the method**, through a
 catch-all the literal routes outrank. A bare 404 is the failure mode that turns
