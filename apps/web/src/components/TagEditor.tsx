@@ -12,6 +12,7 @@ import {
 } from '@fonoteca/ui'
 import { useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import {
   ALBUM_FIELDS,
@@ -55,6 +56,7 @@ export function TagEditor({
   const [said, setSaid] = useState<string | null>(null)
   const [added, setAdded] = useState<readonly string[]>([])
   const [naming, setNaming] = useState('')
+  const mayTag = useCan('Admin')
 
   const state = useApiQuery(
     () => api.get('/api/catalogue/folders/tags', { params: { query: { folder } } }),
@@ -239,16 +241,18 @@ export function TagEditor({
 
       <Stack gap={8} align="center" wrap role="status" aria-live="polite">
         {tags.willWrite ? (
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={saving || draft.size === 0 || blocked !== null}
-            onClick={() => void save()}
-          >
-            {saving
-              ? 'Saving…'
-              : `Save and write ${draft.size === 1 ? 'the change' : 'the changes'}`}
-          </Button>
+          mayTag ? (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={saving || draft.size === 0 || blocked !== null}
+              onClick={() => void save()}
+            >
+              {saving
+                ? 'Saving…'
+                : `Save and write ${draft.size === 1 ? 'the change' : 'the changes'}`}
+            </Button>
+          ) : null
         ) : (
           <Badge tone="info" size="sm">
             File writing is off

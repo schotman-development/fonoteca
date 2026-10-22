@@ -2,6 +2,7 @@ import { type components, describeError } from '@fonoteca/api-client'
 import { Button, Stack, Text } from '@fonoteca/ui'
 import { useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { undoLabel, undoOutcome, undoQuestion } from '../pages/tagUndo.ts'
 import { useApiQuery } from '../useApiQuery.ts'
@@ -26,13 +27,15 @@ export function UndoFolderButton({
   const [attempt, setAttempt] = useState(0)
   const [sending, setSending] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  const mayTag = useCan('Admin')
 
   const state = useApiQuery(
     () => api.get('/api/catalogue/folders/undo', { params: { query: { folder } } }),
     [folder, attempt],
   )
 
-  if (state.status !== 'ready' || !state.data.willWrite || state.data.edit == null) return null
+  if (!mayTag || state.status !== 'ready' || !state.data.willWrite || state.data.edit == null)
+    return null
 
   const edit = state.data.edit
 

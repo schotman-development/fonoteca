@@ -20,6 +20,7 @@ import {
 import { Link, useParams } from '@tanstack/react-router'
 import { type FormEvent, useEffect, useId, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { TagWritePanel } from '../components/TagWritePanel.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
@@ -180,6 +181,8 @@ function Profile({
   const { artist, profile, tracks, discography } = data
   const [tab, setTab] = useState<TabKey>('overview')
   const [editing, setEditing] = useState(false)
+  const admin = useCan('Admin')
+  const mayEdit = useCan('CoverArt')
   const id = useId()
 
   const asked = artist.describedAtUtc != null
@@ -257,17 +260,19 @@ function Profile({
           </div>
 
           <Stack className={styles.actions} gap={8} wrap align="start">
-            <FollowButton artistId={artistId} following={artist.following} />
-            <Button
-              variant="secondary"
-              aria-pressed={editing}
-              onClick={() => {
-                setEditing(!editing)
-                open('biography', `${id}about`)
-              }}
-            >
-              Edit
-            </Button>
+            {admin ? <FollowButton artistId={artistId} following={artist.following} /> : null}
+            {mayEdit ? (
+              <Button
+                variant="secondary"
+                aria-pressed={editing}
+                onClick={() => {
+                  setEditing(!editing)
+                  open('biography', `${id}about`)
+                }}
+              >
+                Edit
+              </Button>
+            ) : null}
           </Stack>
         </div>
       </header>
@@ -1107,6 +1112,7 @@ function MonitorButton({
   readonly monitored: boolean
   readonly title: string
 }) {
+  const admin = useCan('Admin')
   const [monitored, setMonitored] = useState(initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1130,6 +1136,8 @@ function MonitorButton({
       setBusy(false)
     }
   }
+
+  if (!admin) return null
 
   return (
     <>
@@ -1191,6 +1199,7 @@ function PicturePicker({
   readonly uploaded: boolean
   readonly onChanged: () => void
 }) {
+  const mayEdit = useCan('CoverArt')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -1225,6 +1234,8 @@ function PicturePicker({
       }
     })
   }
+
+  if (!mayEdit) return null
 
   return (
     <Stack direction="column" gap={4} align="start">

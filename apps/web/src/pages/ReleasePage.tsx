@@ -21,6 +21,7 @@ import {
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { AddToPlaylist } from '../components/AddToPlaylist.tsx'
 import { TagEditor } from '../components/TagEditor.tsx'
@@ -191,6 +192,9 @@ function Album({
   // Bumped after a change so the header asks for the new picture at once.
   const [coverVersion, setCoverVersion] = useState(0)
   const playback = usePlayback()
+  const admin = useCan('Admin')
+  const mayEdit = useCan('CoverArt')
+  const mayPlay = useCan('Stream')
   const navigate = useNavigate()
   const id = useId()
 
@@ -315,21 +319,23 @@ function Album({
           </div>
 
           <Stack className={styles.actions} gap={8} wrap align="start">
-            <Button
-              variant="primary"
-              disabled={first === undefined}
-              onClick={() => {
-                if (first === undefined) return
-                playback.play({
-                  id: `${release.id}:${first.track.discNumber}:${first.track.position}:${first.track.recordingId}`,
-                  src: contentUrl(apiBaseUrl, first.file.path),
-                  title: first.track.title,
-                  subtitle: release.title,
-                })
-              }}
-            >
-              Play
-            </Button>
+            {mayPlay ? (
+              <Button
+                variant="primary"
+                disabled={first === undefined}
+                onClick={() => {
+                  if (first === undefined) return
+                  playback.play({
+                    id: `${release.id}:${first.track.discNumber}:${first.track.position}:${first.track.recordingId}`,
+                    src: contentUrl(apiBaseUrl, first.file.path),
+                    title: first.track.title,
+                    subtitle: release.title,
+                  })
+                }}
+              >
+                Play
+              </Button>
+            ) : null}
             {heldSongs.length > 0 ? (
               <AddToPlaylist recordingIds={heldSongs} name={release.title} />
             ) : null}
@@ -339,7 +345,7 @@ function Album({
                 label="this album"
                 onWritten={onChanged}
               />
-            ) : about.groupId != null ? (
+            ) : about.groupId != null && admin ? (
               <WantButton groupId={about.groupId} monitored={about.monitored} />
             ) : null}
             {/*
@@ -347,18 +353,20 @@ function Album({
               every page reads the album from. A pressing's own facts are
               corrected only where the files are proven to be it.
             */}
-            <Button
-              variant="secondary"
-              aria-pressed={editing}
-              disabled={release.coverReleaseId == null}
-              onClick={() => {
-                setEditing(!editing)
-                flushSync(() => setTab('overview'))
-                document.getElementById(`${id}about`)?.focus()
-              }}
-            >
-              Edit
-            </Button>
+            {mayEdit ? (
+              <Button
+                variant="secondary"
+                aria-pressed={editing}
+                disabled={release.coverReleaseId == null}
+                onClick={() => {
+                  setEditing(!editing)
+                  flushSync(() => setTab('overview'))
+                  document.getElementById(`${id}about`)?.focus()
+                }}
+              >
+                Edit
+              </Button>
+            ) : null}
           </Stack>
         </div>
       </header>
@@ -476,11 +484,13 @@ function Album({
                           } else onChanged()
                         }}
                       />
-                      <NotThisAlbum
-                        folder={folder.path}
-                        albumId={releaseId}
-                        onChanged={onChanged}
-                      />
+                      {admin ? (
+                        <NotThisAlbum
+                          folder={folder.path}
+                          albumId={releaseId}
+                          onChanged={onChanged}
+                        />
+                      ) : null}
                     </Stack>
                   </Disclosure>
                 ))}
@@ -660,7 +670,7 @@ function Album({
                               {certainty.note}
                             </Text>
                           ) : null}
-                          <AskAgain files={files} onReopened={onReopened} />
+                          {admin ? <AskAgain files={files} onReopened={onReopened} /> : null}
                         </Stack>
                       </dd>
                       <dt>Cover</dt>
@@ -675,7 +685,7 @@ function Album({
                                 : "Neither source has one; the files' own is shown if they carry one"}
                             </Text>
                           )}
-                          {release.coverReleaseId != null ? (
+                          {release.coverReleaseId != null && mayEdit ? (
                             <Button size="sm" variant="ghost" onClick={() => setChoosing(true)}>
                               Change cover
                             </Button>
@@ -731,7 +741,7 @@ function Album({
                           <dd>{about.monitored ? 'Yes' : 'No'}</dd>
                         </>
                       )}
-                      {data.contributable > 0 ? (
+                      {data.contributable > 0 && admin ? (
                         <>
                           <dt>AcoustID</dt>
                           <dd>

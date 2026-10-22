@@ -1,4 +1,4 @@
-import { describeError } from '@fonoteca/api-client'
+import { type components, describeError } from '@fonoteca/api-client'
 import {
   Badge,
   Button,
@@ -14,23 +14,52 @@ import {
 } from '@fonoteca/ui'
 import { useState } from 'react'
 
+import { type Role, useAccount, useCan, useReloadAccount } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
+import own from './AccountsPage.module.css'
 import styles from './BrowsePage.module.css'
 
+type AccountResponse = components['schemas']['AccountResponse']
+
 /**
- * Accounts, and the signed-in account's Subsonic API keys (ADR 0018).
+ * What each of OpenSubsonic's roles lets an account do here, in its order.
+ * A record, so a role the API gains is a compile error until it is described.
+ */
+const ROLES: Readonly<Record<Role, { readonly name: string; readonly does: string }>> = {
+  Admin: { name: 'Admin', does: 'accounts, the passes, files, tags, Identify, follows and Qobuz' },
+  Settings: { name: 'Settings', does: 'their own password and API keys' },
+  Download: { name: 'Download', does: 'music as files' },
+  Upload: { name: 'Upload', does: 'files into the library' },
+  Playlist: { name: 'Playlists', does: 'no effect: playlists are everyone’s' },
+  CoverArt: { name: 'Covers', does: 'covers, pictures and corrections to albums and artists' },
+  Comment: { name: 'Comments and ratings', does: 'nothing here uses it' },
+  Podcast: { name: 'Podcasts', does: 'nothing here uses it' },
+  Stream: { name: 'Play', does: 'music, here and in apps' },
+  Jukebox: { name: 'Jukebox', does: 'nothing here uses it' },
+  Share: { name: 'Sharing', does: 'nothing here uses it' },
+  VideoConversion: { name: 'Video conversion', does: 'nothing here uses it' },
+}
+
+const EVERY_ROLE = Object.keys(ROLES) as Role[]
+
+/** OpenSubsonic's `createUser` defaults, which the API gives an account added without roles too. */
+const DEFAULT_ROLES: readonly Role[] = ['Settings', 'Stream']
+
+/**
+ * Accounts, and the signed-in account's own password and Subsonic API keys
+ * (ADR 0018).
  *
- * Every account may do everything, so any of them manages all of them. What
- * an account owns is its hearts and its keys; the library and the playlists
- * are everyone's, which the page says so nobody looks here for a setting
- * that is not per person.
+ * What an account may do is its roles, OpenSubsonic's, on the web as in a
+ * Subsonic app. An admin manages every account; anybody else sees their own.
+ * What an account owns is its hearts and its keys; the library and the
+ * playlists are everyone's, which the page says so nobody looks here for a
+ * setting that is not per person.
  */
 export function AccountsPage() {
-  const [version, setVersion] = useState(0)
-  const reload = () => setVersion((n) => n + 1)
-  const me = useApiQuery(() => api.get('/api/account'), [])
-  const accounts = useApiQuery(() => api.get('/api/accounts'), [version])
+  const me = useAccount()
+  const admin = useCan('Admin')
+  const settings = useCan('Settings', 'Admin')
 
   return (
     <Stack direction="column" gap={24}>
@@ -41,104 +70,269 @@ export function AccountsPage() {
           </Text>
         </h1>
         <Text tone="secondary" block>
-          An account signs in here and in Subsonic apps with the same name and password. The library
-          and its playlists are everyone's; what is an account's own is its hearts and its API keys.
-          Every account may add, reset and remove the others.
+          An account signs in here and in Subsonic apps with the same name and password, and may do
+          what its roles say, there as here. The library and its playlists are everyone's; what is
+          an account's own is its hearts and its API keys. An admin adds, changes and removes
+          accounts.
         </Text>
       </Stack>
 
-      <Stack gap={8} align="center" wrap>
-        <Text>
-          Signed in as <Text weight="semibold">{me.status === 'ready' ? me.data.name : '…'}</Text>
-        </Text>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void api.post('/api/account/logout').then(() => window.location.reload())}
-        >
-          Sign out
-        </Button>
-      </Stack>
-
-      <section aria-labelledby="accounts-heading">
-        <Stack direction="column" gap={12}>
-          <h2 id="accounts-heading" className={styles.title}>
-            <Text weight="semibold">Everyone</Text>
-          </h2>
-          <div role="status" aria-live="polite">
-            {accounts.status === 'error' ? (
-              <Badge tone="danger">Could not read the accounts: {accounts.message}</Badge>
-            ) : null}
-          </div>
-          {accounts.status === 'ready' ? (
-            <Table density="cozy">
-              <thead>
-                <tr>
-                  <TableHeaderCell>Name</TableHeaderCell>
-                  <TableHeaderCell>Since</TableHeaderCell>
-                  <TableHeaderCell>
-                    <VisuallyHidden>Actions</VisuallyHidden>
-                  </TableHeaderCell>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.data.map((account) => (
-                  <tr key={account.id}>
-                    <TableCell>
-                      <Text weight="medium">{account.name}</Text>
-                      {me.status === 'ready' && me.data.id === account.id ? (
-                        <>
-                          {' '}
-                          <Badge size="sm">you</Badge>
-                        </>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <Text size="sm" tone="secondary">
-                        {new Date(account.createdUtc).toLocaleDateString()}
-                      </Text>
-                    </TableCell>
-                    <TableCell>
-                      <AccountActions
-                        account={account}
-                        alone={accounts.data.length === 1}
-                        onChanged={reload}
-                      />
-                    </TableCell>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          ) : null}
-          <AddAccount onAdded={reload} />
+      <Stack direction="column" gap={4}>
+        <Stack gap={8} align="center" wrap>
+          <Text>
+            Signed in as <Text weight="semibold">{me?.name ?? '…'}</Text>
+          </Text>
+          {settings && me !== undefined ? <PasswordButton account={me} own /> : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              void api.post('/api/account/logout').then(() => window.location.reload())
+            }
+          >
+            Sign out
+          </Button>
         </Stack>
-      </section>
+        {me !== undefined ? (
+          <Text size="sm" tone="secondary" block>
+            {me.roles.length === 0
+              ? 'Your account holds no roles: it may browse the library and nothing more.'
+              : `Your roles: ${me.roles.map((role) => ROLES[role].name).join(', ')}.`}
+          </Text>
+        ) : null}
+      </Stack>
 
-      <ApiKeys />
+      {admin ? <Everyone me={me} /> : null}
+
+      {settings ? <ApiKeys /> : null}
     </Stack>
   )
 }
 
-type Account = { readonly id: string; readonly name: string }
+/** Every account, for an admin to add, change and remove. */
+function Everyone({ me }: { readonly me: AccountResponse | undefined }) {
+  const [version, setVersion] = useState(0)
+  const reloadMe = useReloadAccount()
+  const reload = () => {
+    setVersion((n) => n + 1)
+    reloadMe()
+  }
+  const accounts = useApiQuery(() => api.get('/api/accounts'), [version])
+  const admins =
+    accounts.status === 'ready'
+      ? accounts.data.filter((account) => account.roles.includes('Admin')).length
+      : 0
 
-function AccountActions({
-  account,
-  alone,
-  onChanged,
+  return (
+    <section aria-labelledby="accounts-heading">
+      <Stack direction="column" gap={12}>
+        <h2 id="accounts-heading" className={styles.title}>
+          <Text weight="semibold">Everyone</Text>
+        </h2>
+        <div role="status" aria-live="polite">
+          {accounts.status === 'error' ? (
+            <Badge tone="danger">Could not read the accounts: {accounts.message}</Badge>
+          ) : null}
+        </div>
+        {accounts.status === 'ready' ? (
+          <Table density="cozy">
+            <thead>
+              <tr>
+                <TableHeaderCell>Name</TableHeaderCell>
+                <TableHeaderCell>Roles</TableHeaderCell>
+                <TableHeaderCell>Since</TableHeaderCell>
+                <TableHeaderCell>
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </TableHeaderCell>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.data.map((account) => (
+                <tr key={account.id}>
+                  <TableCell>
+                    <Text weight="medium">{account.name}</Text>
+                    {me?.id === account.id ? (
+                      <>
+                        {' '}
+                        <Badge size="sm">you</Badge>
+                      </>
+                    ) : null}
+                    {account.email != null ? (
+                      <Text size="sm" tone="secondary" block>
+                        {account.email}
+                      </Text>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>
+                    <Text size="sm" tone="secondary">
+                      {account.roles.length === 0
+                        ? 'None'
+                        : account.roles.map((role) => ROLES[role].name).join(', ')}
+                    </Text>
+                  </TableCell>
+                  <TableCell>
+                    <Text size="sm" tone="secondary">
+                      {new Date(account.createdUtc).toLocaleDateString()}
+                    </Text>
+                  </TableCell>
+                  <TableCell>
+                    <AccountActions
+                      account={account}
+                      lastAdmin={admins === 1 && account.roles.includes('Admin')}
+                      onChanged={reload}
+                    />
+                  </TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : null}
+        <AddAccount onAdded={reload} />
+      </Stack>
+    </section>
+  )
+}
+
+/** A checkbox per role, in OpenSubsonic's order. */
+function RolePicker({
+  roles,
+  onChange,
 }: {
-  readonly account: Account
-  readonly alone: boolean
-  readonly onChanged: () => void
+  readonly roles: readonly Role[]
+  readonly onChange: (roles: readonly Role[]) => void
 }) {
-  const [dialog, setDialog] = useState<'password' | 'remove' | null>(null)
+  return (
+    <fieldset className={own.roles}>
+      <legend>
+        <Text size="sm" weight="medium">
+          Roles
+        </Text>
+      </legend>
+      {EVERY_ROLE.map((role) => (
+        <label key={role} className={own.check}>
+          <input
+            type="checkbox"
+            checked={roles.includes(role)}
+            onChange={(event) =>
+              onChange(
+                event.currentTarget.checked
+                  ? EVERY_ROLE.filter((each) => each === role || roles.includes(each))
+                  : roles.filter((each) => each !== role),
+              )
+            }
+          />
+          <Text size="sm">
+            {ROLES[role].name}: {ROLES[role].does}
+          </Text>
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+/** Sets a password: the signed-in account's own, or, for an admin, anybody's. */
+function PasswordButton({
+  account,
+  own: isOwn,
+}: {
+  readonly account: AccountResponse
+  readonly own?: boolean
+}) {
+  const [open, setOpen] = useState(false)
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const close = () => {
-    setDialog(null)
+    setOpen(false)
     setPassword('')
     setError(null)
+  }
+
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await (isOwn
+        ? api.post('/api/account/password', { json: { password } })
+        : api.post('/api/accounts/{id}/password', {
+            params: { path: { id: account.id } },
+            json: { password },
+          }))
+      close()
+    } catch (cause) {
+      setError(describeError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
+        {isOwn ? 'Change your password' : 'Set password'}
+      </Button>
+      <Dialog
+        open={open}
+        onClose={close}
+        title={isOwn ? 'A new password for you' : `A new password for ${account.name}`}
+        description="For the web and Subsonic apps alike. Other sign-ins end within a minute."
+        footer={
+          <Stack gap={8} justify="end">
+            <Button variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || password === ''}
+              onClick={() => void save()}
+            >
+              Set password
+            </Button>
+          </Stack>
+        }
+      >
+        <Field label="Password" hint="At least 16 characters." error={error ?? undefined}>
+          {(control) => (
+            <Input
+              {...control}
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          )}
+        </Field>
+      </Dialog>
+    </>
+  )
+}
+
+function AccountActions({
+  account,
+  lastAdmin,
+  onChanged,
+}: {
+  readonly account: AccountResponse
+  readonly lastAdmin: boolean
+  readonly onChanged: () => void
+}) {
+  const [dialog, setDialog] = useState<'roles' | 'remove' | null>(null)
+  const [roles, setRoles] = useState<readonly Role[]>(account.roles)
+  const [email, setEmail] = useState(account.email ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const close = () => {
+    setDialog(null)
+    setError(null)
+  }
+
+  // From the account as it is now, which a save elsewhere may have changed.
+  const editRoles = () => {
+    setRoles(account.roles)
+    setEmail(account.email ?? '')
+    setDialog('roles')
   }
 
   const run = async (action: () => Promise<unknown>) => {
@@ -159,18 +353,19 @@ function AccountActions({
 
   return (
     <Stack gap={8} justify="end" wrap>
-      <Button size="sm" variant="ghost" onClick={() => setDialog('password')}>
-        Set password
+      <Button size="sm" variant="ghost" onClick={editRoles}>
+        Roles
       </Button>
-      <Button size="sm" variant="ghost" disabled={alone} onClick={() => setDialog('remove')}>
+      <PasswordButton account={account} />
+      <Button size="sm" variant="ghost" disabled={lastAdmin} onClick={() => setDialog('remove')}>
         Remove
       </Button>
 
       <Dialog
-        open={dialog === 'password'}
+        open={dialog === 'roles'}
         onClose={close}
-        title={`A new password for ${account.name}`}
-        description="For the web and Subsonic apps alike. Their other sign-ins end within a minute."
+        title={`What ${account.name} may do`}
+        description="A change reaches their other sign-ins within a minute. There is always one admin."
         footer={
           <Stack gap={8} justify="end">
             <Button variant="ghost" onClick={close}>
@@ -178,29 +373,37 @@ function AccountActions({
             </Button>
             <Button
               variant="primary"
-              disabled={busy || password === ''}
+              disabled={busy}
               onClick={() =>
                 void run(() =>
-                  api.post('/api/accounts/{id}/password', { ...params, json: { password } }),
+                  api.post('/api/accounts/{id}', { ...params, json: { roles: [...roles], email } }),
                 )
               }
             >
-              Set password
+              Save
             </Button>
           </Stack>
         }
       >
-        <Field label="Password" hint="At least 16 characters." error={error ?? undefined}>
-          {(control) => (
-            <Input
-              {...control}
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          )}
-        </Field>
+        <Stack direction="column" gap={12}>
+          <Field label="Email" hint="Optional; Subsonic apps show it, nothing here sends mail.">
+            {(control) => (
+              <Input
+                {...control}
+                type="email"
+                autoComplete="off"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            )}
+          </Field>
+          <RolePicker roles={roles} onChange={setRoles} />
+          {error != null ? (
+            <Text size="sm" tone="danger" role="alert" block>
+              {error}
+            </Text>
+          ) : null}
+        </Stack>
       </Dialog>
 
       <Dialog
@@ -236,6 +439,8 @@ function AccountActions({
 function AddAccount({ onAdded }: { readonly onAdded: () => void }) {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
+  const [roles, setRoles] = useState<readonly Role[]>(DEFAULT_ROLES)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -243,9 +448,13 @@ function AddAccount({ onAdded }: { readonly onAdded: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      await api.post('/api/accounts', { json: { name: name.trim(), password } })
+      await api.post('/api/accounts', {
+        json: { name: name.trim(), password, email: email.trim() || null, roles: [...roles] },
+      })
       setName('')
       setPassword('')
+      setEmail('')
+      setRoles(DEFAULT_ROLES)
       onAdded()
     } catch (cause) {
       setError(describeError(cause))
@@ -285,6 +494,17 @@ function AddAccount({ onAdded }: { readonly onAdded: () => void }) {
               />
             )}
           </Field>
+          <Field label="Email" hint="Optional.">
+            {(control) => (
+              <Input
+                {...control}
+                type="email"
+                autoComplete="off"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            )}
+          </Field>
           <Button
             type="submit"
             variant="secondary"
@@ -293,6 +513,7 @@ function AddAccount({ onAdded }: { readonly onAdded: () => void }) {
             Add
           </Button>
         </Stack>
+        <RolePicker roles={roles} onChange={setRoles} />
         {error != null ? (
           <Text size="sm" tone="danger" role="alert" block>
             {error}

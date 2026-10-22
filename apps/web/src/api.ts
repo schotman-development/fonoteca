@@ -13,17 +13,20 @@ import { createApiClient } from '@fonoteca/api-client'
 export const apiBaseUrl: string = import.meta.env.VITE_API_BASE_URL ?? ''
 
 const SIGNED_OUT = 'fonoteca:signed-out'
+const REFUSED = 'fonoteca:refused'
 
 /**
  * Every request carries the session, and a 401 from any of them means there
  * is none — signed out, the password reset elsewhere, the account removed —
- * which `AccountGate` answers with the sign-in form.
+ * which `AccountGate` answers with the sign-in form. A 403 means the account
+ * lacks a role the request needs, and `AccountGate` reads its roles again.
  */
 export const api = createApiClient({
   baseUrl: apiBaseUrl,
   fetch: async (input, init) => {
     const response = await fetch(input, { ...init, credentials: 'include' })
     if (response.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+    if (response.status === 403) window.dispatchEvent(new Event(REFUSED))
     return response
   },
 })
@@ -32,4 +35,10 @@ export const api = createApiClient({
 export function onSignedOut(listener: () => void): () => void {
   window.addEventListener(SIGNED_OUT, listener)
   return () => window.removeEventListener(SIGNED_OUT, listener)
+}
+
+/** Calls `listener` whenever a request is refused for a role; returns the unsubscribe. */
+export function onRefused(listener: () => void): () => void {
+  window.addEventListener(REFUSED, listener)
+  return () => window.removeEventListener(REFUSED, listener)
 }

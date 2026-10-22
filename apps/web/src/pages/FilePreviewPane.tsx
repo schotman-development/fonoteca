@@ -2,6 +2,7 @@ import type { components } from '@fonoteca/api-client'
 import type { PlaybackTrack } from '@fonoteca/ui'
 import { Artwork, Badge, formatTime, PlayButton, Stack, Text } from '@fonoteca/ui'
 
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './FilePreviewPane.module.css'
@@ -103,6 +104,8 @@ function FolderPreview({ entry, onOpen }: { entry: FolderEntry; onOpen: (path: s
 }
 
 function FilePreview({ entry }: { entry: FolderEntry }) {
+  const mayDownload = useCan('Download')
+
   if (entry.isAudio) return <AudioPreview entry={entry} />
   if (entry.kind === 'Image') return <ImagePreview entry={entry} />
   if (entry.kind === 'Text') return <TextPreview entry={entry} />
@@ -111,11 +114,14 @@ function FilePreview({ entry }: { entry: FolderEntry }) {
     <Stack direction="column" gap={8} align="start">
       <Badge tone="neutral">No preview</Badge>
       <Text size="sm" tone="secondary" block>
-        Nothing here can show this safely, so it is offered as a download instead.
+        Nothing here can show this safely
+        {mayDownload ? ', so it is offered as a download instead' : ''}.
       </Text>
-      <a className={styles.download} href={contentUrl(apiBaseUrl, entry.path)}>
-        Download {entry.name}
-      </a>
+      {mayDownload ? (
+        <a className={styles.download} href={contentUrl(apiBaseUrl, entry.path)}>
+          Download {entry.name}
+        </a>
+      ) : null}
     </Stack>
   )
 }
@@ -205,6 +211,7 @@ function trackFor(
  * moment this button is pressed.
  */
 function AudioPreview({ entry }: { entry: FolderEntry }) {
+  const mayPlay = useCan('Stream')
   const state = useApiQuery(
     () => api.get('/api/files/detail', { params: { query: { path: entry.path } } }),
     [entry.path],
@@ -223,12 +230,14 @@ function AudioPreview({ entry }: { entry: FolderEntry }) {
         work is worse than none.
       */}
       {entry.kind === 'Audio' ? (
-        <Stack gap={8} align="center">
-          <PlayButton track={trackFor(entry, detail)} />
-          <Text size="sm" tone="secondary">
-            {detail?.durationSeconds == null ? 'Play' : formatTime(detail.durationSeconds)}
-          </Text>
-        </Stack>
+        mayPlay ? (
+          <Stack gap={8} align="center">
+            <PlayButton track={trackFor(entry, detail)} />
+            <Text size="sm" tone="secondary">
+              {detail?.durationSeconds == null ? 'Play' : formatTime(detail.durationSeconds)}
+            </Text>
+          </Stack>
+        ) : null
       ) : (
         <Badge tone="neutral">No browser plays this format</Badge>
       )}

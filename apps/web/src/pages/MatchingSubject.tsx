@@ -19,6 +19,7 @@ import {
 } from '@fonoteca/ui'
 import { useDeferredValue, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { apiBaseUrl } from '../api.ts'
 import styles from './MatchingSubject.module.css'
 import type {
@@ -178,7 +179,7 @@ function Listen({ files }: { readonly files: readonly SubjectFile[] }) {
       <ul className={styles.files} aria-label="Files">
         {files.map((file) => (
           <li key={file.path} className={styles.file}>
-            <PlayButton size="sm" track={trackFor(file.path, basename(file.path))} />
+            <Play track={trackFor(file.path, basename(file.path))} />
             <Text size="xs" family="mono" tone="secondary" truncate>
               {basename(file.path)}
             </Text>
@@ -266,7 +267,7 @@ function releaseOption(candidate: ReleaseCandidate): CandidateOption {
             </Text>
           }
           rows={candidate.slots}
-          renderPlay={(row) => <PlayButton size="sm" track={slotTrack(row)} />}
+          renderPlay={(row) => <Play track={slotTrack(row)} />}
         />
       </CandidateCard>
     ),
@@ -331,6 +332,11 @@ function artistOption(candidate: ArtistCandidate): CandidateOption {
  * all.
  */
 const AUDIO_PATH = '/api/library/audio'
+
+/** A play button for an account that may stream; nothing for one that may not. */
+function Play({ track }: { readonly track: PlaybackTrack }) {
+  return useCan('Stream') ? <PlayButton size="sm" track={track} /> : null
+}
 
 function trackFor(path: string, title: string): PlaybackTrack {
   const mimeType = mimeTypeFor(path)

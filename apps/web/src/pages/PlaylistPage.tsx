@@ -16,6 +16,7 @@ import {
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useId, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './BrowsePage.module.css'
@@ -258,6 +259,7 @@ function Header({
   readonly onRename: (name: string) => Promise<boolean>
 }) {
   const playback = usePlayback()
+  const mayPlay = useCan('Stream')
   const navigate = useNavigate()
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -352,21 +354,23 @@ function Header({
         </Text>
 
         <Stack gap={8} wrap>
-          <Button
-            variant="primary"
-            disabled={first == null}
-            onClick={() => {
-              if (first == null) return
-              playback.play({
-                id: `${playlist.id}:${held[0]?.index}`,
-                src: contentUrl(apiBaseUrl, first.file.path),
-                title: first.title,
-                subtitle: playlist.name,
-              })
-            }}
-          >
-            Play
-          </Button>
+          {mayPlay ? (
+            <Button
+              variant="primary"
+              disabled={first == null}
+              onClick={() => {
+                if (first == null) return
+                playback.play({
+                  id: `${playlist.id}:${held[0]?.index}`,
+                  src: contentUrl(apiBaseUrl, first.file.path),
+                  title: first.title,
+                  subtitle: playlist.name,
+                })
+              }}
+            >
+              Play
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
             disabled={busy || renaming || !playlist.editable}

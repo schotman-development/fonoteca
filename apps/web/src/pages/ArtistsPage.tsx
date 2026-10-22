@@ -4,6 +4,7 @@ import { Badge, Button, CatalogueCard, CatalogueGrid, Input, Stack, Text } from 
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useDeferredValue, useId, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { SortSelect } from '../components/SortSelect.tsx'
 import { useApiQuery } from '../useApiQuery.ts'
@@ -54,6 +55,7 @@ export function ArtistsPage() {
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true })
   }
 
+  const admin = useCan('Admin')
   const searchId = useId()
   const followId = useId()
 
@@ -188,28 +190,30 @@ export function ArtistsPage() {
           for releases, it needs a Solr index, and it fails against a
           self-hosted mirror. An MBID is a lookup and works everywhere.
         */}
-        <div className={styles.search}>
-          <label htmlFor={followId}>
-            <Text size="xs" tone="tertiary">
-              Follow by MusicBrainz id
-            </Text>
-          </label>
-          <Stack gap={8} align="center">
-            <Input
-              id={followId}
-              value={candidate}
-              placeholder="musicbrainz.org/artist/… or the id itself"
-              onChange={(event) => setCandidate(event.target.value)}
-            />
-            <Button
-              variant="secondary"
-              disabled={saving || candidate.trim() === ''}
-              onClick={() => void follow()}
-            >
-              Follow
-            </Button>
-          </Stack>
-        </div>
+        {admin ? (
+          <div className={styles.search}>
+            <label htmlFor={followId}>
+              <Text size="xs" tone="tertiary">
+                Follow by MusicBrainz id
+              </Text>
+            </label>
+            <Stack gap={8} align="center">
+              <Input
+                id={followId}
+                value={candidate}
+                placeholder="musicbrainz.org/artist/… or the id itself"
+                onChange={(event) => setCandidate(event.target.value)}
+              />
+              <Button
+                variant="secondary"
+                disabled={saving || candidate.trim() === ''}
+                onClick={() => void follow()}
+              >
+                Follow
+              </Button>
+            </Stack>
+          </div>
+        ) : null}
       </Stack>
 
       {followError != null ? (
@@ -328,6 +332,7 @@ function Empty({
   readonly scope: ArtistScope
   readonly onWiden: () => void
 }) {
+  const admin = useCan('Admin')
   // The fourth meaning, and it is not a narrowing at all. An empty Following
   // list is not a library that has not been enriched and not a shelf hiding
   // somebody — it is a list nobody has put anything on, so neither the pass
@@ -340,8 +345,9 @@ function Empty({
           {filtered ? 'No artist you follow matches that.' : 'You are not following anyone yet.'}
         </Text>
         <Text size="sm" tone="tertiary" block>
-          Following is a choice rather than a reading of the library. Follow someone from their
-          page, or add an artist you own nothing by with their MusicBrainz id or URL.
+          {admin
+            ? 'Following is a choice rather than a reading of the library. Follow someone from their page, or add an artist you own nothing by with their MusicBrainz id or URL.'
+            : 'Following is a choice rather than a reading of the library.'}
         </Text>
       </Stack>
     )

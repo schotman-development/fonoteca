@@ -13,6 +13,7 @@ import {
 import { Link } from '@tanstack/react-router'
 import { type ReactNode, useId, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './DuplicatesPage.module.css'
@@ -36,6 +37,7 @@ export function DuplicatesPage() {
   const [trashing, setTrashing] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const admin = useCan('Admin')
 
   const state = useApiQuery(() => api.get('/api/catalogue/duplicates'), [loaded])
 
@@ -65,8 +67,8 @@ export function DuplicatesPage() {
         </h1>
         <Text tone="secondary" block>
           Albums held in more than one folder, and songs held twice in one album folder. A song on
-          its album and again on a best-of is two records, not a duplicate. Nothing moves until you
-          move a copy to the trash.
+          its album and again on a best-of is two records, not a duplicate.
+          {admin ? ' Nothing moves until you move a copy to the trash.' : ''}
         </Text>
       </Stack>
 
@@ -189,6 +191,7 @@ function AlbumRow({
   readonly busy: boolean
   readonly onTrash: (path: string) => void
 }) {
+  const admin = useCan('Admin')
   return (
     <div className={styles.panel}>
       <Stack direction="column" gap={8}>
@@ -216,9 +219,11 @@ function AlbumRow({
                 <TableHeaderCell numeric>Files</TableHeaderCell>
                 <TableHeaderCell>Format</TableHeaderCell>
                 <TableHeaderCell numeric>Size</TableHeaderCell>
-                <TableHeaderCell>
-                  <VisuallyHidden>Actions</VisuallyHidden>
-                </TableHeaderCell>
+                {admin ? (
+                  <TableHeaderCell>
+                    <VisuallyHidden>Actions</VisuallyHidden>
+                  </TableHeaderCell>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -240,16 +245,18 @@ function AlbumRow({
                   <TableCell numeric className={styles.nowrap}>
                     {fileSize(folder.sizeBytes)}
                   </TableCell>
-                  <TableCell className={styles.nowrap}>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => onTrash(folder.path)}
-                    >
-                      Move to trash
-                    </Button>
-                  </TableCell>
+                  {admin ? (
+                    <TableCell className={styles.nowrap}>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onTrash(folder.path)}
+                      >
+                        Move to trash
+                      </Button>
+                    </TableCell>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -269,6 +276,7 @@ function SongRow({
   readonly busy: boolean
   readonly onTrash: (path: string) => void
 }) {
+  const admin = useCan('Admin')
   return (
     <div className={styles.panel}>
       <Stack direction="column" gap={8}>
@@ -291,9 +299,11 @@ function SongRow({
                 <TableHeaderCell className={styles.path}>File</TableHeaderCell>
                 <TableHeaderCell>Format</TableHeaderCell>
                 <TableHeaderCell numeric>Size</TableHeaderCell>
-                <TableHeaderCell>
-                  <VisuallyHidden>Actions</VisuallyHidden>
-                </TableHeaderCell>
+                {admin ? (
+                  <TableHeaderCell>
+                    <VisuallyHidden>Actions</VisuallyHidden>
+                  </TableHeaderCell>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -311,16 +321,18 @@ function SongRow({
                   <TableCell numeric className={styles.nowrap}>
                     {fileSize(copy.sizeBytes)}
                   </TableCell>
-                  <TableCell className={styles.nowrap}>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => onTrash(copy.path)}
-                    >
-                      Move to trash
-                    </Button>
-                  </TableCell>
+                  {admin ? (
+                    <TableCell className={styles.nowrap}>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onTrash(copy.path)}
+                      >
+                        Move to trash
+                      </Button>
+                    </TableCell>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

@@ -22,6 +22,7 @@ import {
 } from '@fonoteca/ui'
 import { useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { type QueryState, useApiQuery } from '../useApiQuery.ts'
 import { embeddedArt, releaseArt } from './coverArt.ts'
@@ -820,6 +821,7 @@ function Candidates({
   readonly claimed?: string
   readonly onDecided: () => void
 }) {
+  const admin = useCan('Admin')
   const state = useApiQuery(
     () =>
       api.get('/api/catalogue/matching/recordings/{id}/candidates', {
@@ -996,26 +998,28 @@ function Candidates({
               footer={
                 <Stack direction="column" gap={6} align="start">
                   <Stack gap={12} align="center" wrap>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      // The same predicate the fieldset uses, and not
-                      // `!== 'idle'`. On an error the fieldset comes back but a
-                      // button disabled in its own right does not, and the way
-                      // back to idle is `onSelect` — which a native radio that
-                      // is already checked never fires. Retrying the same answer
-                      // after a 503 would mean detouring through another
-                      // candidate and back, and the two failures that get here
-                      // are exactly the ones worth retrying unchanged.
-                      disabled={
-                        answer == null || commit.status === 'sending' || commit.status === 'done'
-                      }
-                      onClick={() => {
-                        if (answer != null) void send(answer)
-                      }}
-                    >
-                      {commitLabel(answer, commit)}
-                    </Button>
+                    {admin ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        // The same predicate the fieldset uses, and not
+                        // `!== 'idle'`. On an error the fieldset comes back but a
+                        // button disabled in its own right does not, and the way
+                        // back to idle is `onSelect` — which a native radio that
+                        // is already checked never fires. Retrying the same answer
+                        // after a 503 would mean detouring through another
+                        // candidate and back, and the two failures that get here
+                        // are exactly the ones worth retrying unchanged.
+                        disabled={
+                          answer == null || commit.status === 'sending' || commit.status === 'done'
+                        }
+                        onClick={() => {
+                          if (answer != null) void send(answer)
+                        }}
+                      >
+                        {commitLabel(answer, commit)}
+                      </Button>
+                    ) : null}
                     <Text size="xs" tone="tertiary">
                       {commitHint(answer, commit, chosenTitle(candidates, answer))}
                     </Text>
@@ -1550,6 +1554,7 @@ function ComponentCandidates({
   // document for every component it refuses, out of the gather it had already
   // paid for — so a fresh gather is a deliberate act rather than a default.
   const [asked, setAsked] = useState(0)
+  const admin = useCan('Admin')
 
   const state = useApiQuery(
     () =>
@@ -1672,18 +1677,20 @@ function ComponentCandidates({
               footer={
                 <Stack direction="column" gap={6} align="start">
                   <Stack gap={12} align="center" wrap>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={
-                        answer == null || commit.status === 'sending' || commit.status === 'done'
-                      }
-                      onClick={() => {
-                        if (answer != null) void send(answer)
-                      }}
-                    >
-                      {albumCommitLabel(answer, commit)}
-                    </Button>
+                    {admin ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={
+                          answer == null || commit.status === 'sending' || commit.status === 'done'
+                        }
+                        onClick={() => {
+                          if (answer != null) void send(answer)
+                        }}
+                      >
+                        {albumCommitLabel(answer, commit)}
+                      </Button>
+                    ) : null}
                     <Text size="xs" tone="tertiary">
                       {albumCommitHint(answer, commit, candidates, state.data.files)}
                     </Text>

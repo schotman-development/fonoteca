@@ -15,6 +15,7 @@ import {
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { type ChangeEvent, useId, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { TagEditor } from '../components/TagEditor.tsx'
 import { UndoFolderButton } from '../components/UndoFolderButton.tsx'
@@ -62,6 +63,7 @@ export function FilesPage() {
   const navigate = useNavigate({ from: '/files' })
   const [attempt, setAttempt] = useState(0)
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+  const admin = useCan('Admin')
   // The row being looked at, which is not the set being acted on. A file
   // browser has both: one highlighted thing described in the pane, and any
   // number of ticked things a command applies to.
@@ -213,7 +215,7 @@ export function FilesPage() {
       return failed === 0
         ? {
             tone: 'success',
-            message: `${chosen.length} file${chosen.length === 1 ? '' : 's'} written. Scan to catalogue them.`,
+            message: `${chosen.length} file${chosen.length === 1 ? '' : 's'} written.${admin ? ' Scan to catalogue them.' : ''}`,
           }
         : {
             tone: 'danger',
@@ -345,6 +347,7 @@ export function FilesPage() {
               onCurrent={setCurrent}
               onOpen={open}
               onRename={setRenaming}
+              canChange={admin}
             />
           )}
 
@@ -461,6 +464,8 @@ function Toolbar({
   onUpload: (files: FileList) => void
   onScan: () => void
 }) {
+  const admin = useCan('Admin')
+  const mayUpload = useCan('Upload')
   const filesId = useId()
   const folderId = useId()
 
@@ -474,37 +479,45 @@ function Toolbar({
 
   return (
     <Stack gap={8} align="center" wrap>
-      <Button variant="danger" size="sm" disabled={busy || selected === 0} onClick={onTrash}>
-        Move to trash{selected > 0 ? ` (${selected})` : ''}
-      </Button>
+      {admin ? (
+        <Button variant="danger" size="sm" disabled={busy || selected === 0} onClick={onTrash}>
+          Move to trash{selected > 0 ? ` (${selected})` : ''}
+        </Button>
+      ) : null}
 
-      <label className={styles.upload} htmlFor={filesId}>
-        <Text size="sm">Add files</Text>
-        <input id={filesId} type="file" multiple onChange={pick} disabled={busy} />
-      </label>
+      {mayUpload ? (
+        <>
+          <label className={styles.upload} htmlFor={filesId}>
+            <Text size="sm">Add files</Text>
+            <input id={filesId} type="file" multiple onChange={pick} disabled={busy} />
+          </label>
 
-      <label className={styles.upload} htmlFor={folderId}>
-        <Text size="sm">Add an album folder</Text>
-        <input
-          id={folderId}
-          type="file"
-          multiple
-          // React has no prop for it and every browser that matters supports it.
-          // Set on the element, because the attribute is what makes the picker
-          // choose a directory and hand back webkitRelativePath — which is the
-          // only thing that keeps CD1 and CD2 apart on the way in.
-          ref={(node) => {
-            if (node)
-              (node as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true
-          }}
-          onChange={pick}
-          disabled={busy}
-        />
-      </label>
+          <label className={styles.upload} htmlFor={folderId}>
+            <Text size="sm">Add an album folder</Text>
+            <input
+              id={folderId}
+              type="file"
+              multiple
+              // React has no prop for it and every browser that matters supports it.
+              // Set on the element, because the attribute is what makes the picker
+              // choose a directory and hand back webkitRelativePath — which is the
+              // only thing that keeps CD1 and CD2 apart on the way in.
+              ref={(node) => {
+                if (node)
+                  (node as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true
+              }}
+              onChange={pick}
+              disabled={busy}
+            />
+          </label>
+        </>
+      ) : null}
 
-      <Button variant="secondary" size="sm" disabled={busy} onClick={onScan}>
-        Scan library
-      </Button>
+      {admin ? (
+        <Button variant="secondary" size="sm" disabled={busy} onClick={onScan}>
+          Scan library
+        </Button>
+      ) : null}
 
       {uploading ? (
         <Text size="sm" tone="tertiary">
@@ -523,6 +536,7 @@ function Listing({
   onCurrent,
   onOpen,
   onRename,
+  canChange,
 }: {
   entries: readonly FolderEntry[]
   selected: ReadonlySet<string>
@@ -531,6 +545,7 @@ function Listing({
   onCurrent: (path: string) => void
   onOpen: (path: string) => void
   onRename: (entry: FolderEntry) => void
+  canChange: boolean
 }) {
   const toggle = (path: string) => {
     const next = new Set(selected)
@@ -546,16 +561,18 @@ function Listing({
     <Table density="compact">
       <thead>
         <tr>
-          <TableHeaderCell className={styles.pick}>
-            <input
-              type="checkbox"
-              checked={all}
-              aria-label="Select every entry"
-              onChange={() =>
-                onSelect(all ? new Set() : new Set(entries.map((entry) => entry.path)))
-              }
-            />
-          </TableHeaderCell>
+          {canChange ? (
+            <TableHeaderCell className={styles.pick}>
+              <input
+                type="checkbox"
+                checked={all}
+                aria-label="Select every entry"
+                onChange={() =>
+                  onSelect(all ? new Set() : new Set(entries.map((entry) => entry.path)))
+                }
+              />
+            </TableHeaderCell>
+          ) : null}
           <TableHeaderCell className={styles.name}>Name</TableHeaderCell>
           <TableHeaderCell>Catalogue</TableHeaderCell>
           <TableHeaderCell numeric className={styles.number}>
@@ -564,9 +581,11 @@ function Listing({
           <TableHeaderCell numeric className={styles.number}>
             Modified
           </TableHeaderCell>
-          <TableHeaderCell>
-            <span className={styles.hidden}>Actions</span>
-          </TableHeaderCell>
+          {canChange ? (
+            <TableHeaderCell>
+              <span className={styles.hidden}>Actions</span>
+            </TableHeaderCell>
+          ) : null}
         </tr>
       </thead>
       <tbody>
@@ -579,14 +598,16 @@ function Listing({
               data-current={entry.path === current || undefined}
               className={styles.row}
             >
-              <TableCell className={styles.pick}>
-                <input
-                  type="checkbox"
-                  checked={selected.has(entry.path)}
-                  aria-label={`Select ${entry.name}`}
-                  onChange={() => toggle(entry.path)}
-                />
-              </TableCell>
+              {canChange ? (
+                <TableCell className={styles.pick}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(entry.path)}
+                    aria-label={`Select ${entry.name}`}
+                    onChange={() => toggle(entry.path)}
+                  />
+                </TableCell>
+              ) : null}
 
               <TableCell className={styles.name}>
                 <span className={styles.entry}>
@@ -646,11 +667,13 @@ function Listing({
                 </Text>
               </TableCell>
 
-              <TableCell>
-                <Button variant="ghost" size="sm" onClick={() => onRename(entry)}>
-                  Rename
-                </Button>
-              </TableCell>
+              {canChange ? (
+                <TableCell>
+                  <Button variant="ghost" size="sm" onClick={() => onRename(entry)}>
+                    Rename
+                  </Button>
+                </TableCell>
+              ) : null}
             </tr>
           )
         })}

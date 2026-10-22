@@ -2,6 +2,7 @@ import { type components, describeError } from '@fonoteca/api-client'
 import { Badge, Button, Stack, Text } from '@fonoteca/ui'
 import { useCallback, useEffect, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { type JobProgress, useJobsConnection } from '../useJobsConnection.ts'
 
@@ -31,6 +32,7 @@ export function AttributionPanel({ onAttributed }: { readonly onAttributed?: () 
   const [status, setStatus] = useState<Status | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const admin = useCan('Admin')
 
   const { jobs } = useJobsConnection()
   const live: JobProgress | undefined = jobs[JOB_KIND]
@@ -108,21 +110,23 @@ export function AttributionPanel({ onAttributed }: { readonly onAttributed?: () 
 
   return (
     <Stack direction="column" gap={12}>
-      <Stack gap={8} align="center" wrap>
-        <Button
-          variant="primary"
-          onClick={() => void attribute()}
-          disabled={busy || running || status.pending === 0}
-        >
-          {running ? 'Attributing…' : 'Attribute'}
-        </Button>
-
-        {running ? (
-          <Button size="sm" variant="danger" onClick={() => void cancel()}>
-            Stop
+      {admin ? (
+        <Stack gap={8} align="center" wrap>
+          <Button
+            variant="primary"
+            onClick={() => void attribute()}
+            disabled={busy || running || status.pending === 0}
+          >
+            {running ? 'Attributing…' : 'Attribute'}
           </Button>
-        ) : null}
-      </Stack>
+
+          {running ? (
+            <Button size="sm" variant="danger" onClick={() => void cancel()}>
+              Stop
+            </Button>
+          ) : null}
+        </Stack>
+      ) : null}
 
       <Stack direction="column" gap={12} role="status" aria-live="polite" aria-busy={running}>
         {error !== null ? (

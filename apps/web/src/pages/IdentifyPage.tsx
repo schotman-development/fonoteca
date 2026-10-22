@@ -30,6 +30,7 @@ import {
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import { releaseGroupArt } from './coverArt.ts'
@@ -363,33 +364,38 @@ function Settled({
   readonly onNotice: (notice: string) => void
   readonly onReread: () => void
 }) {
+  const admin = useCan('Admin')
   const [sending, setSending] = useState(false)
   const markable = data.folder.split('/').length >= ALBUM_FOLDER_DEPTH
 
   return (
     <Stack direction="column" gap={8} align="start" className={styles.panel}>
       <Text size="sm" block>
-        Nothing here is waiting on you. If the album or the tracks are wrong, take the answer back
-        and the folder becomes one question again.
+        Nothing here is waiting on you.
+        {admin
+          ? ' If the album or the tracks are wrong, take the answer back and the folder becomes one question again.'
+          : ''}
       </Text>
-      <Button
-        variant="secondary"
-        disabled={!markable || sending}
-        onClick={() => {
-          setSending(true)
-          void reopenFolder(data.folder, onNotice, onReread).finally(() => {
-            setSending(false)
-          })
-        }}
-      >
-        {sending ? 'Reopening…' : 'Wrong match — ask again'}
-      </Button>
+      {admin ? (
+        <Button
+          variant="secondary"
+          disabled={!markable || sending}
+          onClick={() => {
+            setSending(true)
+            void reopenFolder(data.folder, onNotice, onReread).finally(() => {
+              setSending(false)
+            })
+          }}
+        >
+          {sending ? 'Reopening…' : 'Wrong match — ask again'}
+        </Button>
+      ) : null}
       {onSkip !== undefined ? (
         <Button variant="ghost" onClick={onSkip} disabled={sending}>
           Skip
         </Button>
       ) : null}
-      {!markable ? (
+      {admin && !markable ? (
         <Text size="xs" tone="tertiary" block>
           Only an Artist/Album folder can be reopened.
         </Text>
@@ -565,6 +571,7 @@ function Chooser({
   const [failure, setFailure] = useState<string | null>(null)
 
   const markable = data.folder.split('/').length >= ALBUM_FOLDER_DEPTH
+  const admin = useCan('Admin')
 
   async function file() {
     if (selected === null || seating === null || pairs.length === 0) return
@@ -730,27 +737,31 @@ function Chooser({
               Skip
             </Button>
           ) : null}
-          <Button
-            variant="secondary"
-            disabled={!markable || sending !== 'idle'}
-            onClick={() => {
-              void unreleased()
-            }}
-          >
-            {sending === 'unreleasing' ? 'Marking…' : 'Not a release'}
-          </Button>
+          {admin ? (
+            <Button
+              variant="secondary"
+              disabled={!markable || sending !== 'idle'}
+              onClick={() => {
+                void unreleased()
+              }}
+            >
+              {sending === 'unreleasing' ? 'Marking…' : 'Not a release'}
+            </Button>
+          ) : null}
           <MoreMenu data={data} markable={markable} onNotice={onNotice} onReread={onReread} />
-          <Button
-            variant="primary"
-            disabled={pairs.length === 0 || sending !== 'idle'}
-            onClick={() => {
-              void file()
-            }}
-          >
-            {sending === 'filing'
-              ? 'Filing…'
-              : `File ${pairs.length} file${pairs.length === 1 ? '' : 's'} under this album`}
-          </Button>
+          {admin ? (
+            <Button
+              variant="primary"
+              disabled={pairs.length === 0 || sending !== 'idle'}
+              onClick={() => {
+                void file()
+              }}
+            >
+              {sending === 'filing'
+                ? 'Filing…'
+                : `File ${pairs.length} file${pairs.length === 1 ? '' : 's'} under this album`}
+            </Button>
+          ) : null}
         </Stack>
       </div>
     </>
@@ -1265,6 +1276,8 @@ function MoreMenu({
   const menu = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const playback = usePlayback()
+  const admin = useCan('Admin')
+  const mayPlay = useCan('Stream')
 
   const [dialog, setDialog] = useState<'tags' | 'musicbrainz' | null>(null)
   const [subject, setSubject] = useState<MatchingSubjectRef | null>(null)
@@ -1280,21 +1293,25 @@ function MoreMenu({
     {
       group: 'Look closer',
       items: [
-        {
-          label: 'Play the folder',
-          description: 'Starts the first open file in the player.',
-          unavailable: first === undefined ? 'There is no open file to play.' : null,
-          run: () => {
-            if (first === undefined) return
-            playback.play({
-              id: first.mediaFileId,
-              src: contentUrl(apiBaseUrl, first.path),
-              title: first.title,
-              subtitle: data.folder,
-              ...(first.lengthMs != null ? { duration: first.lengthMs / 1000 } : {}),
-            })
-          },
-        },
+        ...(mayPlay
+          ? [
+              {
+                label: 'Play the folder',
+                description: 'Starts the first open file in the player.',
+                unavailable: first === undefined ? 'There is no open file to play.' : null,
+                run: () => {
+                  if (first === undefined) return
+                  playback.play({
+                    id: first.mediaFileId,
+                    src: contentUrl(apiBaseUrl, first.path),
+                    title: first.title,
+                    subtitle: data.folder,
+                    ...(first.lengthMs != null ? { duration: first.lengthMs / 1000 } : {}),
+                  })
+                },
+              },
+            ]
+          : []),
         {
           label: 'Open in Files',
           description: 'Everything in the folder, including covers, cue sheets and stray files.',
@@ -1316,20 +1333,26 @@ function MoreMenu({
     {
       group: 'Answer another way',
       items: [
-        {
-          label: 'Match files one at a time…',
-          description:
-            answerable.length > 0
-              ? `${answerable.length} file${answerable.length === 1 ? ' has' : 's have'} recordings of ${answerable.length === 1 ? 'its' : 'their'} own to choose from.`
-              : 'For files whose audio matched several recordings.',
-          unavailable:
-            answerable.length > 0 ? null : 'No file in this folder has recordings to choose from.',
-          run: () => {
-            const next = answerable[0]
-            if (next === undefined) return
-            setSubject({ source: 'catalogue', question: questionFor(next) })
-          },
-        },
+        ...(admin
+          ? [
+              {
+                label: 'Match files one at a time…',
+                description:
+                  answerable.length > 0
+                    ? `${answerable.length} file${answerable.length === 1 ? ' has' : 's have'} recordings of ${answerable.length === 1 ? 'its' : 'their'} own to choose from.`
+                    : 'For files whose audio matched several recordings.',
+                unavailable:
+                  answerable.length > 0
+                    ? null
+                    : 'No file in this folder has recordings to choose from.',
+                run: () => {
+                  const next = answerable[0]
+                  if (next === undefined) return
+                  setSubject({ source: 'catalogue', question: questionFor(next) })
+                },
+              },
+            ]
+          : []),
         {
           label: 'Add this album to MusicBrainz…',
           description:
@@ -1339,19 +1362,23 @@ function MoreMenu({
             setDialog('musicbrainz')
           },
         },
-        {
-          label: 'Wrong match — ask again',
-          description:
-            'Takes back what the passes filed in this folder and makes the whole folder one question.',
-          unavailable: !markable
-            ? 'Only an Artist/Album folder can be reopened.'
-            : placed > 0
-              ? null
-              : 'Nothing in this folder is filed yet.',
-          run: () => {
-            void reopenFolder(data.folder, onNotice, onReread)
-          },
-        },
+        ...(admin
+          ? [
+              {
+                label: 'Wrong match — ask again',
+                description:
+                  'Takes back what the passes filed in this folder and makes the whole folder one question.',
+                unavailable: !markable
+                  ? 'Only an Artist/Album folder can be reopened.'
+                  : placed > 0
+                    ? null
+                    : 'Nothing in this folder is filed yet.',
+                run: () => {
+                  void reopenFolder(data.folder, onNotice, onReread)
+                },
+              },
+            ]
+          : []),
       ],
     },
   ]

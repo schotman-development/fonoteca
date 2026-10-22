@@ -2,6 +2,7 @@ import { type components, describeError } from '@fonoteca/api-client'
 import { Badge, Button, Stack, Text } from '@fonoteca/ui'
 import { useCallback, useEffect, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { type JobProgress, useJobsConnection } from '../useJobsConnection.ts'
 
@@ -61,6 +62,7 @@ export function TagWritePanel({
   const [started, setStarted] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const admin = useCan('Admin')
 
   const { jobs } = useJobsConnection()
   const live: JobProgress | undefined = jobs[JOB_KIND]
@@ -154,7 +156,7 @@ export function TagWritePanel({
 
   // With file writing off no button that would change a file is shown, and an
   // album's or an artist's panel is nothing but its button.
-  if (scope !== undefined && !status.willWrite) return null
+  if (scope !== undefined && (!admin || !status.willWrite)) return null
 
   const processed = live?.processed ?? status.processed
   const total = live?.total ?? status.total
@@ -167,7 +169,7 @@ export function TagWritePanel({
   return (
     <Stack direction="column" gap={12}>
       <Stack gap={8} align="center" wrap>
-        {status.willWrite ? (
+        {admin && status.willWrite ? (
           <Button
             variant={scope === undefined ? 'primary' : 'secondary'}
             size={size}
@@ -182,7 +184,7 @@ export function TagWritePanel({
           </Button>
         ) : null}
 
-        {running ? (
+        {admin && running ? (
           <Button size="sm" variant="danger" onClick={() => void cancel()}>
             Stop
           </Button>

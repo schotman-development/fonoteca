@@ -4,6 +4,7 @@ import { Badge, Button, Dialog, Stack, Table, TableCell, TableHeaderCell, Text }
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './QobuzAlbumDialog.module.css'
@@ -65,6 +66,7 @@ export function QobuzAlbumDialog({
   readonly replacing?: Replacing | undefined
   readonly onClose: () => void
 }) {
+  const admin = useCan('Admin')
   const [download, setDownload] = useState<DownloadState>({ status: 'idle' })
 
   const state = useApiQuery(
@@ -137,35 +139,37 @@ export function QobuzAlbumDialog({
           </Button>
 
           {/* The folder asked about may hold another album: this one can land beside it. */}
-          {separable ? (
+          {separable && admin ? (
             <Button variant="secondary" onClick={() => void start({ separate: true })}>
               Download as a separate album
             </Button>
           ) : null}
 
-          <Button
-            variant="primary"
-            onClick={() => void start({ confirmed: asked })}
-            disabled={
-              !canDownload ||
-              running ||
-              (download.status === 'done' && !asked) ||
-              !album.streamable ||
-              state.status !== 'ready'
-            }
-          >
-            {running
-              ? 'Downloading…'
-              : asked
-                ? 'Replace anyway'
-                : download.status === 'done'
-                  ? download.result === null
-                    ? 'Not downloaded'
-                    : 'Downloaded'
-                  : replacing !== undefined
-                    ? 'Download and replace'
-                    : 'Download'}
-          </Button>
+          {admin ? (
+            <Button
+              variant="primary"
+              onClick={() => void start({ confirmed: asked })}
+              disabled={
+                !canDownload ||
+                running ||
+                (download.status === 'done' && !asked) ||
+                !album.streamable ||
+                state.status !== 'ready'
+              }
+            >
+              {running
+                ? 'Downloading…'
+                : asked
+                  ? 'Replace anyway'
+                  : download.status === 'done'
+                    ? download.result === null
+                      ? 'Not downloaded'
+                      : 'Downloaded'
+                    : replacing !== undefined
+                      ? 'Download and replace'
+                      : 'Download'}
+            </Button>
+          ) : null}
         </Stack>
       }
     >

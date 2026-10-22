@@ -1,9 +1,10 @@
 import { AudioTransport, Badge, CommandBar, Text, ThemeSwitch } from '@fonoteca/ui'
 import { Link, Outlet } from '@tanstack/react-router'
 
+import { useAccount } from './AccountGate.tsx'
 import styles from './AppShell.module.css'
 import { useAppCommands } from './commands.ts'
-import { NAV_SECTIONS } from './navigation.ts'
+import { sectionsFor } from './navigation.ts'
 
 /**
  * The root layout: a navigation rail, a top bar, the current route, and the
@@ -22,6 +23,7 @@ import { NAV_SECTIONS } from './navigation.ts'
  */
 export function AppShell() {
   const commands = useAppCommands()
+  const sections = sectionsFor(useAccount()?.roles ?? [])
 
   return (
     <div className={styles.shell}>
@@ -42,9 +44,10 @@ export function AppShell() {
             marker ends up on the wrong link after a redirect.
 
             The links come from NAV_SECTIONS, which the command bar reads too — see
-            the note there on why the list is not written out twice.
+            the note there on why the list is not written out twice — less the
+            sections the signed-in account's roles leave out.
           */}
-          {NAV_SECTIONS.map((section) => (
+          {sections.map((section) => (
             <div key={section.label} className={styles.navSection}>
               <h2 className={styles.navSectionLabel}>{section.label}</h2>
               {section.items.map((item) => (

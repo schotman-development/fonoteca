@@ -1,3 +1,7 @@
+import type { components } from '@fonoteca/api-client'
+
+type Role = components['schemas']['AccountRoles']
+
 /**
  * The sections of the application, in the order they are shown.
  *
@@ -41,6 +45,11 @@ export type NavItem = {
    * this?" — the labels alone are four words, and "releases" is not one of them.
    */
   readonly keywords: readonly string[]
+  /**
+   * The role the section is for, where everything it does needs one (ADR
+   * 0018); an account without it is shown neither the link nor the command.
+   */
+  readonly role?: Role
 }
 
 /**
@@ -133,6 +142,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Identify',
         exact: false,
         keywords: ['matching', 'questions', 'unmatched'],
+        role: 'Admin',
       },
       // Beside Identify: another list only a person can answer.
       {
@@ -140,6 +150,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Duplicates',
         exact: true,
         keywords: ['duplicates', 'dedupe', 'twice', 'copies'],
+        role: 'Admin',
       },
       // Last, and separate from Identify in more than order: that one corrects
       // what is already here, this one spends money on something that is not.
@@ -148,9 +159,18 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Acquire',
         exact: true,
         keywords: ['qobuz', 'download', 'buy', 'purchase', 'acquire'],
+        role: 'Admin',
       },
     ],
   },
 ]
 
 export const NAV_ITEMS: readonly NavItem[] = NAV_SECTIONS.flatMap((section) => section.items)
+
+/** The sections an account holding `roles` is shown, each without the items it is not, and none left empty. */
+export function sectionsFor(roles: readonly Role[]): readonly NavSection[] {
+  return NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => item.role === undefined || roles.includes(item.role)),
+  })).filter((section) => section.items.length > 0)
+}

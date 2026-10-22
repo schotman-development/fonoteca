@@ -14,6 +14,7 @@ import {
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Fragment, useDeferredValue, useId, useRef } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api, apiBaseUrl } from '../api.ts'
 import { AddToPlaylist } from '../components/AddToPlaylist.tsx'
 import { Pager } from '../components/Pager.tsx'
@@ -182,18 +183,21 @@ export function TrackCells({ track }: { readonly track: TrackListRow }) {
   const { album, file } = track
   const byline = track.artists.map((credit) => credit.name + (credit.joinPhrase ?? '')).join('')
   const cover = album != null ? albumArt(album) : undefined
+  const mayPlay = useCan('Stream')
 
   return (
     <>
       <TableCell>
-        <PlayButton
-          track={{
-            id: track.recordingId,
-            src: contentUrl(apiBaseUrl, file.path),
-            title: track.title,
-            ...(byline !== '' ? { subtitle: byline } : {}),
-          }}
-        />
+        {mayPlay ? (
+          <PlayButton
+            track={{
+              id: track.recordingId,
+              src: contentUrl(apiBaseUrl, file.path),
+              title: track.title,
+              ...(byline !== '' ? { subtitle: byline } : {}),
+            }}
+          />
+        ) : null}
       </TableCell>
 
       <TableCell truncate title={track.title}>

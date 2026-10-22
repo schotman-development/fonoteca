@@ -12,6 +12,7 @@ import {
 import type { FocusEvent, KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 import { useApiQuery } from '../useApiQuery.ts'
 import styles from './AcquirePage.module.css'
@@ -785,6 +786,8 @@ function Missing({
   readonly state: ReturnType<typeof useApiQuery<UpgradeListResponse>>
   readonly onSearch: (record: MissingRecord) => void
 }) {
+  const admin = useCan('Admin')
+
   // The upgrade panel's, one request behind all three lists — see `Incomplete`.
   if (state.status !== 'ready') return null
 
@@ -813,9 +816,10 @@ function Missing({
       return (
         <Text size="sm" tone="tertiary">
           {unmonitoredGaps.toLocaleString()} record{unmonitoredGaps === 1 ? '' : 's'} by artists you
-          follow {unmonitoredGaps === 1 ? 'is' : 'are'} not here, and none is marked as wanted. Mark
-          the ones you want on the artist's page and they appear on this shelf — records released
-          after you followed someone are marked for you.
+          follow {unmonitoredGaps === 1 ? 'is' : 'are'} not here, and none is marked as wanted.
+          {admin
+            ? " Mark the ones you want on the artist's page and they appear on this shelf — records released after you followed someone are marked for you."
+            : ''}
           {/*
             Said here as well, because the two states overlap and this branch
             wins. A library with some unmarked gaps *and* some unbrowsed artists
@@ -860,7 +864,7 @@ function Missing({
           {unmonitoredGaps > 0
             ? ` ${unmonitoredGaps.toLocaleString()} more ${
                 unmonitoredGaps === 1 ? 'record is' : 'records are'
-              } missing but unmarked; mark them on the artist's page.`
+              } missing but unmarked${admin ? "; mark them on the artist's page" : ''}.`
             : ''}
           {unbrowsedArtists > 0
             ? ` ${unbrowsedArtists.toLocaleString()} ${
@@ -985,6 +989,7 @@ function MissingTile({
  * which table the id belongs to.
  */
 function UnwantButton({ record }: { readonly record: MissingRecord }) {
+  const admin = useCan('Admin')
   const [wanted, setWanted] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1017,6 +1022,8 @@ function UnwantButton({ record }: { readonly record: MissingRecord }) {
       setBusy(false)
     }
   }
+
+  if (!admin) return null
 
   return (
     <span className={styles.unwant}>

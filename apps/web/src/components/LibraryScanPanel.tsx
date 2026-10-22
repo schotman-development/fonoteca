@@ -2,6 +2,7 @@ import { describeError } from '@fonoteca/api-client'
 import { Badge, Button, Stack, Text } from '@fonoteca/ui'
 import { useCallback, useEffect, useState } from 'react'
 
+import { useCan } from '../AccountGate.tsx'
 import { api } from '../api.ts'
 
 type ScanSummary = {
@@ -38,6 +39,7 @@ const POLL_MS = 2000
 export function LibraryScanPanel({ onScanned }: { readonly onScanned?: () => void }) {
   const [status, setStatus] = useState<ScanStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const admin = useCan('Admin')
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -93,9 +95,11 @@ export function LibraryScanPanel({ onScanned }: { readonly onScanned?: () => voi
   return (
     <Stack direction="column" gap={12}>
       <Stack gap={8} align="center" wrap>
-        <Button variant="primary" onClick={() => void scan()} disabled={busy || elsewhere}>
-          {busy ? 'Scanning…' : 'Scan library'}
-        </Button>
+        {admin ? (
+          <Button variant="primary" onClick={() => void scan()} disabled={busy || elsewhere}>
+            {busy ? 'Scanning…' : 'Scan library'}
+          </Button>
+        ) : null}
         {elsewhere ? <Badge tone="info">Running in another window</Badge> : null}
       </Stack>
 

@@ -1,0 +1,16 @@
+/* The roles, one checkbox each, as many to a row as fit. */
+.roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-16);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-block-size: var(--density-control);
+}

@@ -2,7 +2,8 @@ import { type Command, useTheme } from '@fonoteca/ui'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo } from 'react'
 
-import { NAV_ITEMS } from './navigation.ts'
+import { useAccount } from './AccountGate.tsx'
+import { sectionsFor } from './navigation.ts'
 
 /**
  * What the command bar can do today: go to a section, or set the theme.
@@ -20,20 +21,23 @@ import { NAV_ITEMS } from './navigation.ts'
 export function useAppCommands(): readonly Command[] {
   const navigate = useNavigate()
   const { setSetting } = useTheme()
+  const roles = useAccount()?.roles
 
   return useMemo(
     () => [
-      ...NAV_ITEMS.map(
-        (item): Command => ({
-          id: `go:${item.to}`,
-          label: item.label,
-          kind: 'Go to',
-          keywords: item.keywords,
-          onSelect: () => {
-            void navigate({ to: item.to })
-          },
-        }),
-      ),
+      ...sectionsFor(roles ?? [])
+        .flatMap((section) => section.items)
+        .map(
+          (item): Command => ({
+            id: `go:${item.to}`,
+            label: item.label,
+            kind: 'Go to',
+            keywords: item.keywords,
+            onSelect: () => {
+              void navigate({ to: item.to })
+            },
+          }),
+        ),
       {
         id: 'theme:light',
         label: 'Theme — light',
@@ -62,6 +66,6 @@ export function useAppCommands(): readonly Command[] {
         },
       },
     ],
-    [navigate, setSetting],
+    [navigate, setSetting, roles],
   )
 }
