@@ -107,9 +107,12 @@ password forms stay.
 no query can see another account's hearts by forgetting a `Where`. The two
 places hearts move for everybody (a merged recording, an album filed again)
 read past the filter and carry each account's hearts separately.
+*Amended 2026-10-22:* an account's tags and playlist folders (ADR 0012) are
+filtered the same way, a song's tags carried with its hearts.
 
 **Playlists stay everyone's**, and a Subsonic client is told the signed-in
-account owns each one, so it lets them be edited.
+account owns each one, so it lets them be edited. *Amended 2026-10-22:* where
+each account keeps them, in folders of its own, is that account's.
 
 **The web client reaches the API on its own origin.** Vite proxies `/api` and
 `/hubs` to the API in development, so the session cookie is first-party

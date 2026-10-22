@@ -285,6 +285,16 @@ public static partial class SubsonicEndpoints
         Map(group, "createPlaylist", CreatePlaylist);
         Map(group, "updatePlaylist", UpdatePlaylist);
         Map(group, "deletePlaylist", DeletePlaylist);
+        Map(group, "getPlaylistFolders", GetPlaylistFolders);
+        Map(group, "createPlaylistFolder", CreatePlaylistFolder);
+        Map(group, "updatePlaylistFolder", UpdatePlaylistFolder);
+        Map(group, "deletePlaylistFolder", DeletePlaylistFolder);
+        Map(group, "movePlaylist", MovePlaylist);
+        Map(group, "getTags", GetTags);
+        Map(group, "getTag", GetTag);
+        Map(group, "createTag", CreateTag);
+        Map(group, "updateTag", UpdateTag);
+        Map(group, "deleteTag", DeleteTag);
         Map(group, "scrobble", Scrobble);
         Map(group, "getScanStatus", GetScanStatus);
         Map(group, "startScan", StartScan);
@@ -343,8 +353,9 @@ public static partial class SubsonicEndpoints
         SubsonicResult.Ok("license", license => license.Attr("valid", true));
 
     /// <summary>
-    /// The extensions this server implements: timed lyrics, and Fonoteca's own
-    /// album motion, performance dates and compositions.
+    /// The extensions this server implements: timed lyrics, playlist folders,
+    /// and Fonoteca's own album motion, performance dates, compositions and
+    /// tags.
     /// </summary>
     /// <remarks>
     /// The presence of the response is how a client learns the server is an
@@ -359,12 +370,16 @@ public static partial class SubsonicEndpoints
     /// piece's <c>composed</c> (<c>from</c>, <c>to</c>), each date an ItemDate.
     /// <c>fonotecaCompositions</c> is <c>getComposers</c> and
     /// <c>getCompositions</c>: who wrote the classical pieces held, and each
-    /// piece with its songs.
+    /// piece with its songs. <c>playlistFolders</c> is each account's own tree
+    /// of the playlists, as the spec's pull request 255 proposes it at
+    /// <c>eeb7b9e</c>. <c>fonotecaTags</c> is each account's own tags on songs,
+    /// nested at any depth: <c>getTags</c>, <c>getTag</c>, <c>createTag</c>,
+    /// <c>updateTag</c>, <c>deleteTag</c>, and a song's <c>tagIds</c>.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

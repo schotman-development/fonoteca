@@ -315,6 +315,8 @@ public static partial class CatalogueEndpoints
 
         if (problem is not null) return problem;
 
+        if (target != path) await PlacedAsync(db, FileName(path), FileName(target), cancellationToken).ConfigureAwait(false);
+
         return await GetPlaylist(FileName(target), db, files, cancellationToken).ConfigureAwait(false);
     }
 
@@ -377,7 +379,11 @@ public static partial class CatalogueEndpoints
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return problem is null ? TypedResults.NoContent() : problem;
+        if (problem is not null) return problem;
+
+        await PlacedAsync(db, FileName(path), null, cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.NoContent();
     }
 
     internal static async Task<Results<Ok<PlaylistResponse>, ProblemHttpResult>> CreateSmartPlaylist(
@@ -576,7 +582,37 @@ public static partial class CatalogueEndpoints
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return problem is null ? TypedResults.NoContent() : problem;
+        if (problem is not null) return problem;
+
+        await PlacedAsync(db, id.ToString(), null, cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>
+    /// Every account's place for a playlist in its folders (Subsonic's
+    /// <c>playlistFolders</c>) moved to the playlist's new id, or dropped with
+    /// it where <paramref name="to"/> is null.
+    /// </summary>
+    /// <remarks>
+    /// A place already under the new id was kept for a playlist that left
+    /// without Fonoteca seeing it go, and is not this one's.
+    /// </remarks>
+    private static async Task PlacedAsync(FonotecaDbContext db, string from, string? to, CancellationToken cancellationToken)
+    {
+        var placements = db.PlaylistPlacements.IgnoreQueryFilters();
+
+        if (to is null)
+        {
+            await placements.Where(placement => placement.Playlist == from).ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await placements.Where(placement => placement.Playlist == to).ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+        await placements
+            .Where(placement => placement.Playlist == from)
+            .ExecuteUpdateAsync(placement => placement.SetProperty(row => row.Playlist, to), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>One entry of a playlist's file, and what in the library it names.</summary>

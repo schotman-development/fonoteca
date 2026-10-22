@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
@@ -1249,6 +1250,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("getStarred2")]
     [InlineData("getAlbumList2&type=starred")]
     [InlineData("getTopSongs&artist=Nobody")]
+    [InlineData("getTags")]
+    [InlineData("getPlaylistFolders")]
     public async Task EveryMethodAnswers(string method)
     {
         using var client = _factory!.CreateClient();
@@ -1318,7 +1321,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags"], extensions);
     }
 
     /// <summary>
@@ -1800,6 +1803,208 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             db.Works.RemoveRange(await db.Works.Where(row => row.Id == part.Id || row.Id == piece.Id).ToListAsync(Token));
             await db.SaveChangesAsync(Token);
         }
+    }
+
+    /// <summary>
+    /// A listener's own tags: nested at any depth, on a song's recording so
+    /// every copy shows them, counted with the tags below, and nobody else's
+    /// to see or change.
+    /// </summary>
+    [Fact]
+    public async Task ATagIsOnEveryCopyOfASongAndOnlyItsAccountSeesIt()
+    {
+        var copy = MediaFileId.New();
+        var later = new Recording { Id = RecordingId.New(), Title = "Nameless" };
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var filed = await seed.MediaFiles.SingleAsync(file => file.Id == _filed, Token);
+
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = copy,
+                Path = "Bill Evans/The Best Of/03 My Foolish Heart.mp3",
+                SizeBytes = 2048,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-04T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = filed.RecordingId,
+                Quality = new AudioQuality { Codec = "mp3", SampleRateHz = 44_100, Channels = 2, BitrateBps = 320_000, IsLossless = false, Duration = TimeSpan.FromSeconds(292) },
+            });
+            seed.Recordings.Add(later);
+            await seed.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        async Task<JsonElement> Answer(string route, string user = "me")
+        {
+            var separator = route.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            using var response = await client.GetAsync(
+                new Uri($"/rest/{route}{separator}u={user}&p={Password}&v=1.16.1&c=test&f=json", UriKind.Relative),
+                Token);
+
+            return JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response").Clone();
+        }
+
+        static int Code(JsonElement answer) => answer.GetProperty("error").GetProperty("code").GetInt32();
+        static string Status(JsonElement answer) => answer.GetProperty("status").GetString()!;
+
+        async Task<string> MakeAsync(string query) =>
+            (await Answer($"createTag.view?{query}")).GetProperty("tag").GetProperty("id").GetString()!;
+
+        async Task<Dictionary<string, int>> CountsAsync(string user = "me") =>
+            (await Answer("getTags.view", user)).GetProperty("tags") is var tags && tags.TryGetProperty("tag", out var rows)
+                ? rows.EnumerateArray().ToDictionary(tag => tag.GetProperty("name").GetString()!, tag => tag.GetProperty("songCount").GetInt32())
+                : [];
+
+        async Task<List<string>> TagIdsAsync(MediaFileId song, string user = "me") =>
+            (await Answer($"getSong.view?id=tr-{song.Value:N}", user)).GetProperty("song").TryGetProperty("tagIds", out var ids)
+                ? [.. ids.EnumerateArray().Select(id => id.GetString()!).Order()]
+                : [];
+
+        async Task<List<string>> SongsAsync(string tag) =>
+            (await Answer($"getTag.view?id={tag}")).GetProperty("tag") is var listed && listed.TryGetProperty("song", out var songs)
+                ? [.. songs.EnumerateArray().Select(song => song.GetProperty("id").GetString()!).Order()]
+                : [];
+
+        var jazz = await MakeAsync("name=Jazz");
+        var piano = await MakeAsync($"name=Piano&parentId={jazz}");
+        var ballads = await MakeAsync("name=Ballads");
+        var cool = await MakeAsync($"name=Cool&parentId={jazz}");
+
+        var made = (await Answer($"createTag.view?name=Trio&parentId={piano}")).GetProperty("tag");
+        Assert.Equal(piano, made.GetProperty("parentId").GetString());
+        Assert.Equal(0, made.GetProperty("songCount").GetInt32());
+        Assert.False((await Answer("createTag.view?name=Solo")).GetProperty("tag").TryGetProperty("parentId", out _));
+
+        Assert.Equal(10, Code(await Answer("createTag.view?name=%20")));
+        Assert.Equal(70, Code(await Answer($"createTag.view?name=x&parentId=tg-{Guid.CreateVersion7():N}")));
+        Assert.Equal(0, Code(await Answer("createTag.view?name=jAZZ")));
+        Assert.Equal(0, Code(await Answer($"createTag.view?name={new string('x', 201)}")));
+
+        // A name is unique among its siblings only.
+        var elsewhere = await MakeAsync($"name=cool&parentId={ballads}");
+        Assert.Equal(0, Code(await Answer($"updateTag.view?tagId={elsewhere}&parentId={jazz}")));
+        Assert.Equal("ok", Status(await Answer($"deleteTag.view?tagId={elsewhere}")));
+
+        // The MP3 tagged: its recording is, so the album's FLAC shows it too.
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={piano}&songIdToAdd=tr-{copy.Value:N}")));
+        Assert.Equal([piano], await TagIdsAsync(_filed));
+        Assert.Equal([piano], await TagIdsAsync(copy));
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={jazz}&songIdToAdd=tr-{_scanned.Value:N}")));
+        Assert.Equal([jazz], await TagIdsAsync(_scanned));
+
+        // A song once under every tag above it, as the copy a playlist plays.
+        Assert.Equal(2, (await CountsAsync())["Jazz"]);
+        Assert.Equal(1, (await CountsAsync())["Piano"]);
+        Assert.Equal(0, (await CountsAsync())["Cool"]);
+        Assert.Equal(new[] { $"tr-{_filed.Value:N}", $"tr-{_scanned.Value:N}" }.Order(), await SongsAsync(jazz));
+        Assert.Equal([$"tr-{_filed.Value:N}"], await SongsAsync(piano));
+        Assert.Equal(1, (await Answer($"getTag.view?id={piano}")).GetProperty("tag").GetProperty("songCount").GetInt32());
+
+        // Nothing is half done, and nothing twice.
+        Assert.Equal(70, Code(await Answer($"updateTag.view?tagId={ballads}&songIdToAdd=tr-{_filed.Value:N}&songIdToAdd=tr-{Guid.CreateVersion7():N}")));
+        Assert.Equal(70, Code(await Answer($"updateTag.view?tagId={ballads}&name=Slow&songIdToAdd={FolderId("Somebody/A Bootleg/01 Untitled.flac")}")));
+        Assert.Equal(0, (await CountsAsync())["Ballads"]);
+        Assert.Equal(10, Code(await Answer($"updateTag.view?tagId={ballads}")));
+        Assert.Equal(10, Code(await Answer("updateTag.view?name=x")));
+        Assert.Equal(70, Code(await Answer($"updateTag.view?tagId=tg-{Guid.CreateVersion7():N}&name=x")));
+        // Connections opened first, or one tap runs ahead while the rest open theirs and never meets them.
+        await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Answer("getTags.view")));
+        Assert.All(
+            await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Answer($"updateTag.view?tagId={ballads}&songIdToAdd=tr-{_filed.Value:N}&songIdToAdd=tr-{copy.Value:N}"))),
+            tap => Assert.Equal("ok", Status(tap)));
+        Assert.Equal(1, (await CountsAsync())["Ballads"]);
+
+        // Taken off and put on in one request, a song keeps the tag.
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={ballads}&songIdToRemove=tr-{_filed.Value:N}&songIdToAdd=tr-{copy.Value:N}")));
+        Assert.Equal(1, (await CountsAsync())["Ballads"]);
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={ballads}&songIdToRemove=tr-{copy.Value:N}")));
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={ballads}&songIdToRemove=tr-{copy.Value:N}")));
+        Assert.Equal([piano], await TagIdsAsync(_filed));
+
+        // A tag moves under another, never under itself or below it; an empty parent is the root.
+        Assert.Equal(0, Code(await Answer($"updateTag.view?tagId={jazz}&parentId={piano}")));
+        Assert.Equal(0, Code(await Answer($"updateTag.view?tagId={jazz}&parentId={jazz}")));
+        Assert.Equal(70, Code(await Answer($"updateTag.view?tagId={jazz}&parentId=tg-{Guid.CreateVersion7():N}")));
+        // As a form, too: an empty value is still sent, and a repeated one every time.
+        using (var form = new FormUrlEncodedContent([
+            new("u", "me"), new("p", Password), new("v", "1.16.1"), new("c", "test"), new("f", "json"),
+            new("tagId", piano), new("parentId", string.Empty), new("songIdToAdd", $"tr-{_filed.Value:N}"), new("songIdToAdd", $"tr-{_scanned.Value:N}")]))
+        using (var posted = await client.PostAsync(new Uri("/rest/updateTag.view", UriKind.Relative), form, Token))
+        {
+            Assert.Equal("ok", Status(JsonDocument.Parse(await posted.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response")));
+        }
+
+        Assert.Equal(new[] { piano, jazz }.Order(), await TagIdsAsync(_scanned));
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={piano}&songIdToRemove=tr-{_scanned.Value:N}")));
+        Assert.Equal(0, Code(await Answer($"updateTag.view?tagId={piano}&name=ballads")));
+        Assert.Equal(0, Code(await Answer($"updateTag.view?tagId={ballads}&parentId={jazz}&name=cool")));
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={piano}&name=keys")));
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={piano}&name=Keys")));
+        Assert.Equal(1, (await CountsAsync())["Jazz"]);
+        Assert.Equal(1, (await CountsAsync())["Keys"]);
+
+        // Taking a tag off a song takes it off only that tag, and off a copy tagged as itself.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = SubsonicTag(ballads), MediaFileId = copy });
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(new[] { piano, ballads }.Order(), await TagIdsAsync(_filed));
+        Assert.Equal(1, (await CountsAsync())["Ballads"]);
+        Assert.Equal("ok", Status(await Answer($"updateTag.view?tagId={ballads}&songIdToRemove=tr-{_filed.Value:N}")));
+        Assert.Equal([piano], await TagIdsAsync(copy));
+
+        // A recording no file holds is no song yet.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = SubsonicTag(cool), RecordingId = later.Id });
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(0, (await CountsAsync())["Cool"]);
+
+        // The scanned file gains that recording and keeps its own tag.
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            (await db.MediaFiles.SingleAsync(file => file.Id == _scanned, Token)).RecordingId = later.Id;
+            await db.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal(1, (await CountsAsync())["Cool"]);
+        Assert.Equal(1, (await CountsAsync())["Jazz"]);
+        Assert.Equal(new[] { jazz, cool }.Order(), await TagIdsAsync(_scanned));
+        Assert.Equal([$"tr-{_scanned.Value:N}"], await SongsAsync(jazz));
+
+        // Somebody else sees none of it and can change none of it.
+        Assert.Equal("ok", Status(await Answer("createUser.view?username=you&password=a-test-passphrase&email=you@example.org")));
+        Assert.Empty(await CountsAsync("you"));
+        Assert.Empty(await TagIdsAsync(_filed, "you"));
+        Assert.Equal(70, Code(await Answer($"getTag.view?id={jazz}", "you")));
+        Assert.Equal(70, Code(await Answer($"updateTag.view?tagId={jazz}&name=Mine", "you")));
+        Assert.Equal(70, Code(await Answer($"createTag.view?name=Mine&parentId={jazz}", "you")));
+        Assert.Equal(70, Code(await Answer($"deleteTag.view?tagId={jazz}", "you")));
+        Assert.Equal("ok", Status(await Answer("createTag.view?name=Jazz", "you")));
+
+        // A tag deleted takes those below it; the songs stay.
+        Assert.Equal("ok", Status(await Answer($"deleteTag.view?tagId={jazz}")));
+        Assert.Equal(new[] { "Ballads", "Keys", "Solo", "Trio" }.Order(), (await CountsAsync()).Keys.Order());
+        Assert.Equal(70, Code(await Answer($"getTag.view?id={cool}")));
+        Assert.Empty(await TagIdsAsync(_scanned));
+        Assert.Equal(10, Code(await Answer("deleteTag.view")));
+        Assert.Equal(new[] { "Jazz" }, (await CountsAsync("you")).Keys);
+
+        Assert.Contains(
+            (await Answer("getOpenSubsonicExtensions.view")).GetProperty("openSubsonicExtensions").EnumerateArray().Select(extension => extension.GetProperty("name").GetString()),
+            name => name == "fonotecaTags");
+
+        // The XML carries a song's tags as repeated elements.
+        using var xml = await client.GetAsync(new Uri($"/rest/getSong.view?id=tr-{copy.Value:N}&{Credentials}", UriKind.Relative), Token);
+        var song = XDocument.Parse(await xml.Content.ReadAsStringAsync(Token)).Descendants().Single(element => element.Name.LocalName == "song");
+        Assert.Equal([piano], song.Elements().Where(element => element.Name.LocalName == "tagIds").Select(element => element.Value));
+
+        static Guid SubsonicTag(string id) => Guid.ParseExact(id["tg-".Length..], "N");
     }
 
     private async Task<JsonElement> BillEvansAsync(HttpClient client) =>

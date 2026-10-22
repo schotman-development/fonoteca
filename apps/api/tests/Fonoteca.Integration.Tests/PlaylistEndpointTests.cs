@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
+using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -776,6 +777,167 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.True(System.IO.File.Exists(PlaylistPath("Smart")));
     }
 
+    /// <summary>
+    /// Each account keeps its own tree of folders and places any playlist in
+    /// it, a smart one too, without the playlist changing; another account sees
+    /// the same playlists at its root and none of the tree.
+    /// </summary>
+    [Fact]
+    public async Task EachAccountKeepsItsOwnTreeOfPlaylistFolders()
+    {
+        using var client = _factory!.CreateClient();
+        await client.AddAccountAsync("you", Password, Token);
+
+        static int Code(JsonElement answer) => answer.GetProperty("error").GetProperty("code").GetInt32();
+        static string Status(JsonElement answer) => answer.GetProperty("status").GetString()!;
+        static JsonElement Listed(JsonElement answer, string id) =>
+            answer.GetProperty("playlists").GetProperty("playlist").EnumerateArray().Single(playlist => playlist.GetProperty("id").GetString() == id);
+        static (string? Folder, int? Order) Place(JsonElement playlist) =>
+            (playlist.GetProperty("playlistFolderId").GetString(),
+                playlist.TryGetProperty("playlistFolderSortOrder", out var order) ? order.GetInt32() : null);
+        async Task<List<JsonElement>> FoldersAsync(string user = "me") =>
+            (await SubsonicAsync(client, "getPlaylistFolders", user)).GetProperty("playlistFolders") is var folders
+                && folders.TryGetProperty("playlistFolder", out var rows)
+                ? [.. rows.EnumerateArray()]
+                : [];
+
+        var phone = (await SubsonicAsync(client, $"createPlaylist?name=Phone&songId={Song(_lossy)}")).GetProperty("playlist").GetProperty("id").GetString()!;
+        var road = (await SubsonicAsync(client, $"createPlaylist?name=Road&songId={Song(_dreamsFile)}")).GetProperty("playlist").GetProperty("id").GetString()!;
+        var smartRow = await CreateSmartAsync(client, "Smart", Criteria(Group("All", Condition("Title", "Is", "Dreams"))));
+        var smart = $"pl-{Guid.Parse(smartRow.Id):N}";
+
+        // Never placed: at the root, with no order to claim.
+        Assert.Equal((string.Empty, null), Place(Listed(await SubsonicAsync(client, "getPlaylists"), phone)));
+
+        var dj = (await SubsonicAsync(client, "createPlaylistFolder?name=DJ%20Sets")).GetProperty("playlistFolder");
+        var djId = dj.GetProperty("id").GetString()!;
+        Assert.Equal("DJ Sets", dj.GetProperty("name").GetString());
+        Assert.False(dj.TryGetProperty("parentId", out _));
+        Assert.Equal(1, dj.GetProperty("sortOrder").GetInt32());
+
+        var year = (await SubsonicAsync(client, $"createPlaylistFolder?name=2026&parentId={djId}")).GetProperty("playlistFolder");
+        var yearId = year.GetProperty("id").GetString()!;
+        Assert.Equal(djId, year.GetProperty("parentId").GetString());
+        Assert.Equal(1, year.GetProperty("sortOrder").GetInt32());
+
+        // After the highest sibling, a folder as much as a playlist.
+        var archive = (await SubsonicAsync(client, "createPlaylistFolder?name=Archive")).GetProperty("playlistFolder");
+        Assert.Equal(2, archive.GetProperty("sortOrder").GetInt32());
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={archive.GetProperty("id").GetString()}")));
+
+        Assert.Equal(10, Code(await SubsonicAsync(client, "createPlaylistFolder?name=%20")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"createPlaylistFolder?name=x&parentId=pd-{Guid.CreateVersion7():N}")));
+        Assert.Equal(0, Code(await SubsonicAsync(client, "createPlaylistFolder?name=x&sortOrder=first")));
+
+        // Into a folder in the order sent, after what is there.
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"movePlaylist?playlistId={road}&playlistId={phone}&playlistFolderId={yearId}")));
+        var listed = await SubsonicAsync(client, "getPlaylists");
+        Assert.Equal((yearId, 1), Place(Listed(listed, road)));
+        Assert.Equal((yearId, 2), Place(Listed(listed, phone)));
+
+        // Placed again without an order, after the rest and not after themselves.
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"movePlaylist?playlistId={road}&playlistId={phone}&playlistFolderId={yearId}")));
+        listed = await SubsonicAsync(client, "getPlaylists");
+        Assert.Equal((yearId, 1), Place(Listed(listed, road)));
+        Assert.Equal((yearId, 2), Place(Listed(listed, phone)));
+
+        // A place alone keeps the folder; a smart playlist is placed like any other.
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"movePlaylist?playlistId={phone}&sortOrder=0")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"movePlaylist?playlistId={smart}&playlistFolderId={djId}&sortOrder=5")));
+        Assert.Equal((yearId, 0), Place((await SubsonicAsync(client, $"getPlaylist?id={phone}")).GetProperty("playlist")));
+        Assert.Equal((djId, 5), Place(Listed(await SubsonicAsync(client, "getPlaylists"), smart)));
+
+        // A folder made beside a placed playlist goes after it.
+        var later = (await SubsonicAsync(client, $"createPlaylistFolder?name=Later&parentId={djId}")).GetProperty("playlistFolder");
+        Assert.Equal(6, later.GetProperty("sortOrder").GetInt32());
+
+        Assert.Equal(10, Code(await SubsonicAsync(client, "movePlaylist?playlistFolderId=")));
+        Assert.Equal(10, Code(await SubsonicAsync(client, $"movePlaylist?playlistId={road}")));
+        Assert.Equal(10, Code(await SubsonicAsync(client, $"movePlaylist?playlistId={road}&playlistId={phone}&sortOrder=1")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"movePlaylist?playlistId=pf-Nothing.m3u8&playlistFolderId=")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"movePlaylist?playlistId={road}&playlistFolderId=pd-{Guid.CreateVersion7():N}")));
+
+        // A folder cannot go inside itself, and an empty parent is the root.
+        Assert.Equal(0, Code(await SubsonicAsync(client, $"updatePlaylistFolder?playlistFolderId={djId}&parentId={yearId}")));
+        Assert.Equal(0, Code(await SubsonicAsync(client, $"updatePlaylistFolder?playlistFolderId={djId}&parentId={djId}")));
+        Assert.Equal(10, Code(await SubsonicAsync(client, $"updatePlaylistFolder?playlistFolderId={djId}")));
+        Assert.Equal(10, Code(await SubsonicAsync(client, "updatePlaylistFolder?name=x")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"updatePlaylistFolder?playlistFolderId={djId}&parentId=pd-{Guid.CreateVersion7():N}")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"updatePlaylistFolder?playlistFolderId={yearId}&parentId=&name=Twenty&sortOrder=3")));
+
+        var moved = (await FoldersAsync()).Single(folder => folder.GetProperty("id").GetString() == yearId);
+        Assert.False(moved.TryGetProperty("parentId", out _));
+        Assert.Equal("Twenty", moved.GetProperty("name").GetString());
+        Assert.Equal(3, moved.GetProperty("sortOrder").GetInt32());
+
+        // Renamed, a playlist keeps its place, over one left for a file gone without Fonoteca seeing it.
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            var me = await seed.Users.Where(account => account.UserName == "me").Select(account => account.Id).SingleAsync(Token);
+            seed.PlaylistPlacements.Add(new() { Id = Guid.CreateVersion7(), AccountId = me, Playlist = "Road trip.m3u8", SortOrder = 7 });
+
+            // And one in a folder, which keeps nothing from deleting it.
+            seed.PlaylistPlacements.Add(new() { Id = Guid.CreateVersion7(), AccountId = me, Playlist = "Gone.m3u8", FolderId = Guid.ParseExact(yearId["pd-".Length..], "N") });
+            await seed.SaveChangesAsync(Token);
+        }
+
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"updatePlaylist?playlistId={road}&name=Road%20trip")));
+        road = "pf-Road trip.m3u8";
+        Assert.Equal((yearId, 1), Place(Listed(await SubsonicAsync(client, "getPlaylists"), road)));
+
+        // Somebody else sees the same playlists at the root and none of the tree.
+        var theirs = await SubsonicAsync(client, "getPlaylists", "you");
+        Assert.All(
+            theirs.GetProperty("playlists").GetProperty("playlist").EnumerateArray(),
+            playlist => Assert.Equal((string.Empty, null), Place(playlist)));
+        Assert.Empty(await FoldersAsync("you"));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"movePlaylist?playlistId={phone}&playlistFolderId={djId}", "you")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={later.GetProperty("id").GetString()}", "you")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"updatePlaylistFolder?playlistFolderId={djId}&name=Mine", "you")));
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"createPlaylistFolder?name=Mine&parentId={djId}", "you")));
+        Assert.Equal(50, Code(await SubsonicAsync(client, "getPlaylistFolders?username=me", "you")));
+        Assert.Equal(50, Code(await SubsonicAsync(client, "getPlaylists?username=me", "you")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, "getPlaylistFolders?username=you", "you")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"movePlaylist?playlistId={phone}&sortOrder=9", "you")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"movePlaylist?playlistId={smart}&sortOrder=4", "you")));
+
+        // A first place made twice at once: every request answered, one place kept.
+        Assert.All(
+            await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => SubsonicAsync(client, $"movePlaylist?playlistId={road}&playlistFolderId=&sortOrder=2", "you"))),
+            tap => Assert.Equal("ok", Status(tap)));
+
+        // An admin reads another account's tree by name.
+        Assert.Equal((string.Empty, 9), Place(Listed(await SubsonicAsync(client, "getPlaylists?username=you"), phone)));
+        Assert.Equal((string.Empty, 2), Place(Listed(await SubsonicAsync(client, "getPlaylists?username=you"), road)));
+        Assert.Equal((yearId, 0), Place(Listed(await SubsonicAsync(client, "getPlaylists"), phone)));
+        Assert.Equal(3, (await FoldersAsync()).Count);
+        Assert.Equal(70, Code(await SubsonicAsync(client, "getPlaylistFolders?username=nobody")));
+
+        // Not while a playlist or a folder is in it; a playlist deleted leaves it.
+        Assert.Equal(0, Code(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={yearId}")));
+        Assert.Equal(0, Code(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={djId}")));
+        Assert.Equal(10, Code(await SubsonicAsync(client, "deletePlaylistFolder")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deletePlaylist?id={phone}")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deletePlaylist?id={road}")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={yearId}")));
+
+        using (var deleted = await client.DeleteAsync(new Uri($"/api/catalogue/smart-playlists/{smartRow.Id}", UriKind.Relative), Token))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        }
+
+        // A folder holding only a folder is not empty.
+        Assert.Equal(0, Code(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={djId}")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={later.GetProperty("id").GetString()}")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={djId}")));
+        Assert.Empty(await FoldersAsync());
+        Assert.Equal(70, Code(await SubsonicAsync(client, $"deletePlaylistFolder?playlistFolderId={djId}")));
+
+        // The places went with the playlists, for every account.
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.False(await db.PlaylistPlacements.IgnoreQueryFilters().AnyAsync(Token));
+    }
+
     private async Task<PlaylistResponse> CreateAsync(HttpClient client, string name, params RecordingId[] songs)
     {
         using var response = await client.PostAsJsonAsync(
@@ -823,11 +985,13 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     private static object Condition(string field, string op, string? value = null, string? to = null) =>
         new { field, @operator = op, value, to };
 
-    private static async Task<JsonElement> SubsonicAsync(HttpClient client, string route)
+    private static async Task<JsonElement> SubsonicAsync(HttpClient client, string route, string user = "me")
     {
         var separator = route.Contains('?', StringComparison.Ordinal) ? "&" : "?";
 
-        using var response = await client.GetAsync(new Uri($"/rest/{route}{separator}{Credentials}", UriKind.Relative), Token);
+        using var response = await client.GetAsync(
+            new Uri($"/rest/{route}{separator}{Credentials.Replace("u=me", $"u={user}", StringComparison.Ordinal)}", UriKind.Relative),
+            Token);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 

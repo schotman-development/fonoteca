@@ -10,7 +10,8 @@ namespace Fonoteca.Data;
 /// ADR 0018. The library has no owner: the catalogue, the files and the passes
 /// are one shared thing, and an account may do what its <see cref="Roles"/>
 /// say. What an account owns is what a person owns — their hearts
-/// (<c>Love.AccountId</c>) and their API keys. Playlists stay everyone's.
+/// (<c>Love.AccountId</c>), their tags, their playlist folders and their API
+/// keys. Playlists stay everyone's.
 ///
 /// ASP.NET Core Identity's own user, so the password hash, the lockout and the
 /// security stamp that signs a person out everywhere on a reset are the

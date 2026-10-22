@@ -250,7 +250,15 @@ static ones through the playlist endpoints' own handlers
 (`SubsonicEndpoints.Playlists.cs`). A smart playlist is read-only to a client.
 *Amended 2026-10-20:* and every playlist says which it is in OpenSubsonic's
 `readonly`, true for a smart one, so a client offers no change it would be
-refused.
+refused. *Amended 2026-10-22:* each account keeps its own tree of folders for
+them, OpenSubsonic's proposed `playlistFolders` (pull request 255 at
+`eeb7b9e`, the owner's choice): `getPlaylistFolders`, `createPlaylistFolder`,
+`updatePlaylistFolder`, `deletePlaylistFolder` and `movePlaylist`, and a
+playlist's `playlistFolderId` and `playlistFolderSortOrder`. The folders and
+the places are rows beside the playlists, never in their files, keyed on the
+catalogue's own id for each playlist, which a rename here carries; a playlist
+never placed is at the root with no order, so its sort order is left out
+(`SubsonicEndpoints.PlaylistFolders.cs`).
 
 Also absent: file-based *writing*, video, podcasts, jukebox, chat, bookmarks,
 share, lyrics. *Amended 2026-10-14:* lyrics exist now (ADR 0016):
@@ -284,7 +292,14 @@ album's notes — the leads of their English Wikipedia articles, as HTML ending
 in a link to the article — and their MusicBrainz ids; `getAlbumInfo2` takes a
 song's id too, for its album. There are no similar artists, images or Last.fm
 addresses, and `getTopSongs` answers an empty list: nothing here records
-plays or asks a service that does (the owner's choice).
+plays or asks a service that does (the owner's choice). *Amended 2026-10-22:*
+each account tags songs with its own tags, under Fonoteca's own
+`fonotecaTags` extension (`getTags`, `getTag`, `createTag`, `updateTag`,
+`deleteTag`, and a song's `tagIds`): a tag is a label and a parent at once,
+nested at any depth, nobody else's to see, an admin's neither, and on a song's
+recording as a heart is, so every copy shows it (the owner's choices). A tag
+lists each song once, as the copy a playlist plays
+(`SubsonicEndpoints.Tags.cs`).
 
 ### Scope
 
@@ -292,7 +307,7 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
-`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation` — each at both `/rest/x`
+`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation`, and *(amended 2026-10-22)* `getPlaylistFolders`, `createPlaylistFolder`, `updatePlaylistFolder`, `deletePlaylistFolder`, `movePlaylist`, `getTags`, `getTag`, `createTag`, `updateTag`, `deleteTag` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 *Amended 2026-10-19:* each also takes `POST` with an
 `application/x-www-form-urlencoded` body, read as the query (OpenSubsonic's

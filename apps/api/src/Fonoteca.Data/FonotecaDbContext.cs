@@ -20,12 +20,14 @@ namespace Fonoteca.Data;
 public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> options)
     : IdentityUserContext<Account, Guid>(options)
 {
-    /// <summary>Whose hearts this context sees.</summary>
+    /// <summary>Whose hearts, tags and playlist folders this context sees.</summary>
     /// <remarks>
     /// Set by the Subsonic guard for the account it signed in. Every query of
-    /// <see cref="Loves"/> is filtered by it, so a handler cannot show one
-    /// person another's hearts by forgetting a <c>Where</c>; code that moves
-    /// hearts for everybody (<c>CatalogueWriter</c>) says
+    /// <see cref="Loves"/>, <see cref="Tags"/>, <see cref="SongTags"/>,
+    /// <see cref="PlaylistFolders"/> and <see cref="PlaylistPlacements"/> is
+    /// filtered by it, so a handler cannot show one person another's by
+    /// forgetting a <c>Where</c>; code that moves them for everybody
+    /// (<c>CatalogueWriter</c>, a playlist's rename) says
     /// <c>IgnoreQueryFilters</c>.
     /// </remarks>
     public Guid? AccountId { get; set; }
@@ -41,6 +43,10 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<ArtistCredit> ArtistCredits => Set<ArtistCredit>();
     public DbSet<Love> Loves => Set<Love>();
+    public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<SongTag> SongTags => Set<SongTag>();
+    public DbSet<PlaylistFolder> PlaylistFolders => Set<PlaylistFolder>();
+    public DbSet<PlaylistPlacement> PlaylistPlacements => Set<PlaylistPlacement>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<Contribution> Contributions => Set<Contribution>();
     public DbSet<RecordingSession> RecordingSessions => Set<RecordingSession>();
@@ -432,6 +438,55 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => new { x.AccountId, x.ReleaseGroupId }).IsUnique().HasFilter("\"ReleaseGroupId\" IS NOT NULL");
             e.HasIndex(x => new { x.AccountId, x.ArtistId }).IsUnique().HasFilter("\"ArtistId\" IS NOT NULL");
             e.HasIndex(x => new { x.AccountId, x.WorkId }).IsUnique().HasFilter("\"WorkId\" IS NOT NULL");
+        });
+
+        builder.Entity<Tag>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(Tag.NameLength).IsRequired();
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+
+            // Cascade: a tag deleted takes every tag below it.
+            e.HasOne<Tag>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(x => x.AccountId == AccountId);
+            e.HasIndex(x => new { x.AccountId, x.ParentId, x.Name }).IsUnique().AreNullsDistinct(false);
+        });
+
+        builder.Entity<SongTag>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne(x => x.Tag).WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Recording>().WithMany().HasForeignKey(x => x.RecordingId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<MediaFile>().WithMany().HasForeignKey(x => x.MediaFileId).OnDelete(DeleteBehavior.Cascade);
+
+            // The tag's own filter, through it, so a required navigation never
+            // reaches a tag the context cannot see.
+            e.HasQueryFilter(x => x.Tag!.AccountId == AccountId);
+            e.HasIndex(x => new { x.TagId, x.RecordingId }).IsUnique().HasFilter("\"RecordingId\" IS NOT NULL");
+            e.HasIndex(x => new { x.TagId, x.MediaFileId }).IsUnique().HasFilter("\"MediaFileId\" IS NOT NULL");
+        });
+
+        builder.Entity<PlaylistFolder>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(PlaylistFolder.NameLength).IsRequired();
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PlaylistFolder>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(x => x.AccountId == AccountId);
+        });
+
+        builder.Entity<PlaylistPlacement>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Playlist).HasMaxLength(1000).IsRequired();
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+
+            // Cascade: a folder goes only when empty, so what it takes is a
+            // placement whose playlist is gone.
+            e.HasOne<PlaylistFolder>().WithMany().HasForeignKey(x => x.FolderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(x => x.AccountId == AccountId);
+            e.HasIndex(x => new { x.AccountId, x.Playlist }).IsUnique();
+            e.HasIndex(x => x.Playlist);
         });
 
         builder.Entity<ArtistCredit>(e =>

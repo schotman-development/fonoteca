@@ -641,6 +641,10 @@ public static partial class SubsonicEndpoints
             });
         }
 
+        // fonotecaTags: the listener's own tags placed on it, and nothing
+        // where it has none.
+        if (song.TagIds.Count > 0) writer.Strings("tagIds", song.TagIds);
+
         // OpenSubsonic's: the values the tag write puts in the file, for a
         // client that normalises from the API rather than the tags.
         if (song.ReplayGain is { } gain)
@@ -741,7 +745,8 @@ internal sealed record Song(
     SongWork? Work,
     IReadOnlyList<SongContributor> Contributors,
     SongRecorded? Recorded,
-    DateTimeOffset? Starred);
+    DateTimeOffset? Starred,
+    IReadOnlyList<string> TagIds);
 
 /// <summary>One credit, by the tag write's role; an artist the catalogue has no row for has no id.</summary>
 internal sealed record SongContributor(string Role, string? SubRole, ArtistId? ArtistId, string Name, Mbid? Mbid);

@@ -115,15 +115,16 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
-    /// A heart on a song goes with its files to the recording row that now
-    /// holds them, wherever the old row is about to go: a merge, and the rows
-    /// a download minted that MusicBrainz names. Saved by the caller.
+    /// A heart on a song, and a listener's tag on it, go with its files to the
+    /// recording row that now holds them, wherever the old row is about to go:
+    /// a merge, and the rows a download minted that MusicBrainz names. Saved by
+    /// the caller.
     /// </summary>
     /// <remarks>
-    /// Once per account: where that account loves the new row already, its
-    /// love on the old row cascades away with it. The change tracker is asked
-    /// as well as the database, because two of an album's rows can fold into
-    /// one before the save. Every account's hearts, so past the query filter.
+    /// Once per account, and once per tag: where the new row has it already,
+    /// the old row's cascades away with it. The change tracker is asked as
+    /// well as the database, because two of an album's rows can fold into one
+    /// before the save. Every account's, so past the query filters.
     /// </remarks>
     internal static async Task CarryLovesAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
     {
@@ -134,6 +135,17 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         foreach (var love in await db.Loves.IgnoreQueryFilters().Where(love => love.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
         {
             if (taken.Add(love.AccountId)) love.RecordingId = to;
+        }
+
+        HashSet<Guid> tagged =
+        [
+            .. await db.SongTags.IgnoreQueryFilters().Where(tag => tag.RecordingId == to).Select(tag => tag.TagId).ToListAsync(cancellationToken).ConfigureAwait(false),
+            .. db.SongTags.Local.Where(tag => tag.RecordingId == to).Select(tag => tag.TagId),
+        ];
+
+        foreach (var tag in await db.SongTags.IgnoreQueryFilters().Where(tag => tag.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (tagged.Add(tag.TagId)) tag.RecordingId = to;
         }
     }
 

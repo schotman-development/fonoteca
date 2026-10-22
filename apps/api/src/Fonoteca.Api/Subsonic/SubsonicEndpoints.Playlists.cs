@@ -6,6 +6,7 @@ using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -34,13 +35,23 @@ namespace Fonoteca.Api.Subsonic;
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
+    /// <remarks>
+    /// Each says where the account keeps it (<c>playlistFolders</c>), or the
+    /// account an admin names in <c>username</c>: the playlists are everyone's,
+    /// so the name chooses only whose tree.
+    /// </remarks>
     private static async Task<IResult> GetPlaylists(
         HttpContext http,
         FonotecaDbContext db,
         PlaylistFiles files,
+        UserManager<Account> users,
         CancellationToken cancellationToken)
     {
+        var (account, refused) = await SelectedAsync(http, db, users).ConfigureAwait(false);
+        if (refused is not null) return refused;
+
         var playlists = (await CatalogueEndpoints.GetPlaylists(db, files, cancellationToken).ConfigureAwait(false)).Value!.Items;
+        var placements = await PlacementsAsync(db, account, cancellationToken).ConfigureAwait(false);
 
         var owner = Owner(http);
 
@@ -57,7 +68,8 @@ public static partial class SubsonicEndpoints
                     playlist.ChangedUtc,
                     playlist.ChangedUtc,
                     playlist.Albums.Count == 0 ? null : SubsonicIds.Album(new ReleaseGroupId(playlist.Albums[0].AlbumId)),
-                    playlist.Kind == PlaylistKind.Smart)));
+                    playlist.Kind == PlaylistKind.Smart,
+                    placements.GetValueOrDefault(playlist.Id))));
     }
 
     private static async Task<IResult> GetPlaylist(
@@ -274,6 +286,11 @@ public static partial class SubsonicEndpoints
 
         var owner = Owner(http);
 
+        var placement = await db.PlaylistPlacements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Playlist == playlist.Id, cancellationToken)
+            .ConfigureAwait(false);
+
         return SubsonicResult.Ok("playlist", root =>
         {
             WritePlaylist(
@@ -286,7 +303,8 @@ public static partial class SubsonicEndpoints
                 playlist.ChangedUtc,
                 playlist.ChangedUtc,
                 ordered.Count == 0 ? null : ordered[0].AlbumId is { } album ? SubsonicIds.Album(album) : ordered[0].Id,
-                playlist.Kind == PlaylistKind.Smart);
+                playlist.Kind == PlaylistKind.Smart,
+                placement);
 
             root.Children("entry", ordered, WriteSong);
         });
@@ -305,7 +323,8 @@ public static partial class SubsonicEndpoints
         DateTimeOffset created,
         DateTimeOffset changed,
         string? coverArt,
-        bool readOnly)
+        bool readOnly,
+        PlaylistPlacement? placement)
     {
         writer.Attr("id", id);
         writer.Attr("name", name);
@@ -317,6 +336,10 @@ public static partial class SubsonicEndpoints
         writer.Attr("changed", changed);
         writer.Attr("coverArt", coverArt);
         writer.Attr("readonly", readOnly);
+
+        // playlistFolders: where the account keeps it, empty at the root.
+        writer.Attr("playlistFolderId", placement?.FolderId is { } folder ? SubsonicIds.PlaylistFolder(folder) : string.Empty);
+        writer.Attr("playlistFolderSortOrder", placement?.SortOrder);
     }
 
     /// <summary>Each song id's file, in order; or which id is not a song.</summary>

@@ -134,6 +134,67 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("ApiKeys");
                 });
 
+            modelBuilder.Entity("Fonoteca.Data.PlaylistFolder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("ParentId");
+
+                    b.ToTable("PlaylistFolders");
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.PlaylistPlacement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("FolderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Playlist")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FolderId");
+
+                    b.HasIndex("Playlist");
+
+                    b.HasIndex("AccountId", "Playlist")
+                        .IsUnique();
+
+                    b.ToTable("PlaylistPlacements");
+                });
+
             modelBuilder.Entity("Fonoteca.Data.RadioStation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -157,6 +218,67 @@ namespace Fonoteca.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RadioStations");
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.SongTag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MediaFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaFileId");
+
+                    b.HasIndex("RecordingId");
+
+                    b.HasIndex("TagId", "MediaFileId")
+                        .IsUnique()
+                        .HasFilter("\"MediaFileId\" IS NOT NULL");
+
+                    b.HasIndex("TagId", "RecordingId")
+                        .IsUnique()
+                        .HasFilter("\"RecordingId\" IS NOT NULL");
+
+                    b.ToTable("SongTags");
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.Tag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("AccountId", "ParentId", "Name")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("AccountId", "ParentId", "Name"), false);
+
+                    b.ToTable("Tags");
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.AlbumBooklet", b =>
@@ -1498,6 +1620,69 @@ namespace Fonoteca.Data.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.PlaylistFolder", b =>
+                {
+                    b.HasOne("Fonoteca.Data.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Fonoteca.Data.PlaylistFolder", null)
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.PlaylistPlacement", b =>
+                {
+                    b.HasOne("Fonoteca.Data.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Fonoteca.Data.PlaylistFolder", null)
+                        .WithMany()
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.SongTag", b =>
+                {
+                    b.HasOne("Fonoteca.Domain.Catalogue.MediaFile", null)
+                        .WithMany()
+                        .HasForeignKey("MediaFileId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithMany()
+                        .HasForeignKey("RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Fonoteca.Data.Tag", "Tag")
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tag");
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.Tag", b =>
+                {
+                    b.HasOne("Fonoteca.Data.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Fonoteca.Data.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.AlbumBooklet", b =>

@@ -353,6 +353,8 @@ public static partial class SubsonicEndpoints
         var lovedFiles = await LovedAsync(db.Loves.Where(love => love.MediaFileId != null && ids.Contains(love.MediaFileId.Value)), love => love.MediaFileId!.Value, cancellationToken)
             .ConfigureAwait(false);
 
+        var tags = await SongTagsAsync(db, recordings, ids, cancellationToken).ConfigureAwait(false);
+
         // The album folder first: two rips of one album are one album here, and
         // interleaving them would play every track twice in a row.
         return rows
@@ -368,7 +370,8 @@ public static partial class SubsonicEndpoints
                 row.Work is { } work ? works.GetValueOrDefault(work) : null,
                 row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default,
                 row.Recording is { } song && lovedSongs.TryGetValue(song, out var loved) ? loved
-                    : lovedFiles.TryGetValue(row.Id, out var own) ? own : null))
+                    : lovedFiles.TryGetValue(row.Id, out var own) ? own : null,
+                [.. (row.Recording is { } tagged ? tags.Songs[tagged] : tags.Files[row.Id]).Order().Select(SubsonicIds.Tag)]))
             .ToList();
     }
 
@@ -646,7 +649,8 @@ public static partial class SubsonicEndpoints
         (double Gain, double Peak)? album,
         SongWork? work,
         (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded) performance,
-        DateTimeOffset? starred)
+        DateTimeOffset? starred,
+        IReadOnlyList<string> tagIds)
     {
         var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
@@ -707,7 +711,8 @@ public static partial class SubsonicEndpoints
             work,
             performance.Contributors ?? [],
             performance.Recorded,
-            starred);
+            starred,
+            tagIds);
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>

@@ -36,6 +36,8 @@ internal static class SubsonicIds
     private const string PlaylistPrefix = "pl-";
     private const string PlaylistFilePrefix = "pf-";
     private const string WorkPrefix = "wk-";
+    private const string PlaylistFolderPrefix = "pd-";
+    private const string TagPrefix = "tg-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
@@ -50,6 +52,12 @@ internal static class SubsonicIds
 
     /// <summary>A static playlist, which is its file: the file's name in the Playlists folder.</summary>
     internal static string PlaylistFile(string name) => PlaylistFilePrefix + name;
+
+    /// <summary>A folder of an account's playlists (<c>playlistFolders</c>), never a directory.</summary>
+    internal static string PlaylistFolder(Guid id) => PlaylistFolderPrefix + id.ToString("N");
+
+    /// <summary>A listener's own tag (<c>fonotecaTags</c>).</summary>
+    internal static string Tag(Guid id) => TagPrefix + id.ToString("N");
 
     /// <summary>A directory, or a file the catalogue does not hold.</summary>
     internal static string Path(string libraryRelativePath) =>
@@ -69,6 +77,10 @@ internal static class SubsonicIds
 
     internal static PlaylistId? AsPlaylist(string? id) =>
         Guid(id, PlaylistPrefix) is { } value ? new PlaylistId(value) : null;
+
+    internal static Guid? AsPlaylistFolder(string? id) => Guid(id, PlaylistFolderPrefix);
+
+    internal static Guid? AsTag(string? id) => Guid(id, TagPrefix);
 
     internal static string? AsPlaylistFile(string? id) =>
         id is not null && id.StartsWith(PlaylistFilePrefix, StringComparison.Ordinal) && id.Length > PlaylistFilePrefix.Length

@@ -445,6 +445,12 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
                 seed.Loves.Add(new Love { Id = Guid.CreateVersion7(), RecordingId = survivor.Id, LovedUtc = decided.AddDays(1) });
             }
 
+            // A listener's tag moves the same way, once per tag.
+            var tag = new Tag { Id = Guid.CreateVersion7(), AccountId = other, Name = "Mine" };
+            seed.Tags.Add(tag);
+            seed.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = tag.Id, RecordingId = old.Id });
+            if (survivorLoved) seed.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = tag.Id, RecordingId = survivor.Id });
+
             var release = new Release { Id = ReleaseId.New(), Title = "Symphonies", Mbid = Mb("a0000000-0000-4000-8000-000000000001") };
             seed.Releases.Add(release);
 
@@ -569,6 +575,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         Assert.All(loves, love => Assert.Equal(survivorRow, love.RecordingId));
         Assert.Equal(survivorLoved ? decided.AddDays(1) : decided, loves.Single(love => love.AccountId == null).LovedUtc);
         Assert.Equal(decided, loves.Single(love => love.AccountId == other).LovedUtc);
+        Assert.Equal(survivorRow, Assert.Single(await db.SongTags.IgnoreQueryFilters().AsNoTracking().ToListAsync(Token)).RecordingId);
     }
 
     /// <summary>

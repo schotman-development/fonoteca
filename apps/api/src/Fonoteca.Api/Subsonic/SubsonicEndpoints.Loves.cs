@@ -216,20 +216,7 @@ public static partial class SubsonicEndpoints
 
         var files = lovedFiles.Where(file => file.RecordingId is null).Select(file => file.Id).ToList();
 
-        var copies = await db.MediaFiles
-            .AsNoTracking()
-            .Where(file => file.RecordingId != null && recordings.Contains(file.RecordingId.Value))
-            .Select(file => new
-            {
-                Recording = file.RecordingId!.Value,
-                Copy = new PlaylistCopy(file.Id, file.Path, file.SizeBytes, file.Quality, file.Measurement, file.Integrity),
-            })
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var best = copies
-            .GroupBy(copy => copy.Recording)
-            .Select(song => PlaylistFile.Best(song.Select(copy => copy.Copy))!.Id)
+        var best = (await BestCopiesAsync(db, recordings, cancellationToken).ConfigureAwait(false))
             .Concat(files)
             .Distinct()
             .ToList();
@@ -243,5 +230,25 @@ public static partial class SubsonicEndpoints
             root.Children("album", albums.Where(album => album.Starred is not null).OrderByDescending(album => album.Starred), WriteAlbum);
             root.Children("song", songs, WriteSong);
         });
+    }
+
+    /// <summary>Each recording's copy a playlist would play (<see cref="PlaylistFile.Best"/>).</summary>
+    private static async Task<List<MediaFileId>> BestCopiesAsync(
+        FonotecaDbContext db,
+        List<RecordingId> recordings,
+        CancellationToken cancellationToken)
+    {
+        var copies = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.RecordingId != null && recordings.Contains(file.RecordingId.Value))
+            .Select(file => new
+            {
+                Recording = file.RecordingId!.Value,
+                Copy = new PlaylistCopy(file.Id, file.Path, file.SizeBytes, file.Quality, file.Measurement, file.Integrity),
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return [.. copies.GroupBy(copy => copy.Recording).Select(song => PlaylistFile.Best(song.Select(copy => copy.Copy))!.Id)];
     }
 }

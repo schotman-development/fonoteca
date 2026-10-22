@@ -1050,9 +1050,9 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## Accounts
 
-ADR 0018. **The library has no owner; an account owns only its hearts and its
-API keys**, and its roles say what it may do. Never scope a catalogue fact, a
-file or a playlist by account.
+ADR 0018. **The library has no owner; an account owns only its hearts, its
+tags, its playlist folders and its API keys**, and its roles say what it may
+do. Never scope a catalogue fact, a file or a playlist by account.
 
 - **ASP.NET Core Identity, and OpenSubsonic's twelve roles** (`AccountRoles`,
   a column, made claims by `AccountClaims`). A fallback policy closes every
@@ -1075,7 +1075,11 @@ file or a playlist by account.
 - **Hearts are filtered, not queried for.** `Love` has a global query filter on
   `FonotecaDbContext.AccountId`, set per request by the Subsonic guard; code
   that moves hearts for everybody (`CatalogueWriter`) reads past it with
-  `IgnoreQueryFilters` and carries each account's hearts separately.
+  `IgnoreQueryFilters` and carries each account's hearts separately. So do
+  `Tag`, `SongTag` (through its tag), `PlaylistFolder` and
+  `PlaylistPlacement`: a song's tags move with its hearts
+  (`CarryLovesAsync`), and a playlist's rename or delete moves or drops every
+  account's place for it (`CatalogueEndpoints.PlacedAsync`).
 - **The journal names the account** (`AccountCallerContext`); work with no
   request behind it is `system`, `/mcp` is `agent`.
 
