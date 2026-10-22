@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Fonoteca.Api.Endpoints;
 
@@ -16,11 +17,15 @@ namespace Fonoteca.Api.Endpoints;
 /// Accounts: signing in, the accounts page, and Subsonic API keys.
 /// </summary>
 /// <remarks>
-/// ADR 0018 is the design record. <b>Every account is equal</b> (the owner's
-/// choice, "roles may come later"): any signed-in account adds, resets and
-/// removes accounts, its own included, but never the last. <b>The first
-/// account is made by the first visit</b>, while none exists, and claims the hearts given before
-/// there were accounts; after that <c>/api/account/setup</c> refuses.
+/// ADR 0018 is the design record. <b>An account may do what its roles say</b>
+/// — OpenSubsonic's, on the web as on Subsonic (<see cref="AccountRoles"/>,
+/// the owner's choice). An admin adds, changes and removes accounts, its own
+/// included, but never the last admin. <b>The first account is made by the
+/// first visit</b>, while none exists, with every role, and claims the hearts
+/// given before there were accounts; after that <c>/api/account/setup</c>
+/// refuses. A role taken away reaches that account's other browsers within a
+/// minute, when the security stamp is next checked and the claims are made
+/// again (<see cref="AccountClaims"/>).
 ///
 /// <b>One password for both clients</b>, the owner's choice: Identity keeps its
 /// hash for this sign-in, and <see cref="SetPasswordAsync"/> keeps a protected
@@ -71,21 +76,29 @@ public static class AccountEndpoints
             .WithName("GetSignedInAccount")
             .WithSummary("The signed-in account; 401 when nobody is.");
 
+        mine.MapPost("/password", ChangeOwnPassword)
+            .RequireRole(AccountRoles.Settings, AccountRoles.Admin)
+            .WithName("ChangeOwnPassword")
+            .WithSummary("Set the signed-in account's own password, for the web and Subsonic alike.")
+            .ProducesProblem(StatusCodes.Status400BadRequest);
+
         mine.MapGet("/keys", GetKeys)
             .WithName("GetApiKeys")
             .WithSummary("The signed-in account's Subsonic API keys, without the keys themselves.");
 
         mine.MapPost("/keys", CreateKey)
+            .RequireRole(AccountRoles.Settings, AccountRoles.Admin)
             .WithName("CreateApiKey")
             .WithSummary("A new Subsonic API key. The key is in this answer and never again.")
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
         mine.MapDelete("/keys/{id:guid}", RevokeKey)
+            .RequireRole(AccountRoles.Settings, AccountRoles.Admin)
             .WithName("RevokeApiKey")
             .WithSummary("Revoke one of the signed-in account's API keys.")
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        var everyone = app.MapGroup("/api/accounts").WithTags("Accounts");
+        var everyone = app.MapGroup("/api/accounts").WithTags("Accounts").RequireRole(AccountRoles.Admin);
 
         everyone.MapGet("/", GetAccounts)
             .WithName("GetAccounts")
@@ -96,6 +109,13 @@ public static class AccountEndpoints
             .WithSummary("Add an account.")
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
+        everyone.MapPost("/{id:guid}", UpdateAccount)
+            .WithName("UpdateAccount")
+            .WithSummary("Change an account's email, roles or maxBitRate; what the request leaves out stays.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         everyone.MapPost("/{id:guid}/password", ResetPassword)
             .WithName("ResetAccountPassword")
             .WithSummary("Set an account's password, for the web and Subsonic alike; signs it out elsewhere.")
@@ -104,7 +124,7 @@ public static class AccountEndpoints
 
         everyone.MapDelete("/{id:guid}", DeleteAccount)
             .WithName("DeleteAccount")
-            .WithSummary("Remove an account, with its hearts and API keys; never the last one.")
+            .WithSummary("Remove an account, with its hearts and API keys; never the last admin.")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
 
@@ -137,7 +157,7 @@ public static class AccountEndpoints
                     statusCode: StatusCodes.Status409Conflict);
             }
 
-            var (account, problem) = await CreateAsync(request, users, protection, clock).ConfigureAwait(false);
+            var (account, problem) = await CreateAsync(request, Account.Everything, users, protection, clock).ConfigureAwait(false);
             if (problem is not null) return problem;
 
             // Hearts given before there were accounts are the first account's.
@@ -286,17 +306,76 @@ public static class AccountEndpoints
         return TypedResults.Ok(accounts);
     }
 
+    /// <remarks>With no roles named, OpenSubsonic's <c>createUser</c> defaults (<see cref="Account.DefaultRoles"/>).</remarks>
     internal static async Task<Results<Ok<AccountResponse>, ProblemHttpResult>> CreateAccount(
         AccountRequest request,
         UserManager<Account> users,
         IDataProtectionProvider protection,
         IClock clock)
     {
-        var (account, problem) = await CreateAsync(request, users, protection, clock).ConfigureAwait(false);
+        var roles = request?.Roles is { } named ? Combine(named) : Account.DefaultRoles;
+
+        var (account, problem) = await CreateAsync(request, roles, users, protection, clock).ConfigureAwait(false);
         if (problem is not null) return problem;
 
         return TypedResults.Ok(Response(account!));
     }
+
+    internal static async Task<Results<Ok<AccountResponse>, ProblemHttpResult>> UpdateAccount(
+        Guid id,
+        AccountUpdateRequest request,
+        UserManager<Account> users,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (EmailProblem(request.Email) is { } wrong) return wrong;
+
+        if (request.MaxBitRate < 0)
+        {
+            return TypedResults.Problem(detail: "A maximum bit rate is 0, for none, or more.", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        await Census.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var account = await users.FindByIdAsync(id.ToString()).ConfigureAwait(false);
+            if (account is null) return NoSuchAccount();
+
+            if (request.Roles is { } named)
+            {
+                var roles = Combine(named);
+
+                if (account.Roles.HasFlag(AccountRoles.Admin)
+                    && !roles.HasFlag(AccountRoles.Admin)
+                    && await IsLastAdminAsync(users, id, cancellationToken).ConfigureAwait(false))
+                {
+                    return LastAdmin("making another account an admin before taking it from this one");
+                }
+
+                account.Roles = roles;
+            }
+
+            if (request.Email is not null) SetEmail(users, account, request.Email);
+            if (request.MaxBitRate is { } rate) account.MaxBitRate = rate;
+
+            var result = await users.UpdateAsync(account).ConfigureAwait(false);
+            return result.Succeeded ? TypedResults.Ok(Response(account)) : Refused(result);
+        }
+        finally
+        {
+            Census.Release();
+        }
+    }
+
+    internal static async Task<Results<NoContent, ProblemHttpResult>> ChangeOwnPassword(
+        PasswordRequest request,
+        ClaimsPrincipal user,
+        UserManager<Account> users,
+        SignInManager<Account> signIn,
+        IDataProtectionProvider protection) =>
+        await ResetPassword(Guid.Parse(users.GetUserId(user)!), request, user, users, signIn, protection).ConfigureAwait(false);
 
     internal static async Task<Results<NoContent, ProblemHttpResult>> ResetPassword(
         Guid id,
@@ -335,13 +414,13 @@ public static class AccountEndpoints
             var account = await users.FindByIdAsync(id.ToString()).ConfigureAwait(false);
             if (account is null) return NoSuchAccount();
 
-            // With none left the first visit would make one, so whoever reached
-            // the port next would own the library.
-            if (!await users.Users.AnyAsync(other => other.Id != id, cancellationToken).ConfigureAwait(false))
+            // With no admin left nobody could add, change or remove an account
+            // again; with no account left the first visit would make one, so
+            // whoever reached the port next would own the library.
+            if (account.Roles.HasFlag(AccountRoles.Admin)
+                && await IsLastAdminAsync(users, id, cancellationToken).ConfigureAwait(false))
             {
-                return TypedResults.Problem(
-                    detail: "This is the only account; add another before removing it.",
-                    statusCode: StatusCodes.Status409Conflict);
+                return LastAdmin("making another account an admin before removing this one");
             }
 
             // Hearts and keys go by the foreign keys' cascade.
@@ -403,18 +482,69 @@ public static class AccountEndpoints
     private static IDataProtector Protector(IDataProtectionProvider protection) =>
         protection.CreateProtector(PasswordPurpose);
 
+    /// <summary>Each role set in <paramref name="roles"/>, one at a time, in OpenSubsonic's order.</summary>
+    internal static IReadOnlyList<AccountRoles> Each(AccountRoles roles) =>
+        [.. Enum.GetValues<AccountRoles>().Where(role => role != AccountRoles.None && roles.HasFlag(role))];
+
+    /// <summary>The roles named, as one value; a bit no role has is dropped.</summary>
+    internal static AccountRoles Combine(IEnumerable<AccountRoles> roles) =>
+        roles.Aggregate(AccountRoles.None, (all, role) => all | role)
+        & Enum.GetValues<AccountRoles>().Aggregate((all, role) => all | role);
+
+    /// <summary>One role claim per role, which <c>RequireRole</c> and <c>IsInRole</c> read.</summary>
+    internal static IEnumerable<Claim> RoleClaims(AccountRoles roles) =>
+        Each(roles).Select(role => new Claim(ClaimTypes.Role, role.ToString()));
+
+    /// <summary>Only an account holding one of <paramref name="roles"/> may call it.</summary>
+    internal static TBuilder RequireRole<TBuilder>(this TBuilder builder, params AccountRoles[] roles)
+        where TBuilder : IEndpointConventionBuilder =>
+        builder.RequireAuthorization(policy => policy.RequireRole(roles.Select(role => role.ToString())));
+
+    private static async Task<bool> IsLastAdminAsync(UserManager<Account> users, Guid id, CancellationToken cancellationToken) =>
+        !await users.Users
+            .AnyAsync(other => other.Id != id && other.Roles.HasFlag(AccountRoles.Admin), cancellationToken)
+            .ConfigureAwait(false);
+
+    private static ProblemHttpResult LastAdmin(string instead) =>
+        TypedResults.Problem(
+            detail: $"This is the only admin; try {instead}.",
+            statusCode: StatusCodes.Status409Conflict);
+
+    /// <summary>Identity's own column, at Identity's own length; nothing here sends mail, so its form is not checked.</summary>
+    private static ProblemHttpResult? EmailProblem(string? email) =>
+        email?.Length > 256
+            ? TypedResults.Problem(detail: "An email address is at most 256 characters.", statusCode: StatusCodes.Status400BadRequest)
+            : null;
+
+    /// <summary>
+    /// Sets the address without <c>SetEmailAsync</c>, which changes the
+    /// security stamp and so signs the account out everywhere for an address
+    /// nothing reads.
+    /// </summary>
+    private static void SetEmail(UserManager<Account> users, Account account, string email)
+    {
+        account.Email = email.Length == 0 ? null : email.Trim();
+        account.NormalizedEmail = users.NormalizeEmail(account.Email);
+    }
+
     private static async Task<(Account? Account, ProblemHttpResult? Problem)> CreateAsync(
-        AccountRequest request,
+        AccountRequest? request,
+        AccountRoles roles,
         UserManager<Account> users,
         IDataProtectionProvider protection,
         IClock clock)
     {
+        if (EmailProblem(request?.Email) is { } wrong) return (null, wrong);
+
         var account = new Account
         {
             Id = Guid.CreateVersion7(),
             UserName = request?.Name?.Trim(),
             CreatedUtc = StoreTime.ToStorePrecision(clock.UtcNow),
+            Roles = roles,
         };
+
+        if (request?.Email is { } email) SetEmail(users, account, email);
 
         var password = request?.Password ?? string.Empty;
         account.SubsonicPassword = Protector(protection).Protect(password);
@@ -423,8 +553,8 @@ public static class AccountEndpoints
         return result.Succeeded ? (account, null) : (null, Refused(result));
     }
 
-    private static AccountResponse Response(Account account) =>
-        new(account.Id, account.UserName!, account.CreatedUtc);
+    internal static AccountResponse Response(Account account) =>
+        new(account.Id, account.UserName!, account.Email, Each(account.Roles), account.MaxBitRate, account.CreatedUtc);
 
     private static ProblemHttpResult Refused(IdentityResult result) =>
         TypedResults.Problem(
@@ -433,6 +563,26 @@ public static class AccountEndpoints
 
     private static ProblemHttpResult NoSuchAccount() =>
         TypedResults.Problem(detail: "No such account.", statusCode: StatusCodes.Status404NotFound);
+}
+
+/// <summary>
+/// Identity's claims for an account, and one per role it holds.
+/// </summary>
+/// <remarks>
+/// Made at sign-in and again at every security stamp check, once a minute, so
+/// a role given or taken reaches a signed-in browser without signing it out.
+/// </remarks>
+internal sealed class AccountClaims(UserManager<Account> users, IOptions<IdentityOptions> options)
+    : UserClaimsPrincipalFactory<Account>(users, options)
+{
+    protected override async Task<ClaimsIdentity> GenerateClaimsAsync(Account user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        var identity = await base.GenerateClaimsAsync(user).ConfigureAwait(false);
+        identity.AddClaims(AccountEndpoints.RoleClaims(user.Roles));
+        return identity;
+    }
 }
 
 /// <summary>
@@ -458,13 +608,25 @@ internal sealed class AccountCallerContext(IHttpContextAccessor http) : ICallerC
 public sealed record AccountSetupResponse(bool Needed);
 
 /// <param name="Name">Letters, digits and <c>-._@+</c>; the name a Subsonic client signs in with too.</param>
-public sealed record AccountRequest(string? Name, string? Password);
+/// <param name="Roles">Null for OpenSubsonic's defaults, settings and stream.</param>
+public sealed record AccountRequest(string? Name, string? Password, string? Email = null, IReadOnlyList<AccountRoles>? Roles = null);
+
+/// <param name="Email">Empty takes it away.</param>
+/// <param name="Roles">The whole set; null leaves the roles as they are.</param>
+/// <param name="MaxBitRate">OpenSubsonic's, 0 for none; kept and reported, applied by nothing.</param>
+public sealed record AccountUpdateRequest(string? Email = null, IReadOnlyList<AccountRoles>? Roles = null, int? MaxBitRate = null);
 
 public sealed record SignInRequest(string? Name, string? Password);
 
 public sealed record PasswordRequest(string? Password);
 
-public sealed record AccountResponse(Guid Id, string Name, DateTimeOffset CreatedUtc);
+public sealed record AccountResponse(
+    Guid Id,
+    string Name,
+    string? Email,
+    IReadOnlyList<AccountRoles> Roles,
+    int? MaxBitRate,
+    DateTimeOffset CreatedUtc);
 
 public sealed record ApiKeyRequest(string? Name);
 

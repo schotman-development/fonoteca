@@ -209,7 +209,11 @@ public static partial class SubsonicEndpoints
 
         db.AccountId = account.Id;
         context.User = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, account.Id.ToString()), new Claim(ClaimTypes.Name, account.UserName!)],
+            [
+                new Claim(ClaimTypes.NameIdentifier, account.Id.ToString()),
+                new Claim(ClaimTypes.Name, account.UserName!),
+                .. AccountEndpoints.RoleClaims(account.Roles),
+            ],
             "Subsonic"));
 
         return null;
@@ -248,6 +252,9 @@ public static partial class SubsonicEndpoints
         Map(group, "getArtists", GetArtists);
         Map(group, "getArtist", GetArtist);
         Map(group, "getAlbum", GetAlbum);
+        Map(group, "getArtistInfo2", GetArtistInfo2);
+        Map(group, "getAlbumInfo2", GetAlbumInfo2);
+        Map(group, "getTopSongs", GetTopSongs);
         Map(group, "getAlbumList2", GetAlbumList2);
         Map(group, "getSong", GetSong);
         Map(group, "getLyrics", GetLyrics);
@@ -267,6 +274,11 @@ public static partial class SubsonicEndpoints
         Map(group, "getAlbumMotion", GetAlbumMotion);
 
         Map(group, "getUser", GetUser);
+        Map(group, "getUsers", GetUsers);
+        Map(group, "createUser", CreateUser);
+        Map(group, "updateUser", UpdateUser);
+        Map(group, "deleteUser", DeleteUser);
+        Map(group, "changePassword", ChangePassword);
         Map(group, "tokenInfo", TokenInfo);
         Map(group, "getPlaylists", GetPlaylists);
         Map(group, "getPlaylist", GetPlaylist);
@@ -318,52 +330,6 @@ public static partial class SubsonicEndpoints
         SubsonicResult.Error(
             0,
             $"This server does not implement {MethodOf(http.Request.Path)}.");
-
-    /// <summary>
-    /// An account, and what it is allowed to do.
-    /// </summary>
-    /// <remarks>
-    /// Several clients call this at login to decide which buttons to draw, and a
-    /// missing answer reads to them as a broken server. Every role is stated
-    /// rather than assumed, and the four that are true are the four this
-    /// surface actually does: stream, download, cover art and playlists. Nothing here can
-    /// rate, upload, share or administer anything, so a client that reads
-    /// this draws none of those.
-    ///
-    /// The signed-in account, or the one <c>username</c> names: every account
-    /// is equal (ADR 0018), so each has the same roles, and one that does not
-    /// exist is error 70.
-    /// </remarks>
-    private static async Task<IResult> GetUser(HttpContext http, UserManager<Account> users)
-    {
-        var name = http.User.Identity!.Name!;
-
-        if (Text(http, "username") is { } asked && !string.Equals(asked, name, StringComparison.OrdinalIgnoreCase))
-        {
-            if (await users.FindByNameAsync(asked).ConfigureAwait(false) is not { } other) return SubsonicResult.Error(70, "No such user.");
-            name = other.UserName!;
-        }
-
-        return SubsonicResult.Ok("user", user =>
-        {
-            user.Attr("username", name);
-            user.Attr("email", (string?)null);
-            user.Attr("scrobblingEnabled", false);
-            user.Attr("adminRole", false);
-            user.Attr("settingsRole", false);
-            user.Attr("downloadRole", true);
-            user.Attr("uploadRole", false);
-            user.Attr("playlistRole", true);
-            user.Attr("coverArtRole", true);
-            user.Attr("commentRole", false);
-            user.Attr("podcastRole", false);
-            user.Attr("streamRole", true);
-            user.Attr("jukeboxRole", false);
-            user.Attr("shareRole", false);
-            user.Attr("videoConversionRole", false);
-            user.Attr("folder", 0);
-        });
-    }
 
     /// <summary>Whose API key this is (<c>apiKeyAuthentication</c>); the guard has refused a wrong one.</summary>
     private static IResult TokenInfo(HttpContext http) =>
@@ -430,12 +396,15 @@ public static partial class SubsonicEndpoints
     /// second scan still refuses.
     /// </remarks>
     private static async Task<IResult> StartScan(
+        HttpContext http,
         LibraryScanService scans,
         IdentificationService identification,
         IOptions<FonotecaOptions> options,
         FonotecaDbContext db,
         CancellationToken cancellationToken)
     {
+        if (!May(http, AccountRoles.Admin)) return NotAuthorized();
+
         await LibraryEndpoints
             .ScanLibrary(scans, identification, options, cancellationToken)
             .ConfigureAwait(false);
@@ -474,19 +443,7 @@ public static partial class SubsonicEndpoints
             // sending a password in the clear. It is not, and the protocol says
             // as much; it is accepted because refusing it locks those clients
             // out of a surface they can already reach with p= anyway.
-            if (sent.StartsWith("enc:", StringComparison.Ordinal))
-            {
-                try
-                {
-                    sent = Encoding.UTF8.GetString(Convert.FromHexString(sent.AsSpan(4)));
-                }
-                catch (FormatException)
-                {
-                    return false;
-                }
-            }
-
-            return Same(sent, password);
+            return Decoded(sent) is { } clear && Same(clear, password);
         }
 
         var token = query["t"].ToString();
@@ -504,6 +461,21 @@ public static partial class SubsonicEndpoints
 #pragma warning restore CA5351
 
         return Same(token.ToLowerInvariant(), expected);
+    }
+
+    /// <summary>A password as sent, clear or <c>enc:</c> hex; null where the hex is not hex.</summary>
+    private static string? Decoded(string sent)
+    {
+        if (!sent.StartsWith("enc:", StringComparison.Ordinal)) return sent;
+
+        try
+        {
+            return Encoding.UTF8.GetString(Convert.FromHexString(sent.AsSpan(4)));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     private static bool Same(string sent, string expected) =>

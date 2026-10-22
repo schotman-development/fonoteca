@@ -94,6 +94,7 @@ public static partial class CatalogueEndpoints
                 CancellationToken cancellationToken) =>
                 UploadArtistImage(
                     id, ArtistImageKind.Portrait, db, clock, context, cancellationToken))
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("UploadArtistPortrait")
             .WithSummary("Use an uploaded picture for this artist.")
             .WithDescription(UploadDescription)
@@ -108,6 +109,7 @@ public static partial class CatalogueEndpoints
                 CancellationToken cancellationToken) =>
                 UploadArtistImage(
                     id, ArtistImageKind.Banner, db, clock, context, cancellationToken))
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("UploadArtistBanner")
             .WithSummary("Use an uploaded picture as this artist's banner.")
             .WithDescription(UploadDescription)
@@ -117,6 +119,7 @@ public static partial class CatalogueEndpoints
         group.MapDelete("/artists/{id:guid}/portrait", (
                 Guid id, FonotecaDbContext db, CancellationToken cancellationToken) =>
                 DeleteArtistImage(id, ArtistImageKind.Portrait, db, cancellationToken))
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("DeleteArtistPortrait")
             .WithSummary("Stop using the uploaded picture for this artist.")
             .WithDescription(DeleteDescription)
@@ -125,6 +128,7 @@ public static partial class CatalogueEndpoints
         group.MapDelete("/artists/{id:guid}/banner", (
                 Guid id, FonotecaDbContext db, CancellationToken cancellationToken) =>
                 DeleteArtistImage(id, ArtistImageKind.Banner, db, cancellationToken))
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("DeleteArtistBanner")
             .WithSummary("Stop using the uploaded banner for this artist.")
             .WithDescription(DeleteDescription)

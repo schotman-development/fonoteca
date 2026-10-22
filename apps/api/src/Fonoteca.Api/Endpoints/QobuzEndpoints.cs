@@ -62,6 +62,7 @@ public static class QobuzEndpoints
             .WithSummary("One album with its track list.");
 
         group.MapPost("/albums/{albumId}/download", DownloadAlbum)
+            .RequireRole(AccountRoles.Admin)
             .WithName("DownloadQobuzAlbum")
             .WithSummary(
                 "Fetch an album into the library, replacing the copy already held when it is an upgrade.")
@@ -71,6 +72,7 @@ public static class QobuzEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/albums/{albumId}/upgrade", UpgradeAlbum)
+            .RequireRole(AccountRoles.Admin)
             .WithName("UpgradeQobuzAlbum")
             .WithSummary("Download an album and retire the one in the library it replaces.")
             .WithDescription(

@@ -248,6 +248,9 @@ this. *Amended 2026-10-13:* playlists exist now, as m3u files in the library's
 `updatePlaylist` and `deletePlaylist` read static and smart ones and write
 static ones through the playlist endpoints' own handlers
 (`SubsonicEndpoints.Playlists.cs`). A smart playlist is read-only to a client.
+*Amended 2026-10-20:* and every playlist says which it is in OpenSubsonic's
+`readonly`, true for a smart one, so a client offers no change it would be
+refused.
 
 Also absent: file-based *writing*, video, podcasts, jukebox, chat, bookmarks,
 share, lyrics. *Amended 2026-10-14:* lyrics exist now (ADR 0016):
@@ -275,7 +278,13 @@ rule for a piece recorded movement by movement, so film scores stay — the
 owner's choice), its key, a period (`ClassicalWorks.Period`), its movement
 count, its longest performance, its lyricists and librettists, and the
 languages of its words; catalogue numbers are left out, since MusicBrainz
-states them only in titles (the owner's choice).
+states them only in titles (the owner's choice). *Amended 2026-10-20:*
+`getArtistInfo2` and `getAlbumInfo2` give an artist's biography and an
+album's notes — the leads of their English Wikipedia articles, as HTML ending
+in a link to the article — and their MusicBrainz ids; `getAlbumInfo2` takes a
+song's id too, for its album. There are no similar artists, images or Last.fm
+addresses, and `getTopSongs` answers an empty list: nothing here records
+plays or asks a service that does (the owner's choice).
 
 ### Scope
 
@@ -283,7 +292,7 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
-`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan` — each at both `/rest/x`
+`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 *Amended 2026-10-19:* each also takes `POST` with an
 `application/x-www-form-urlencoded` body, read as the query (OpenSubsonic's
@@ -296,7 +305,20 @@ joined by a comma; any other body is not read.
 `getUser` is there because several clients call it at login to decide which
 buttons to draw, and a server that does not answer reads to them as broken
 rather than as limited. It states every role, and the three that are true are
-the three this surface has: stream, download, cover art.
+the three this surface has: stream, download, cover art. *Amended 2026-10-21:*
+an account's roles are its own now (ADR 0018), and `getUser` reports them, its
+email and its `maxBitRate` — kept, but applied by nothing, since nothing
+transcodes. OpenSubsonic's user management is here too: `getUsers`,
+`createUser`, `updateUser`, `deleteUser` and `changePassword`, each the
+accounts page's own handler, so the last admin and the password rules are that
+page's (`SubsonicEndpoints.Users.cs`). Another account is an admin's to read
+or change; a person's own password needs the settings role (or admin); a
+password comes clear or as `enc:` hex. `createUser` gives the spec's default
+roles where none are named, and `updateUser` changes only the roles it names.
+`stream` needs the stream role, `download` the download role and `startScan`
+admin, and a refusal is error 50. One music folder, no LDAP and no scrobbling,
+so `musicFolderId` and `ldapAuthenticated` are read by nothing and
+`scrobblingEnabled` is false.
 
 **Everything else under `/rest` answers error 0 naming the method**, through a
 catch-all the literal routes outrank. A bare 404 is the failure mode that turns

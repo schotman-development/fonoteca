@@ -151,6 +151,40 @@
         }
       }
     },
+    "/api/account/password": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Set the signed-in account's own password, for the web and Subsonic alike.",
+        "operationId": "ChangeOwnPassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/account/keys": {
       "get": {
         "tags": [
@@ -312,6 +346,121 @@
         }
       }
     },
+    "/api/accounts/{id}": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Change an account's email, roles or maxBitRate; what the request leaves out stays.",
+        "operationId": "UpdateAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Remove an account, with its hearts and API keys; never the last admin.",
+        "operationId": "DeleteAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/accounts/{id}/password": {
       "post": {
         "tags": [
@@ -356,51 +505,6 @@
           },
           "404": {
             "description": "Not Found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/accounts/{id}": {
-      "delete": {
-        "tags": [
-          "Accounts"
-        ],
-        "summary": "Remove an account, with its hearts and API keys; never the last one.",
-        "operationId": "DeleteAccount",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "404": {
-            "description": "Not Found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1154,7 +1258,7 @@
           "Files"
         ],
         "summary": "The bytes of one file, with range support.",
-        "description": "What an <img>, an <audio> or a partial fetch of a rip log reads. Range requests are handled, so seeking into a large FLAC does not read the part before it.\n\n**The media type comes from an allowlist, never from the extension itself.** Anything not on it is served as application/octet-stream and as an attachment, and every response carries X-Content-Type-Options: nosniff — an .html in a music folder is a download, not a page on this origin.",
+        "description": "What an <img>, an <audio> or a partial fetch of a rip log reads. Range requests are handled, so seeking into a large FLAC does not read the part before it.\n\n**The media type comes from an allowlist, never from the extension itself.** Anything not on it is served as application/octet-stream and as an attachment, and every response carries X-Content-Type-Options: nosniff — an .html in a music folder is a download, not a page on this origin.\n\nAudio takes the stream or the download role; anything else, which the file manager previews, takes neither.",
         "operationId": "GetLibraryFileContent",
         "parameters": [
           {
@@ -1179,6 +1283,16 @@
           },
           "400": {
             "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4892,6 +5006,21 @@
               "null",
               "string"
             ]
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "roles": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AccountRoles"
+            }
           }
         }
       },
@@ -4899,6 +5028,9 @@
         "required": [
           "id",
           "name",
+          "email",
+          "roles",
+          "maxBitRate",
           "createdUtc"
         ],
         "type": "object",
@@ -4910,11 +5042,47 @@
           "name": {
             "type": "string"
           },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountRoles"
+            }
+          },
+          "maxBitRate": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
           "createdUtc": {
             "type": "string",
             "format": "date-time"
           }
         }
+      },
+      "AccountRoles": {
+        "enum": [
+          "Admin",
+          "Settings",
+          "Download",
+          "Upload",
+          "Playlist",
+          "CoverArt",
+          "Comment",
+          "Podcast",
+          "Stream",
+          "Jukebox",
+          "Share",
+          "VideoConversion"
+        ],
+        "type": "string"
       },
       "AccountSetupResponse": {
         "required": [
@@ -4924,6 +5092,33 @@
         "properties": {
           "needed": {
             "type": "boolean"
+          }
+        }
+      },
+      "AccountUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "roles": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AccountRoles"
+            }
+          },
+          "maxBitRate": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
           }
         }
       },

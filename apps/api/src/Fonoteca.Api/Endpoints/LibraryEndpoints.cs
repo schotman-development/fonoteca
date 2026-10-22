@@ -1,5 +1,6 @@
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Library;
+using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,7 @@ public static class LibraryEndpoints
         var group = app.MapGroup("/api/library").WithTags("Library");
 
         group.MapPost("/scan", ScanLibrary)
+            .RequireRole(AccountRoles.Admin)
             .WithName("ScanLibrary")
             .WithSummary("Reconcile the catalogue's file list with the files on disk.")
             .WithDescription(
@@ -54,6 +56,7 @@ public static class LibraryEndpoints
             .WithSummary("Whether a scan is running, and what the last one found.");
 
         group.MapPost("/identify", StartIdentification)
+            .RequireRole(AccountRoles.Admin)
             .WithName("StartLibraryIdentification")
             .WithSummary("Fingerprint the files with no AcoustID and look them up.")
             .WithDescription(
@@ -72,11 +75,13 @@ public static class LibraryEndpoints
             .WithSummary("How many files still have no AcoustID, and how the last pass went.");
 
         group.MapDelete("/identify", CancelIdentification)
+            .RequireRole(AccountRoles.Admin)
             .WithName("CancelLibraryIdentification")
             .WithSummary("Ask the running pass to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/enrich", StartEnrichment)
+            .RequireRole(AccountRoles.Admin)
             .WithName("StartLibraryEnrichment")
             .WithSummary("Ask MusicBrainz what the identified files are, and file them under artists.")
             .WithDescription(
@@ -93,11 +98,13 @@ public static class LibraryEndpoints
             .WithSummary("How many identified files have no recording yet, and how the last pass went.");
 
         group.MapDelete("/enrich", CancelEnrichment)
+            .RequireRole(AccountRoles.Admin)
             .WithName("CancelLibraryEnrichment")
             .WithSummary("Ask the running pass to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/probe", StartProbe)
+            .RequireRole(AccountRoles.Admin)
             .WithName("StartLibraryProbe")
             .WithSummary("Measure every file: codec, depth, rate, and whether it still decodes.")
             .WithDescription(
@@ -114,11 +121,13 @@ public static class LibraryEndpoints
             .WithSummary("How many files have never been measured, and what the last pass found.");
 
         group.MapDelete("/probe", CancelProbe)
+            .RequireRole(AccountRoles.Admin)
             .WithName("CancelLibraryProbe")
             .WithSummary("Ask the running pass to stop after the page it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/analyse", StartAnalysis)
+            .RequireRole(AccountRoles.Admin)
             .WithName("StartLibraryAnalysis")
             .WithSummary("Measure every file's audio: loudness, dynamic range, real bit depth, silence and clipping.")
             .WithDescription(
@@ -132,11 +141,13 @@ public static class LibraryEndpoints
             .WithSummary("How many files have never been measured, and what the last pass found.");
 
         group.MapDelete("/analyse", CancelAnalysis)
+            .RequireRole(AccountRoles.Admin)
             .WithName("CancelLibraryAnalysis")
             .WithSummary("Ask the running pass to stop after the page it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/attribute", StartAttribution)
+            .RequireRole(AccountRoles.Admin)
             .WithName("StartReleaseAttribution")
             .WithSummary("Work out which album each identified file came from.")
             .WithDescription(
@@ -153,11 +164,13 @@ public static class LibraryEndpoints
             .WithSummary("How many files have no album yet, and how the last pass went.");
 
         group.MapDelete("/attribute", CancelAttribution)
+            .RequireRole(AccountRoles.Admin)
             .WithName("CancelReleaseAttribution")
             .WithSummary("Ask the running pass to stop after the set it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/tags", StartTagWrite)
+            .RequireRole(AccountRoles.Admin)
             .WithName("StartLibraryTagWrite")
             .WithSummary("Write everything the catalogue knows back into the library's files.")
             .WithDescription(
@@ -180,6 +193,7 @@ public static class LibraryEndpoints
             .WithSummary("Whether a tag write is running, how many files it could cover, and how the last one went.");
 
         group.MapDelete("/tags", CancelTagWrite)
+            .RequireRole(AccountRoles.Admin)
             .WithName("CancelLibraryTagWrite")
             .WithSummary("Ask the running tag write to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);

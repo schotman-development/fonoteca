@@ -59,6 +59,12 @@ internal interface ISubsonicWriter
     void Strings(string name, IEnumerable<string> values);
 
     /// <summary>
+    /// One text: a property in JSON, an element holding it in XML — how an
+    /// artist's biography is sent. After the attributes, like a child.
+    /// </summary>
+    void Text(string name, string? value);
+
+    /// <summary>
     /// The element's own text in XML, a <c>value</c> property in JSON — how a
     /// genre carries its name. After the attributes, like a child.
     /// </summary>
@@ -363,6 +369,11 @@ internal sealed class SubsonicResult : IResult
             json.WriteEndArray();
         }
 
+        public void Text(string name, string? value)
+        {
+            if (value is not null) json.WriteString(name, value);
+        }
+
         public void Value(string value) => json.WriteString("value", value);
     }
 
@@ -444,6 +455,11 @@ internal sealed class SubsonicResult : IResult
             {
                 xml.WriteElementString(name, value);
             }
+        }
+
+        public void Text(string name, string? value)
+        {
+            if (value is not null) xml.WriteElementString(name, value);
         }
 
         public void Value(string value) => xml.WriteString(value);

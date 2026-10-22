@@ -14,7 +14,7 @@ namespace Fonoteca.Data;
 /// <c>pg_trgm</c> indexes for fuzzy title matching, and covering indexes on the
 /// columns the scanner touches on every pass.
 ///
-/// Identity's user tables live here too (ADR 0018), without roles, so a
+/// Identity's user tables live here too (ADR 0018), without its role tables, so a
 /// heart can name its account in a foreign key.
 /// </remarks>
 public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> options)

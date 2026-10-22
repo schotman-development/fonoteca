@@ -187,6 +187,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/matching/files/release", FileFilesUnderRelease)
+            .RequireRole(AccountRoles.Admin)
             .WithName("FileFilesUnderRelease")
             .WithSummary("File a set of chosen files onto a set of chosen album slots.")
             .WithDescription(
@@ -211,6 +212,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/matching/folders/unreleased", MarkFolderUnreleased)
+            .RequireRole(AccountRoles.Admin)
             .WithName("MarkFolderUnreleased")
             .WithSummary("Say a folder is nobody's release, so it stops being asked about.")
             .WithDescription(
@@ -233,6 +235,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/matching/folders/reopen", ReopenFolder)
+            .RequireRole(AccountRoles.Admin)
             .WithName("ReopenFolder")
             .WithSummary("Say the passes got this folder wrong, and ask it again by hand.")
             .WithDescription(
@@ -256,6 +259,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/matching/folders/album", SetFolderAlbum)
+            .RequireRole(AccountRoles.Admin)
             .WithName("SetFolderAlbum")
             .WithSummary("Say which album a folder is, whatever the passes decided.")
             .WithDescription(

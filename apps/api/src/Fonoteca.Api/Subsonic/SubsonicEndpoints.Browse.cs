@@ -1,3 +1,4 @@
+using System.Net;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
@@ -120,6 +121,105 @@ public static partial class SubsonicEndpoints
             root.Children("song", songs, WriteSong);
         });
     }
+
+    /// <summary>
+    /// What is known about an artist: their biography and MusicBrainz id.
+    /// </summary>
+    /// <remarks>
+    /// <b>The biography is the lead of their English Wikipedia article</b>,
+    /// sent as HTML ending in a link to it, as Last.fm's are: it is somebody
+    /// else's prose under CC BY-SA and never travels without its credit.
+    ///
+    /// <b>No similar artists, images or Last.fm address.</b> Nothing here says
+    /// who is like whom, and no service is asked (the owner's choice); the
+    /// picture is the artist's <c>coverArt</c>, which a client fetches through
+    /// <c>getCoverArt</c>.
+    /// </remarks>
+    private static async Task<IResult> GetArtistInfo2(
+        HttpContext http,
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (SubsonicIds.AsArtist(Text(http, "id")) is not { } artistId)
+        {
+            return SubsonicResult.Error(70, "No such artist.");
+        }
+
+        var artist = await db.Artists
+            .AsNoTracking()
+            .Where(row => row.Id == artistId)
+            .Select(row => new { row.BiographyText, row.BiographyUrl, row.Mbid })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (artist is null) return SubsonicResult.Error(70, "No such artist.");
+
+        return SubsonicResult.Ok("artistInfo2", root =>
+        {
+            root.Text("biography", Credited(artist.BiographyText, artist.BiographyUrl));
+            root.Text("musicBrainzId", artist.Mbid?.ToString());
+        });
+    }
+
+    /// <summary>
+    /// What is known about an album: its notes and MusicBrainz id.
+    /// </summary>
+    /// <remarks>
+    /// The notes are the lead of the album's English Wikipedia article,
+    /// credited as an artist's biography is. The protocol also takes a song's
+    /// id here, for the album it is on.
+    /// </remarks>
+    private static async Task<IResult> GetAlbumInfo2(
+        HttpContext http,
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var id = Text(http, "id");
+        var albumId = SubsonicIds.AsAlbum(id);
+
+        if (albumId is null && SubsonicIds.AsSong(id) is { } fileId)
+        {
+            var songs = await SongsAsync(db, album: null, cancellationToken, fileId).ConfigureAwait(false);
+            albumId = songs.Count > 0 ? songs[0].AlbumId : null;
+        }
+
+        var album = albumId is not { } group
+            ? null
+            : await db.ReleaseGroups
+                .AsNoTracking()
+                .Where(row => row.Id == group)
+                .Select(row => new { row.ReviewText, row.ReviewUrl, row.Mbid })
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        if (album is null) return SubsonicResult.Error(70, "No such album.");
+
+        return SubsonicResult.Ok("albumInfo", root =>
+        {
+            root.Text("notes", Credited(album.ReviewText, album.ReviewUrl));
+            root.Text("musicBrainzId", album.Mbid?.ToString());
+        });
+    }
+
+    /// <summary>
+    /// An artist's most played songs: none, on purpose.
+    /// </summary>
+    /// <remarks>
+    /// Popularity is a question about listening, here or anywhere, and nothing
+    /// here records a play or asks a service that does — so the honest answer
+    /// is an empty list, as <c>frequent</c> is, not a missing method.
+    /// </remarks>
+    private static IResult GetTopSongs() =>
+        SubsonicResult.Ok("topSongs", root => root.Children("song", Array.Empty<Song>(), WriteSong));
+
+    /// <summary>
+    /// An article's plain text as HTML, its paragraphs kept, followed by a
+    /// link to where it came from; nothing without both.
+    /// </summary>
+    private static string? Credited(string? text, string? url) =>
+        string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(url)
+            ? null
+            : $"{WebUtility.HtmlEncode(text.Trim()).ReplaceLineEndings("<br/>")}<br/><br/><a href=\"{WebUtility.HtmlEncode(url)}\">Read more on Wikipedia</a>";
 
     /// <summary>
     /// A shelf of albums.

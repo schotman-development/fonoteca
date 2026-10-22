@@ -34,6 +34,7 @@ public static partial class CatalogueEndpoints
     private static void MapTaggingEndpoints(IEndpointRouteBuilder group)
     {
         group.MapPost("/albums/{id:guid}/tags", WriteAlbumTags)
+            .RequireRole(AccountRoles.Admin)
             .WithName("WriteAlbumTags")
             .WithSummary("Write what the catalogue knows about this album into its files.")
             .WithDescription(
@@ -49,6 +50,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/artists/{id:guid}/tags", WriteArtistTags)
+            .RequireRole(AccountRoles.Admin)
             .WithName("WriteArtistTags")
             .WithSummary("Write what the catalogue knows about this artist's tracks into their files.")
             .WithDescription(
@@ -71,6 +73,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/folders/tags", SaveFolderTags)
+            .RequireRole(AccountRoles.Admin)
             .WithName("SaveFolderTags")
             .WithSummary("Set, take out or forget a person's tags in an album folder, and write the folder.")
             .WithDescription(
@@ -92,6 +95,7 @@ public static partial class CatalogueEndpoints
                 + "it off an undo is refused, as every file write is.");
 
         group.MapPost("/folders/undo", UndoFolder)
+            .RequireRole(AccountRoles.Admin)
             .WithName("UndoFolder")
             .WithSummary("Step an album folder back by one edit to its files.")
             .WithDescription(

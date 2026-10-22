@@ -85,12 +85,14 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/releases/{id:guid}/cover/archive/{imageId:long}", ChooseReleaseCover)
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("ChooseReleaseCover")
             .WithSummary("Use this Cover Art Archive image as the album's cover.")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/releases/{id:guid}/cover", UploadReleaseCover)
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("UploadReleaseCover")
             .WithSummary("Use an uploaded picture as the album's cover.")
             .WithDescription(

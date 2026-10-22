@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Fonoteca.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -18,7 +19,7 @@ namespace Fonoteca.Integration.Tests;
 /// Every <c>/api</c> route takes a signed-in account (ADR 0018). A test of a
 /// library endpoint is not a test of signing in, so <see cref="SignedIn"/>
 /// signs every request of its host in as <see cref="AccountId"/>, which has
-/// no row. A test of signing in, or of Subsonic, makes real accounts with
+/// no row and holds every role. A test of signing in, or of Subsonic, makes real accounts with
 /// <see cref="SetUpAsync"/> instead and leaves this off.
 /// </remarks>
 internal static class TestSignIn
@@ -63,16 +64,20 @@ internal static class TestSignIn
         return (client, account!.Id);
     }
 
-    /// <summary>Another account, made by a client already signed in.</summary>
+    /// <summary>
+    /// Another account, made by a client already signed in as an admin; with
+    /// no roles named, OpenSubsonic's defaults.
+    /// </summary>
     public static async Task<Guid> AddAccountAsync(
         this HttpClient signedIn,
         string name,
         string password,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        params string[]? roles)
     {
         using var response = await signedIn.PostAsJsonAsync(
             new Uri("/api/accounts", UriKind.Relative),
-            new { name, password },
+            new { name, password, roles = roles is { Length: > 0 } ? roles : null },
             cancellationToken);
 
         response.EnsureSuccessStatusCode();
@@ -91,7 +96,11 @@ internal static class TestSignIn
         protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
             Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(
                 new ClaimsPrincipal(new ClaimsIdentity(
-                    [new Claim(ClaimTypes.NameIdentifier, AccountId.ToString()), new Claim(ClaimTypes.Name, "tester")],
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, AccountId.ToString()),
+                        new Claim(ClaimTypes.Name, "tester"),
+                        .. Enum.GetValues<AccountRoles>().Select(role => new Claim(ClaimTypes.Role, role.ToString())),
+                    ],
                     SchemeName)),
                 SchemeName)));
     }

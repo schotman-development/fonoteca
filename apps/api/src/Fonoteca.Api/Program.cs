@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Configuration;
@@ -60,11 +61,7 @@ builder.Services.AddDbContext<FonotecaDbContext>(options =>
         npgsql.EnableRetryOnFailure(maxRetryCount: 3, TimeSpan.FromSeconds(5), null);
     });
 
-    if (builder.Environment.IsDevelopment())
-    {
-        options.EnableDetailedErrors();
-        options.EnableSensitiveDataLogging();
-    }
+    if (builder.Environment.IsDevelopment()) options.EnableDetailedErrors();
 });
 
 // ---------------------------------------------------------------------------
@@ -299,13 +296,25 @@ builder.Services.AddSingleton<QobuzDownloadService>();
 // Web
 // ---------------------------------------------------------------------------
 
-builder.Services.AddOpenApi();
+// A [Flags] enum is a bare string to the document; a role on the wire is one
+// role, so the generated client gets their names.
+builder.Services.AddOpenApi(openApi => openApi.AddSchemaTransformer((schema, context, _) =>
+{
+    if (context.JsonTypeInfo.Type == typeof(AccountRoles))
+    {
+        schema.Enum = [.. AccountEndpoints.Each((AccountRoles)~0).Select(role => (JsonNode)role.ToString())];
+    }
+
+    return Task.CompletedTask;
+}));
 builder.Services.AddSignalR();
 
-// Accounts (ADR 0018): ASP.NET Core Identity, without roles, its cookie the
-// web client's session. Every route needs a signed-in account unless it says
-// otherwise — /health, the sign-in endpoints, and /rest and /mcp, which have
-// guards of their own.
+// Accounts (ADR 0018): ASP.NET Core Identity, its cookie the web client's
+// session. Every route needs a signed-in account unless it says otherwise —
+// /health, the sign-in endpoints, and /rest and /mcp, which have guards of
+// their own — and a route that changes the library one of OpenSubsonic's
+// roles (AccountRoles), a column on the account rather than Identity's role
+// tables, which AccountClaims turns into role claims.
 //
 // The application name fixes the Data Protection key ring's discriminator,
 // which by default is the content root's path: without it, moving the
@@ -326,7 +335,8 @@ builder.Services
     })
     .AddEntityFrameworkStores<FonotecaDbContext>()
     .AddSignInManager()
-    .AddDefaultTokenProviders();
+    .AddDefaultTokenProviders()
+    .AddClaimsPrincipalFactory<AccountClaims>();
 
 builder.Services
     .AddAuthentication(IdentityConstants.ApplicationScheme)

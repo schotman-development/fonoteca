@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set the signed-in account's own password, for the web and Subsonic alike. */
+        post: operations["ChangeOwnPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/account/keys": {
         parameters: {
             query?: never;
@@ -126,6 +143,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change an account's email, roles or maxBitRate; what the request leaves out stays. */
+        post: operations["UpdateAccount"];
+        /** Remove an account, with its hearts and API keys; never the last admin. */
+        delete: operations["DeleteAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts/{id}/password": {
         parameters: {
             query?: never;
@@ -138,23 +173,6 @@ export interface paths {
         /** Set an account's password, for the web and Subsonic alike; signs it out elsewhere. */
         post: operations["ResetAccountPassword"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/accounts/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove an account, with its hearts and API keys; never the last one. */
-        delete: operations["DeleteAccount"];
         options?: never;
         head?: never;
         patch?: never;
@@ -439,6 +457,8 @@ export interface paths {
          * @description What an <img>, an <audio> or a partial fetch of a rip log reads. Range requests are handled, so seeking into a large FLAC does not read the part before it.
          *
          *     **The media type comes from an allowlist, never from the extension itself.** Anything not on it is served as application/octet-stream and as an attachment, and every response carries X-Content-Type-Options: nosniff — an .html in a music folder is a download, not a page on this origin.
+         *
+         *     Audio takes the stream or the download role; anything else, which the file manager previews, takes neither.
          */
         get: operations["GetLibraryFileContent"];
         put?: never;
@@ -1761,16 +1781,30 @@ export interface components {
         AccountRequest: {
             name: null | string;
             password: null | string;
+            email?: null | string;
+            roles?: null | components["schemas"]["AccountRoles"][];
         };
         AccountResponse: {
             /** Format: uuid */
             id: string;
             name: string;
+            email: null | string;
+            roles: components["schemas"]["AccountRoles"][];
+            /** Format: int32 */
+            maxBitRate: null | number;
             /** Format: date-time */
             createdUtc: string;
         };
+        /** @enum {string} */
+        AccountRoles: "Admin" | "Settings" | "Download" | "Upload" | "Playlist" | "CoverArt" | "Comment" | "Podcast" | "Stream" | "Jukebox" | "Share" | "VideoConversion";
         AccountSetupResponse: {
             needed: boolean;
+        };
+        AccountUpdateRequest: {
+            email?: null | string;
+            roles?: null | components["schemas"]["AccountRoles"][];
+            /** Format: int32 */
+            maxBitRate?: null | number;
         };
         AcoustIdClusterRow: {
             /** Format: uuid */
@@ -3924,6 +3958,37 @@ export interface operations {
             };
         };
     };
+    ChangeOwnPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     GetApiKeys: {
         parameters: {
             query?: never;
@@ -4059,7 +4124,7 @@ export interface operations {
             };
         };
     };
-    ResetAccountPassword: {
+    UpdateAccount: {
         parameters: {
             query?: never;
             header?: never;
@@ -4070,16 +4135,18 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PasswordRequest"];
+                "application/json": components["schemas"]["AccountUpdateRequest"];
             };
         };
         responses: {
-            /** @description No Content */
-            204: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
             };
             /** @description Bad Request */
             400: {
@@ -4092,6 +4159,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4130,6 +4206,48 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    ResetAccountPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4848,6 +4966,15 @@ export interface operations {
         responses: {
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

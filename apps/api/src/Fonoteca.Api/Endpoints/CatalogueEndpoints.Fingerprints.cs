@@ -128,6 +128,7 @@ public static partial class CatalogueEndpoints
     private static void MapFingerprintEndpoints(IEndpointRouteBuilder group)
     {
         group.MapPost("/albums/{id:guid}/fingerprints", ContributeFingerprints)
+            .RequireRole(AccountRoles.Admin)
             .WithName("ContributeFingerprints")
             .WithSummary("Send this album's unknown fingerprints to AcoustID.")
             .WithDescription(

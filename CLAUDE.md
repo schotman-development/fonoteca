@@ -1051,16 +1051,23 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 ## Accounts
 
 ADR 0018. **The library has no owner; an account owns only its hearts and its
-API keys.** Never scope a catalogue fact, a file or a playlist by account.
+API keys**, and its roles say what it may do. Never scope a catalogue fact, a
+file or a playlist by account.
 
-- **ASP.NET Core Identity, no roles; every account may do everything.** A
-  fallback policy closes every route; `/health`, `/openapi`, the sign-in
-  endpoints and `/rest` and `/mcp` (their own guards) say `AllowAnonymous`. A
-  new route is closed without anyone writing a line, which is the point.
+- **ASP.NET Core Identity, and OpenSubsonic's twelve roles** (`AccountRoles`,
+  a column, made claims by `AccountClaims`). A fallback policy closes every
+  route; `/health`, `/openapi`, the sign-in endpoints and `/rest` and `/mcp`
+  (their own guards) say `AllowAnonymous`. A new route is closed without anyone
+  writing a line, which is the point. **A route that changes something names
+  its role** (`.RequireRole(AccountRoles.Admin)` — admin for the library's
+  machinery and every file write but an upload, cover art for covers and corrections, upload, settings), a
+  Subsonic method checks `May`, and the web client hides it (`useCan`).
   Integration tests sign every request in with `builder.SignedIn()`
-  (`TestSignIn`); a test of signing in or of Subsonic makes real accounts.
-- **The first visit makes the first account** and claims the hearts from
-  before accounts; the last account cannot be removed.
+  (`TestSignIn`, every role); a test of signing in or of Subsonic makes real
+  accounts.
+- **The first visit makes the first account**, with every role, and claims the
+  hearts from before accounts; the last admin can be neither removed nor
+  demoted.
 - **One password for the web and Subsonic**, so it is kept twice in one save
   (`AccountEndpoints.SetPasswordAsync`): Identity's hash, and
   `Account.SubsonicPassword` under Data Protection, because `t=md5(p+s)` needs

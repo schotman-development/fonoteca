@@ -702,6 +702,8 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
 
         Assert.Equal(id, only.GetProperty("id").GetString());
         Assert.Equal("me", only.GetProperty("owner").GetString());
+        Assert.False(only.GetProperty("readonly").GetBoolean());
+        Assert.False(created.GetProperty("playlist").GetProperty("readonly").GetBoolean());
         Assert.Equal(2, only.GetProperty("songCount").GetInt32());
         Assert.Equal(528, only.GetProperty("duration").GetInt32());
 
@@ -712,10 +714,18 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
             [Song(_dreamsFile), Song(_nameless)],
             Entries((await SubsonicAsync(client, $"getPlaylist?id={id}")).GetProperty("playlist")));
 
+        // The file is what changed, not a copy of it somewhere else.
+        var file = ReadPlaylist("Phone");
+        Assert.DoesNotContain(Lossy, file, StringComparison.Ordinal);
+        Assert.True(
+            file.IndexOf(DreamsPath, StringComparison.Ordinal) is var dreams and >= 0
+            && dreams < file.IndexOf(NamelessPath, StringComparison.Ordinal));
+
         var deleted = await SubsonicAsync(client, $"deletePlaylist?id={id}");
 
         Assert.Equal("ok", deleted.GetProperty("status").GetString());
         Assert.Empty((await SubsonicAsync(client, "getPlaylists")).GetProperty("playlists").GetProperty("playlist").EnumerateArray());
+        Assert.False(System.IO.File.Exists(PlaylistPath("Phone")));
     }
 
     /// <summary>
@@ -750,8 +760,12 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         var id = $"pl-{Guid.Parse(playlist.Id):N}";
 
         var listed = await SubsonicAsync(client, "getPlaylists");
-        Assert.Equal(id, Assert.Single(listed.GetProperty("playlists").GetProperty("playlist").EnumerateArray()).GetProperty("id").GetString());
-        Assert.Equal([Song(_dreamsFile)], Entries((await SubsonicAsync(client, $"getPlaylist?id={id}")).GetProperty("playlist")));
+        var smart = Assert.Single(listed.GetProperty("playlists").GetProperty("playlist").EnumerateArray());
+        Assert.Equal(id, smart.GetProperty("id").GetString());
+        Assert.True(smart.GetProperty("readonly").GetBoolean());
+        var read = (await SubsonicAsync(client, $"getPlaylist?id={id}")).GetProperty("playlist");
+        Assert.Equal([Song(_dreamsFile)], Entries(read));
+        Assert.True(read.GetProperty("readonly").GetBoolean());
 
         foreach (var route in new[] { $"updatePlaylist?playlistId={id}&songIndexToRemove=0", $"deletePlaylist?id={id}", $"createPlaylist?playlistId={id}&songId={Song(_lossy)}" })
         {

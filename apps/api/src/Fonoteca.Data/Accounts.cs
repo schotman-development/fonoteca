@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Identity;
 
 namespace Fonoteca.Data;
@@ -7,10 +8,9 @@ namespace Fonoteca.Data;
 /// </summary>
 /// <remarks>
 /// ADR 0018. The library has no owner: the catalogue, the files and the passes
-/// are one shared thing, and every account may do everything (the owner's
-/// choice, "roles may come later"). What an account owns is what a person
-/// owns — their hearts (<c>Love.AccountId</c>) and their API keys.
-/// Playlists stay everyone's.
+/// are one shared thing, and an account may do what its <see cref="Roles"/>
+/// say. What an account owns is what a person owns — their hearts
+/// (<c>Love.AccountId</c>) and their API keys. Playlists stay everyone's.
 ///
 /// ASP.NET Core Identity's own user, so the password hash, the lockout and the
 /// security stamp that signs a person out everywhere on a reset are the
@@ -34,6 +34,70 @@ public sealed class Account : IdentityUser<Guid>
     public string? SubsonicPassword { get; set; }
 
     public DateTimeOffset CreatedUtc { get; set; }
+
+    /// <summary>What this account may do: OpenSubsonic's roles, on the web as on Subsonic.</summary>
+    public AccountRoles Roles { get; set; }
+
+    /// <summary>OpenSubsonic's <c>maxBitRate</c>, kept and reported; nothing transcodes, so nothing applies it.</summary>
+    public int? MaxBitRate { get; set; }
+
+    /// <summary>A new account's roles where nobody named any: OpenSubsonic's <c>createUser</c> defaults.</summary>
+    public const AccountRoles DefaultRoles = AccountRoles.Settings | AccountRoles.Stream;
+
+    /// <summary>
+    /// Every role naming something this server does: the first account's, and
+    /// every account's that existed before roles did (the owner's choice).
+    /// </summary>
+    public const AccountRoles Everything =
+        AccountRoles.Admin | AccountRoles.Settings | AccountRoles.Download | AccountRoles.Upload
+        | AccountRoles.Playlist | AccountRoles.CoverArt | AccountRoles.Stream;
+}
+
+/// <summary>
+/// OpenSubsonic's user roles, in its own order; each is <c>{name}Role</c> there.
+/// </summary>
+/// <remarks>
+/// ADR 0018. Stored as one integer, so a new role is a new bit and no
+/// migration. Five name nothing this server does — comments and ratings,
+/// podcasts, jukebox, sharing, video — and are kept and reported for a client
+/// to read but bind nothing. Playlist binds nothing either: "changing this
+/// role has no effect", the protocol's own words, so playlists stay everyone's.
+/// </remarks>
+[Flags]
+[JsonConverter(typeof(JsonStringEnumConverter<AccountRoles>))]
+public enum AccountRoles
+{
+    None = 0,
+
+    /// <summary>Accounts, the passes, the file manager, Identify, follows, Qobuz: whatever changes the library.</summary>
+    Admin = 1 << 0,
+
+    /// <summary>Their own password and API keys.</summary>
+    Settings = 1 << 1,
+
+    /// <summary>A file as an attachment, here and over Subsonic's <c>download</c>.</summary>
+    Download = 1 << 2,
+
+    /// <summary>The file manager's upload.</summary>
+    Upload = 1 << 3,
+
+    Playlist = 1 << 4,
+
+    /// <summary>Covers, artist pictures and a person's corrections to an album or artist.</summary>
+    CoverArt = 1 << 5,
+
+    Comment = 1 << 6,
+
+    Podcast = 1 << 7,
+
+    /// <summary>Playing a file, here and over Subsonic's <c>stream</c>.</summary>
+    Stream = 1 << 8,
+
+    Jukebox = 1 << 9,
+
+    Share = 1 << 10,
+
+    VideoConversion = 1 << 11,
 }
 
 /// <summary>

@@ -44,10 +44,11 @@ public static partial class SubsonicEndpoints
         FileSystemAudioFileStore store,
         FonotecaDbContext db,
         CancellationToken cancellationToken) =>
-        Serve(http, store, db, cancellationToken);
+        Serve(http, AccountRoles.Stream, store, db, cancellationToken);
 
     /// <summary>
-    /// The same bytes, and deliberately the same handler.
+    /// The same bytes, and deliberately the same handler, under the download
+    /// role rather than the stream role.
     /// </summary>
     /// <remarks>
     /// The protocol distinguishes them so a server can transcode one and not the
@@ -59,14 +60,17 @@ public static partial class SubsonicEndpoints
         FileSystemAudioFileStore store,
         FonotecaDbContext db,
         CancellationToken cancellationToken) =>
-        Serve(http, store, db, cancellationToken);
+        Serve(http, AccountRoles.Download, store, db, cancellationToken);
 
     private static async Task<IResult> Serve(
         HttpContext http,
+        AccountRoles role,
         FileSystemAudioFileStore store,
         FonotecaDbContext db,
         CancellationToken cancellationToken)
     {
+        if (!May(http, role)) return NotAuthorized();
+
         var path = await PathOfAsync(db, Text(http, "id"), cancellationToken).ConfigureAwait(false);
 
         if (path is null) return SubsonicResult.Error(70, "No such song.");

@@ -1,4 +1,5 @@
 using Fonoteca.Api.Library;
+using Fonoteca.Data;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
 
@@ -36,6 +37,7 @@ public static partial class FileEndpoints
                 + "are filed under an album.");
 
         group.MapPost("/trash", TrashEntries)
+            .RequireRole(AccountRoles.Admin)
             .WithName("TrashLibraryEntries")
             .WithSummary("Move files or folders out of the library, into the trash.")
             .WithDescription(
@@ -46,6 +48,7 @@ public static partial class FileEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/move", MoveEntry)
+            .RequireRole(AccountRoles.Admin)
             .WithName("MoveLibraryEntry")
             .WithSummary("Rename or move one file or folder within the library.")
             .WithDescription(
@@ -56,6 +59,7 @@ public static partial class FileEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/upload", UploadFile)
+            .RequireRole(AccountRoles.Upload)
             .WithName("UploadLibraryFile")
             .WithSummary("Write one file into the library at the given path.")
             .WithDescription(

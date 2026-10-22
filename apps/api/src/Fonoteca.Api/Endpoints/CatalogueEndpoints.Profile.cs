@@ -27,6 +27,7 @@ public static partial class CatalogueEndpoints
     private static void MapProfileEndpoints(IEndpointRouteBuilder group)
     {
         group.MapPost("/artists/{id:guid}/edits", EditArtist)
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("EditArtist")
             .WithSummary("Correct what the catalogue says about an artist.")
             .WithDescription(
@@ -38,6 +39,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/releases/{id:guid}/edits", EditRelease)
+            .RequireRole(AccountRoles.CoverArt)
             .WithName("EditRelease")
             .WithSummary("Correct what the catalogue says about an album.")
             .WithDescription(

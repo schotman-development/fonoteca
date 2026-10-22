@@ -29,7 +29,8 @@ namespace Fonoteca.Api.Subsonic;
 ///
 /// <b>A song id is a file, and a static playlist's entry is the file it
 /// names.</b> A smart playlist is read-only here: its rules are the library's
-/// to keep, so a client asking to change or delete one is refused.
+/// to keep, so a client asking to change or delete one is refused, and each
+/// playlist says which it is in OpenSubsonic's <c>readonly</c>.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
@@ -55,7 +56,8 @@ public static partial class SubsonicEndpoints
                     playlist.Seconds,
                     playlist.ChangedUtc,
                     playlist.ChangedUtc,
-                    playlist.Albums.Count == 0 ? null : SubsonicIds.Album(new ReleaseGroupId(playlist.Albums[0].AlbumId)))));
+                    playlist.Albums.Count == 0 ? null : SubsonicIds.Album(new ReleaseGroupId(playlist.Albums[0].AlbumId)),
+                    playlist.Kind == PlaylistKind.Smart)));
     }
 
     private static async Task<IResult> GetPlaylist(
@@ -283,7 +285,8 @@ public static partial class SubsonicEndpoints
                 ordered.Sum(song => song.DurationSeconds ?? 0),
                 playlist.ChangedUtc,
                 playlist.ChangedUtc,
-                ordered.Count == 0 ? null : ordered[0].AlbumId is { } album ? SubsonicIds.Album(album) : ordered[0].Id);
+                ordered.Count == 0 ? null : ordered[0].AlbumId is { } album ? SubsonicIds.Album(album) : ordered[0].Id,
+                playlist.Kind == PlaylistKind.Smart);
 
             root.Children("entry", ordered, WriteSong);
         });
@@ -301,7 +304,8 @@ public static partial class SubsonicEndpoints
         int duration,
         DateTimeOffset created,
         DateTimeOffset changed,
-        string? coverArt)
+        string? coverArt,
+        bool readOnly)
     {
         writer.Attr("id", id);
         writer.Attr("name", name);
@@ -312,6 +316,7 @@ public static partial class SubsonicEndpoints
         writer.Attr("created", created);
         writer.Attr("changed", changed);
         writer.Attr("coverArt", coverArt);
+        writer.Attr("readonly", readOnly);
     }
 
     /// <summary>Each song id's file, in order; or which id is not a song.</summary>

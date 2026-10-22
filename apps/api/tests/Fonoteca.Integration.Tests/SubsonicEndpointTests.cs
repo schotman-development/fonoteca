@@ -1248,6 +1248,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("getCompositions")]
     [InlineData("getStarred2")]
     [InlineData("getAlbumList2&type=starred")]
+    [InlineData("getTopSongs&artist=Nobody")]
     public async Task EveryMethodAnswers(string method)
     {
         using var client = _factory!.CreateClient();
@@ -1846,6 +1847,74 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             "getPodcasts",
             body.GetProperty("error").GetProperty("message").GetString(),
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An artist's biography and an album's notes are their Wikipedia leads,
+    /// as HTML with a link to the article, in both formats; an album answers
+    /// for one of its songs too, and without an article there is nothing.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistsBiographyAndAnAlbumsNotesComeWithTheirCredit()
+    {
+        using var client = _factory!.CreateClient();
+
+        var album = await AlbumIdAsync();
+        var artistId = (await JsonAsync(client, $"/rest/getAlbum.view?id={album}"))
+            .GetProperty("subsonic-response").GetProperty("album").GetProperty("artistId").GetString();
+
+        var bare = (await JsonAsync(client, $"/rest/getArtistInfo2.view?id={artistId}"))
+            .GetProperty("subsonic-response");
+
+        Assert.Equal("ok", bare.GetProperty("status").GetString());
+        Assert.False(bare.GetProperty("artistInfo2").TryGetProperty("biography", out _));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Artists.ExecuteUpdateAsync(
+                update => update
+                    .SetProperty(artist => artist.BiographyText, "Pianist <b>and</b> composer.\nBorn 1929.")
+                    .SetProperty(artist => artist.BiographyUrl, "https://en.wikipedia.org/wiki/Bill_Evans"),
+                Token);
+
+            await db.ReleaseGroups.ExecuteUpdateAsync(
+                update => update
+                    .SetProperty(group => group.ReviewText, "A live album.")
+                    .SetProperty(group => group.ReviewUrl, "https://en.wikipedia.org/wiki/Waltz_for_Debby"),
+                Token);
+        }
+
+        var biography = (await JsonAsync(client, $"/rest/getArtistInfo2.view?id={artistId}"))
+            .GetProperty("subsonic-response").GetProperty("artistInfo2").GetProperty("biography").GetString();
+
+        Assert.Equal(
+            "Pianist &lt;b&gt;and&lt;/b&gt; composer.<br/>Born 1929.<br/><br/>"
+            + "<a href=\"https://en.wikipedia.org/wiki/Bill_Evans\">Read more on Wikipedia</a>",
+            biography);
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getArtistInfo2.view?id={artistId}&{Credentials}", UriKind.Relative),
+            Token);
+        var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+        XNamespace ns = "http://subsonic.org/restapi";
+
+        Assert.Equal(biography, xml.Descendants(ns + "biography").Single().Value);
+
+        foreach (var id in new[] { album, $"tr-{_filed.Value:N}" })
+        {
+            var notes = (await JsonAsync(client, $"/rest/getAlbumInfo2.view?id={id}"))
+                .GetProperty("subsonic-response").GetProperty("albumInfo").GetProperty("notes").GetString();
+
+            Assert.StartsWith("A live album.<br/><br/><a href=", notes, StringComparison.Ordinal);
+        }
+
+        foreach (var method in new[] { "getArtistInfo2", "getAlbumInfo2" })
+        {
+            var missing = (await JsonAsync(client, $"/rest/{method}.view?id=ar-{Guid.CreateVersion7():N}"))
+                .GetProperty("subsonic-response");
+
+            Assert.Equal(70, missing.GetProperty("error").GetProperty("code").GetInt32());
+        }
     }
 
     /// <summary>

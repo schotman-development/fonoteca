@@ -324,6 +324,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/artists/{id:guid}/follow", SetArtistFollowed)
+            .RequireRole(AccountRoles.Admin)
             .WithName("SetArtistFollowed")
             .WithSummary("Follow or unfollow an artist the catalogue already holds.")
             .WithDescription(
@@ -339,6 +340,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/artists/follow", FollowArtistByMbid)
+            .RequireRole(AccountRoles.Admin)
             .WithName("FollowArtistByMbid")
             .WithSummary("Follow an artist by MusicBrainz id, whether or not the library holds them.")
             .WithDescription(
@@ -357,6 +359,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/release-groups/{id:guid}/monitor", SetReleaseGroupMonitored)
+            .RequireRole(AccountRoles.Admin)
             .WithName("SetReleaseGroupMonitored")
             .WithSummary("Mark a record as one you want, or stop wanting it.")
             .WithDescription(
@@ -376,6 +379,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/discovered/{id:guid}/monitor", SetDiscoveredRecordMonitored)
+            .RequireRole(AccountRoles.Admin)
             .WithName("SetDiscoveredRecordMonitored")
             .WithSummary("Mark a record a shop named as one you want, or stop wanting it.")
             .WithDescription(
@@ -501,6 +505,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/matching/recordings/{id:guid}/decision", DecideRecording)
+            .RequireRole(AccountRoles.Admin)
             .WithName("DecideRecordingMatch")
             .WithSummary("A person's answer to one file's identification question.")
             .WithDescription(
@@ -544,6 +549,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/matching/components/{stamp}/decision", DecideComponent)
+            .RequireRole(AccountRoles.Admin)
             .WithName("DecideComponentMatch")
             .WithSummary("A person's answer to one component's album question.")
             .WithDescription(

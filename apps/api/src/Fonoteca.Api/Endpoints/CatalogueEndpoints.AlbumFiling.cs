@@ -80,6 +80,7 @@ public static partial class CatalogueEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/matching/files/album", FileFilesUnderAlbum)
+            .RequireRole(AccountRoles.Admin)
             .WithName("FileFilesUnderAlbum")
             .WithSummary("File chosen files under an album, each as the recording of a chosen track.")
             .WithDescription(

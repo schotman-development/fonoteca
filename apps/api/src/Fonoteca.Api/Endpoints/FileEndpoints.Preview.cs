@@ -1,3 +1,4 @@
+using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Ingest;
@@ -59,7 +60,7 @@ public static partial class FileEndpoints
 
     private static void MapPreview(RouteGroupBuilder group)
     {
-        group.MapGet("/content", GetContent)
+        group.MapGet("/content", GetContentFor)
             .WithName("GetLibraryFileContent")
             .WithSummary("The bytes of one file, with range support.")
             .WithDescription(
@@ -68,8 +69,11 @@ public static partial class FileEndpoints
                 + "**The media type comes from an allowlist, never from the extension itself.** "
                 + "Anything not on it is served as application/octet-stream and as an attachment, "
                 + "and every response carries X-Content-Type-Options: nosniff — an .html in a "
-                + "music folder is a download, not a page on this origin.")
+                + "music folder is a download, not a page on this origin.\n\n"
+                + "Audio takes the stream or the download role; anything else, which the "
+                + "file manager previews, takes neither.")
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/detail", GetDetail)
@@ -102,6 +106,24 @@ public static partial class FileEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
+
+    /// <remarks>
+    /// One URL plays a file and downloads it, so either role lets the bytes
+    /// out; the screens offer each only where its role is held. Subsonic's
+    /// <c>stream</c> and <c>download</c> check their own role and call
+    /// <see cref="GetContent"/>.
+    /// </remarks>
+    private static Results<PhysicalFileHttpResult, NotFound, ProblemHttpResult> GetContentFor(
+        FileSystemAudioFileStore store,
+        HttpContext context,
+        string path) =>
+        AudioFormats.IsAudioFile(path)
+        && !context.User.IsInRole(nameof(AccountRoles.Stream))
+        && !context.User.IsInRole(nameof(AccountRoles.Download))
+            ? TypedResults.Problem(
+                detail: "Playing or downloading music takes the stream or the download role.",
+                statusCode: StatusCodes.Status403Forbidden)
+            : GetContent(store, context, path);
 
     internal static Results<PhysicalFileHttpResult, NotFound, ProblemHttpResult> GetContent(
         FileSystemAudioFileStore store,
