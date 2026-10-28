@@ -75,6 +75,8 @@ public sealed class EnrichmentService(
     IArtistBanners banners,
     IAlbumMotions motions,
     IAlbumBooklets booklets,
+    ICoverArtArchive archive,
+    QobuzCovers shopCovers,
     ISongLyrics lyrics,
     IOptions<WikidataOptions> portraitOptions,
     IOptions<FonotecaOptions> options,
@@ -230,9 +232,12 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var covers = await UncoveredReleases(db, CoverCutoff).CountAsync(cancellationToken).ConfigureAwait(false)
+                + await UncoveredAlbums(db, CoverCutoff).CountAsync(cancellationToken).ConfigureAwait(false);
+
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres, parentWorks, words, works, releases);
+                recordings, genres, parentWorks, words, works, releases, covers);
         }
     }
 
@@ -466,6 +471,16 @@ public sealed class EnrichmentService(
             await BatchesAsync(
                 "artist banners",
                 token => BannersAsync(BannerBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            // The sleeves, after the billing lines and the artists' names the
+            // shop's fallback is matched by: an album nobody has opened since it
+            // arrived would otherwise reach the tag write with no cover to write.
+            var coverRun = new CoverRun();
+
+            await BatchesAsync(
+                "album covers",
+                token => CoversAsync(CoverBatchSize, coverRun, token),
                 counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
             // Eighth, after everything else that describes what is here and
@@ -1949,6 +1964,143 @@ public sealed class EnrichmentService(
         }
 
         return page.Count;
+    }
+
+    /// <summary>Sleeves asked for per batch: one archive listing and one download each.</summary>
+    private const int CoverBatchSize = 10;
+
+    /// <summary>Sleeves in a row that may go unanswered before it is taken for an outage.</summary>
+    private const int CoverFailuresInARow = 3;
+
+    /// <summary>One run of the cover stage: the releases it could not get an answer for, and the current streak.</summary>
+    private sealed class CoverRun
+    {
+        public HashSet<ReleaseId> Unanswered { get; } = [];
+
+        public int InARow { get; set; }
+    }
+
+    /// <summary>When a stored "neither source has one" stops being believed, as on the album page.</summary>
+    private DateTimeOffset CoverCutoff => clock.UtcNow - CatalogueEndpoints.CoverRetryAfter;
+
+    /// <summary>
+    /// Releases a file is filed under whose sleeve nobody has asked for, or
+    /// found none of a week ago.
+    /// </summary>
+    /// <remarks>
+    /// The tag write draws a filed file's sleeve from its own release, so these
+    /// are asked by the release, not the album.
+    /// </remarks>
+    private static IQueryable<Release> UncoveredReleases(FonotecaDbContext db, DateTimeOffset cutoff) =>
+        db.Releases.Where(release => db.MediaFiles.Any(file => file.ReleaseId == release.Id)
+            && !db.ReleaseCovers.Any(cover => cover.ReleaseId == release.Id
+                && (cover.Bytes != null || cover.SavedUtc >= cutoff)));
+
+    /// <summary>
+    /// Held albums no file is filed under an edition of, with no edition's
+    /// sleeve asked for, or found none of a week ago.
+    /// </summary>
+    /// <remarks>
+    /// Such a file's sleeve is its album's display edition's, chosen in
+    /// <see cref="CoversAsync"/> as the album page chooses it. Any edition's
+    /// answer takes the album off this list, so asking the display edition
+    /// always does; the cost is a week's wait where another edition was asked
+    /// while it was the one shown.
+    /// </remarks>
+    private static IQueryable<ReleaseGroup> UncoveredAlbums(FonotecaDbContext db, DateTimeOffset cutoff) =>
+        db.ReleaseGroups.Where(group => group.Files.Any()
+            && !group.Files.Any(file => file.ReleaseId != null)
+            && db.Releases.Any(release => release.ReleaseGroupId == group.Id)
+            && !db.ReleaseCovers.Any(cover => (cover.Bytes != null || cover.SavedUtc >= cutoff)
+                && db.Releases.Any(release => release.Id == cover.ReleaseId && release.ReleaseGroupId == group.Id)));
+
+    /// <summary>
+    /// Asks for one batch of sleeves, as the album page's first view would, and
+    /// stores each answer as it comes.
+    /// </summary>
+    /// <remarks>
+    /// <b>The page's own path</b> (<see cref="CatalogueEndpoints.AskForCoverAsync"/>):
+    /// the archive, then the shop, and "neither" stored for a week, so the shop
+    /// is asked at most once a week per album that has no sleeve anywhere.
+    ///
+    /// <see cref="LyricsAsync"/>'s rule for one that gets no answer: skipped
+    /// for the rest of the run and never stored, and
+    /// <see cref="CoverFailuresInARow"/> in a row is an outage, which ends the
+    /// stage. Without the skip, a front the archive lists and will not serve
+    /// ended the stage there on every run, and nothing after it was asked.
+    /// </remarks>
+    /// <returns>How many were asked; zero ends the stage.</returns>
+    private async Task<int> CoversAsync(int size, CoverRun run, CancellationToken cancellationToken)
+    {
+        List<ReleaseId> asks;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+            var skipped = run.Unanswered.ToList();
+
+            asks = await UncoveredReleases(db, CoverCutoff)
+                .AsNoTracking()
+                .Where(release => !skipped.Contains(release.Id))
+                .OrderBy(release => release.Id)
+                .Select(release => release.Id)
+                .Take(size)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (asks.Count < size)
+            {
+                // An album whose display edition went unanswered is claimed
+                // again, so the page is longer by those.
+                var albums = await UncoveredAlbums(db, CoverCutoff)
+                    .AsNoTracking()
+                    .OrderBy(group => group.Id)
+                    .Select(group => group.Id)
+                    .Take(size - asks.Count + skipped.Count)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                var editions = await CatalogueEndpoints.EditionFactsAsync(db, albums, cancellationToken)
+                    .ConfigureAwait(false);
+
+                asks.AddRange(albums
+                    .Select(album => CatalogueEndpoints.DisplayEdition(editions[album])?.Id)
+                    .OfType<ReleaseId>()
+                    .Where(release => !run.Unanswered.Contains(release))
+                    .Take(size - asks.Count));
+            }
+        }
+
+        foreach (var release in asks)
+        {
+            var save = scopeFactory.CreateAsyncScope();
+            await using (save.ConfigureAwait(false))
+            {
+                var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+                try
+                {
+                    await CatalogueEndpoints.AskForCoverAsync(db, archive, shopCovers, release, clock, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (ProviderException cause)
+                {
+                    // Either kind, as on the album page: a shop credential
+                    // refused is as unanswered as an archive that is down.
+                    run.Unanswered.Add(release);
+                    Log.CoverUnanswered(logger, release.Value, cause.Message);
+
+                    if (++run.InARow >= CoverFailuresInARow) throw;
+
+                    continue;
+                }
+
+                run.InARow = 0;
+            }
+        }
+
+        return asks.Count;
     }
 
     /// <summary>Albums asked about per batch: few, because one can be minutes of downloads and a failure ends the stage.</summary>
@@ -3554,6 +3706,7 @@ public enum EnrichmentStatus
 /// <param name="Lyrics">Held recordings nobody has looked for the words of, or found none of a week ago.</param>
 /// <param name="Works">Works nobody has asked MusicBrainz for their languages and parts.</param>
 /// <param name="Releases">Releases a file is filed under, never asked for their ASIN, script and track ids.</param>
+/// <param name="Covers">Sleeves the tag write would draw from that nobody has asked for, or found none of a week ago.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
@@ -3568,7 +3721,8 @@ public sealed record EnrichmentPending(
     int ParentWorks,
     int Lyrics,
     int Works,
-    int Releases)
+    int Releases,
+    int Covers)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -3580,7 +3734,7 @@ public sealed record EnrichmentPending(
     /// </remarks>
     public int Total =>
         Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
-        + ParentWorks + Lyrics + Works + Releases;
+        + ParentWorks + Lyrics + Works + Releases + Covers;
 }
 
 /// <summary>Where a running pass has got to.</summary>

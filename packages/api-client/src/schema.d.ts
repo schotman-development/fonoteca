@@ -2593,6 +2593,8 @@ export interface components {
             pendingWorks: number;
             /** Format: int32 */
             pendingReleases: number;
+            /** Format: int32 */
+            pendingCovers: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {

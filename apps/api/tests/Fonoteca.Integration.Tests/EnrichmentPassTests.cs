@@ -8,6 +8,7 @@ using Fonoteca.Domain.Identification;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Fonoteca.Providers.Qobuz;
 using Fonoteca.Providers.Wikidata;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -2935,7 +2936,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
     public void TheNewerStagesAreInTheTotal() =>
-        Assert.Equal(33, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8).Total);
+        Assert.Equal(42, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9).Total);
 
     /// <summary>
     /// A song is asked about as its held file has it, its words are kept, and
@@ -3526,7 +3527,8 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         IArtistBanners? banners = null,
         IAlbumMotions? motions = null,
         IAlbumBooklets? booklets = null,
-        ISongLyrics? lyrics = null)
+        ISongLyrics? lyrics = null,
+        ICoverArtArchive? archive = null)
     {
         var services = new ServiceCollection();
 
@@ -3574,6 +3576,12 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         services.AddSingleton(motions ?? new StubMotions());
         services.AddSingleton(booklets ?? new StubBooklets());
         services.AddSingleton(lyrics ?? new StubLyrics());
+        services.AddSingleton(archive ?? new StubArchive());
+
+        // Unconfigured, so the shop answers nothing without being asked.
+        services.AddHttpClient();
+        services.AddSingleton<QobuzClient>();
+        services.AddSingleton<QobuzCovers>();
 
         services.Configure<WikidataOptions>(options => options.BatchSize = 2);
         services.AddSingleton<LibraryWorkGate>();

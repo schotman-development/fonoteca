@@ -258,7 +258,7 @@ the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
 held recordings described again → parent works → works and filed releases
 asked for what the tags need → album genres → artists → portraits → articles,
-banners, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
+banners, covers, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
 
@@ -713,7 +713,9 @@ what it means comes from the catalogue.
 and served from `ReleaseCovers` under
 an ETag — every tile used to hot-link the archive's front-250. Only an image the
 archive lists against *this* release may be chosen, and an upload is held to the
-same raster allowlist with SVG refused.
+same raster allowlist with SVG refused. Enrichment asks for every sleeve the
+tag write would draw from the same way (the cover stage), so an album nobody
+opened still gets its `cover.jpg`.
 
 - **Two sources, in order, and the order is the safety argument.** The archive
   is keyed on the release mbid and cannot be wrong about which record it shows.

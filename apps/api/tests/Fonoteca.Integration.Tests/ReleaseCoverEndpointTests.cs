@@ -87,6 +87,11 @@ public sealed class ReleaseCoverEndpointTests(PostgresFixture postgres) : IAsync
             content: null,
             ct);
         Assert.Equal(HttpStatusCode.NotFound, elsewhere.StatusCode);
+
+        using var unknown = await client.GetAsync(
+            new Uri($"/api/catalogue/releases/{Guid.CreateVersion7()}/cover", UriKind.Relative),
+            ct);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
     [Fact]

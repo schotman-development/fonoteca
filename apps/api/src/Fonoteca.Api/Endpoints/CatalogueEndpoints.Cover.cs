@@ -55,7 +55,7 @@ public static partial class CatalogueEndpoints
     /// <b>Only a row with no bytes expires.</b> A cover that exists is never
     /// re-asked, from any source — see <c>ReleaseCover</c>.
     /// </remarks>
-    private static readonly TimeSpan CoverRetryAfter = TimeSpan.FromDays(7);
+    internal static readonly TimeSpan CoverRetryAfter = TimeSpan.FromDays(7);
 
     private static void MapCoverEndpoints(IEndpointRouteBuilder group)
     {
@@ -126,61 +126,10 @@ public static partial class CatalogueEndpoints
         // only how long ago nobody had a picture, and it runs out.
         if (cover is null || (cover.Bytes is null && now - cover.SavedUtc >= CoverRetryAfter))
         {
-            var release = await db.Releases
-                .Where(row => row.Id == releaseId)
-                .Select(row => new
-                {
-                    row.Mbid,
-                    row.Title,
-                    row.ReleasedYear,
-                    row.Barcode,
-
-                    // The album's other editions, whose barcodes the shop may
-                    // know it by where this one has none or another.
-                    Siblings = db.Releases
-                        .Where(other => other.ReleaseGroupId != null
-                            && other.ReleaseGroupId == row.ReleaseGroupId
-                            && other.Id != row.Id
-                            && other.Barcode != null)
-                        .OrderBy(other => other.Id)
-                        .Select(other => other.Barcode)
-                        .ToList(),
-
-                    // The billed line, as every other screen renders it — the
-                    // name a shop prints on the same record.
-                    Artists = row.Credits
-                        .OrderBy(credit => credit.Position)
-                        .Select(credit => new
-                        {
-                            credit.CreditedAs,
-                            credit.JoinPhrase,
-                            Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
-                        })
-                        .ToList(),
-                })
-                .FirstOrDefaultAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            if (release is null) return NoCover();
-
             try
             {
-                cover =
-                    await ArchiveCoverAsync(archive, releaseId, release.Mbid, clock, cancellationToken)
-                        .ConfigureAwait(false)
-                    ?? await ShopCoverAsync(
-                            shop,
-                            releaseId,
-                            release.Title,
-                            CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
-                            [.. release.Artists.Select(a => a.CreditedAs ?? a.Name)],
-                            release.ReleasedYear,
-                            release.Barcode,
-                            release.Siblings,
-                            clock,
-                            cancellationToken)
-                        .ConfigureAwait(false)
-                    ?? new ReleaseCover { ReleaseId = releaseId, SavedUtc = now };
+                cover = await AskForCoverAsync(db, archive, shop, releaseId, clock, cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (ProviderException cause)
             {
@@ -189,7 +138,7 @@ public static partial class CatalogueEndpoints
                 return ArchiveUnavailable(cause);
             }
 
-            await StoreFoundCoverAsync(db, cover, cancellationToken).ConfigureAwait(false);
+            if (cover is null) return NoCover();
         }
 
         if (cover.Bytes is null || cover.MediaType is null)
@@ -206,6 +155,84 @@ public static partial class CatalogueEndpoints
             cover.MediaType,
             lastModified: cover.SavedUtc,
             entityTag: new EntityTagHeaderValue($"\"{cover.SavedUtc.UtcTicks}\""));
+    }
+
+    /// <summary>
+    /// Asks the archive, then the shop, for one release's sleeve, and stores
+    /// the answer — "neither has one" included, which expires after
+    /// <see cref="CoverRetryAfter"/>.
+    /// </summary>
+    /// <remarks>
+    /// The album page's first view and enrichment's cover stage both come
+    /// here, so the order and the bound on the shop are the same for both.
+    /// </remarks>
+    /// <returns>What was found, or null where there is no such release.</returns>
+    /// <exception cref="ProviderException">A source could not be asked. Nothing is stored.</exception>
+    internal static async Task<ReleaseCover?> AskForCoverAsync(
+        FonotecaDbContext db,
+        ICoverArtArchive archive,
+        QobuzCovers shop,
+        ReleaseId releaseId,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var release = await db.Releases
+            .Where(row => row.Id == releaseId)
+            .Select(row => new
+            {
+                row.Mbid,
+                row.Title,
+                row.ReleasedYear,
+                row.Barcode,
+
+                // The album's other editions, whose barcodes the shop may
+                // know it by where this one has none or another.
+                Siblings = db.Releases
+                    .Where(other => other.ReleaseGroupId != null
+                        && other.ReleaseGroupId == row.ReleaseGroupId
+                        && other.Id != row.Id
+                        && other.Barcode != null)
+                    .OrderBy(other => other.Id)
+                    .Select(other => other.Barcode)
+                    .ToList(),
+
+                // The billed line, as every other screen renders it — the
+                // name a shop prints on the same record.
+                Artists = row.Credits
+                    .OrderBy(credit => credit.Position)
+                    .Select(credit => new
+                    {
+                        credit.CreditedAs,
+                        credit.JoinPhrase,
+                        Name = credit.Artist!.LatinName ?? credit.Artist!.Name,
+                    })
+                    .ToList(),
+            })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (release is null) return null;
+
+        var cover =
+            await ArchiveCoverAsync(archive, releaseId, release.Mbid, clock, cancellationToken)
+                .ConfigureAwait(false)
+            ?? await ShopCoverAsync(
+                    shop,
+                    releaseId,
+                    release.Title,
+                    CreditLine(release.Artists.Select(a => (a.CreditedAs ?? a.Name, a.JoinPhrase))),
+                    [.. release.Artists.Select(a => a.CreditedAs ?? a.Name)],
+                    release.ReleasedYear,
+                    release.Barcode,
+                    release.Siblings,
+                    clock,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            ?? new ReleaseCover { ReleaseId = releaseId, SavedUtc = Now(clock) };
+
+        await StoreFoundCoverAsync(db, cover, cancellationToken).ConfigureAwait(false);
+
+        return cover;
     }
 
     private static async Task<Results<Ok<ReleaseCoverOptions>, ProblemHttpResult>>

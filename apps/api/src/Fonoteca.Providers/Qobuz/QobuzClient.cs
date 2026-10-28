@@ -22,8 +22,9 @@ namespace Fonoteca.Providers.Qobuz;
 /// account rather than a retry.
 ///
 /// <b>Acquisition is a person choosing an album; <see cref="QobuzCovers"/> is
-/// not, and is the one caller that isn't.</b> A page of tiles can reach it
-/// without anybody choosing anything, so what bounds it is stated there and
+/// not, and is the one caller that isn't.</b> A page of tiles, and
+/// enrichment's cover stage by the same path, can reach it without anybody
+/// choosing anything, so what bounds it is stated there and
 /// counted here: one search per album, only where the Cover Art Archive holds
 /// nothing, and at most once a week per album while it keeps holding nothing.
 /// Measured on this library that is 105 searches to fill the shelf and a

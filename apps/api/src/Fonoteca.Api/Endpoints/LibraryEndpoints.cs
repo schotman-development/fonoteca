@@ -425,6 +425,7 @@ public static class LibraryEndpoints
             PendingLyrics: pending.Lyrics,
             PendingWorks: pending.Works,
             PendingReleases: pending.Releases,
+            PendingCovers: pending.Covers,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -741,6 +742,9 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Filed releases never asked for their ASIN, script and track ids.</summary>
     int PendingReleases,
+
+    /// <summary>Album sleeves not yet asked for, or none found a week ago.</summary>
+    int PendingCovers,
 
     EnrichmentSummary? LastCompleted);
 

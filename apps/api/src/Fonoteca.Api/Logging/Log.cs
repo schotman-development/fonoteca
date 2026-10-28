@@ -479,6 +479,16 @@ internal static partial class Log
     public static partial void LyricsUnanswered(ILogger logger, string title, string reason);
 
     /// <remarks>
+    /// Warning: unlike a busy LRCLIB, an archive that lists a front it will
+    /// not serve fails the same way every run, so this line repeats per run.
+    /// </remarks>
+    [LoggerMessage(
+        EventId = 1299,
+        Level = LogLevel.Warning,
+        Message = "No cover answer for release {ReleaseId}; asked again next run: {Reason}")]
+    public static partial void CoverUnanswered(ILogger logger, Guid releaseId, string reason);
+
+    /// <remarks>
     /// Debug, like <see cref="ArtistNotDescribed"/>, and for a narrower version
     /// of the same reason: the worklist here is the followed set rather than the
     /// catalogue, so this can never be thousands of lines — but a followed

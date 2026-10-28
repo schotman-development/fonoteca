@@ -47,6 +47,7 @@ function pendingSentence(status: {
   readonly pendingLyrics: number
   readonly pendingWorks: number
   readonly pendingReleases: number
+  readonly pendingCovers: number
 }): string {
   const parts: string[] = []
 
@@ -153,6 +154,15 @@ function pendingSentence(status: {
     parts.push(
       `${status.pendingBanners.toLocaleString()} banner${
         status.pendingBanners === 1 ? '' : 's'
+      } to look for`,
+    )
+  }
+
+  // The album covers, the archive's and else the shop's.
+  if (status.pendingCovers > 0) {
+    parts.push(
+      `${status.pendingCovers.toLocaleString()} album cover${
+        status.pendingCovers === 1 ? '' : 's'
       } to look for`,
     )
   }

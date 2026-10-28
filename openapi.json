@@ -8091,6 +8091,7 @@
           "pendingLyrics",
           "pendingWorks",
           "pendingReleases",
+          "pendingCovers",
           "lastCompleted"
         ],
         "type": "object",
@@ -8175,6 +8176,10 @@
             "format": "int32"
           },
           "pendingReleases": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingCovers": {
             "type": "integer",
             "format": "int32"
           },
