@@ -298,7 +298,12 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   genres never. The parent stage then asks each parent what it is a part of
   (`Works.PartOfLookupUtc`, the top again after a week), so a chain climbs to
   the whole piece, which `WorkTree.Top` reads for every count, the composer
-  pages and the album headings (the owner's choice). Album genres are a release-group lookup each
+  pages and the album headings (the owner's choice) — **below a mere
+  collection**: an untyped top whose every part MusicBrainz types
+  (`Works.PartsTyped`) is cut off in `WorkParentsAsync` (`WorkTree.Cut`), so
+  the Ring is four operas and op. 8 four concertos. Climb from the
+  recording's own work through that dictionary, never from the `ParentId` on
+  its row. Album genres are a release-group lookup each
   (`ReleaseGroups.Genres`), same rule. Artists carry `LinksJson`, every URL
   relation, which is how a later source finds one by identity.
 - **A merged MBID is followed, never refused.** WS/2 answers it with the

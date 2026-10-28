@@ -68,4 +68,22 @@ public sealed class ClassicalWorksTests
         // Another performance of the same work, tagged plain classical, still answers.
         Assert.True(ClassicalWorks.Is(null, ["classical, pop", "classical"]));
     }
+
+    /// <summary>A symphony nobody tagged, on a box its other tracks make classical.</summary>
+    [Fact]
+    public void APieceOfAFormIsClassicalByTheVotesItsAlbumBorrows()
+    {
+        Assert.True(ClassicalWorks.ByItsAlbums("Symphony", [null, "classical, symphony"]));
+        Assert.False(ClassicalWorks.ByItsAlbums("Symphony", [null]));
+        Assert.False(ClassicalWorks.ByItsAlbums("Opera", ["classical crossover, classical"]));
+    }
+
+    /// <summary>A film score's cue, or an untyped track, on a concert its neighbours tag classical.</summary>
+    [Fact]
+    public void BorrowedVotesAnswerNothingForASongAScoreOrAnUntypedPiece()
+    {
+        Assert.False(ClassicalWorks.ByItsAlbums(null, ["classical, instrumental"]));
+        Assert.False(ClassicalWorks.ByItsAlbums("Soundtrack", ["classical"]));
+        Assert.False(ClassicalWorks.ByItsAlbums("Song", ["classical"]));
+    }
 }

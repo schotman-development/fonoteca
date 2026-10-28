@@ -1,3 +1,4 @@
+using Fonoteca.Api.Endpoints;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
@@ -78,7 +79,8 @@ public static partial class SubsonicEndpoints
                 targets.Add(Target(artist: artist));
             }
             else if (SubsonicIds.AsWork(id) is { } work
-                && await db.Works.AnyAsync(row => row.Id == work && row.ParentId == null, cancellationToken).ConfigureAwait(false))
+                && await db.Works.AnyAsync(row => row.Id == work && !(row.Type == null && row.PartsTyped), cancellationToken).ConfigureAwait(false)
+                && !(await CatalogueEndpoints.WorkParentsAsync(db, cancellationToken).ConfigureAwait(false)).ContainsKey(work))
             {
                 targets.Add(Target(work: work));
             }

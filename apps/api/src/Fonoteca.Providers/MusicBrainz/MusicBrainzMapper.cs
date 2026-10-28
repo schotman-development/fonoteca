@@ -49,6 +49,11 @@ internal static class MusicBrainzMapper
     public static MusicBrainzWork ToWork(IWork source)
     {
         var parent = ParentWork(source.Relationships);
+        var parts = (source.Relationships ?? [])
+            .Where(relationship => relationship.Work is not null
+                && string.Equals(relationship.Type, "parts", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(relationship.Direction, "forward", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         return new(
             Id: new Mbid(source.Id),
@@ -59,10 +64,10 @@ internal static class MusicBrainzMapper
             ParentTitle: NullIfBlank(parent?.Work?.Title),
             Languages: ToLanguages(source),
             Position: parent?.OrderingKey,
-            PartCount: (source.Relationships ?? []).Count(relationship => relationship.Work is not null
-                && string.Equals(relationship.Type, "parts", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(relationship.Direction, "forward", StringComparison.OrdinalIgnoreCase)),
-            Key: NullIfBlank(source.Attributes?.FirstOrDefault(attribute => string.Equals(attribute.Type, "Key", StringComparison.Ordinal))?.Value));
+            PartCount: parts.Count,
+            PartsTyped: parts.Count > 0 && parts.All(relationship => NullIfBlank(relationship.Work!.Type) is not null),
+            Key: NullIfBlank(source.Attributes?.FirstOrDefault(attribute => string.Equals(attribute.Type, "Key", StringComparison.Ordinal))?.Value),
+            Aliases: ToAliases(source.Aliases));
     }
 
     /// <summary>The work's languages; the single one an older document states where it lists none.</summary>

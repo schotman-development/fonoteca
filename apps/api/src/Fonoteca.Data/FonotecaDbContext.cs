@@ -92,6 +92,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(1000).IsRequired();
+            e.Property(x => x.LatinTitle).HasMaxLength(1000);
             e.Property(x => x.Type).HasMaxLength(100);
             e.Property(x => x.Languages).HasMaxLength(200);
             e.Property(x => x.Key).HasMaxLength(100);

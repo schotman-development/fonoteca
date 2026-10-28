@@ -299,7 +299,18 @@ each account tags songs with its own tags, under Fonoteca's own
 nested at any depth, nobody else's to see, an admin's neither, and on a song's
 recording as a heart is, so every copy shows it (the owner's choices). A tag
 lists each song once, as the copy a playlist plays
-(`SubsonicEndpoints.Tags.cs`).
+(`SubsonicEndpoints.Tags.cs`). *Amended 2026-10-23:* a song's `works` and
+`movements` name the piece a listener would, the owner's measure ("whatever
+gives the truest result"): an album nobody voted on counts as classical by
+the genres its tracks carry, as its page shows (`FileGenres.Voted`), but only
+for a piece of a form — not a song, a score or an untyped piece, or a
+film-music concert comes in whole (`ClassicalWorks.ByItsAlbums`); a top
+that only gathers pieces — untyped, every part typed, the Ring over four
+operas — is no piece, its parts are (`WorkTree.Cut`), in `getCompositions`
+too; a work in another script is named by its English alias where
+MusicBrainz has one (`Works.LatinTitle`, beside the title the tag write
+keeps); and a movement loses the piece in front however it spells it
+(`MovementTitles`).
 
 ### Scope
 

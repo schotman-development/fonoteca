@@ -37,4 +37,13 @@ public sealed class FileGenresTests
 
         Assert.Equal(["Jazz"], FileGenres.OfAlbum("jazz", ["rock", "rock"]));
     }
+
+    /// <summary>The same choice in MusicBrainz's own words, which the classical rule reads.</summary>
+    [Fact]
+    public void AnAlbumsVotesAreItsGenresBeforeTheyAreFolded()
+    {
+        Assert.Equal(["classical", "symphony"], FileGenres.Voted(null, [null, "symphony, classical", "classical"]));
+        Assert.Equal(["classical crossover"], FileGenres.Voted("classical crossover", ["classical"]));
+        Assert.Empty(FileGenres.Voted(null, [null, null]));
+    }
 }

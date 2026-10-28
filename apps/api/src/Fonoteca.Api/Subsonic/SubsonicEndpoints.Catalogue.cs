@@ -534,7 +534,7 @@ public static partial class SubsonicEndpoints
         var works = await db.Works
             .AsNoTracking()
             .Where(work => wanted.Contains(work.Id))
-            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd, work.Key, work.Languages))
+            .Select(work => new WorkFacts(work.Id, work.LatinTitle ?? work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd, work.Key, work.Languages))
             .ToDictionaryAsync(work => work.Id, cancellationToken)
             .ConfigureAwait(false);
 
@@ -548,15 +548,23 @@ public static partial class SubsonicEndpoints
                 Albums = recording.Files
                     .Select(file => file.ReleaseGroup == null ? null : file.ReleaseGroup.Genres)
                     .ToList(),
+                On = recording.Files.Select(file => file.ReleaseGroupId).ToList(),
             })
             .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var borrowed = await CatalogueEndpoints.BorrowedVotesAsync(
+                db, [.. performances.SelectMany(performance => performance.On)], cancellationToken)
             .ConfigureAwait(false);
 
         var classical = performances
             .GroupBy(performance => performance.Work)
             .Where(work => ClassicalWorks.Is(
-                pieces[work.Key] == work.Key ? works[work.Key].Type : null,
-                work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))))
+                    pieces[work.Key] == work.Key ? works[work.Key].Type : null,
+                    work.SelectMany(performance => performance.Albums.Prepend(performance.Genres)))
+                || ClassicalWorks.ByItsAlbums(
+                    works[pieces[work.Key]].Type,
+                    borrowed.Of(work.SelectMany(performance => performance.On))))
             .Select(work => work.Key)
             .ToHashSet();
 
@@ -619,16 +627,10 @@ public static partial class SubsonicEndpoints
         var direct = parent.Id == whole.Id;
 
         return new SongMovement(
-            Without(part.Title, whole.Title) ?? Without(part.Title, parent.Title) ?? part.Title,
+            MovementTitles.Without(part.Title, whole.Title) ?? MovementTitles.Without(part.Title, parent.Title) ?? part.Title,
             direct ? part.Position : null,
             direct ? parent.PartCount : null);
     }
-
-    /// <summary>A part's title with the piece's in front taken off: "I. Allegro con brio".</summary>
-    private static string? Without(string title, string whole) =>
-        title.Length > whole.Length + 2 && title.StartsWith(whole + ": ", StringComparison.Ordinal)
-            ? title[(whole.Length + 2)..]
-            : null;
 
     /// <summary>
     /// One file, as a song.

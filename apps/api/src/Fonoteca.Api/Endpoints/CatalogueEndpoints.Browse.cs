@@ -302,7 +302,6 @@ public static partial class CatalogueEndpoints
             {
                 recording.Id,
                 Work = recording.WorkId!.Value,
-                recording.Work!.ParentId,
                 Billed = recording.Credits
                     .OrderBy(credit => credit.Position)
                     .Select(credit => new
@@ -349,7 +348,7 @@ public static partial class CatalogueEndpoints
         var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
 
         var pieces = held
-            .GroupBy(recording => recording.ParentId is { } part ? WorkTree.Top(part, parents) : recording.Work)
+            .GroupBy(recording => WorkTree.Top(recording.Work, parents))
             .Select(piece =>
             {
                 var writers = piece
@@ -377,7 +376,7 @@ public static partial class CatalogueEndpoints
 
                 // A piece in movements, even where one track links the whole
                 // work rather than its movement.
-                var inMovements = piece.Any(recording => recording.ParentId != null);
+                var inMovements = piece.Any(recording => parents.ContainsKey(recording.Work));
 
                 var recordings = piece
                     .Select(recording => (
@@ -467,13 +466,13 @@ public static partial class CatalogueEndpoints
         return [.. (await db.Recordings
                 .AsNoTracking()
                 .Where(recording => recording.WorkId != null && recording.Files.Any())
-                .Select(recording => new { recording.Id, Work = recording.WorkId!.Value, recording.Work!.ParentId })
+                .Select(recording => new { recording.Id, Work = recording.WorkId!.Value })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false))
             .Select(row => new HeldWork(
                 row.Id,
                 row.Work,
-                row.ParentId is { } part ? WorkTree.Top(part, parents) : null))];
+                parents.ContainsKey(row.Work) ? WorkTree.Top(row.Work, parents) : null))];
     }
 
     /// <summary>Who wrote each work, by work.</summary>
@@ -522,15 +521,29 @@ public static partial class CatalogueEndpoints
                 Albums = recording.Files
                     .Select(file => file.ReleaseGroup == null ? null : file.ReleaseGroup.Genres)
                     .ToList(),
+                On = recording.Files.Select(file => file.ReleaseGroupId).ToList(),
             })
             .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var borrowed = await BorrowedVotesAsync(db, [.. performances.SelectMany(performance => performance.On)], cancellationToken)
+            .ConfigureAwait(false);
+        var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+        var forms = await db.Works
+            .AsNoTracking()
+            .Where(work => work.Type != null)
+            .Select(work => new { work.Id, work.Type })
+            .ToDictionaryAsync(work => work.Id, work => work.Type, cancellationToken)
             .ConfigureAwait(false);
 
         var works = performances
             .GroupBy(performance => performance.Work)
             .Where(work => ClassicalWorks.Is(
-                work.First().Type,
-                work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))))
+                    work.First().Type,
+                    work.SelectMany(performance => performance.Albums.Prepend(performance.Genres)))
+                || ClassicalWorks.ByItsAlbums(
+                    forms.GetValueOrDefault(WorkTree.Top(work.Key, parents)),
+                    borrowed.Of(work.SelectMany(performance => performance.On))))
             .Select(work => work.Key)
             .ToHashSet();
 

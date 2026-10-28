@@ -29,6 +29,20 @@ public sealed class Work
 {
     public required WorkId Id { get; init; }
     public required string Title { get; set; }
+
+    /// <summary>What Subsonic names it when <see cref="Title"/> is not in Latin script.</summary>
+    /// <remarks>
+    /// <see cref="Artist.LatinName"/>'s twin, by the same rule
+    /// (<see cref="LatinNames.Of"/>) off the work's own aliases: a Russian
+    /// pressing's <c>Щелкунчик, op. 71</c> beside its composer printed as
+    /// Pyotr Ilyich Tchaikovsky. Null where the title is Latin already, and
+    /// beside the title rather than over it, so the tag write keeps what
+    /// MusicBrainz says. Set wherever a work's whole document arrives
+    /// (<c>CatalogueWriter.Describe</c>); a parent minted from a stub has none
+    /// until it is described.
+    /// </remarks>
+    public string? LatinTitle { get; set; }
+
     public Mbid? Mbid { get; set; }
 
     /// <summary>e.g. "Symphony", "Song". Free text mirroring MusicBrainz work types.</summary>
@@ -63,6 +77,15 @@ public sealed class Work
 
     /// <summary>How many parts MusicBrainz lists for it, where it has any.</summary>
     public int? PartCount { get; set; }
+
+    /// <summary>Whether MusicBrainz lists parts for it and gives every one of them a type.</summary>
+    /// <remarks>
+    /// What makes an untyped top a collection rather than a piece
+    /// (<see cref="WorkTree.Cut"/>): read off the work's own lookup, which
+    /// names each part's type, so it speaks for the parts not held here too.
+    /// False until the work is described.
+    /// </remarks>
+    public bool PartsTyped { get; set; }
 
     /// <summary>Its key as MusicBrainz states it: "B-flat minor".</summary>
     public string? Key { get; set; }

@@ -750,6 +750,146 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A movement on an album nobody voted on is classical by its tracks, and a
+    /// film cue there is not; an opera of the Ring is the piece rather than the
+    /// Ring, and an untyped ballet whose numbers are not all typed stays whole;
+    /// a Russian title is named in English; and the piece is taken off a
+    /// movement's name however the movement spells it.
+    /// </summary>
+    [Fact]
+    public async Task ASongNamesThePieceAListenerWould()
+    {
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Wagner and Tchaikovsky" };
+        var pressing = new Release { Id = ReleaseId.New(), Title = album.Title, ReleaseGroupId = album.Id, TrackCount = 3, DiscCount = 1 };
+        var ring = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Der Ring des Nibelungen, WWV 86",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PartCount = 4,
+            PartsTyped = true,
+        };
+        var rheingold = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Das Rheingold, WWV 86A",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Type = "Opera",
+            ParentId = ring.Id,
+            Position = 1,
+            PartCount = 4,
+
+            // A piece whose every part is typed is still the piece.
+            PartsTyped = true,
+        };
+        var scene = new Work { Id = WorkId.New(), Title = "Das Rheingold: Scene I", ParentId = rheingold.Id, Position = 1 };
+        var nutcracker = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Щелкунчик, op. 71",
+            LatinTitle = "The Nutcracker, op. 71",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            PartCount = 3,
+        };
+        var overture = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Щелкунчик, op. 71: Увертюра",
+            LatinTitle = "The Nutcracker, op. 71: Overture",
+            Type = "Overture",
+            ParentId = nutcracker.Id,
+            Position = 1,
+        };
+
+        // A film cue under its score, neither typed.
+        var score = new Work { Id = WorkId.New(), Title = "Gladiator", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var cue = new Work { Id = WorkId.New(), Title = "Elysium", ParentId = score.Id };
+
+        // Only the overture is voted classical, and the album not at all.
+        var recordings = new[] { (scene, (string?)null), (overture, "classical"), (cue, (string?)null) }
+            .Select(pair => new Recording { Id = RecordingId.New(), Title = pair.Item1.Title, WorkId = pair.Item1.Id, Genres = pair.Item2 })
+            .ToList();
+        var files = recordings
+            .Select((recording, i) => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"Wagner/0{i + 1} Track.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = recording.Id,
+                ReleaseId = pressing.Id,
+                ReleaseGroupId = album.Id,
+            })
+            .ToList();
+        var workIds = new[] { ring.Id, rheingold.Id, scene.Id, nutcracker.Id, overture.Id, score.Id, cue.Id };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(album);
+            db.Releases.Add(pressing);
+            db.Works.AddRange(ring, rheingold, scene, nutcracker, overture, score, cue);
+            db.Recordings.AddRange(recordings);
+            db.MediaFiles.AddRange(files);
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            using var client = _factory!.CreateClient();
+
+            var songs = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{album.Id.Value:N}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album")
+                .GetProperty("song")
+                .EnumerateArray()
+                .ToDictionary(row => row.GetProperty("title").GetString()!);
+
+            static (string?, string?, int?, int?) Named(JsonElement song)
+            {
+                var part = Assert.Single(song.GetProperty("movements").EnumerateArray());
+                return (
+                    Assert.Single(song.GetProperty("works").EnumerateArray()).GetProperty("name").GetString(),
+                    part.GetProperty("name").GetString(),
+                    part.TryGetProperty("number", out var number) ? number.GetInt32() : null,
+                    part.TryGetProperty("count", out var count) ? count.GetInt32() : null);
+            }
+
+            Assert.Equal((rheingold.Title, "Scene I", 1, 4), Named(songs[scene.Title]));
+            Assert.Equal(("The Nutcracker, op. 71", "Overture", 1, 3), Named(songs[overture.Title]));
+            Assert.Empty(songs[cue.Title].GetProperty("works").EnumerateArray());
+
+            var listed = (await JsonAsync(client, "/rest/getCompositions.view"))
+                .GetProperty("subsonic-response")
+                .GetProperty("compositions")
+                .GetProperty("composition")
+                .EnumerateArray()
+                .Select(row => (row.GetProperty("id").GetString(), row.GetProperty("name").GetString()))
+                .ToList();
+
+            Assert.Contains(($"wk-{rheingold.Id.Value:N}", rheingold.Title), listed);
+            Assert.Contains(($"wk-{nutcracker.Id.Value:N}", "The Nutcracker, op. 71"), listed);
+            Assert.DoesNotContain(listed, row => row.Item1 == $"wk-{ring.Id.Value:N}");
+
+            // The opera is a composition with a parent on its row, and takes a heart.
+            Assert.Equal("ok", (await JsonAsync(client, $"/rest/star.view?id=wk-{rheingold.Id.Value:N}")).GetProperty("subsonic-response").GetProperty("status").GetString());
+            Assert.Equal(70, (await JsonAsync(client, $"/rest/star.view?id=wk-{ring.Id.Value:N}")).GetProperty("subsonic-response").GetProperty("error").GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.Loves.RemoveRange(await db.Loves.IgnoreQueryFilters().Where(love => love.WorkId != null && workIds.Contains(love.WorkId.Value)).ToListAsync(Token));
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
+            var ids = recordings.Select(recording => recording.Id).ToList();
+            db.Recordings.RemoveRange(await db.Recordings.Where(row => ids.Contains(row.Id)).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+            db.Works.RemoveRange(await db.Works.Where(row => workIds.Contains(row.Id)).ToListAsync(Token));
+            db.Releases.Remove(await db.Releases.SingleAsync(row => row.Id == pressing.Id, Token));
+            db.ReleaseGroups.Remove(await db.ReleaseGroups.SingleAsync(row => row.Id == album.Id, Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
     /// Whoever composed a held classical piece is listed with how many they
     /// wrote; the pieces are listed by name, all or one composer's, and one
     /// opens with its movements in order and every song of it on every album.

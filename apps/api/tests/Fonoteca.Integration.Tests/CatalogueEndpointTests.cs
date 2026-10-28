@@ -1779,6 +1779,65 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
             compositions.Items.Single(piece => piece.Type == "Symphony").Composers.Select(c => c.Id));
     }
 
+    /// <summary>
+    /// A concerto's movement nobody tagged is classical by the album its
+    /// neighbours make classical, where the album has no genres of its own; a
+    /// film cue there is not, and nor is a symphony on an album whose own
+    /// genres say otherwise, whatever its tracks are tagged.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumWithNoGenresLendsItsTracksVotesToAPieceOfAForm()
+    {
+        using var client = _factory!.CreateClient();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var satie = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Satie), Token);
+            var hart = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Hart), Token);
+            var album = await db.ReleaseGroups.SingleAsync(g => g.Id == new ReleaseGroupId(_seed.SymphonyAlbum), Token);
+            album.Genres = null;
+
+            // The symphony's own tracks carry the vote the album now borrows.
+            foreach (var held in await db.Recordings.Where(r => r.Work != null && r.Work.Type == "Symphony").ToListAsync(Token))
+            {
+                held.Genres = "classical";
+            }
+
+            var bonamassa = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Bonamassa), Token);
+            var score = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Score", Genres = "soundtrack" };
+            var concerto = new Work { Id = WorkId.New(), Title = "Concerto no. 1", Type = "Concerto" };
+            db.ReleaseGroups.Add(score);
+            db.Works.Add(concerto);
+
+            foreach (var (title, form, piece, writer, on, genres) in new[]
+            {
+                ("Concerto no. 1: I. Allegro", (string?)null, (WorkId?)concerto.Id, satie, album, (string?)null),
+                ("Main Title", "Soundtrack", null, hart, album, null),
+                ("Symphony no. 1", "Symphony", null, bonamassa, score, null),
+                ("Adagio", null, null, null, score, "classical"),
+            })
+            {
+                var work = new Work { Id = WorkId.New(), Title = title, Type = form, ParentId = piece };
+                var recording = new Recording { Id = RecordingId.New(), Title = title, WorkId = work.Id, Genres = genres };
+                var file = File($"{on.Title}/{title}.flac", recording);
+                file.ReleaseGroupId = on.Id;
+
+                db.Works.Add(work);
+                db.Recordings.Add(recording);
+                db.MediaFiles.Add(file);
+
+                if (writer is not null) db.Contributions.Add(Contributed(writer, "composer", work));
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var composers = await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/composers", UriKind.Relative), Token);
+
+        Assert.Equal(new[] { _seed.Mozart, _seed.Satie }.Order(), composers!.Items.Select(composer => composer.Id).Order());
+    }
+
     [Fact]
     public async Task TheHomePageCountsComposersAndCompositionsAsTheirPagesDo()
     {

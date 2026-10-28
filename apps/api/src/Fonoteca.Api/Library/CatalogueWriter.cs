@@ -361,11 +361,13 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(source);
 
+        row.LatinTitle = LatinNames.Of(row.Title, source.Aliases);
         row.Type = source.Type;
         row.Key = source.Key;
         row.Languages = EnrichmentService.Joined(source.Languages ?? []);
         row.Position = underItsParent ? source.Position : null;
         row.PartCount = source.PartCount > 0 ? source.PartCount : null;
+        row.PartsTyped = source.PartsTyped;
 
         var composed = Performance.Composed(source.Relations.Select(relation =>
             (relation.Type, relation.Begin?.ToString(), relation.End?.ToString())));

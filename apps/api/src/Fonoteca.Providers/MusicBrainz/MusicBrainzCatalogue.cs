@@ -65,8 +65,10 @@ public sealed class MusicBrainzCatalogue : IMusicBrainzCatalogue, IDisposable
     /// No <c>Include.Recordings</c>: a popular work has thousands, they arrive
     /// paginated, and the question here is the composer. <c>WorkRelationships</c>
     /// carries <c>parts</c>, which names the symphony a movement belongs to.
+    /// <c>Aliases</c> rides along for a title in another script, as on the
+    /// artist lookup.
     /// </remarks>
-    private const Include WorkIncludes = Include.ArtistRelationships | Include.WorkRelationships;
+    private const Include WorkIncludes = Include.ArtistRelationships | Include.WorkRelationships | Include.Aliases;
 
     /// <summary>
     /// An artist is asked only for what describes them.

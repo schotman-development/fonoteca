@@ -168,6 +168,7 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         Assert.Equal(new Mbid(Guid.Parse("27bca9c5-495c-4148-ab7e-a89a71d298ad")), work.ParentId);
         Assert.Equal("Suite for Violin and String Orchestra, JS 185", work.ParentTitle);
         Assert.Equal("composer", Assert.Single(work.Relations).Type);
+        Assert.False(work.PartsTyped);
         Assert.Contains("work-rels", Assert.Single(stub.Requests).Uri.Query, StringComparison.Ordinal);
     }
 
@@ -583,6 +584,41 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
 
         Assert.NotNull(work);
         Assert.Equal(("Sonata", "C major"), (work.Type, work.Key));
+    }
+
+    /// <summary>A top MusicBrainz leaves untyped over parts it types every one of: the Ring, a collection.</summary>
+    [Fact]
+    public async Task AWorkSaysWhetherEveryPartOfItIsTyped()
+    {
+        var (catalogue, stub) = Build(Recorded("work-der-ring-des-nibelungen.json"));
+
+        var ring = await catalogue.GetWorkAsync(new Mbid(Guid.Parse("597e017a-2c97-40c0-9eeb-430a0461e4ad")), Token);
+
+        Assert.NotNull(ring);
+        Assert.Null(ring.Type);
+        Assert.Equal(4, ring.PartCount);
+        Assert.True(ring.PartsTyped);
+        Assert.Contains("aliases", Assert.Single(stub.Requests).Uri.Query, StringComparison.Ordinal);
+
+        // The Nutcracker lists an act MusicBrainz gives no type.
+        (catalogue, _) = Build(Recorded("work-nutcracker.json"));
+
+        var ballet = await catalogue.GetWorkAsync(new Mbid(Guid.Parse("f3281e81-eea2-409f-88b8-9e1e1de5ca10")), Token);
+
+        Assert.NotNull(ballet);
+        Assert.False(ballet.PartsTyped);
+    }
+
+    /// <summary>A work in another script carries its names in others, the English one among them.</summary>
+    [Fact]
+    public async Task AWorkCarriesItsAliases()
+    {
+        var (catalogue, _) = Build(Recorded("work-nutcracker.json"));
+
+        var work = await catalogue.GetWorkAsync(new Mbid(Guid.Parse("f3281e81-eea2-409f-88b8-9e1e1de5ca10")), Token);
+
+        Assert.NotNull(work);
+        Assert.Equal("The Nutcracker, op. 71", LatinNames.Of(work.Title, work.Aliases));
     }
 
     /// <summary>

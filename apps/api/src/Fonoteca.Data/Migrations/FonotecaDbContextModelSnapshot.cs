@@ -1433,6 +1433,10 @@ namespace Fonoteca.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("LatinTitle")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
 
@@ -1444,6 +1448,9 @@ namespace Fonoteca.Data.Migrations
 
                     b.Property<DateTimeOffset?>("PartOfLookupUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("PartsTyped")
+                        .HasColumnType("boolean");
 
                     b.Property<int?>("Position")
                         .HasColumnType("integer");

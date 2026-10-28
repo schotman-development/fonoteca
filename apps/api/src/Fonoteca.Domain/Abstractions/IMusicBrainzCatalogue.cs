@@ -441,8 +441,14 @@ public sealed record MusicBrainzWork(
     /// <summary>How many parts MusicBrainz lists for it: a symphony's movements.</summary>
     int PartCount = 0,
 
+    /// <summary>Whether it lists parts and types every one: the Ring's four operas.</summary>
+    bool PartsTyped = false,
+
     /// <summary>Its <c>Key</c> attribute as MusicBrainz writes it: "B-flat minor".</summary>
-    string? Key = null);
+    string? Key = null,
+
+    /// <summary>The names it is also known by, which <see cref="Catalogue.LatinNames.Of"/> picks from.</summary>
+    IReadOnlyList<MusicBrainzAlias>? Aliases = null);
 
 /// <summary>One name an artist is also known by.</summary>
 /// <remarks>

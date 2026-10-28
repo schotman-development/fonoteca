@@ -193,16 +193,23 @@ public static partial class SubsonicEndpoints
 
         var works = await db.Works
             .AsNoTracking()
-            .Select(work => new WorkFacts(work.Id, work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd, work.Key, work.Languages))
+            .Select(work => new WorkFacts(work.Id, work.LatinTitle ?? work.Title, work.Mbid, work.Type, work.Position, work.PartCount, work.ComposedBegin, work.ComposedEnd, work.Key, work.Languages))
             .ToDictionaryAsync(work => work.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        var borrowed = await CatalogueEndpoints.BorrowedVotesAsync(
+                db, [.. held.SelectMany(recording => recording.Files.Select(file => file.ReleaseGroupId))], cancellationToken)
             .ConfigureAwait(false);
 
         // SongWorksAsync's piece, so a cycle in the chain ends where it does there.
         var classical = held
             .GroupBy(recording => parents.TryGetValue(recording.Work, out var parent) ? WorkTree.Top(parent, parents) : recording.Work)
             .Where(piece => ClassicalWorks.Is(
-                piece.Any(recording => recording.Work == piece.Key) ? works[piece.Key].Type : null,
-                piece.SelectMany(recording => recording.Files.Select(file => file.Genres).Prepend(recording.Genres))))
+                    piece.Any(recording => recording.Work == piece.Key) ? works[piece.Key].Type : null,
+                    piece.SelectMany(recording => recording.Files.Select(file => file.Genres).Prepend(recording.Genres)))
+                || ClassicalWorks.ByItsAlbums(
+                    works[piece.Key].Type,
+                    borrowed.Of(piece.SelectMany(recording => recording.Files.Select(file => file.ReleaseGroupId)))))
             .ToList();
 
         var wanted = classical

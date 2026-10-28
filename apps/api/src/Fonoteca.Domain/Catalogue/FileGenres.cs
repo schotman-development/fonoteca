@@ -33,21 +33,28 @@ public static class FileGenres
     /// appears under the genres its files carry. Ties keep the order the
     /// recordings first gave them, so a rerun answers the same.
     /// </remarks>
-    public static IReadOnlyList<string> OfAlbum(string? album, IEnumerable<string?> recordings)
+    public static IReadOnlyList<string> OfAlbum(string? album, IEnumerable<string?> recordings) =>
+        Genres.Carried(Voted(album, recordings));
+
+    /// <summary>
+    /// <see cref="OfAlbum"/> as MusicBrainz spells them, before they are folded
+    /// into Fonoteca's own: what <see cref="ClassicalWorks"/> reads an album by.
+    /// </summary>
+    public static IReadOnlyList<string> Voted(string? album, IEnumerable<string?> recordings)
     {
         ArgumentNullException.ThrowIfNull(recordings);
 
         var own = Split(album);
-        if (own.Count > 0) return Genres.Carried(own.Take(Max));
+        if (own.Count > 0) return [.. own.Take(Max)];
 
-        return Genres.Carried(recordings
+        return [.. recordings
             .SelectMany(Split)
             .GroupBy(genre => genre, StringComparer.Ordinal)
             .Select((group, first) => (Genre: group.Key, Count: group.Count(), First: first))
             .OrderByDescending(entry => entry.Count)
             .ThenBy(entry => entry.First)
             .Take(Max)
-            .Select(entry => entry.Genre));
+            .Select(entry => entry.Genre)];
     }
 
     /// <summary>A stored genre column, as the list it was joined from.</summary>

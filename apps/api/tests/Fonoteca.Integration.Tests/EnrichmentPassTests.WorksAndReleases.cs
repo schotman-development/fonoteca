@@ -51,6 +51,41 @@ public sealed partial class EnrichmentPassTests
     }
 
     /// <summary>
+    /// A work in another script keeps its English alias beside its title, and
+    /// a piece whose every part MusicBrainz types says so; a Latin title and a
+    /// work with no parts say neither.
+    /// </summary>
+    [Fact]
+    public async Task AWorkIsDescribedWithItsLatinTitleAndWhetherItsPartsAreTyped()
+    {
+        await SeedMovementAsync();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Works.Where(w => w.Mbid == PieceMbid).ExecuteUpdateAsync(set => set.SetProperty(w => w.Title, "Щелкунчик, op. 71"), Token);
+        }
+
+        var services = Build(Answering(Recording), WorksAnswering(
+            new MusicBrainzWork(MovementMbid, "Allegro", null, [], PieceMbid, "Щелкунчик, op. 71", ["zxx"], 1, 0, Aliases: [new("Allegretto", "en", true, "Work name")]),
+            new MusicBrainzWork(
+                PieceMbid,
+                "Щелкунчик, op. 71",
+                null,
+                [],
+                PartCount: 2,
+                PartsTyped: true,
+                Aliases: [new("Der Nussknacker, op. 71", "de", true, "Work name"), new("The Nutcracker, op. 71", "en", true, "Work name")])));
+
+        await EnrichAsync(services);
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        var works = await check.Works.AsNoTracking().ToDictionaryAsync(w => w.Mbid!.Value, Token);
+
+        Assert.Equal(("The Nutcracker, op. 71", true), (works[PieceMbid].LatinTitle, works[PieceMbid].PartsTyped));
+        Assert.Equal(((string?)null, false), (works[MovementMbid].LatinTitle, works[MovementMbid].PartsTyped));
+    }
+
+    /// <summary>
     /// A movement number is a number in one parent's order: where the answer
     /// names another parent than the row's, the position is not kept.
     /// </summary>

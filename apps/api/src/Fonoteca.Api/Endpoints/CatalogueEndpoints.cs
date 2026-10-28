@@ -1716,10 +1716,10 @@ public static partial class CatalogueEndpoints
                 // reads the absence and stays a flat list.
                 WorkTitle = track.Recording!.Work == null ? null : track.Recording.Work.Title,
 
-                // The work the movement is a part of, where MusicBrainz says so,
-                // climbed to the whole piece below — what the track list groups
-                // under before it falls back to reading the work's title.
-                PartOf = track.Recording.Work == null ? null : track.Recording.Work.ParentId,
+                // The work itself, climbed to the whole piece it is a movement
+                // of below — what the track list groups under before it falls
+                // back to reading the work's title.
+                track.Recording.WorkId,
 
                 // The recording's own billing line and typed links, which the
                 // credits below are rolled up from.
@@ -1826,8 +1826,8 @@ public static partial class CatalogueEndpoints
         // The whole piece each movement's run is headed with.
         var parents = await WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
         var pieces = tracks
-            .Where(track => track.PartOf is not null)
-            .Select(track => WorkTree.Top(track.PartOf!.Value, parents))
+            .Where(track => track.WorkId is { } work && parents.ContainsKey(work))
+            .Select(track => WorkTree.Top(track.WorkId!.Value, parents))
             .Distinct()
             .ToList();
         var pieceTitles = await db.Works
@@ -1887,7 +1887,7 @@ public static partial class CatalogueEndpoints
                     // a guest on one song, a compilation's own artist.
                     own is not null && own != credit ? own : null,
                     [.. row.On.Select(edition => edition.Value)],
-                    facts.PartOf is { } part ? pieceTitles[WorkTree.Top(part, parents)] : null);
+                    facts.WorkId is { } work && parents.ContainsKey(work) ? pieceTitles[WorkTree.Top(work, parents)] : null);
             })
             .ToList();
 
@@ -4781,27 +4781,76 @@ public static partial class CatalogueEndpoints
         return (await db.Recordings
                 .AsNoTracking()
                 .Where(recording => recording.Files.Any() && recording.Work!.ParentId != null)
-                .Select(recording => new { recording.Id, Parent = recording.Work!.ParentId!.Value })
+                .Select(recording => new { recording.Id, Work = recording.WorkId!.Value })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false))
-            .ToDictionary(row => row.Id, row => WorkTree.Top(row.Parent, parents));
+            .Where(row => parents.ContainsKey(row.Work))
+            .ToDictionary(row => row.Id, row => WorkTree.Top(row.Work, parents));
     }
 
-    /// <summary>Every work's parent, for <see cref="WorkTree.Top"/>.</summary>
+    /// <summary>The genres an album with none of its own borrows from its tracks, for <see cref="ClassicalWorks.ByItsAlbums"/>.</summary>
+    /// <remarks>
+    /// <see cref="FileGenres.Voted"/>, the genres the album's page shows. An
+    /// album with genres of its own is not in it: those count as they always
+    /// did.
+    /// </remarks>
+    internal static async Task<BorrowedVotes> BorrowedVotesAsync(
+        FonotecaDbContext db,
+        IReadOnlyCollection<ReleaseGroupId?> albums,
+        CancellationToken cancellationToken)
+    {
+        var ids = albums.OfType<ReleaseGroupId>().Distinct().ToList();
+
+        return new((await db.ReleaseGroups
+                .AsNoTracking()
+                .Where(album => ids.Contains(album.Id) && (album.Genres == null || album.Genres == ""))
+                .Select(album => new
+                {
+                    album.Id,
+                    Recordings = album.Files
+                        .Select(file => file.Recording != null ? file.Recording.Genres : null)
+                        .ToList(),
+                })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(album => album.Id, album => string.Join(", ", FileGenres.Voted(null, album.Recordings))));
+    }
+
+    internal sealed record BorrowedVotes(Dictionary<ReleaseGroupId, string> Genres)
+    {
+        public IEnumerable<string?> Of(IEnumerable<ReleaseGroupId?> albums) =>
+            albums.Select(album => album is { } id && Genres.TryGetValue(id, out var genres) ? genres : null);
+    }
+
+    /// <summary>Every work's parent below any collection, for <see cref="WorkTree.Top"/>.</summary>
     /// <remarks>
     /// Read whole and climbed in memory: EF cannot walk a chain inside a
     /// query, and the rows are the works that are a movement of something —
-    /// about a thousand here.
+    /// about a thousand here. A link up into a collection is not in it
+    /// (<see cref="WorkTree.Cut"/>), so a reader climbs from the recording's
+    /// own work, never from the <c>ParentId</c> on its row: an opera of the
+    /// Ring has a parent there and is a whole piece here.
     /// </remarks>
     internal static async Task<Dictionary<WorkId, WorkId>> WorkParentsAsync(
         FonotecaDbContext db,
-        CancellationToken cancellationToken) =>
-        await db.Works
+        CancellationToken cancellationToken)
+    {
+        var parents = await db.Works
             .AsNoTracking()
             .Where(work => work.ParentId != null)
             .Select(work => new { work.Id, Parent = work.ParentId!.Value })
             .ToDictionaryAsync(row => row.Id, row => row.Parent, cancellationToken)
             .ConfigureAwait(false);
+
+        var collections = await db.Works
+            .AsNoTracking()
+            .Where(work => work.Type == null && work.PartsTyped)
+            .Select(work => work.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return WorkTree.Cut(parents, collections.ToHashSet());
+    }
 
     /// <summary>
     /// Who the records in the library are by, read more widely than the
