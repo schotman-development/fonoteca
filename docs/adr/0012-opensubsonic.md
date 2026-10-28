@@ -349,9 +349,11 @@ stations should live "in the library not just a server or an app". Each is an
 XSPF file in `Radio/` at the top of the library (`RadioStationFile`), believed
 whoever wrote it, as a static playlist is, and its id is `ir-` and the file's
 name. XSPF over extended M3U and PLS because it alone has a written spec and a
-field for the stream, name, home page and logo. Saving a station asks
-radio-browser.info for its logo (`IStationLogos`), since the protocol carries
-none, and writes it into the file; the responses are unchanged. The five rows
+field for the stream, name, home page and logo. Saving a station looks up its
+logo (`IStationLogos`), since the protocol carries none, and writes it into the
+file; the responses are unchanged. Three sources, the owner's choice: the
+station's home page, Wikidata and radio-browser.info, a large page icon first
+because a client draws a station as a tile. The five rows
 were written out as files once, before the migration dropped the table.
 
 **Everything else under `/rest` answers error 0 naming the method**, through a

@@ -208,7 +208,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
-| radio | `Domain/Catalogue/RadioStationFile.cs` | `Api/Subsonic/SubsonicEndpoints.Radio.cs`, `Providers/RadioBrowser/RadioBrowserLogos.cs` |
+| radio | `Domain/Catalogue/RadioStationFile.cs`, `PageIcons.cs` | `Api/Subsonic/SubsonicEndpoints.Radio.cs`, `Providers/Radio/StationLogos.cs` |
 | duplicates | `Domain/Catalogue/Duplicates.cs` | `Api/Endpoints/CatalogueEndpoints.Duplicates.cs`, trashed through `FileManagerService` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
@@ -823,10 +823,16 @@ does not say whether it re-reads a changed m3u; Navidrome does.
 at the top of the library, no row, believed like a static playlist and
 written through `PlaylistFiles`' reads, writes, lock and mount check (the
 owner's choice, so stations go wherever the library goes). Subsonic is the
-only way in; a station's id is `ir-` and its file's name. Saving one asks
-radio-browser.info for its logo — by stream, then by name held to the stream
-— and puts it in `image`; an update keeps the file's own while the stream is
-unchanged. Fonoteca never opens any of a station's addresses.
+only way in; a station's id is `ir-` and its file's name, kept while its name
+is. Saving one looks up a logo for `image` (`StationLogos`, the owner's
+sources): a large icon the station's home page names, then Wikidata's `P154`
+on the item whose stream (`P963`) or official website (`P856`) is the
+station's, then radio-browser.info by stream, then the page's share picture,
+small icons and a `/favicon.ico` it answers for. An update keeps the file's
+own logo while the stream is unchanged. **The home page is the one address
+nobody vetted** — anyone can enter one on radio-browser — so its client
+connects only to public addresses (`StationHomepages.ConnectAsync`), no proxy,
+redirects included. Fonoteca never plays a stream or fetches a logo.
 
 ## Acquisition
 

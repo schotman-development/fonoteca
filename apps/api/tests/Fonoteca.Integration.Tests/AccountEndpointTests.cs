@@ -693,15 +693,26 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         var asYou = "u=you&p=a-test-passphrase";
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"createUser.view?{asMe}&username=you&password=a-test-passphrase&email=you@example.org")));
 
-        // A root with nothing in it is a mount point with nothing behind it.
+        // A root holding only the stations is a mount point with nothing behind it: nothing written, nothing moved.
+        WriteFile("Radio/a.xspf", """
+            <playlist version="1" xmlns="http://xspf.org/ns/0/">
+              <title>A</title>
+              <trackList><track><location>https://example.org/a</location></track></trackList>
+            </playlist>
+            """);
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/live")));
-        Assert.False(Directory.Exists(Path.Combine(_root, "Radio")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id=ir-a.xspf&name=B&streamUrl=https://example.org/a")));
+        Assert.Equal(["a.xspf"], Directory.EnumerateFiles(Path.Combine(_root, "Radio")).Select(Path.GetFileName));
+        File.Delete(Path.Combine(_root, "Radio", "a.xspf"));
         WriteFile("Artist/Album/01 - Song.flac", "audio");
 
         Assert.Equal(10, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=ftp://example.org/live")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/live&homepageUrl=javascript:alert(1)")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=%20&streamUrl=https://example.org/live")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Ra%01dio&streamUrl=https://example.org/live")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Ra%EF%BF%BFdio&streamUrl=https://example.org/live")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/%EF%BF%BE")));
         Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asYou}&name=Radio&streamUrl=https://example.org/live")));
         Assert.Empty(_logos.Asked);
 
@@ -726,6 +737,19 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id=ir-Other.xspf&name=Other&streamUrl=https://example.org/live")));
         Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id=ir-..%2FArtist%2FAlbum%2F01%20-%20Song.flac")));
 
+        // An id names one visible file in the Radio folder, and nothing else in the library.
+        WriteFile("Artist/x.xspf", "<playlist/>");
+        WriteFile("Radio/.hidden.xspf", "<playlist/>");
+        WriteFile("Radio/sub/x.xspf", "<playlist/>");
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id=ir-sub%2Fx.xspf")));
+        Assert.True(File.Exists(Path.Combine(_root, "Radio", "sub", "x.xspf")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id=ir-..%2FArtist%2Fx.xspf")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id=ir-..%5CArtist%5Cx.xspf")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id=ir-.hidden.xspf")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id=ir-%00.xspf&name=Other&streamUrl=https://example.org/live")));
+        Assert.True(File.Exists(Path.Combine(_root, "Artist", "x.xspf")));
+        Assert.True(File.Exists(Path.Combine(_root, "Radio", ".hidden.xspf")));
+
         // A rename moves the file, and the same stream keeps the logo it has without asking again.
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl={stream}")));
         Assert.False(File.Exists(Path.Combine(_root, "Radio", "Radio.xspf")));
@@ -735,7 +759,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         // An update restates the station: no home page sent is none kept, and a new stream is asked about.
         id = Uri.EscapeDataString("ir-Renamed.xspf");
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl=http://example.org/other")));
-        Assert.Equal(["https://example.org/live?format=mp3&bitrate=128", "http://example.org/other"], _logos.Asked);
+        Assert.Equal(["https://example.org/live?format=mp3&bitrate=128", "http://example.org/other"], _logos.Asked.Take(2));
         Assert.Equal(
             new RadioStation("Renamed", "http://example.org/other", null, null),
             RadioStationFile.Read(ReadFile("Radio/Renamed.xspf"), "Radio/Renamed.xspf"));
@@ -748,6 +772,10 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             </playlist>
             """);
         WriteFile("Radio/notes.txt", "not a station");
+
+        // A stream-only edit keeps the file its name, so the id does not change under it.
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id=ir-hand.xspf&name=By%20hand&streamUrl=https://example.org/hand2")));
+        Assert.Equal("https://example.org/hand2", RadioStationFile.Read(ReadFile("Radio/hand.xspf"), "Radio/hand.xspf")?.StreamUrl);
 
         var stations = Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"));
         Assert.Equal(["By hand", "Renamed"], stations.Select(each => each.GetProperty("name").GetString()));
@@ -780,10 +808,10 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
 
         public List<string> Asked { get; } = [];
 
-        public Task<string?> FindAsync(string name, string streamUrl, CancellationToken cancellationToken = default)
+        public Task<string?> FindAsync(RadioStation station, CancellationToken cancellationToken = default)
         {
-            Asked.Add(streamUrl);
-            return Task.FromResult(streamUrl.EndsWith("/other", StringComparison.Ordinal) ? null : (string?)Logo);
+            Asked.Add(station.StreamUrl);
+            return Task.FromResult(station.StreamUrl.EndsWith("/other", StringComparison.Ordinal) ? null : (string?)Logo);
         }
     }
 

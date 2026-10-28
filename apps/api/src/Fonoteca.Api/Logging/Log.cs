@@ -883,10 +883,4 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Smart playlist '{Path}' has rules that do not read back, so its file was not written.")]
     public static partial void SmartPlaylistUnreadable(ILogger logger, string path);
-
-    [LoggerMessage(
-        EventId = 1605,
-        Level = LogLevel.Warning,
-        Message = "radio-browser was not asked for the logo of station '{Name}', which is saved without one: {Reason}")]
-    public static partial void StationLogoNotAsked(ILogger logger, string name, string reason);
 }

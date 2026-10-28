@@ -9,6 +9,7 @@ using Fonoteca.Providers.Lrclib;
 using Fonoteca.Providers.RadioBrowser;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
+using Fonoteca.Providers.Radio;
 using Fonoteca.Providers.Wikidata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -493,13 +494,16 @@ public static class ProviderServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Registers <see cref="IStationLogos"/> over radio-browser.info and the client behind it.</summary>
+    /// <summary>Registers <see cref="IStationLogos"/> over a station's home page, Wikidata and radio-browser.info.</summary>
     /// <remarks>
-    /// <see cref="AddLrclib"/>'s shape, with the deadline cut short: a lookup
-    /// runs inside the request that saves a station, which is saved without a
-    /// logo rather than kept waiting for one.
+    /// After <see cref="AddWikidata"/>, whose client it asks. radio-browser's
+    /// client is <see cref="AddLrclib"/>'s shape with the deadline cut short,
+    /// and the home pages' as short with no retry: a lookup runs inside the
+    /// request that saves a station, which is saved without a logo rather than
+    /// kept waiting for one. The home pages' client has no gate, since each
+    /// page is somebody else's server, asked once.
     /// </remarks>
-    public static IServiceCollection AddRadioBrowser(
+    public static IServiceCollection AddStationLogos(
         this IServiceCollection services,
         Action<RadioBrowserOptions> configure)
     {
@@ -530,7 +534,25 @@ public static class ProviderServiceCollectionExtensions
             options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);
         });
 
-        services.AddSingleton<IStationLogos, RadioBrowserLogos>();
+        services.AddHttpClient(StationHomepages.HttpClientName, (provider, http) =>
+        {
+            http.Timeout = TimeSpan.FromSeconds(10);
+            http.DefaultRequestHeaders.Add("User-Agent", $"Fonoteca/0.1 ( {Options<RadioBrowserOptions>(provider).Contact} )");
+            http.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.5");
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            MaxAutomaticRedirections = 5,
+            // A proxy would be the one connection the address check never sees.
+            UseProxy = false,
+            ConnectCallback = StationHomepages.ConnectAsync,
+        });
+
+        services.AddSingleton<RadioBrowserLogos>();
+        services.AddSingleton<StationHomepages>();
+        services.AddSingleton<WikidataStationLogos>();
+        services.AddSingleton<IStationLogos, StationLogos>();
 
         return services;
     }

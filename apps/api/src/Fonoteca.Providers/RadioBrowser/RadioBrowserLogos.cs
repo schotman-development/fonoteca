@@ -7,7 +7,8 @@ using Polly;
 namespace Fonoteca.Providers.RadioBrowser;
 
 /// <summary>
-/// <see cref="IStationLogos"/> over radio-browser.info's station lists.
+/// A station's logo as radio-browser.info lists it: one of the sources
+/// <see cref="Radio.StationLogos"/> asks.
 /// </summary>
 /// <remarks>
 /// <b>Up to two asks, both held to the stream.</b> First <c>byurl</c>, an exact
@@ -18,7 +19,7 @@ namespace Fonoteca.Providers.RadioBrowser;
 /// redirected to is found. The first hit with a logo that is a web address
 /// answers.
 /// </remarks>
-public sealed class RadioBrowserLogos(IHttpClientFactory clients) : IStationLogos
+public sealed class RadioBrowserLogos(IHttpClientFactory clients)
 {
     /// <summary>Name used in <see cref="ProviderException.Provider"/> and in log messages.</summary>
     public const string ProviderName = "radio-browser";
@@ -27,6 +28,8 @@ public sealed class RadioBrowserLogos(IHttpClientFactory clients) : IStationLogo
     // others contain finds its station by the stream's own ask or not at all.
     private const int NameHits = 100;
 
+    /// <returns>The logo, or null where radio-browser has no station with this stream and a logo.</returns>
+    /// <exception cref="ProviderUnavailableException">radio-browser could not be asked.</exception>
     public async Task<string?> FindAsync(string name, string streamUrl, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(streamUrl);

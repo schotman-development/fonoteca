@@ -277,7 +277,7 @@ public sealed class WikidataPortraits(
     /// same file is at both — so correcting it is not the cache rewriting a
     /// provider's verdict.
     /// </remarks>
-    private static bool Image(string value, out Uri image)
+    internal static bool Image(string value, out Uri image)
     {
         image = null!;
 

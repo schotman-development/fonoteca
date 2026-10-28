@@ -1,7 +1,6 @@
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
-using Fonoteca.Api.Logging;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
@@ -23,8 +22,8 @@ namespace Fonoteca.Api.Subsonic;
 /// <b>Its logo is looked up when it is saved</b> (<see cref="IStationLogos"/>,
 /// the owner's choice), since the protocol carries none, and goes in the
 /// file. An update keeps the file's own logo while the stream stays the same,
-/// so one put there by hand stays; a lookup that fails saves the station
-/// without one.
+/// so one put there by hand stays, and keeps the file's name while the
+/// station's stays, so an id does not change under an edit.
 ///
 /// An update restates the whole station, so a <c>homepageUrl</c> it leaves out
 /// is a station with no home page, as Navidrome reads it.
@@ -54,7 +53,6 @@ public static partial class SubsonicEndpoints
         HttpContext http,
         PlaylistFiles files,
         IStationLogos logos,
-        ILogger<PlaylistFiles> logger,
         CancellationToken cancellationToken)
     {
         if (!May(http, AccountRoles.Admin)) return NotAuthorized();
@@ -67,7 +65,7 @@ public static partial class SubsonicEndpoints
         // Asked again under the lock; here so a name already taken asks radio-browser nothing.
         if (StationTaken(files, path, self: null) is { } early) return early;
 
-        var station = sent with { ImageUrl = await LogoAsync(logos, logger, sent, cancellationToken).ConfigureAwait(false) };
+        var station = sent with { ImageUrl = await logos.FindAsync(sent, cancellationToken).ConfigureAwait(false) };
 
         return await files.EditAsync(
                 async () => StationTaken(files, path, self: null)
@@ -82,11 +80,11 @@ public static partial class SubsonicEndpoints
         HttpContext http,
         PlaylistFiles files,
         IStationLogos logos,
-        ILogger<PlaylistFiles> logger,
         CancellationToken cancellationToken)
     {
         if (!May(http, AccountRoles.Admin)) return NotAuthorized();
         if ((Missing(http, "id", "streamUrl", "name") ?? Unfit(http)) is { } refused) return refused;
+        if (!files.Mounted()) return StationsUnmounted();
 
         if (StationPath(Text(http, "id")) is not { } path
             || await files.ReadAsync(path, cancellationToken).ConfigureAwait(false) is not { } before
@@ -96,12 +94,12 @@ public static partial class SubsonicEndpoints
         }
 
         var sent = StationSent(http);
-        var target = RadioStationFile.PathFor(sent.Name);
+        var target = sent.Name == was.Name ? path : RadioStationFile.PathFor(sent.Name);
 
         if (StationTaken(files, target, self: path) is { } early) return early;
 
         var found = (was.StreamUrl == sent.StreamUrl ? was.ImageUrl : null)
-            ?? await LogoAsync(logos, logger, sent, cancellationToken).ConfigureAwait(false);
+            ?? await logos.FindAsync(sent, cancellationToken).ConfigureAwait(false);
 
         return await files.EditAsync(
                 async () =>
@@ -161,24 +159,11 @@ public static partial class SubsonicEndpoints
     private static RadioStation StationSent(HttpContext http) =>
         new(Text(http, "name")!.Trim(), Text(http, "streamUrl")!, Text(http, "homepageUrl"), ImageUrl: null);
 
-    /// <summary>The logo radio-browser has for the station, or none where it has none or could not be asked.</summary>
-    private static async Task<string?> LogoAsync(IStationLogos logos, ILogger logger, RadioStation station, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await logos.FindAsync(station.Name, station.StreamUrl, cancellationToken).ConfigureAwait(false);
-        }
-        catch (ProviderException cause)
-        {
-            Log.StationLogoNotAsked(logger, station.Name, cause.Message);
-            return null;
-        }
-    }
-
     /// <summary>The station file an id names, or null where it names none: one file at the top of the Radio folder.</summary>
     private static string? StationPath(string? id) =>
         SubsonicIds.AsRadioStation(id) is { } file
         && !file.StartsWith('.')
+        && !file.Any(char.IsControl)
         && file.AsSpan().IndexOfAny('/', '\\') < 0
         && string.Equals(Path.GetExtension(file), RadioStationFile.Extension, StringComparison.OrdinalIgnoreCase)
             ? $"{RadioStationFile.Folder}/{file}"
@@ -196,7 +181,7 @@ public static partial class SubsonicEndpoints
     {
         var name = Text(http, "name")!.Trim();
 
-        if (name.Length is 0 or > RadioStationFile.NameLength || name.Any(char.IsControl))
+        if (name.Length is 0 or > RadioStationFile.NameLength || name.Any(character => char.IsControl(character) || character is '\uFFFE' or '\uFFFF'))
             return SubsonicResult.Error(0, $"A station's name is one line of at most {RadioStationFile.NameLength} characters.");
 
         foreach (var parameter in (string[])["streamUrl", "homepageUrl"])

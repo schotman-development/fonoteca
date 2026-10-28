@@ -49,7 +49,7 @@ public static class RadioStationFile
     /// <summary>Whether an address is one a client may be handed: absolute, http or https, not overlong, on one line.</summary>
     public static bool WebAddress(string? url) =>
         url is { Length: <= UrlLength }
-        && !url.Any(char.IsControl)
+        && !url.Any(character => char.IsControl(character) || character is '\uFFFE' or '\uFFFF')
         && Uri.TryCreate(url, UriKind.Absolute, out var address)
         && (address.Scheme == Uri.UriSchemeHttp || address.Scheme == Uri.UriSchemeHttps);
 
