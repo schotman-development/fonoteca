@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Fonoteca.Data;
+using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
 using Microsoft.AspNetCore.Authorization;
@@ -32,6 +33,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
     private WebApplicationFactory<Program>? _factory;
+    private readonly StubLogos _logos = new();
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -44,13 +46,17 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         {
             builder.UseSetting("ConnectionStrings:Fonoteca", _connectionString);
             builder.UseSetting("Fonoteca:LibraryPath", _root);
+            builder.UseSetting("Fonoteca:TrashPath", _root + "-trash");
             builder.UseSetting("Fonoteca:WarmCandidates", "false");
             builder.UseSetting("Fonoteca:MusicBrainzContact", string.Empty);
 
             // A session is checked against its account on every request rather
             // than once a minute, so a test sees a reset end it.
-            builder.ConfigureTestServices(services => services.Configure<SecurityStampValidatorOptions>(
-                stamp => stamp.ValidationInterval = TimeSpan.Zero));
+            builder.ConfigureTestServices(services =>
+            {
+                services.Configure<SecurityStampValidatorOptions>(stamp => stamp.ValidationInterval = TimeSpan.Zero);
+                services.AddSingleton<IStationLogos>(_logos);
+            });
         });
 
         using var warm = _factory.CreateClient();
@@ -62,6 +68,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
     {
         if (_factory is not null) await _factory.DisposeAsync();
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+        if (Directory.Exists(_root + "-trash")) Directory.Delete(_root + "-trash", recursive: true);
     }
 
     /// <summary>
@@ -673,6 +680,10 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// A station is an XSPF file in the library's Radio folder, its logo
+    /// looked up when it is saved; everyone's to list and an admin's to change.
+    /// </summary>
     [Fact]
     public async Task InternetRadioIsEveryonesToListAndAnAdminsToChange()
     {
@@ -682,37 +693,98 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         var asYou = "u=you&p=a-test-passphrase";
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"createUser.view?{asMe}&username=you&password=a-test-passphrase&email=you@example.org")));
 
+        // A root with nothing in it is a mount point with nothing behind it.
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/live")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "Radio")));
+        WriteFile("Artist/Album/01 - Song.flac", "audio");
+
         Assert.Equal(10, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=ftp://example.org/live")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/live&homepageUrl=javascript:alert(1)")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=%20&streamUrl=https://example.org/live")));
         Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asYou}&name=Radio&streamUrl=https://example.org/live")));
+        Assert.Empty(_logos.Asked);
 
         var stream = Uri.EscapeDataString("https://example.org/live?format=mp3&bitrate=128");
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl={stream}&homepageUrl=https://example.org")));
+        Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=radio&streamUrl=https://example.org/second")));
 
-        var station = Assert.Single((await SubsonicAsync(client, $"getInternetRadioStations.view?{asYou}"))
-            .GetProperty("internetRadioStations").GetProperty("internetRadioStation").EnumerateArray());
+        Assert.Equal(
+            new RadioStation("Radio", "https://example.org/live?format=mp3&bitrate=128", "https://example.org", StubLogos.Logo),
+            RadioStationFile.Read(ReadFile("Radio/Radio.xspf"), "Radio/Radio.xspf"));
+
+        var station = Assert.Single(Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asYou}")));
+        Assert.Equal("ir-Radio.xspf", station.GetProperty("id").GetString());
         Assert.Equal("Radio", station.GetProperty("name").GetString());
         Assert.Equal("https://example.org/live?format=mp3&bitrate=128", station.GetProperty("streamUrl").GetString());
         Assert.Equal("https://example.org", station.GetProperty("homePageUrl").GetString());
-        var id = station.GetProperty("id").GetString();
+        var id = Uri.EscapeDataString(station.GetProperty("id").GetString()!);
 
         Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asYou}&id={id}&name=Mine&streamUrl=https://example.org/live")));
         Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asYou}&id={id}")));
         Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={Guid.NewGuid():N}&name=Other&streamUrl=https://example.org/live")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id=ir-Other.xspf&name=Other&streamUrl=https://example.org/live")));
+        Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id=ir-..%2FArtist%2FAlbum%2F01%20-%20Song.flac")));
 
-        // An update restates the station: no home page sent is none kept.
+        // A rename moves the file, and the same stream keeps the logo it has without asking again.
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl={stream}")));
+        Assert.False(File.Exists(Path.Combine(_root, "Radio", "Radio.xspf")));
+        Assert.Equal(StubLogos.Logo, RadioStationFile.Read(ReadFile("Radio/Renamed.xspf"), "Radio/Renamed.xspf")?.ImageUrl);
+        Assert.Single(_logos.Asked);
+
+        // An update restates the station: no home page sent is none kept, and a new stream is asked about.
+        id = Uri.EscapeDataString("ir-Renamed.xspf");
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl=http://example.org/other")));
-        station = Assert.Single((await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"))
-            .GetProperty("internetRadioStations").GetProperty("internetRadioStation").EnumerateArray());
-        Assert.Equal("Renamed", station.GetProperty("name").GetString());
-        Assert.Equal("http://example.org/other", station.GetProperty("streamUrl").GetString());
-        Assert.False(station.TryGetProperty("homePageUrl", out _));
+        Assert.Equal(["https://example.org/live?format=mp3&bitrate=128", "http://example.org/other"], _logos.Asked);
+        Assert.Equal(
+            new RadioStation("Renamed", "http://example.org/other", null, null),
+            RadioStationFile.Read(ReadFile("Radio/Renamed.xspf"), "Radio/Renamed.xspf"));
+
+        // Whatever else writes a station there is believed.
+        WriteFile("Radio/hand.xspf", """
+            <playlist version="1" xmlns="http://xspf.org/ns/0/">
+              <title>By hand</title>
+              <trackList><track><location>https://example.org/hand</location></track></trackList>
+            </playlist>
+            """);
+        WriteFile("Radio/notes.txt", "not a station");
+
+        var stations = Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"));
+        Assert.Equal(["By hand", "Renamed"], stations.Select(each => each.GetProperty("name").GetString()));
+        Assert.Equal(["ir-hand.xspf", "ir-Renamed.xspf"], stations.Select(each => each.GetProperty("id").GetString()));
+        Assert.False(stations[1].TryGetProperty("homePageUrl", out _));
 
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
+        Assert.False(File.Exists(Path.Combine(_root, "Radio", "Renamed.xspf")));
+        Assert.Single(Directory.EnumerateFiles(_root + "-trash", "Renamed.xspf", SearchOption.AllDirectories));
         Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
-        Assert.Equal(0, (await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"))
-            .GetProperty("internetRadioStations").TryGetProperty("internetRadioStation", out var none) ? none.GetArrayLength() : 0);
+        Assert.Equal(["By hand"], Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}")).Select(each => each.GetProperty("name").GetString()));
+    }
+
+    private static List<JsonElement> Stations(JsonElement response) =>
+        response.GetProperty("internetRadioStations").TryGetProperty("internetRadioStation", out var list) ? [.. list.EnumerateArray()] : [];
+
+    private void WriteFile(string relativePath, string content)
+    {
+        var absolute = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        File.WriteAllText(absolute, content);
+    }
+
+    private string ReadFile(string relativePath) => File.ReadAllText(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+    /// <summary>radio-browser, answering every stream but one with the same logo.</summary>
+    private sealed class StubLogos : IStationLogos
+    {
+        public const string Logo = "https://example.org/logo.png";
+
+        public List<string> Asked { get; } = [];
+
+        public Task<string?> FindAsync(string name, string streamUrl, CancellationToken cancellationToken = default)
+        {
+            Asked.Add(streamUrl);
+            return Task.FromResult(streamUrl.EndsWith("/other", StringComparison.Ordinal) ? null : (string?)Logo);
+        }
     }
 
     private static string[] Roles(JsonElement account) =>

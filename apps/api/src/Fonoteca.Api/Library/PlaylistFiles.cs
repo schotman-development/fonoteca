@@ -40,6 +40,10 @@ namespace Fonoteca.Api.Library;
 /// <b>Nothing is written while the library looks unmounted.</b> A root holding
 /// nothing but the playlists folder is a mount point with nothing behind it,
 /// and writing there would put the folder on the host's own disk (rule 3).
+///
+/// <b>The radio stations' files go through the same reads and writes</b>
+/// (<see cref="RadioStationFile"/>), under the same lock: the same kind of
+/// file, believed the same way, in a folder of its own beside this one.
 /// </remarks>
 public sealed class PlaylistFiles(
     IServiceScopeFactory scopeFactory,
@@ -358,6 +362,21 @@ public sealed class PlaylistFiles(
             .Select(name => $"{PlaylistFile.Folder}/{name}")];
     }
 
+    /// <summary>Every station's file at the top of the Radio folder, by library-relative path, as <see cref="AllPaths"/>.</summary>
+    internal IReadOnlyList<string> StationPaths()
+    {
+        var folder = Path.Combine(store.Root, RadioStationFile.Folder);
+
+        if (!Directory.Exists(folder)) return [];
+
+        return [.. Directory.EnumerateFiles(folder)
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Where(name => !name.StartsWith('.') && string.Equals(Path.GetExtension(name), RadioStationFile.Extension, StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.Ordinal)
+            .Select(name => $"{RadioStationFile.Folder}/{name}")];
+    }
+
     /// <summary>A playlist's text as the file has it; null where there is no such file.</summary>
     /// <remarks>Read under the lock, so it is not caught halfway through a write of Fonoteca's own.</remarks>
     internal async Task<PlaylistText?> ReadAsync(string path, CancellationToken cancellationToken)
@@ -444,11 +463,11 @@ public sealed class PlaylistFiles(
 
     internal string Root => store.Root;
 
-    /// <summary>Whether anything but the playlists folder is under the root.</summary>
+    /// <summary>Whether anything but the playlists and radio folders is under the root.</summary>
     internal bool Mounted() =>
         Directory.Exists(store.Root)
         && Directory.EnumerateFileSystemEntries(store.Root)
-            .Any(entry => !string.Equals(Path.GetFileName(entry), PlaylistFile.Folder, StringComparison.Ordinal));
+            .Any(entry => Path.GetFileName(entry) is not (PlaylistFile.Folder or RadioStationFile.Folder));
 
     /// <summary>What an edit names to say which text it was made against: a hash of it.</summary>
     internal static string Version(string text) =>

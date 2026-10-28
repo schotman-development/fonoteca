@@ -195,31 +195,6 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("PlaylistPlacements");
                 });
 
-            modelBuilder.Entity("Fonoteca.Data.RadioStation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("HomePageUrl")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("StreamUrl")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RadioStations");
-                });
-
             modelBuilder.Entity("Fonoteca.Data.SongTag", b =>
                 {
                     b.Property<Guid>("Id")

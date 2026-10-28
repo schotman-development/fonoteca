@@ -161,7 +161,7 @@ Fonoteca.Api        minimal API, OpenAPI, SignalR, health
 Fonoteca.Domain     PURE — entities, matching, quality ranking
 Fonoteca.Ingest     walk, probe, fingerprint
 Fonoteca.Tagging    read/write, dry-run diff, undo journal
-Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic | lrclib
+Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic | lrclib | radiobrowser
 Fonoteca.Jobs       empty — Hangfire refs, a reference to Domain, no source
 Fonoteca.Data       EF Core, migrations
 ```
@@ -208,6 +208,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
+| radio | `Domain/Catalogue/RadioStationFile.cs` | `Api/Subsonic/SubsonicEndpoints.Radio.cs`, `Providers/RadioBrowser/RadioBrowserLogos.cs` |
 | duplicates | `Domain/Catalogue/Duplicates.cs` | `Api/Endpoints/CatalogueEndpoints.Duplicates.cs`, trashed through `FileManagerService` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
@@ -817,6 +818,15 @@ Nothing is written while the root looks unmounted, and a deleted playlist's file
 goes to the trash. Subsonic reads both kinds through the same handlers and writes
 static ones; a smart one is read-only there (error 50). Roon's documentation
 does not say whether it re-reads a changed m3u; Navidrome does.
+
+**Internet radio stations are files too**: one XSPF per station in `Radio/`
+at the top of the library, no row, believed like a static playlist and
+written through `PlaylistFiles`' reads, writes, lock and mount check (the
+owner's choice, so stations go wherever the library goes). Subsonic is the
+only way in; a station's id is `ir-` and its file's name. Saving one asks
+radio-browser.info for its logo — by stream, then by name held to the stream
+— and puts it in `image`; an update keeps the file's own while the stream is
+unchanged. Fonoteca never opens any of a station's addresses.
 
 ## Acquisition
 

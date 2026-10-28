@@ -38,6 +38,7 @@ internal static class SubsonicIds
     private const string WorkPrefix = "wk-";
     private const string PlaylistFolderPrefix = "pd-";
     private const string TagPrefix = "tg-";
+    private const string RadioStationPrefix = "ir-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
@@ -52,6 +53,9 @@ internal static class SubsonicIds
 
     /// <summary>A static playlist, which is its file: the file's name in the Playlists folder.</summary>
     internal static string PlaylistFile(string name) => PlaylistFilePrefix + name;
+
+    /// <summary>An internet radio station, which is its file: the file's name in the Radio folder.</summary>
+    internal static string RadioStation(string name) => RadioStationPrefix + name;
 
     /// <summary>A folder of an account's playlists (<c>playlistFolders</c>), never a directory.</summary>
     internal static string PlaylistFolder(Guid id) => PlaylistFolderPrefix + id.ToString("N");
@@ -82,10 +86,9 @@ internal static class SubsonicIds
 
     internal static Guid? AsTag(string? id) => Guid(id, TagPrefix);
 
-    internal static string? AsPlaylistFile(string? id) =>
-        id is not null && id.StartsWith(PlaylistFilePrefix, StringComparison.Ordinal) && id.Length > PlaylistFilePrefix.Length
-            ? id[PlaylistFilePrefix.Length..]
-            : null;
+    internal static string? AsPlaylistFile(string? id) => Name(id, PlaylistFilePrefix);
+
+    internal static string? AsRadioStation(string? id) => Name(id, RadioStationPrefix);
 
     /// <summary>
     /// The library-relative path a folder id carries, or null when the id is not
@@ -105,6 +108,11 @@ internal static class SubsonicIds
             return null;
         }
     }
+
+    private static string? Name(string? id, string prefix) =>
+        id is not null && id.StartsWith(prefix, StringComparison.Ordinal) && id.Length > prefix.Length
+            ? id[prefix.Length..]
+            : null;
 
     private static Guid? Guid(string? id, string prefix)
     {

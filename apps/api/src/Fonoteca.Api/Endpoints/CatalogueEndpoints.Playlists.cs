@@ -863,7 +863,7 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>A renamed playlist's file, renamed with it, so the old name does not linger as a second playlist in a player.</summary>
-    private static ProblemHttpResult? Move(PlaylistFiles files, string from, string to)
+    internal static ProblemHttpResult? Move(PlaylistFiles files, string from, string to)
     {
         try
         {
@@ -887,7 +887,7 @@ public static partial class CatalogueEndpoints
     }
 
     /// <summary>A playlist's file into a stamped folder under the trash; a problem where it would not go.</summary>
-    private static ProblemHttpResult? Trash(PlaylistFiles files, FonotecaOptions options, IClock clock, ILogger logger, string path)
+    internal static ProblemHttpResult? Trash(PlaylistFiles files, FonotecaOptions options, IClock clock, ILogger logger, string path)
     {
         try
         {
@@ -947,7 +947,7 @@ public static partial class CatalogueEndpoints
     private static ProblemHttpResult Unmounted() =>
         TypedResults.Problem(
             title: "The library is not mounted",
-            detail: "Its root holds nothing but the Playlists folder, so nothing is written there.",
+            detail: "Its root holds nothing but the Playlists and Radio folders, so nothing is written there.",
             statusCode: StatusCodes.Status409Conflict);
 
     private static ProblemHttpResult NotWritten(string path) =>

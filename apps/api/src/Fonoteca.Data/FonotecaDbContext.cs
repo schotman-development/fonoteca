@@ -61,7 +61,6 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<DiscoveredRecord> DiscoveredRecords => Set<DiscoveredRecord>();
     public DbSet<ArtistImage> ArtistImages => Set<ArtistImage>();
     public DbSet<SmartPlaylist> SmartPlaylists => Set<SmartPlaylist>();
-    public DbSet<RadioStation> RadioStations => Set<RadioStation>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -701,14 +700,6 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Path).HasMaxLength(1000).IsRequired();
             e.HasIndex(x => x.Path).IsUnique();
             e.Property(x => x.CriteriaJson).HasColumnType("jsonb").IsRequired();
-        });
-
-        builder.Entity<RadioStation>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Name).HasMaxLength(RadioStation.NameLength).IsRequired();
-            e.Property(x => x.StreamUrl).HasMaxLength(RadioStation.UrlLength).IsRequired();
-            e.Property(x => x.HomePageUrl).HasMaxLength(RadioStation.UrlLength);
         });
 
         base.OnModelCreating(builder);

@@ -1,103 +1,218 @@
+using Fonoteca.Api.Configuration;
+using Fonoteca.Api.Endpoints;
+using Fonoteca.Api.Library;
+using Fonoteca.Api.Logging;
 using Fonoteca.Data;
-using Microsoft.EntityFrameworkCore;
+using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Catalogue;
+using Microsoft.Extensions.Options;
 
 namespace Fonoteca.Api.Subsonic;
 
 /// <summary>
-/// Internet radio: <see cref="RadioStation"/>, every account's to list and an
-/// admin's to change.
+/// Internet radio: the XSPF files in the library's Radio folder
+/// (<see cref="RadioStationFile"/>), every account's to list and an admin's to
+/// change.
 /// </summary>
 /// <remarks>
+/// <b>A station is its file</b> (the owner's choice), as a static playlist is:
+/// its id is the file's name, whatever else writes there is believed, a write
+/// is a staged file renamed over it, nothing is written while the library
+/// looks unmounted, and a deleted station's file goes to the trash.
+///
+/// <b>Its logo is looked up when it is saved</b> (<see cref="IStationLogos"/>,
+/// the owner's choice), since the protocol carries none, and goes in the
+/// file. An update keeps the file's own logo while the stream stays the same,
+/// so one put there by hand stays; a lookup that fails saves the station
+/// without one.
+///
 /// An update restates the whole station, so a <c>homepageUrl</c> it leaves out
 /// is a station with no home page, as Navidrome reads it.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
-    private static async Task<IResult> GetInternetRadioStations(FonotecaDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> GetInternetRadioStations(PlaylistFiles files, CancellationToken cancellationToken)
     {
-        var stations = await db.RadioStations
-            .AsNoTracking()
-            .OrderBy(station => station.Name)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        List<(string Id, RadioStation Station)> stations = [];
 
-        return SubsonicResult.Ok("internetRadioStations", list => list.Children("internetRadioStation", stations, WriteStation));
+        foreach (var path in files.StationPaths())
+        {
+            if (await files.ReadAsync(path, cancellationToken).ConfigureAwait(false) is { } file
+                && RadioStationFile.Read(file.Text, path) is { } station)
+            {
+                stations.Add((SubsonicIds.RadioStation(path[(RadioStationFile.Folder.Length + 1)..]), station));
+            }
+        }
+
+        return SubsonicResult.Ok("internetRadioStations", list => list.Children(
+            "internetRadioStation",
+            stations.OrderBy(entry => entry.Station.Name, StringComparer.OrdinalIgnoreCase),
+            WriteStation));
     }
 
-    private static async Task<IResult> CreateInternetRadioStation(HttpContext http, FonotecaDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> CreateInternetRadioStation(
+        HttpContext http,
+        PlaylistFiles files,
+        IStationLogos logos,
+        ILogger<PlaylistFiles> logger,
+        CancellationToken cancellationToken)
     {
         if (!May(http, AccountRoles.Admin)) return NotAuthorized();
         if ((Missing(http, "streamUrl", "name") ?? Unfit(http)) is { } refused) return refused;
+        if (!files.Mounted()) return StationsUnmounted();
 
-        db.RadioStations.Add(new RadioStation
-        {
-            Id = Guid.CreateVersion7(),
-            Name = Text(http, "name")!,
-            StreamUrl = Text(http, "streamUrl")!,
-            HomePageUrl = Text(http, "homepageUrl"),
-        });
+        var sent = StationSent(http);
+        var path = RadioStationFile.PathFor(sent.Name);
 
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return SubsonicResult.Ok();
+        // Asked again under the lock; here so a name already taken asks radio-browser nothing.
+        if (StationTaken(files, path, self: null) is { } early) return early;
+
+        var station = sent with { ImageUrl = await LogoAsync(logos, logger, sent, cancellationToken).ConfigureAwait(false) };
+
+        return await files.EditAsync(
+                async () => StationTaken(files, path, self: null)
+                    ?? (await files.WriteLockedAsync(path, RadioStationFile.Write(null, station), bom: false, cancellationToken).ConfigureAwait(false)
+                        ? SubsonicResult.Ok()
+                        : StationNotWritten(path)),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
-    private static async Task<IResult> UpdateInternetRadioStation(HttpContext http, FonotecaDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> UpdateInternetRadioStation(
+        HttpContext http,
+        PlaylistFiles files,
+        IStationLogos logos,
+        ILogger<PlaylistFiles> logger,
+        CancellationToken cancellationToken)
     {
         if (!May(http, AccountRoles.Admin)) return NotAuthorized();
         if ((Missing(http, "id", "streamUrl", "name") ?? Unfit(http)) is { } refused) return refused;
-        if (await StationAsync(http, db, cancellationToken).ConfigureAwait(false) is not { } station) return NoSuchStation();
 
-        station.Name = Text(http, "name")!;
-        station.StreamUrl = Text(http, "streamUrl")!;
-        station.HomePageUrl = Text(http, "homepageUrl");
+        if (StationPath(Text(http, "id")) is not { } path
+            || await files.ReadAsync(path, cancellationToken).ConfigureAwait(false) is not { } before
+            || RadioStationFile.Read(before.Text, path) is not { } was)
+        {
+            return NoSuchStation();
+        }
 
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return SubsonicResult.Ok();
+        var sent = StationSent(http);
+        var target = RadioStationFile.PathFor(sent.Name);
+
+        if (StationTaken(files, target, self: path) is { } early) return early;
+
+        var found = (was.StreamUrl == sent.StreamUrl ? was.ImageUrl : null)
+            ?? await LogoAsync(logos, logger, sent, cancellationToken).ConfigureAwait(false);
+
+        return await files.EditAsync(
+                async () =>
+                {
+                    if (await files.ReadLockedAsync(path, cancellationToken).ConfigureAwait(false) is not { } current
+                        || RadioStationFile.Read(current.Text, path) is not { } now)
+                    {
+                        return NoSuchStation();
+                    }
+
+                    if (!current.Editable) return SubsonicResult.Error(0, $"'{path}' is not UTF-8, so it is read and never written.");
+                    if (StationTaken(files, target, self: path) is { } taken) return taken;
+
+                    var image = now.StreamUrl == sent.StreamUrl && now.ImageUrl is { } own ? own : found;
+                    var text = RadioStationFile.Write(current.Text, sent with { ImageUrl = image });
+
+                    if (target != path && CatalogueEndpoints.Move(files, path, target) is { } stuck) return Refusal(stuck)!;
+
+                    return string.Equals(text, current.Text, StringComparison.Ordinal)
+                        || await files.WriteLockedAsync(target, text, current.Bom, cancellationToken).ConfigureAwait(false)
+                            ? SubsonicResult.Ok()
+                            : StationNotWritten(target);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
-    private static async Task<IResult> DeleteInternetRadioStation(HttpContext http, FonotecaDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> DeleteInternetRadioStation(
+        HttpContext http,
+        PlaylistFiles files,
+        IOptions<FonotecaOptions> options,
+        IClock clock,
+        ILogger<PlaylistFiles> logger,
+        CancellationToken cancellationToken)
     {
         if (!May(http, AccountRoles.Admin)) return NotAuthorized();
         if (Missing(http, "id") is { } missing) return missing;
-        if (await StationAsync(http, db, cancellationToken).ConfigureAwait(false) is not { } station) return NoSuchStation();
+        if (StationPath(Text(http, "id")) is not { } path) return NoSuchStation();
 
-        db.RadioStations.Remove(station);
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return SubsonicResult.Ok();
+        return await files.EditAsync(
+                () => Task.FromResult(
+                    !File.Exists(files.AbsolutePathFor(path)) ? NoSuchStation()
+                    : CatalogueEndpoints.Trash(files, options.Value, clock, logger, path) is { } stuck ? Refusal(stuck)!
+                    : SubsonicResult.Ok()),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
-    private static void WriteStation(ISubsonicWriter station, RadioStation row)
+    private static void WriteStation(ISubsonicWriter writer, (string Id, RadioStation Station) entry)
     {
-        station.Attr("id", row.Id.ToString("N"));
-        station.Attr("name", row.Name);
-        station.Attr("streamUrl", row.StreamUrl);
-        station.Attr("homePageUrl", row.HomePageUrl);
+        writer.Attr("id", entry.Id);
+        writer.Attr("name", entry.Station.Name);
+        writer.Attr("streamUrl", entry.Station.StreamUrl);
+        writer.Attr("homePageUrl", entry.Station.HomePageUrl);
     }
 
-    private static async Task<RadioStation?> StationAsync(HttpContext http, FonotecaDbContext db, CancellationToken cancellationToken) =>
-        Guid.TryParse(Text(http, "id"), out var id)
-            ? await db.RadioStations.FindAsync([id], cancellationToken).ConfigureAwait(false)
+    private static RadioStation StationSent(HttpContext http) =>
+        new(Text(http, "name")!.Trim(), Text(http, "streamUrl")!, Text(http, "homepageUrl"), ImageUrl: null);
+
+    /// <summary>The logo radio-browser has for the station, or none where it has none or could not be asked.</summary>
+    private static async Task<string?> LogoAsync(IStationLogos logos, ILogger logger, RadioStation station, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await logos.FindAsync(station.Name, station.StreamUrl, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ProviderException cause)
+        {
+            Log.StationLogoNotAsked(logger, station.Name, cause.Message);
+            return null;
+        }
+    }
+
+    /// <summary>The station file an id names, or null where it names none: one file at the top of the Radio folder.</summary>
+    private static string? StationPath(string? id) =>
+        SubsonicIds.AsRadioStation(id) is { } file
+        && !file.StartsWith('.')
+        && file.AsSpan().IndexOfAny('/', '\\') < 0
+        && string.Equals(Path.GetExtension(file), RadioStationFile.Extension, StringComparison.OrdinalIgnoreCase)
+            ? $"{RadioStationFile.Folder}/{file}"
             : null;
 
-    /// <summary>Error 0 for a name the table cannot hold or an address that is not a web one; null when both fit.</summary>
+    /// <summary>Error 0 where another station's file has this path, as a case-blind share would see it; null where none does.</summary>
+    private static SubsonicResult? StationTaken(PlaylistFiles files, string path, string? self) =>
+        files.StationPaths().Any(other => string.Equals(other, path, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(other, self, StringComparison.OrdinalIgnoreCase))
+            ? SubsonicResult.Error(0, $"A station has that name: '{path}' is already one.")
+            : null;
+
+    /// <summary>Error 0 for a name that is blank, overlong or not one line, or an address that is not a web one; null when all fit.</summary>
     private static SubsonicResult? Unfit(HttpContext http)
     {
-        if (Text(http, "name")!.Length > RadioStation.NameLength)
-            return SubsonicResult.Error(0, $"A station's name is at most {RadioStation.NameLength} characters.");
+        var name = Text(http, "name")!.Trim();
 
-        foreach (var name in (string[])["streamUrl", "homepageUrl"])
+        if (name.Length is 0 or > RadioStationFile.NameLength || name.Any(char.IsControl))
+            return SubsonicResult.Error(0, $"A station's name is one line of at most {RadioStationFile.NameLength} characters.");
+
+        foreach (var parameter in (string[])["streamUrl", "homepageUrl"])
         {
-            if (Text(http, name) is { } url && !WebAddress(url))
-                return SubsonicResult.Error(0, $"{name} must be an http or https address of at most {RadioStation.UrlLength} characters.");
+            if (Text(http, parameter) is { } url && !RadioStationFile.WebAddress(url))
+                return SubsonicResult.Error(0, $"{parameter} must be an http or https address of at most {RadioStationFile.UrlLength} characters.");
         }
 
         return null;
     }
 
-    private static bool WebAddress(string url) =>
-        url.Length <= RadioStation.UrlLength
-        && Uri.TryCreate(url, UriKind.Absolute, out var address)
-        && (address.Scheme == Uri.UriSchemeHttp || address.Scheme == Uri.UriSchemeHttps);
-
     private static SubsonicResult NoSuchStation() => SubsonicResult.Error(70, "No such station.");
+
+    private static SubsonicResult StationsUnmounted() =>
+        SubsonicResult.Error(0, "The library is not mounted: its root holds nothing but the Playlists and Radio folders, so nothing is written there.");
+
+    private static SubsonicResult StationNotWritten(string path) =>
+        SubsonicResult.Error(0, $"'{path}' could not be written; the log says why.");
 }

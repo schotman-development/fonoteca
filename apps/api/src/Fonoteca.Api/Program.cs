@@ -263,6 +263,10 @@ builder.Services.AddAppleMusic(options =>
 // by the tag write. No credential; the contact is MusicBrainz's. ADR 0016.
 builder.Services.AddLrclib(options => options.Contact = fonoteca.MusicBrainzContact);
 
+// A radio station's logo, asked for when one is saved over Subsonic and
+// written into its file. No credential; the contact is MusicBrainz's.
+builder.Services.AddRadioBrowser(options => options.Contact = fonoteca.MusicBrainzContact);
+
 // Manual acquisition. Registered unconditionally like the other two, so an
 // unconfigured instance answers "not configured" from the endpoint rather than
 // failing to resolve a service. Nothing here runs on its own: no hosted

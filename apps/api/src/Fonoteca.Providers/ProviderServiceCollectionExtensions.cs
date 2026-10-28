@@ -6,6 +6,7 @@ using Fonoteca.Providers.AppleMusic;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.CoverArt;
 using Fonoteca.Providers.Lrclib;
+using Fonoteca.Providers.RadioBrowser;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
 using Fonoteca.Providers.Wikidata;
@@ -488,6 +489,48 @@ public static class ProviderServiceCollectionExtensions
         });
 
         services.AddSingleton<ISongLyrics, LrclibLyrics>();
+
+        return services;
+    }
+
+    /// <summary>Registers <see cref="IStationLogos"/> over radio-browser.info and the client behind it.</summary>
+    /// <remarks>
+    /// <see cref="AddLrclib"/>'s shape, with the deadline cut short: a lookup
+    /// runs inside the request that saves a station, which is saved without a
+    /// logo rather than kept waiting for one.
+    /// </remarks>
+    public static IServiceCollection AddRadioBrowser(
+        this IServiceCollection services,
+        Action<RadioBrowserOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(RadioBrowserOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<RadioBrowserOptions>(provider).MinimumRequestInterval));
+
+        var client = services.AddHttpClient(RadioBrowserOptions.HttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = RadioBrowserOptions.Server;
+            http.DefaultRequestHeaders.Add("User-Agent", $"Fonoteca/0.1 ( {Options<RadioBrowserOptions>(provider).Contact} )");
+            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
+        client.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        });
+
+        AddResilienceThenGate(client, RadioBrowserOptions.HttpClientName, options =>
+        {
+            options.Retry.MaxRetryAttempts = 1;
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);
+        });
+
+        services.AddSingleton<IStationLogos, RadioBrowserLogos>();
 
         return services;
     }
