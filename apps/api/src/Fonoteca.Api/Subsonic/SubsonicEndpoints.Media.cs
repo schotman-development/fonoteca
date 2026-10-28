@@ -8,6 +8,7 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Ingest;
 using Fonoteca.Providers.Qobuz;
+using Fonoteca.Providers.Radio;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
@@ -79,13 +80,15 @@ public static partial class SubsonicEndpoints
     }
 
     /// <summary>
-    /// A picture of an album, an artist, an artist's record, or a folder.
+    /// A picture of an album, an artist, an artist's record, a folder, or a
+    /// radio station.
     /// </summary>
     /// <remarks>
-    /// One endpoint over four existing answers, which is why the ids carry a
+    /// One endpoint over five existing answers, which is why the ids carry a
     /// prefix at all. An album — or a song filed under one — is the stored
     /// <c>ReleaseCover</c>, fetched once and served under an ETag. An artist is
-    /// the artist page's picture (<see cref="ArtistPortraitAsync"/>). Anything
+    /// the artist page's picture (<see cref="ArtistPortraitAsync"/>), a station
+    /// the logo its file names (<see cref="StationLogoAsync"/>). Anything
     /// else is a path, and a path's picture is the file's embedded cover or the
     /// folder's own <c>cover.jpg</c>. Each comes no larger than the <c>size</c>
     /// asked for (<see cref="SizedAsync"/>).
@@ -106,9 +109,15 @@ public static partial class SubsonicEndpoints
         IClock clock,
         FfmpegCoverScaler scaler,
         IHttpClientFactory clients,
+        PlaylistFiles files,
         CancellationToken cancellationToken)
     {
         var id = Text(http, "id");
+
+        if (SubsonicIds.AsRadioStation(id) is not null)
+        {
+            return await StationLogoAsync(http, id, files, scaler, clients, cancellationToken).ConfigureAwait(false);
+        }
 
         if (SubsonicIds.AsArtist(id) is { } artist)
         {
@@ -155,6 +164,9 @@ public static partial class SubsonicEndpoints
     /// <summary>Where a provider's artist picture is kept once fetched.</summary>
     private static readonly string KeptPortraits = Path.Combine(Path.GetTempPath(), "fonoteca-portraits");
 
+    /// <summary>Where a station's logo is kept once fetched, as it came.</summary>
+    private static readonly string KeptLogos = Path.Combine(Path.GetTempPath(), "fonoteca-logos");
+
     /// <summary>
     /// The artist page's picture, as bytes.
     /// </summary>
@@ -182,46 +194,136 @@ public static partial class SubsonicEndpoints
 
         if (answer.Result is not RedirectHttpResult { Url: var url }) return answer;
 
-        var key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
-
-        var kept = Directory.Exists(KeptPortraits)
-            ? Directory.EnumerateFiles(KeptPortraits, key + ".*").FirstOrDefault()
-            : null;
+        var (kept, key, refused) = await KeepAsync(
+                KeptPortraits,
+                url,
+                () => TagWriteService.DownloadPortraitAsync(clients, url, cancellationToken),
+                FilePreview.ImageExtensionFor,
+                cancellationToken)
+            .ConfigureAwait(false);
 
         if (kept is null)
         {
-            TagWriteService.FetchedImage? picture;
-            string? refused;
-
-            try
-            {
-                (picture, refused) = await TagWriteService
-                    .DownloadPortraitAsync(clients, url, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception cause) when (cause is HttpRequestException
-                || (cause is OperationCanceledException && !cancellationToken.IsCancellationRequested))
-            {
-                (picture, refused) = (null, cause.Message);
-            }
-
-            if (picture is null || FilePreview.ImageExtensionFor(picture.MediaType) is not { } extension)
-            {
-                return TypedResults.Problem(title: "No picture", detail: $"The artist's picture could not be fetched: {refused ?? "no image type"}.", statusCode: StatusCodes.Status502BadGateway);
-            }
-
-            // Written aside and moved, so a concurrent request never reads half.
-            Directory.CreateDirectory(KeptPortraits);
-            var part = Path.Combine(KeptPortraits, Guid.NewGuid().ToString("N") + ".part");
-            kept = Path.Combine(KeptPortraits, $"{key}.{extension}");
-            await File.WriteAllBytesAsync(part, picture.Bytes, cancellationToken).ConfigureAwait(false);
-            File.Move(part, kept, overwrite: true);
+            return TypedResults.Problem(title: "No picture", detail: $"The artist's picture could not be fetched: {refused}.", statusCode: StatusCodes.Status502BadGateway);
         }
 
         return TypedResults.File(
             await File.ReadAllBytesAsync(kept, cancellationToken).ConfigureAwait(false),
             FilePreview.Of(kept).MediaType,
             entityTag: new EntityTagHeaderValue($"\"{key[..16]}\""));
+    }
+
+    /// <summary>
+    /// A radio station's logo, the one its file's <c>image</c> names, as a PNG
+    /// no larger than the <c>size</c> asked for.
+    /// </summary>
+    /// <remarks>
+    /// <b>Fonoteca serves it, so a client never contacts the station's site</b>
+    /// (the owner's choice, 2026-10-23), which a browser could not read anyway:
+    /// most send no CORS headers. Fetched through the station home pages'
+    /// client, which connects to nothing but the public internet, since the
+    /// address is anybody's, and kept as the artist pictures are, under its
+    /// address: a new logo in the file is a new address. Any image type is
+    /// taken, a site's <c>favicon.ico</c> included, because no byte of it goes
+    /// out as fetched: ffmpeg makes the PNG that does, which also keeps the
+    /// transparency a scaled JPEG would paint black.
+    /// </remarks>
+    private static async Task<IResult> StationLogoAsync(
+        HttpContext http,
+        string? id,
+        PlaylistFiles files,
+        FfmpegCoverScaler scaler,
+        IHttpClientFactory clients,
+        CancellationToken cancellationToken)
+    {
+        if (StationPath(id) is not { } path
+            || await files.ReadAsync(path, cancellationToken).ConfigureAwait(false) is not { } file
+            || RadioStationFile.Read(file.Text, path)?.ImageUrl is not { } url)
+        {
+            return SubsonicResult.Error(70, "No such cover art.");
+        }
+
+        var (kept, key, refused) = await KeepAsync(
+                KeptLogos,
+                url,
+                () => TagWriteService.DownloadPictureAsync(
+                    clients.CreateClient(StationHomepages.HttpClientName),
+                    url,
+                    mediaType => mediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true,
+                    cancellationToken),
+                _ => "logo",
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (kept is null)
+        {
+            return TypedResults.Problem(title: "No picture", detail: $"The station's logo could not be fetched: {refused}.", statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        var size = int.TryParse(Text(http, "size"), NumberStyles.None, CultureInfo.InvariantCulture, out var asked) ? asked : 0;
+
+        var png = await scaler
+            .PngAsync(await File.ReadAllBytesAsync(kept, cancellationToken).ConfigureAwait(false), size, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Kept no longer, so a site that fixes the picture behind the address is asked again.
+        if (png is null) File.Delete(kept);
+
+        return png is null
+            ? TypedResults.Problem(title: "No picture", detail: "The station's logo is not a picture ffmpeg can read.", statusCode: StatusCodes.Status502BadGateway)
+            : TypedResults.File(png, "image/png", entityTag: new EntityTagHeaderValue($"\"{key[..16]}\""));
+    }
+
+    /// <summary>
+    /// The picture at this address as a file in <paramref name="folder"/>,
+    /// fetched once and kept under its address, or why it could not be.
+    /// </summary>
+    /// <remarks>
+    /// A refusal or an outage is not kept, so the next view asks again.
+    /// <paramref name="extensionFor"/> names the kept file from the media type
+    /// the picture came with, and refuses it by answering null.
+    /// </remarks>
+    private static async Task<(string? Kept, string Key, string? Refused)> KeepAsync(
+        string folder,
+        string url,
+        Func<Task<(TagWriteService.FetchedImage? Picture, string? Refused)>> download,
+        Func<string?, string?> extensionFor,
+        CancellationToken cancellationToken)
+    {
+        var key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
+
+        var kept = Directory.Exists(folder)
+            ? Directory.EnumerateFiles(folder, key + ".*").FirstOrDefault()
+            : null;
+
+        if (kept is not null) return (kept, key, null);
+
+        TagWriteService.FetchedImage? picture;
+        string? refused;
+
+        try
+        {
+            (picture, refused) = await download().ConfigureAwait(false);
+        }
+        catch (Exception cause) when (cause is HttpRequestException
+            || (cause is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            (picture, refused) = (null, cause.Message);
+        }
+
+        if (picture is null || extensionFor(picture.MediaType) is not { } extension)
+        {
+            return (null, key, refused ?? "no image type");
+        }
+
+        // Written aside and moved, so a concurrent request never reads half.
+        Directory.CreateDirectory(folder);
+        var part = Path.Combine(folder, Guid.NewGuid().ToString("N") + ".part");
+        kept = Path.Combine(folder, $"{key}.{extension}");
+        await File.WriteAllBytesAsync(part, picture.Bytes, cancellationToken).ConfigureAwait(false);
+        File.Move(part, kept, overwrite: true);
+
+        return (kept, key, null);
     }
 
     /// <summary>

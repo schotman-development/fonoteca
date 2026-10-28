@@ -109,6 +109,28 @@ public sealed class FfmpegCoverScaler(
             .ConfigureAwait(false);
     }
 
+    /// <returns>
+    /// The picture as a PNG at most <paramref name="size"/> pixels on its
+    /// longest side — its own size where that is smaller or
+    /// <paramref name="size"/> is 0 — or null when ffmpeg could not read it.
+    /// For a logo, whose transparency a JPEG would paint black, and whose
+    /// format may be one no client should be handed as it is.
+    /// </returns>
+    public async Task<byte[]?> PngAsync(byte[] picture, int size, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(picture);
+        ArgumentOutOfRangeException.ThrowIfNegative(size);
+
+        return await MakeAsync(
+                picture,
+                size,
+                ".png",
+                _timeout,
+                longest => ["-vf", Fit(size == 0 ? longest : Math.Min(size, longest)), "-frames:v", "1"],
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// The kept copy of <paramref name="input"/> for this size, made by ffmpeg
     /// with the output arguments <paramref name="arguments"/> gives for the

@@ -832,7 +832,11 @@ small icons and a `/favicon.ico` it answers for. An update keeps the file's
 own logo while the stream is unchanged. **The home page is the one address
 nobody vetted** — anyone can enter one on radio-browser — so its client
 connects only to public addresses (`StationHomepages.ConnectAsync`), no proxy,
-redirects included. Fonoteca never plays a stream or fetches a logo.
+redirects included. `getCoverArt` serves the logo under the station's id,
+fetched once through that client and kept by address, and always as a PNG
+ffmpeg made (`FfmpegCoverScaler.PngAsync`): a logo is often transparent,
+which a scaled JPEG paints black, and often a `favicon.ico`, which no client
+is handed as fetched. Fonoteca never plays a stream.
 
 ## Acquisition
 

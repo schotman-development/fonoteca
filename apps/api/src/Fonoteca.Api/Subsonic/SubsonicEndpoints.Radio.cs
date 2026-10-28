@@ -154,6 +154,9 @@ public static partial class SubsonicEndpoints
         writer.Attr("name", entry.Station.Name);
         writer.Attr("streamUrl", entry.Station.StreamUrl);
         writer.Attr("homePageUrl", entry.Station.HomePageUrl);
+
+        // The logo the file names, served by getCoverArt under the station's own id.
+        if (entry.Station.ImageUrl is not null) writer.Attr("coverArt", entry.Id);
     }
 
     private static RadioStation StationSent(HttpContext http) =>

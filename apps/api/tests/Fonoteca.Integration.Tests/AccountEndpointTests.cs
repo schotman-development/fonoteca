@@ -8,6 +8,8 @@ using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
+using Fonoteca.Ingest;
+using Fonoteca.Providers.Radio;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
@@ -787,6 +789,142 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.Single(Directory.EnumerateFiles(_root + "-trash", "Renamed.xspf", SearchOption.AllDirectories));
         Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
         Assert.Equal(["By hand"], Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}")).Select(each => each.GetProperty("name").GetString()));
+    }
+
+    /// <summary>
+    /// A station whose file names a logo carries a cover art id, and
+    /// getCoverArt serves the logo itself: fetched once, as a PNG whatever the
+    /// site sent, sized, transparent where it was. A new logo in the file is a
+    /// new fetch, a failed one keeps nothing, and a station with none carries
+    /// no id.
+    /// </summary>
+    [Fact]
+    public async Task AStationsLogoComesFromFonotecaAsAPngFetchedOnce()
+    {
+        var run = Guid.NewGuid().ToString("N");
+        var icon = $"https://station.example/{run}/favicon.ico";
+        var moved = $"https://station.example/{run}/logo.png";
+        var gone = $"https://station.example/{run}/gone.png";
+        var page = $"https://station.example/{run}/page.png";
+        var broken = $"https://station.example/{run}/broken.png";
+
+        var made = Path.Combine(_root, "made.ico");
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red@0.5:s=128x64,format=rgba", "-frames:v", "1", "-c:v", "png", "-f", "ico", made);
+        var bytes = await File.ReadAllBytesAsync(made, Token);
+        File.Delete(made);
+
+        var site = new StubHttpHandler(request => request.Uri.AbsoluteUri == gone ? new HttpResponseMessage(HttpStatusCode.NotFound)
+            : request.Uri.AbsoluteUri == page ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html></html>", Encoding.UTF8, "text/html") }
+            : request.Uri.AbsoluteUri == broken ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) { Headers = { ContentType = new("image/png") } } }
+            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) { Headers = { ContentType = new("image/vnd.microsoft.icon") } } });
+
+        await using var factory = _factory!.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddHttpClient(StationHomepages.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => site)));
+
+        var scaler = factory.Services.GetRequiredService<FfmpegCoverScaler>();
+        var kept = Path.Combine(Path.GetTempPath(), "fonoteca-logos");
+        using var me = (await factory.SetUpAsync("me", Password, Token)).Client;
+        using var client = factory.CreateClient();
+        var asMe = $"u=me&p={Password}";
+
+        void Station(string name, string? logo) => WriteFile($"Radio/{name}.xspf", $"""
+            <playlist version="1" xmlns="http://xspf.org/ns/0/">
+              <trackList><track><location>https://example.org/{name}</location><title>{name}</title>{(logo is null ? "" : $"<image>{logo}</image>")}</track></trackList>
+            </playlist>
+            """);
+
+        async Task<(HttpStatusCode Status, string? Type, byte[] Body)> LogoAsync(string id, int? size)
+        {
+            using var response = await client.GetAsync(
+                new Uri($"/rest/getCoverArt.view?{asMe}&v=1.16.1&c=test&f=json&id={Uri.EscapeDataString(id)}{(size is { } asked ? $"&size={asked}" : "")}", UriKind.Relative),
+                Token);
+
+            return (response.StatusCode, response.Content.Headers.ContentType?.MediaType, await response.Content.ReadAsByteArrayAsync(Token));
+        }
+
+        string Shape(byte[] png)
+        {
+            var file = Path.Combine(_root, "shape.png");
+            File.WriteAllBytes(file, png);
+            var shape = Tool("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,pix_fmt", "-of", "csv=p=0", file).Trim();
+            File.Delete(file);
+            return shape;
+        }
+
+        try
+        {
+            Station("Logo", icon);
+            Station("Plain", null);
+
+            var stations = Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"));
+            Assert.Equal("ir-Logo.xspf", stations[0].GetProperty("coverArt").GetString());
+            Assert.False(stations[1].TryGetProperty("coverArt", out _));
+
+            var small = await LogoAsync("ir-Logo.xspf", 32);
+            Assert.Equal((HttpStatusCode.OK, "image/png"), (small.Status, small.Type));
+            Assert.Equal("32,16,rgba", Shape(small.Body));
+            Assert.Equal(small.Body, (await LogoAsync("ir-Logo.xspf", 32)).Body);
+            Assert.Equal("128,64,rgba", Shape((await LogoAsync("ir-Logo.xspf", null)).Body));
+            Assert.Equal("128,64,rgba", Shape((await LogoAsync("ir-Logo.xspf", 1000)).Body));
+            Assert.Equal(icon, Assert.Single(site.Requests).Uri.AbsoluteUri);
+
+            Station("Logo", moved);
+            Assert.Equal(HttpStatusCode.OK, (await LogoAsync("ir-Logo.xspf", 32)).Status);
+            Assert.Equal(moved, site.Requests[^1].Uri.AbsoluteUri);
+
+            Station("Logo", gone);
+            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
+            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
+            Assert.Equal(4, site.Requests.Count);
+
+            // A page where a picture should be is no logo; a picture ffmpeg cannot read is not kept, so it is asked again.
+            Station("Logo", page);
+            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
+            Station("Logo", broken);
+            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
+            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
+            Assert.Equal(7, site.Requests.Count);
+
+            WriteFile("Secret.xspf", "<playlist/>");
+
+            foreach (var none in (string[])["ir-Plain.xspf", "ir-Missing.xspf", "ir-../Secret.xspf", "ir-..\\Secret.xspf", "ir-.hidden.xspf"])
+            {
+                var answer = await LogoAsync(none, 32);
+                Assert.Equal(70, ErrorCode(JsonDocument.Parse(answer.Body).RootElement.GetProperty("subsonic-response")));
+            }
+
+            Assert.Equal(7, site.Requests.Count);
+        }
+        finally
+        {
+            foreach (var url in (string[])[icon, moved, gone, page, broken])
+            {
+                var key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
+                if (Directory.Exists(kept)) foreach (var file in Directory.EnumerateFiles(kept, key + ".*")) File.Delete(file);
+            }
+
+            foreach (var size in (int[])[0, 32, 1000])
+            {
+                foreach (var kind in (string[])[".png", ".as-is"]) File.Delete(Path.Combine(scaler.Directory, FfmpegCoverScaler.KeyOf(bytes, size) + kind));
+            }
+        }
+    }
+
+    private static string Tool(string name, params string[] arguments)
+    {
+        using var tool = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(name, arguments)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        })!;
+
+        var output = tool.StandardOutput.ReadToEnd();
+        var error = tool.StandardError.ReadToEnd();
+        tool.WaitForExit();
+
+        Assert.True(tool.ExitCode == 0, $"{name} failed: {error}");
+
+        return output;
     }
 
     private static List<JsonElement> Stations(JsonElement response) =>

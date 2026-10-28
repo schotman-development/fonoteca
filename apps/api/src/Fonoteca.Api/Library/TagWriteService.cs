@@ -2140,18 +2140,30 @@ public sealed partial class TagWriteService(
     /// Shared with Subsonic's <c>getCoverArt</c>, which serves the same
     /// pictures, so one allowlist, cap and timeout hold for both.
     /// </remarks>
-    internal static async Task<(FetchedImage? Picture, string? Refused)> DownloadPortraitAsync(
+    internal static Task<(FetchedImage? Picture, string? Refused)> DownloadPortraitAsync(
         IHttpClientFactory clients,
         string url,
+        CancellationToken cancellationToken) =>
+        // The allowlist the upload path holds every cover to, for the same
+        // reason: no text/html and no image/svg+xml, both documents that run
+        // script, and these bytes go into the library and out to clients.
+        DownloadPictureAsync(clients.CreateClient(WikidataOptions.PicturesClientName), url, FilePreview.IsSafeImageMediaType, cancellationToken);
+
+    /// <summary>A picture fetched through this client, of a media type <paramref name="accepts"/> takes.</summary>
+    internal static async Task<(FetchedImage? Picture, string? Refused)> DownloadPictureAsync(
+        HttpClient http,
+        string url,
+        Func<string?, bool> accepts,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(accepts);
+
         if (!Uri.TryCreate(url, UriKind.Absolute, out var address)
             || (address.Scheme != Uri.UriSchemeHttps && address.Scheme != Uri.UriSchemeHttp))
         {
             return (null, "the stored portrait is not an http address");
         }
-
-        var http = clients.CreateClient(WikidataOptions.PicturesClientName);
 
         http.Timeout = PortraitTimeout;
         http.MaxResponseContentBufferSize = MaxPortraitBytes;
@@ -2165,10 +2177,7 @@ public sealed partial class TagWriteService(
 
         var mediaType = response.Content.Headers.ContentType?.MediaType;
 
-        // The allowlist the upload path holds every cover to, for the same
-        // reason: no text/html and no image/svg+xml, both documents that run
-        // script, and these bytes go into the library and out to clients.
-        if (!FilePreview.IsSafeImageMediaType(mediaType))
+        if (!accepts(mediaType))
         {
             return (null, $"it answered with {mediaType ?? "no type"}");
         }
