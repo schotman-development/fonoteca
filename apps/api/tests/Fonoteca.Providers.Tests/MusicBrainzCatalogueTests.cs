@@ -316,6 +316,7 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
         Assert.Equal("Before the Dawn Heals Us", release.Title);
         Assert.Equal("724356386228", release.Barcode);
         Assert.Equal("Album", release.PrimaryType);
+        Assert.Equal(2005, release.ReleaseGroupFirstYear);
 
         var label = Assert.Single(release.Labels);
         Assert.Equal("Gooom", label.Name);

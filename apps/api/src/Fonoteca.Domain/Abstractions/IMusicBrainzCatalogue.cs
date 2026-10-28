@@ -827,7 +827,10 @@ public sealed record MusicBrainzRelease(
     string? Asin = null,
 
     /// <summary>The script its titles are written in, ISO 15924: <c>Latn</c>, <c>Jpan</c>.</summary>
-    string? Script = null);
+    string? Script = null,
+
+    /// <summary>The year the album first came out, on any edition: 2008 for a 2018 reissue.</summary>
+    int? ReleaseGroupFirstYear = null);
 
 /// <summary>A label and the catalogue number it gave this release.</summary>
 public sealed record MusicBrainzLabel(Mbid? Id, string? Name, string? CatalogNumber);

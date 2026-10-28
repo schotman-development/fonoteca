@@ -715,7 +715,11 @@ an ETag — every tile used to hot-link the archive's front-250. Only an image t
 archive lists against *this* release may be chosen, and an upload is held to the
 same raster allowlist with SVG refused. Enrichment asks for every sleeve the
 tag write would draw from the same way (the cover stage), so an album nobody
-opened still gets its `cover.jpg`.
+opened still gets its `cover.jpg`. The release stage writes each filed
+release's billing again, minting a billed artist the catalogue lacks for the
+artist stage to describe, and the album's first-release year: a download is
+filed before enrichment has met its artist, and with no album artist its
+folder is never named.
 
 - **Two sources, in order, and the order is the safety argument.** The archive
   is keyed on the release mbid and cannot be wrong about which record it shows.

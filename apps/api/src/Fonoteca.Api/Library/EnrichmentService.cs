@@ -3329,10 +3329,13 @@ public sealed class EnrichmentService(
         }
     }
 
-    /// <summary>One filed release asked for its ASIN, script and track ids, stamped whether or not MusicBrainz still knows it.</summary>
+    /// <summary>One filed release asked for its ASIN, script, track ids and billing, stamped whether or not MusicBrainz still knows it.</summary>
     /// <remarks>
-    /// Onto the track rows already there, slot by slot, and nothing else: the
-    /// track list itself is the attribution pass's to rewrite.
+    /// Onto the track rows already there, slot by slot: the track list itself
+    /// is the attribution pass's to rewrite. The billing line is written again
+    /// with its artists minted, and the album's first-release year where it has
+    /// none — a download is filed before enrichment has met its artist, and
+    /// without either its folder is never named.
     /// </remarks>
     private async Task DescribeReleaseAsync(
         PendingDescription<ReleaseId> item,
@@ -3385,6 +3388,16 @@ public sealed class EnrichmentService(
                     track.MediumTitle = ReleaseAttributionService.ReleaseWriter.Clamp(disc?.Title, 1000);
                     track.MediumFormat = ReleaseAttributionService.ReleaseWriter.Clamp(disc?.Format, 100) ?? track.MediumFormat;
                 }
+
+                if (row.ReleaseGroupId is { } groupId
+                    && await db.ReleaseGroups.FirstOrDefaultAsync(g => g.Id == groupId, cancellationToken).ConfigureAwait(false) is { } group)
+                {
+                    group.FirstReleaseYear ??= release.ReleaseGroupFirstYear;
+                }
+
+                await new ReleaseAttributionService.ReleaseWriter(db)
+                    .ApplyCreditsAsync(row, release, cancellationToken, mint: true)
+                    .ConfigureAwait(false);
             }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

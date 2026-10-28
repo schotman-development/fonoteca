@@ -107,6 +107,12 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(2007, release.ReleasedYear);
         Assert.Null(release.ReleasedMonth);
 
+        // The album's first year, which no pressing's own date is.
+        Assert.Equal(1999, (await db.ReleaseGroups.SingleAsync(g => g.Mbid == GroupId, Token)).FirstReleaseYear);
+
+        // A billed artist the catalogue has never met is not minted here; enrichment does that.
+        Assert.Empty(await db.Artists.ToListAsync(Token));
+
         var files = await db.MediaFiles.OrderBy(f => f.Path).ToListAsync(Token);
 
         Assert.All(files, file =>
@@ -1402,13 +1408,14 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
             ReleaseGroupTitle: "Album",
             PrimaryType: "Album",
             SecondaryTypes: [],
-            Credits: [],
+            Credits: [new MusicBrainzCredit(Mb("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), "Nobody Here Yet", null, null, null, null)],
             Tracks:
             [
                 Track(1, Song(1), 180),
                 Track(2, Song(2), 200),
                 Track(3, Song(3), 220),
-            ]);
+            ],
+            ReleaseGroupFirstYear: 1999);
 
     /// <summary>A second album, sharing nothing with the first but a box set.</summary>
     private static MusicBrainzRelease SecondAlbum() =>

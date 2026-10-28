@@ -313,7 +313,8 @@ internal static class MusicBrainzMapper
             Tracks: tracks,
             Media: media,
             Asin: NullIfBlank(source.Asin),
-            Script: NullIfBlank(source.TextRepresentation?.Script));
+            Script: NullIfBlank(source.TextRepresentation?.Script),
+            ReleaseGroupFirstYear: ToYear(group?.FirstReleaseDate));
     }
 
     /// <summary>A browse result: a release, counted but not listed.</summary>

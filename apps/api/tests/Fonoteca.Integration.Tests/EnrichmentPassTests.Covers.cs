@@ -7,12 +7,15 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Fonoteca.Integration.Tests;
 
 /// <summary>
-/// The stage that asks for every sleeve the tag write would draw from.
+/// The stage that asks for every sleeve the tag write would draw from, and the
+/// release stage's billing line and first-release year, without which a
+/// download's folder is never named.
 /// </summary>
 public sealed partial class EnrichmentPassTests
 {
     private static readonly Mbid OfficialMbid = Mb("a0000000-0000-4000-8000-000000000021");
     private static readonly Mbid BootlegMbid = Mb("a0000000-0000-4000-8000-000000000022");
+    private static readonly Mbid TrioMbid = Mb("a0000000-0000-4000-8000-000000000031");
 
     /// <summary>A filed release's sleeve is fetched from the archive and stored, and it leaves the count.</summary>
     [Fact]
@@ -223,6 +226,44 @@ public sealed partial class EnrichmentPassTests
     }
 
     /// <summary>
+    /// A filed release billed to an artist the catalogue has never met gets
+    /// that artist minted and billed, and its album the first-release year
+    /// MusicBrainz states, where it had none.
+    /// </summary>
+    [Fact]
+    public async Task AFiledReleaseIsBilledToItsArtistAndItsAlbumGetsItsFirstYear()
+    {
+        var (groupId, releaseId) = await SeedFiledReleaseAsync(PressingMbid, "A/One/01.flac", askedAgo: null);
+
+        var answer = Pressing() with
+        {
+            Credits = [new MusicBrainzCredit(TrioMbid, "Avishai Cohen Trio", null, null, null, "Group")],
+            ReleaseGroupFirstYear = 2008,
+        };
+
+        await EnrichAsync(Build(Answering(Recording), ReleasesAnswering(answer)));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var artist = await db.Artists.AsNoTracking().SingleAsync(a => a.Mbid == TrioMbid, Token);
+        var credit = await db.ArtistCredits.AsNoTracking().SingleAsync(c => c.ReleaseId == releaseId, Token);
+
+        Assert.Equal(artist.Id, credit.ArtistId);
+        Assert.Equal(2008, (await db.ReleaseGroups.AsNoTracking().SingleAsync(g => g.Id == groupId, Token)).FirstReleaseYear);
+    }
+
+    /// <summary>An album's first-release year already known is kept.</summary>
+    [Fact]
+    public async Task AnAlbumsKnownFirstYearIsKept()
+    {
+        var (groupId, _) = await SeedFiledReleaseAsync(PressingMbid, "A/One/01.flac", askedAgo: null, firstYear: 1999);
+
+        await EnrichAsync(Build(Answering(Recording), ReleasesAnswering(Pressing() with { ReleaseGroupFirstYear = 2008 })));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(1999, (await db.ReleaseGroups.AsNoTracking().SingleAsync(g => g.Id == groupId, Token)).FirstReleaseYear);
+    }
+
+    /// <summary>
     /// A release in an album of its own, with a file filed under it at
     /// <paramref name="path"/> where there is one, and a sleeve row stored
     /// <paramref name="askedAgo"/> where given: "none found", or
@@ -232,12 +273,13 @@ public sealed partial class EnrichmentPassTests
         Mbid mbid,
         string? path,
         TimeSpan? askedAgo,
+        int? firstYear = null,
         byte[]? bytes = null,
         ReleaseId? id = null)
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
-        var group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "One" };
+        var group = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "One", FirstReleaseYear = firstYear };
         var release = new Release { Id = id ?? ReleaseId.New(), Title = "One", Mbid = mbid, ReleaseGroupId = group.Id };
 
         db.ReleaseGroups.Add(group);

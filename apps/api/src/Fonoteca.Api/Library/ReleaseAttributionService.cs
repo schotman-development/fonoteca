@@ -1379,7 +1379,8 @@ public sealed class ReleaseAttributionService(
                         source.ReleaseGroupTitle ?? source.Title,
                         cancellationToken,
                         source.PrimaryType,
-                        source.SecondaryTypes)
+                        source.SecondaryTypes,
+                        source.ReleaseGroupFirstYear)
                     .ConfigureAwait(false)
                 : null;
 
@@ -1464,10 +1465,10 @@ public sealed class ReleaseAttributionService(
             // names it properly must be able to fill the rest in.
             group.PrimaryType ??= primaryType;
 
-            // Coalesced for the same reason, and it is the discography browse
-            // that finally fills it: the column has been in the schema since the
-            // first migration with nothing writing it, because a release tells
-            // you when that pressing came out and not when the record did.
+            // Coalesced for the same reason. A release's own date is when that
+            // pressing came out and not when the record did, so this is the
+            // group's first-release date: the discography browse's, or the one a
+            // release lookup carries for its group.
             group.FirstReleaseYear ??= firstReleaseYear;
 
             if (secondaryTypes is { Count: > 0 })
@@ -1508,11 +1509,17 @@ public sealed class ReleaseAttributionService(
         /// artists, this pass does not, and minting one here from a release credit
         /// would create a row with a name and nothing else — no sort name, no
         /// type — that the artist list would then show as a real artist.
+        ///
+        /// <b>Except where enrichment calls it (<paramref name="mint"/>)</b>, for
+        /// a release filed before its billed artist existed: a download, filed
+        /// at once, or an album billed to a trio no track credits. There the
+        /// artist stage runs after it in the same pass and describes the row.
         /// </remarks>
-        private async Task ApplyCreditsAsync(
+        internal async Task ApplyCreditsAsync(
             Release release,
             MusicBrainzRelease source,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool mint = false)
         {
             var stale = await db.ArtistCredits
                 .Where(c => c.ReleaseId == release.Id)
@@ -1522,14 +1529,24 @@ public sealed class ReleaseAttributionService(
             db.ArtistCredits.RemoveRange(stale);
 
             var position = 0;
+            var minted = new Dictionary<Mbid, Artist>();
 
             foreach (var credit in source.Credits)
             {
                 if (credit.ArtistId is not { } mbid) continue;
 
-                var artist = await db.Artists
+                // The map before the query, which cannot see a row this loop added.
+                var artist = minted.GetValueOrDefault(mbid) ?? await db.Artists
                     .FirstOrDefaultAsync(a => a.Mbid == mbid, cancellationToken)
                     .ConfigureAwait(false);
+
+                if (artist is null && mint)
+                {
+                    artist = new Artist { Id = ArtistId.New(), Name = credit.Name, Mbid = mbid };
+
+                    db.Artists.Add(artist);
+                    minted[mbid] = artist;
+                }
 
                 if (artist is null) continue;
 
