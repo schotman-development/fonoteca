@@ -27,5 +27,7 @@ A survivor is a test gap until shown otherwise. The usual causes:
 - **The shared class database hides it.** One album in the database makes "starred albums" and "all albums" the same list. Assert the empty case after an unstar or delete, not only the full one.
 - **A check nothing exercises.** An id that exists against one that doesn't: add the not-found request.
 - **A boundary the fixtures never reach.** Add the cases one either side of it.
+- **An order the fixtures leave to chance.** `Guid.CreateVersion7()` is not ordered within one millisecond, so rows seeded back to back can sort either way, and a mutant that depends on order dies only sometimes. Give the seeded rows explicit ascending ids (`01900000-0000-7000-8000-00000000000n`).
+- **The wrong class ran.** Classes are not named for the screen they test: the album page's tests are in `CatalogueEndpointTests`, not `AlbumEndpointTests`. Grep the tests for the route before you pick the args.
 
 Close the gaps test-only, then rerun just the survivors plus a clean run: copy the script, filter `M` down to those names.
