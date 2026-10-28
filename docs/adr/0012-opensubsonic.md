@@ -457,7 +457,13 @@ spells them and cut at five. An album lists its own, or the commonest among its
 tracks. `genre` carries the first and OpenSubsonic's `genres` the list;
 `getGenres`, `getSongsByGenre` and `getAlbumList2?type=byGenre` browse them.
 Added with the enrichment stages that fill `ReleaseGroups.Genres` and
-`Recordings.Genres`; before those, there was no genre to serve.
+`Recordings.Genres`; before those, there was no genre to serve. *Amended
+2026-10-23:* under Fonoteca's own `fonotecaGenres` extension, each
+`getGenres` entry names the genres it sits under in Fonoteca's tree
+(`Genres.TopsOf`) as `parents` — none for a top or for "Other", both tops for
+a fusion — so a client can draw the tree the albums are filed by. JSON gives
+an array; XML one attribute joined by ", ", since a genre's name is its
+element's text and a child element inside it breaks a pull parser reading it.
 
 **A song's `bitDepth` is the one its audio uses**, where the Analyse pass found
 a lossless file padded beyond it, and its `replayGain` carries the values the tag

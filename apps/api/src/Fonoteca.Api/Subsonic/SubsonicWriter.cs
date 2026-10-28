@@ -59,6 +59,14 @@ internal interface ISubsonicWriter
     void Strings(string name, IEnumerable<string> values);
 
     /// <summary>
+    /// A repeated text on an element whose own text is its name: an array in
+    /// JSON, one attribute joined by ", " in XML, where a child element would
+    /// put markup inside the name and a pull parser reading it refuses. An
+    /// attribute, so before any child.
+    /// </summary>
+    void StringsAttr(string name, IEnumerable<string> values);
+
+    /// <summary>
     /// One text: a property in JSON, an element holding it in XML — how an
     /// artist's biography is sent. After the attributes, like a child.
     /// </summary>
@@ -369,6 +377,8 @@ internal sealed class SubsonicResult : IResult
             json.WriteEndArray();
         }
 
+        public void StringsAttr(string name, IEnumerable<string> values) => Strings(name, values);
+
         public void Text(string name, string? value)
         {
             if (value is not null) json.WriteString(name, value);
@@ -456,6 +466,9 @@ internal sealed class SubsonicResult : IResult
                 xml.WriteElementString(name, value);
             }
         }
+
+        public void StringsAttr(string name, IEnumerable<string> values) =>
+            xml.WriteAttributeString(name, string.Join(", ", values));
 
         public void Text(string name, string? value)
         {

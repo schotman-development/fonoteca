@@ -284,12 +284,16 @@ public static partial class SubsonicEndpoints
     }
 
     /// <summary>
-    /// Every genre a file here carries, with how many songs and albums carry it.
+    /// Every genre a file here carries, with how many songs and albums carry it
+    /// and the genres it sits under.
     /// </summary>
     /// <remarks>
     /// Counted by the rule the tag write uses (<see cref="FileGenres"/>), over a
     /// projection of two short columns per file rather than the whole song —
-    /// the songs are the many.
+    /// the songs are the many. <c>parents</c> is <see cref="Genres.TopsOf"/>,
+    /// Fonoteca's <c>fonotecaGenres</c>: left out for a top and for
+    /// <see cref="Genres.Other"/>, both tops for a fusion. A genre carried is
+    /// carried with its tops, so each parent is in the list too.
     /// </remarks>
     private static async Task<IResult> GetGenres(
         FonotecaDbContext db,
@@ -328,6 +332,9 @@ public static partial class SubsonicEndpoints
             {
                 writer.Attr("songCount", songCounts.GetValueOrDefault(genre));
                 writer.Attr("albumCount", albumCounts.GetValueOrDefault(genre));
+
+                if (Genres.TopsOf(genre) is { Count: > 0 } parents) writer.StringsAttr("parents", parents);
+
                 writer.Value(genre);
             }));
     }

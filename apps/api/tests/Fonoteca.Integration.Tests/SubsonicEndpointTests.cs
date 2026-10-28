@@ -1461,7 +1461,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
     }
 
     /// <summary>
@@ -2383,7 +2383,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             // A second album, under another genre, with two songs: what the
             // filters have to leave out, and a song count that differs from
             // the album count.
-            var rock = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Loud", Genres = "rock" };
+            var rock = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Loud", Genres = "rock, blues rock" };
             db.ReleaseGroups.Add(rock);
 
             foreach (var n in new[] { 1, 2 })
@@ -2427,6 +2427,17 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal(2, loud.GetProperty("songCount").GetInt32());
         Assert.Equal(1, loud.GetProperty("albumCount").GetInt32());
 
+        // A subgenre names its top, a fusion both, and a top none.
+        string?[] Parents(string name) =>
+            genres.Single(genre => genre.GetProperty("value").GetString() == name).TryGetProperty("parents", out var parents)
+                ? [.. parents.EnumerateArray().Select(parent => parent.GetString())]
+                : [];
+
+        Assert.Equal(["Jazz"], Parents("Cool Jazz"));
+        Assert.Equal(["Blues", "Rock"], Parents("Blues Rock"));
+        Assert.Empty(Parents("Rock"));
+        Assert.Empty(Parents("Blues"));
+
         // The album's genres stand for the file: its recording's "pop" is not one.
         Assert.DoesNotContain(genres, genre => genre.GetProperty("value").GetString() == "Pop");
 
@@ -2460,6 +2471,10 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         XNamespace ns = "http://subsonic.org/restapi";
 
         Assert.Contains(xml.Descendants(ns + "genre"), genre => genre.Value == "Cool Jazz");
+        Assert.Equal(
+            "Blues, Rock",
+            xml.Descendants(ns + "genre").Single(genre => genre.Value == "Blues Rock").Attribute("parents")?.Value);
+        Assert.Null(xml.Descendants(ns + "genre").Single(genre => genre.Value == "Rock").Attribute("parents"));
     }
 
     /// <summary>
