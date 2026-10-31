@@ -209,7 +209,11 @@ public static partial class SubsonicEndpoints
                     piece.SelectMany(recording => recording.Files.Select(file => file.Genres).Prepend(recording.Genres)))
                 || ClassicalWorks.ByItsAlbums(
                     works[piece.Key].Type,
-                    borrowed.Of(piece.SelectMany(recording => recording.Files.Select(file => file.ReleaseGroupId)))))
+                    borrowed.Of(piece.SelectMany(recording => recording.Files.Select(file => file.ReleaseGroupId))))
+                || ClassicalWorks.ByItsForm(
+                    works[piece.Key].Type,
+                    piece.SelectMany(recording => recording.Files.Select(file => file.Genres).Prepend(recording.Genres))
+                        .Concat(borrowed.Of(piece.SelectMany(recording => recording.Files.Select(file => file.ReleaseGroupId))))))
             .ToList();
 
         var wanted = classical

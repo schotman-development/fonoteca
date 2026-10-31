@@ -304,7 +304,10 @@ lists each song once, as the copy a playlist plays
 gives the truest result"): an album nobody voted on counts as classical by
 the genres its tracks carry, as its page shows (`FileGenres.Voted`), but only
 for a piece of a form — not a song, a score or an untyped piece, or a
-film-music concert comes in whole (`ClassicalWorks.ByItsAlbums`); a top
+film-music concert comes in whole (`ClassicalWorks.ByItsAlbums`), and where
+no genre is stated at all, on the piece's recordings, its albums or their
+tracks, a piece of a form counts alone (`ClassicalWorks.ByItsForm`, amended
+2026-10-31: Brahms's symphonies were no pieces); a top
 that only gathers pieces — untyped, every part typed, the Ring over four
 operas — is no piece, its parts are (`WorkTree.Cut`), in `getCompositions`
 too; a work in another script is named by its English alias where

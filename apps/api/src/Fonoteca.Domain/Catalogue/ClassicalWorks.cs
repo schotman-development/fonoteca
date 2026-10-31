@@ -51,6 +51,28 @@ public static class ClassicalWorks
         return form is not (null or "Song" or "Soundtrack") && borrowed.Select(FileGenres.Split).Any(Classical);
     }
 
+    /// <summary>Whether a piece is classical by its form alone, where nothing held of it has a genre.</summary>
+    /// <remarks>
+    /// <b>MusicBrainz states no genre at all for 114 of 631 held albums and
+    /// their recordings</b> (measured 2026-10-31) — Brahms's and Beethoven's
+    /// symphonies and the Matthäus-Passion among them — so neither rule above
+    /// can answer there, and a concerto on one was nobody's. A piece typed as
+    /// a form counts there (the owner's choice, 2026-10-31); a musical, an
+    /// audio drama or a poem is a form of something else. <b>Only where no
+    /// genre answers at all</b>: one stated anywhere, its own, its albums' or
+    /// borrowed from their tracks, is evidence and the rules above weigh it,
+    /// so a pop album's concerto stays off.
+    /// </remarks>
+    /// <param name="form">The piece's MusicBrainz type, asked of the whole piece even where only a movement is held.</param>
+    /// <param name="genres">Every genre column of its recordings, their albums, and those albums' borrowed votes.</param>
+    public static bool ByItsForm(string? form, IEnumerable<string?> genres)
+    {
+        ArgumentNullException.ThrowIfNull(genres);
+
+        return form is not (null or "Song" or "Soundtrack" or "Musical" or "Audio drama" or "Poem")
+            && genres.All(genre => FileGenres.Split(genre).Count == 0);
+    }
+
     /// <summary>The era a piece is of: by the year it was begun, else its earliest-born composer at thirty.</summary>
     /// <remarks>
     /// Derived, since MusicBrainz states no period; the bounds and the thirty

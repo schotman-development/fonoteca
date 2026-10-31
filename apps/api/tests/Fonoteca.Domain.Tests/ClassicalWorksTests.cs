@@ -86,4 +86,32 @@ public sealed class ClassicalWorksTests
         Assert.False(ClassicalWorks.ByItsAlbums("Soundtrack", ["classical"]));
         Assert.False(ClassicalWorks.ByItsAlbums("Song", ["classical"]));
     }
+
+    /// <summary>Bruch's concerto on an album MusicBrainz states no genre for, nor for any of its tracks.</summary>
+    [Fact]
+    public void APieceOfAFormIsClassicalWhereNothingHasAGenre()
+    {
+        Assert.True(ClassicalWorks.ByItsForm("Concerto", [null, "", null]));
+        Assert.True(ClassicalWorks.ByItsForm("Symphony", []));
+    }
+
+    /// <summary>A genre anywhere is evidence, and the other two rules weigh it.</summary>
+    [Fact]
+    public void AnyGenreStatedLeavesTheFormToTheOtherRules()
+    {
+        Assert.False(ClassicalWorks.ByItsForm("Concerto", [null, "pop"]));
+        Assert.False(ClassicalWorks.ByItsForm("Symphony", ["classical"]));
+    }
+
+    /// <summary>An untyped piece, and the types that are forms of something other than classical music.</summary>
+    [Fact]
+    public void NoFormOrAnotherArtsFormIsNotClassicalAlone()
+    {
+        Assert.False(ClassicalWorks.ByItsForm(null, [null]));
+
+        foreach (var type in new[] { "Song", "Soundtrack", "Musical", "Audio drama", "Poem" })
+        {
+            Assert.False(ClassicalWorks.ByItsForm(type, [null]), type);
+        }
+    }
 }

@@ -543,7 +543,11 @@ public static partial class CatalogueEndpoints
                     work.SelectMany(performance => performance.Albums.Prepend(performance.Genres)))
                 || ClassicalWorks.ByItsAlbums(
                     forms.GetValueOrDefault(WorkTree.Top(work.Key, parents)),
-                    borrowed.Of(work.SelectMany(performance => performance.On))))
+                    borrowed.Of(work.SelectMany(performance => performance.On)))
+                || ClassicalWorks.ByItsForm(
+                    forms.GetValueOrDefault(WorkTree.Top(work.Key, parents)),
+                    work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))
+                        .Concat(borrowed.Of(work.SelectMany(performance => performance.On)))))
             .Select(work => work.Key)
             .ToHashSet();
 

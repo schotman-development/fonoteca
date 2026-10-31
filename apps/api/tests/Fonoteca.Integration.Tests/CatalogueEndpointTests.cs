@@ -1865,6 +1865,55 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(new[] { _seed.Mozart, _seed.Satie }.Order(), composers!.Items.Select(composer => composer.Id).Order());
     }
 
+    /// <summary>
+    /// A concerto on an album MusicBrainz states no genre for, nor for any of
+    /// its tracks, is classical by its form; one beside a track tagged pop is
+    /// not, nor one on an album tagged pop.
+    /// </summary>
+    [Fact]
+    public async Task APieceOfAFormWhereNothingHasAGenreIsClassical()
+    {
+        using var client = _factory!.CreateClient();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var bonamassa = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Bonamassa), Token);
+            var hart = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Hart), Token);
+            var solti = await db.Artists.SingleAsync(a => a.Id == new ArtistId(_seed.Solti), Token);
+
+            foreach (var (writer, neighbour, tagged) in new[] { (bonamassa, (string?)null, (string?)null), (hart, "pop", null), (solti, null, "pop") })
+            {
+                var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = $"{writer.Name} plays", Genres = tagged };
+                var concerto = new Work { Id = WorkId.New(), Title = $"Concerto by {writer.Name}", Type = "Concerto" };
+                db.ReleaseGroups.Add(album);
+                db.Works.Add(concerto);
+
+                foreach (var (title, piece, genres) in new[] { ($"{concerto.Title}: I. Allegro", (WorkId?)concerto.Id, (string?)null), ($"{writer.Name} encore", null, neighbour) })
+                {
+                    var work = new Work { Id = WorkId.New(), Title = title, ParentId = piece };
+                    var recording = new Recording { Id = RecordingId.New(), Title = title, WorkId = work.Id, Genres = genres };
+                    var file = File($"{album.Title}/{title}.flac", recording);
+                    file.ReleaseGroupId = album.Id;
+
+                    db.Works.Add(work);
+                    db.Recordings.Add(recording);
+                    db.MediaFiles.Add(file);
+
+                    if (piece is not null) db.Contributions.Add(Contributed(writer, "composer", work));
+                }
+            }
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var composers = (await client.GetFromJsonAsync<ArtistListResponse>(
+            new Uri("/api/catalogue/composers", UriKind.Relative), Token))!.Items.Select(composer => composer.Id).ToList();
+
+        Assert.Contains(_seed.Bonamassa, composers);
+        Assert.DoesNotContain(_seed.Hart, composers);
+        Assert.DoesNotContain(_seed.Solti, composers);
+    }
+
     [Fact]
     public async Task TheHomePageCountsComposersAndCompositionsAsTheirPagesDo()
     {

@@ -890,6 +890,116 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// Bruch's concerto on an album MusicBrainz states no genre for, nor for any
+    /// of its tracks: its movements name the piece, which is a composition, and
+    /// an untyped piece beside them names none. A concerto beside a track
+    /// tagged pop is no piece.
+    /// </summary>
+    [Fact]
+    public async Task APieceOfAFormWhereNothingHasAGenreIsAPiece()
+    {
+        var album = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Barber, Bruch" };
+        var pressing = new Release { Id = ReleaseId.New(), Title = album.Title, ReleaseGroupId = album.Id, TrackCount = 3, DiscCount = 1 };
+        var pop = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Crossover Hits" };
+        var popPressing = new Release { Id = ReleaseId.New(), Title = pop.Title, ReleaseGroupId = pop.Id, TrackCount = 2, DiscCount = 1 };
+        var concerto = new Work
+        {
+            Id = WorkId.New(),
+            Title = "Violin Concerto no. 1 in G minor, op. 26",
+            Mbid = new Mbid(Guid.CreateVersion7()),
+            Type = "Concerto",
+            PartCount = 3,
+        };
+        var first = new Work { Id = WorkId.New(), Title = $"{concerto.Title}: I. Vorspiel", ParentId = concerto.Id, Position = 1 };
+        var second = new Work { Id = WorkId.New(), Title = $"{concerto.Title}: II. Adagio", ParentId = concerto.Id, Position = 2 };
+        var adagio = new Work { Id = WorkId.New(), Title = "Adagio appassionato, op. 57", Mbid = new Mbid(Guid.CreateVersion7()) };
+        var crossover = new Work { Id = WorkId.New(), Title = "Crossover Concerto", Mbid = new Mbid(Guid.CreateVersion7()), Type = "Concerto" };
+        var crossed = new Work { Id = WorkId.New(), Title = "Crossover Concerto: I. Allegro", ParentId = crossover.Id, Position = 1 };
+        var hit = new Work { Id = WorkId.New(), Title = "A Hit", Mbid = new Mbid(Guid.CreateVersion7()) };
+
+        var recordings = new[] { first, second, adagio, crossed, hit }
+            .Select(work => new Recording { Id = RecordingId.New(), Title = work.Title, WorkId = work.Id, Genres = work == hit ? "pop" : null })
+            .ToList();
+        var files = recordings
+            .Select((recording, i) => new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = $"Bruch/0{i + 1} Track.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                RecordingId = recording.Id,
+                ReleaseId = i < 3 ? pressing.Id : popPressing.Id,
+                ReleaseGroupId = i < 3 ? album.Id : pop.Id,
+            })
+            .ToList();
+        var workIds = new[] { concerto.Id, first.Id, second.Id, adagio.Id, crossover.Id, crossed.Id, hit.Id };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.AddRange(album, pop);
+            db.Releases.AddRange(pressing, popPressing);
+            db.Works.AddRange(concerto, first, second, adagio, crossover, crossed, hit);
+            db.Recordings.AddRange(recordings);
+            db.MediaFiles.AddRange(files);
+            await db.SaveChangesAsync(Token);
+        }
+
+        try
+        {
+            using var client = _factory!.CreateClient();
+
+            var songs = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{album.Id.Value:N}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album")
+                .GetProperty("song")
+                .EnumerateArray()
+                .ToDictionary(row => row.GetProperty("title").GetString()!);
+
+            foreach (var movement in new[] { first, second })
+            {
+                Assert.Equal(
+                    concerto.Title,
+                    Assert.Single(songs[movement.Title].GetProperty("works").EnumerateArray()).GetProperty("name").GetString());
+            }
+
+            Assert.Empty(songs[adagio.Title].GetProperty("works").EnumerateArray());
+
+            var crossing = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{pop.Id.Value:N}"))
+                .GetProperty("subsonic-response")
+                .GetProperty("album")
+                .GetProperty("song")
+                .EnumerateArray()
+                .Single(row => row.GetProperty("title").GetString() == crossed.Title);
+
+            Assert.Empty(crossing.GetProperty("works").EnumerateArray());
+
+            var listed = (await JsonAsync(client, "/rest/getCompositions.view"))
+                .GetProperty("subsonic-response")
+                .GetProperty("compositions")
+                .GetProperty("composition")
+                .EnumerateArray()
+                .Select(row => row.GetProperty("id").GetString())
+                .ToList();
+
+            Assert.Contains($"wk-{concerto.Id.Value:N}", listed);
+            Assert.DoesNotContain($"wk-{adagio.Id.Value:N}", listed);
+            Assert.DoesNotContain($"wk-{crossover.Id.Value:N}", listed);
+        }
+        finally
+        {
+            await using var db = PostgresFixture.CreateContext(_connectionString);
+            db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id || file.ReleaseGroupId == pop.Id).ToListAsync(Token));
+            var ids = recordings.Select(recording => recording.Id).ToList();
+            db.Recordings.RemoveRange(await db.Recordings.Where(row => ids.Contains(row.Id)).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+            db.Works.RemoveRange(await db.Works.Where(row => workIds.Contains(row.Id)).ToListAsync(Token));
+            db.Releases.RemoveRange(await db.Releases.Where(row => row.Id == pressing.Id || row.Id == popPressing.Id).ToListAsync(Token));
+            db.ReleaseGroups.RemoveRange(await db.ReleaseGroups.Where(row => row.Id == album.Id || row.Id == pop.Id).ToListAsync(Token));
+            await db.SaveChangesAsync(Token);
+        }
+    }
+
+    /// <summary>
     /// Whoever composed a held classical piece is listed with how many they
     /// wrote; the pieces are listed by name, all or one composer's, and one
     /// opens with its movements in order and every song of it on every album.

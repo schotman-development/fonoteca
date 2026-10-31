@@ -564,7 +564,11 @@ public static partial class SubsonicEndpoints
                     work.SelectMany(performance => performance.Albums.Prepend(performance.Genres)))
                 || ClassicalWorks.ByItsAlbums(
                     works[pieces[work.Key]].Type,
-                    borrowed.Of(work.SelectMany(performance => performance.On))))
+                    borrowed.Of(work.SelectMany(performance => performance.On)))
+                || ClassicalWorks.ByItsForm(
+                    works[pieces[work.Key]].Type,
+                    work.SelectMany(performance => performance.Albums.Prepend(performance.Genres))
+                        .Concat(borrowed.Of(work.SelectMany(performance => performance.On)))))
             .Select(work => work.Key)
             .ToHashSet();
 
