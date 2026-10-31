@@ -44,7 +44,12 @@ running, wait for its own job id in the API log
    (`ffmpeg -nostdin -v error -i f -map 0:a -f md5 -`; without `-nostdin`
    ffmpeg eats a `while read` loop's input, and ffprobe needs `</dev/null`)
    and tell the user whether only the tags differ. Also compare the ALBUM tag:
-   if it is unchanged, Aria's album ids hold.
+   if it is unchanged, Aria's album ids hold. Pair a stale file with its
+   renamed successor by folder, track-number prefix and extension. Run the
+   decodes four at a time in the background; 287 pairs took a few minutes.
+   Different audio from a tag write is damage, not a new rip: on 2026-10-31
+   it was a stray 0x00 byte after the ID3v2 tag that hid the LAME header.
+   Compare packet counts and `start_pts` with ffprobe to see which it is.
 5. Before asking, count what Aria would lose, read-only. Old ids are
    `sha1(relative path)`. Count favourites from `GET /api/tracks?limit=100000`,
    plays from `GET /api/plays/counts`, and entries from each
@@ -64,7 +69,9 @@ writes; the user's answer there is the go-ahead.
 1. After the file sync, `POST /api/scan` (synchronous) creates the new
    tracks. Aria also rescans by itself within minutes, so check `tracks`
    first. Plays outlive their track row (no foreign key), so a re-link still
-   works after a rescan. Save `GET /api/tracks?limit=100000` *before* the
+   works after a rescan. A rescan drops the old rows and their caches, so
+   when no plays, playlist entries or favourites sat on the old ids, the
+   only thing left to restore is `addedAt`. Save `GET /api/tracks?limit=100000` *before* the
    sync, because it is the only place the old rows' `addedAt` survives.
 2. Compare each album's `albumId` before and after. It is the folder plus the
    ALBUM tag, case-folded, so a tag write can change it. Move `enrich_cache`
@@ -93,6 +100,11 @@ writes; the user's answer there is the go-ahead.
    and check `GET /api/plays/counts`.
 
 ## Apply
+
+Re-run `plan.py` right before applying and assert that it equals the plan
+you checked, so nothing moved in between. To hold files back (production
+keeping its copy), drop their paths from `changed` and `only_copy` in a
+copy of the plan and apply that copy.
 
 `python3 -I apply.py <plan>.json "/mnt/vault/media/music-trash/<date> sync"`
 does all of the following in this order, so a path is never missing: new
