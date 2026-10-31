@@ -486,7 +486,7 @@ public static partial class CatalogueEndpoints
     /// <c>ChooseReleaseCover</c>'s unconditional upsert gets to win a race it
     /// did not know it was in.
     /// </remarks>
-    private static async Task StoreFoundCoverAsync(
+    internal static async Task StoreFoundCoverAsync(
         FonotecaDbContext db,
         ReleaseCover cover,
         CancellationToken cancellationToken)

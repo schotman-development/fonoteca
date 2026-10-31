@@ -865,6 +865,12 @@ internal static partial class Log
     public static partial void DownloadNotLookedUp(ILogger logger, string album, string reason);
 
     [LoggerMessage(
+        EventId = 1504,
+        Level = LogLevel.Information,
+        Message = "The sleeve of Qobuz album {Album} was not kept at download; the album page and the cover stage ask for one as for any album: {Reason}")]
+    public static partial void DownloadSleeveNotKept(ILogger logger, string album, string reason);
+
+    [LoggerMessage(
         EventId = 1600,
         Level = LogLevel.Warning,
         Message = "Writing the playlists failed; the next move, edit or library change tries again.")]

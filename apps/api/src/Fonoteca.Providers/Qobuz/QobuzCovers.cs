@@ -15,7 +15,9 @@ namespace Fonoteca.Providers.Qobuz;
 /// is showing; this is keyed on a search, and is asked only where that key
 /// produced nothing. Measured on this library, the archive holds no front for
 /// <b>105 of 612</b> albums it was asked about — a sixth of the shelf drawing a
-/// monogram for a record the shop sells a picture of.
+/// monogram for a record the shop sells a picture of. A download is the one
+/// exception: <see cref="SleeveAsync"/> fetches the sleeve of the very album
+/// bought, which is no search.
 ///
 /// <b>Two keys, and the good one is available more often than it looks.</b>
 /// 69 of those 105 releases carry a <c>Barcode</c>, and a Qobuz album carries a
@@ -99,6 +101,23 @@ public sealed class QobuzCovers(
             return null;
         }
 
+        var cover = await SleeveAsync(match.Id, url, cancellationToken).ConfigureAwait(false);
+
+        if (cover is not null) ProviderLog.QobuzCoverMatched(logger, match.Id, artist, title, how);
+
+        return cover;
+    }
+
+    /// <summary>The picture one of the shop's albums lists, at its largest.</summary>
+    /// <param name="albumId">The shop's album, kept as the provenance.</param>
+    /// <param name="url">The picture its listing names.</param>
+    /// <returns>Null where the picture is not on the shop's own image host, or is not a picture.</returns>
+    /// <exception cref="ProviderException">The picture could not be fetched.</exception>
+    public async Task<QobuzCover?> SleeveAsync(string albumId, string url, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(albumId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+
         if (!Picture(url))
         {
             ProviderLog.QobuzCoverRejected(logger, url);
@@ -123,9 +142,7 @@ public sealed class QobuzCovers(
             return null;
         }
 
-        ProviderLog.QobuzCoverMatched(logger, match.Id, artist, title, how);
-
-        return new QobuzCover(match.Id, image.Bytes, image.MediaType);
+        return new QobuzCover(albumId, image.Bytes, image.MediaType);
     }
 
     /// <summary>Which of the shop's albums is this record, if any.</summary>

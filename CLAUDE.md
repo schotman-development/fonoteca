@@ -734,6 +734,12 @@ folder is never named.
   conductor here and the conductor alone there. A loose match is still
   refused: an ampersand written out as "and" does not fold, and that is a
   `QobuzCoversTests` case rather than an oversight.
+- **A download keeps the sleeve of the album it bought** (`Acquiring`), where
+  its release holds no picture, before its own tag write puts it beside the
+  tracks — the shop's own album, never a match, the owner's choice after a
+  download filed under MusicBrainz's release had its sleeve while downloading
+  and nowhere after (the archive answered 500 for it). Stored, it is never
+  asked about again, so the archive's front does not replace it.
 - **A row with no bytes is a stamp, not an answer**, and expires after
   `CatalogueEndpoints.CoverRetryAfter` (a week). Treated as final it would hide
   every sleeve that reached either source after the first view, forever, with no

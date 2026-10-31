@@ -25,9 +25,11 @@ public sealed class Acquiring(
     DownloadFiling filing,
     TagWriteService tagWrites,
     MusicBrainzCatchUp catchUp,
+    QobuzCovers covers,
     ICallerContext caller,
     FonotecaDbContext db,
     PlaylistFiles playlists,
+    IClock clock,
     ILogger<Acquiring> logger)
 {
     /// <summary>The kind a download takes the gate as.</summary>
@@ -107,6 +109,8 @@ public sealed class Acquiring(
 
         if (filed.Files.Count == 0) return new AlbumFiling(filed.AlbumId, folder, 0, filed.Kept, 0, 0, filed.Why);
 
+        await KeepSleeveAsync(album, new MediaFileId(filed.Files[0]), cancellationToken).ConfigureAwait(false);
+
         if (!tagWrites.MutationAllowed)
         {
             return new AlbumFiling(
@@ -132,5 +136,64 @@ public sealed class Acquiring(
             summary.Written,
             summary.Refused + summary.Failed + summary.Unsupported,
             null);
+    }
+
+    /// <summary>
+    /// The sleeve of the album bought, kept as its release's cover where the
+    /// release has none, so the tag write puts it beside the tracks.
+    /// </summary>
+    /// <remarks>
+    /// <b>The shop's own album, never a match</b>: the picture of exactly what
+    /// was bought, the owner's choice (2026-10-31) after a download filed under
+    /// MusicBrainz's release showed its sleeve while downloading and nowhere
+    /// after, the archive answering 500 for that release. A stored cover is
+    /// never asked about again, so the archive's front does not replace it.
+    /// A sleeve that cannot be fetched leaves the release to the album page
+    /// and the cover stage, as any other.
+    /// </remarks>
+    private async Task KeepSleeveAsync(QobuzAlbum album, MediaFileId filed, CancellationToken cancellationToken)
+    {
+        if (album.CoverUrl is not { } url) return;
+
+        var release = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.Id == filed)
+            .Select(file => file.ReleaseId)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (release is not { } id
+            || await db.ReleaseCovers.AnyAsync(cover => cover.ReleaseId == id && cover.Bytes != null, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return;
+        }
+
+        QobuzCover? sleeve;
+
+        try
+        {
+            sleeve = await covers.SleeveAsync(album.Id, url, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ProviderException cause)
+        {
+            Log.DownloadSleeveNotKept(logger, album.Id, cause.Message);
+            return;
+        }
+
+        if (sleeve is null) return;
+
+        await CatalogueEndpoints.StoreFoundCoverAsync(
+                db,
+                new ReleaseCover
+                {
+                    ReleaseId = id,
+                    Bytes = sleeve.Bytes,
+                    MediaType = sleeve.MediaType,
+                    QobuzAlbumId = sleeve.AlbumId,
+                    SavedUtc = StoreTime.ToStorePrecision(clock.UtcNow),
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 }

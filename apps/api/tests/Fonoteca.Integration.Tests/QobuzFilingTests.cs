@@ -65,6 +65,12 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
 
     /// <summary>Set to have Qobuz fail the second track's file, as an outage would.</summary>
     private bool _failSecondTrack;
+
+    /// <summary>Set to have the shop list a picture for Rumours, served from its image host as <see cref="_sleeve"/>.</summary>
+    private bool _sleeved;
+
+    /// <summary>What the shop's image host answers, or null for an outage.</summary>
+    private byte[]? _sleeve = [0xFF, 0xD8, 0xFF, 0xE0, 1];
     private readonly List<WebApplicationFactory<Program>> _factories = [];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -76,7 +82,9 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
 
         var flac = await File.ReadAllBytesAsync(Corpus.Flac, Token);
 
-        _qobuz = new StubHttpHandler(request => request.Uri.Host.StartsWith("cdn", StringComparison.Ordinal)
+        _qobuz = new StubHttpHandler(request => request.Uri.Host == "static.qobuz.com"
+            ? Sleeve()
+            : request.Uri.Host.StartsWith("cdn", StringComparison.Ordinal)
             ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(flac) }
             : _failSecondTrack && request.Uri.Query.Contains("track_id=56", StringComparison.Ordinal)
                 ? StubHttpHandler.Json(HttpStatusCode.ServiceUnavailable, """{"status":"error","code":503,"message":"Try later."}""")
@@ -85,6 +93,7 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
                 request.Uri.AbsolutePath.Contains("getFileUrl", StringComparison.Ordinal) ? FileUrl
                     : request.Uri.Query.Contains("album_id=2", StringComparison.Ordinal) ? Tusk
                     : request.Uri.Query.Contains("album_id=3", StringComparison.Ordinal) ? Rosetta
+                    : _sleeved ? Album.Replace("\"upc\"", "\"image\":{\"large\":\"https://static.qobuz.com/images/covers/32/10/0603497941032_600.jpg\"},\"upc\"", StringComparison.Ordinal)
                     : Album));
     }
 
@@ -442,6 +451,95 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(expected, await scope.ServiceProvider.GetRequiredService<DownloadFiling>().KnownToMusicBrainzAsync("Fleetwood Mac/Rumours", Token));
     }
 
+    [Fact]
+    public async Task ADownloadKeepsTheSleeveItWasSoldWithAndWritesItBesideTheTracks()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        // Filed under MusicBrainz's release, whose sleeve the archive could not
+        // serve: the case that showed a cover while downloading and none after.
+        _sleeved = true;
+        var factory = Factory(mutation: true, new StubMusicBrainz { Releases = { Rumours() } });
+
+        var body = await DownloadAsync(factory);
+        Assert.Equal(2, body.Filing!.TagsWritten);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var release = await db.Releases.SingleAsync(Token);
+        Assert.Equal(RumoursRelease, release.Mbid);
+
+        var cover = await db.ReleaseCovers.SingleAsync(Token);
+        Assert.Equal((release.Id, "1", "image/jpeg"), (cover.ReleaseId, cover.QobuzAlbumId, cover.MediaType));
+        Assert.Equal(_sleeve, cover.Bytes);
+
+        // The largest rendition, named like the one the album lists.
+        Assert.Contains(_qobuz!.Requests, request => request.Uri.AbsolutePath.EndsWith("/0603497941032_max.jpg", StringComparison.Ordinal));
+
+        var folder = AlbumFolder.Of((await db.MediaFiles.FirstAsync(Token)).Path);
+        Assert.Equal(_sleeve, await File.ReadAllBytesAsync(Path.Combine(_root, folder, "cover.jpg"), Token));
+    }
+
+    [Fact]
+    public async Task ACoverTheReleaseHoldsStaysAndNoSleeveIsFetchedForIt()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        _sleeved = true;
+        var factory = Factory(mutation: false);
+        var kept = _sleeve;
+
+        await DownloadAsync(factory);
+        var fetched = _qobuz!.Requests.Count(request => request.Uri.Host == "static.qobuz.com");
+
+        _sleeve = [0x89, 0x50, 0x4E, 0x47];
+        await DownloadAsync(factory, "?separate=true");
+
+        Assert.Equal(fetched, _qobuz.Requests.Count(request => request.Uri.Host == "static.qobuz.com"));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(kept, (await db.ReleaseCovers.SingleAsync(Token)).Bytes);
+    }
+
+    [Fact]
+    public async Task AStampSayingNeitherSourceHadASleeveIsNoCoverAndTheSleeveIsKept()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var factory = Factory(mutation: false);
+        await DownloadAsync(factory);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseCovers.Add(new ReleaseCover { ReleaseId = (await db.Releases.SingleAsync(Token)).Id, SavedUtc = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync(Token);
+        }
+
+        _sleeved = true;
+        await DownloadAsync(factory, "?separate=true");
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(_sleeve, (await check.ReleaseCovers.SingleAsync(Token)).Bytes);
+    }
+
+    [Fact]
+    public async Task ASleeveTheShopCannotServeLeavesTheDownloadFiledAndWritten()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        _sleeved = true;
+        _sleeve = null;
+        var factory = Factory(mutation: true);
+
+        var body = await DownloadAsync(factory);
+
+        Assert.Equal((2, 2), (body.Filing!.Filed, body.Filing.TagsWritten));
+
+        // Nothing stored: the album page and the cover stage ask as for any album.
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Empty(await db.ReleaseCovers.ToListAsync(Token));
+    }
+
     private async Task<AlbumUpgrade> DownloadAsync(WebApplicationFactory<Program> factory, string query = "", string album = "1")
     {
         using var client = factory.CreateClient();
@@ -540,5 +638,14 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
 
         _factories.Add(factory);
         return factory;
+    }
+
+    private HttpResponseMessage Sleeve()
+    {
+        if (_sleeve is null) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(_sleeve) };
+        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        return response;
     }
 }
