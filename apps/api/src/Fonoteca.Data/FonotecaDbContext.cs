@@ -100,6 +100,10 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
 
+            // Apple's ids are slugs: "ludwig-van-beethoven-1770-pp27".
+            e.Property(x => x.AppleWorkId).HasMaxLength(200);
+            e.HasIndex(x => x.AppleWorkId).IsUnique().HasFilter("\"AppleWorkId\" IS NOT NULL");
+
             // Set null: a parent is minted from a stub and owns nothing, so
             // losing it must not take its movements with it.
             e.HasOne(x => x.Parent)
@@ -135,6 +139,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.ReviewUrl).HasMaxLength(1000);
             e.Property(x => x.Genres).HasMaxLength(1000);
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
+            e.Property(x => x.AppleClassicalAlbumId).HasMaxLength(50);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
         });
@@ -532,6 +537,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Type).HasMaxLength(100).IsRequired();
             e.Property(x => x.Attributes).HasMaxLength(500);
             e.Property(x => x.Name).HasMaxLength(1000).IsRequired();
+            e.Property(x => x.Source).HasMaxLength(50);
 
             // Cascade from both ends: a contribution is a statement about one
             // recording or one work and means nothing once it is gone — and a

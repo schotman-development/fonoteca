@@ -2,9 +2,9 @@ namespace Fonoteca.Providers.AppleMusic;
 
 /// <summary>How to talk to Apple Music's public pages.</summary>
 /// <remarks>
-/// Three hosts, three clients, because they are three different services with
-/// three different costs: the documented search API, the album pages a browser
-/// reads, and the video CDN. Nothing here needs a credential — see ADR 0014 for
+/// Three clients, because they are three different services with three
+/// different costs: the documented search API, the pages a browser reads —
+/// Apple Music's and Apple Music Classical's, at one pace — and the video CDN. Nothing here needs a credential — see ADR 0014 for
 /// why the web player's own key is not used.
 /// </remarks>
 public sealed class AppleMusicOptions
@@ -21,6 +21,9 @@ public sealed class AppleMusicOptions
     public static readonly Uri SearchServer = new("https://itunes.apple.com/");
 
     public static readonly Uri PageServer = new("https://music.apple.com/");
+
+    /// <summary>Apple Music Classical's pages, read through the page client and its gate (ADR 0019).</summary>
+    public static readonly Uri ClassicalServer = new("https://classical.music.apple.com/");
 
     /// <summary>The shop asked first: the largest catalogue, and one video per record wherever it is sold.</summary>
     public const string Storefront = "us";

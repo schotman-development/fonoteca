@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Text.Json;
+using Fonoteca.Api.Endpoints;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
@@ -77,8 +78,16 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
             recording.Title = source.Title;
         }
 
+        var previous = recording.WorkId;
+
         recording.Duration = source.Length;
-        recording.WorkId = workRow?.Id;
+
+        // MusicBrainz's work replaces Apple's, and its silence keeps it (ADR 0019).
+        recording.WorkId = workRow?.Id
+            ?? (previous is { } held
+                && await db.Works.AnyAsync(w => w.Id == held && w.AppleWorkId != null, cancellationToken).ConfigureAwait(false)
+                    ? previous
+                    : null);
         recording.Genres = EnrichmentService.Joined(source.Genres ?? []);
         recording.Isrcs = Isrcs(source.Isrcs);
         recording.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
@@ -92,10 +101,25 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
 
         await ApplyCreditsAsync(recording, workRow, credits, cancellationToken).ConfigureAwait(false);
 
+        WorkId? absorbed = null;
+
         if (asked is { } old && old != source.Id)
         {
-            await AbsorbAsync(old, recording, cancellationToken).ConfigureAwait(false);
+            absorbed = await AbsorbAsync(old, recording, cancellationToken).ConfigureAwait(false);
+
+            // The merged row's Apple piece is the survivor's while MusicBrainz names none.
+            if (recording.WorkId is null
+                && absorbed is { } piece
+                && await db.Works.AnyAsync(w => w.Id == piece && w.AppleWorkId != null, cancellationToken).ConfigureAwait(false))
+            {
+                recording.WorkId = piece;
+            }
         }
+
+        await DropUnperformedAsync(
+                [(previous == recording.WorkId ? null : previous, recording.WorkId), (absorbed, recording.WorkId)],
+                cancellationToken)
+            .ConfigureAwait(false);
 
         return recording.Id;
     }
@@ -226,13 +250,14 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     /// was merged away is on no stored edition's track list and could not prove a
     /// pressing. A file a person seated keeps its stamp; its track moved with it.
     /// </remarks>
-    private async Task AbsorbAsync(Mbid old, Recording survivor, CancellationToken cancellationToken)
+    /// <returns>The work the stale row performed, for <see cref="DropUnperformedAsync"/>.</returns>
+    private async Task<WorkId?> AbsorbAsync(Mbid old, Recording survivor, CancellationToken cancellationToken)
     {
         var stale = await db.Recordings
             .FirstOrDefaultAsync(r => r.Mbid == old, cancellationToken)
             .ConfigureAwait(false);
 
-        if (stale is null || stale.Id == survivor.Id) return;
+        if (stale is null || stale.Id == survivor.Id) return null;
 
         var files = await db.MediaFiles
             .Where(f => f.RecordingId == stale.Id)
@@ -288,6 +313,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
                     payload),
                 cancellationToken)
             .ConfigureAwait(false);
+
+        return stale.WorkId;
     }
 
     private async Task<Work> UpsertWorkAsync(
@@ -423,13 +450,20 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         IReadOnlyList<MusicBrainzRelation> relations,
         CancellationToken cancellationToken)
     {
+        // Apple's performers stand until MusicBrainz names one (ADR 0019).
+        var replacesApple = relations.Any(relation => ClassicalCatalogue.IsPerformer(relation.Type));
+
         var stale = recording is { } recordingId
             ? db.Contributions.Where(c => c.RecordingId == recordingId)
             : db.Contributions.Where(c => c.WorkId == work);
 
-        db.Contributions.RemoveRange(await stale.ToListAsync(cancellationToken).ConfigureAwait(false));
+        db.Contributions.RemoveRange(await stale
+            .Where(c => c.Source == null || replacesApple)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
         db.Contributions.RemoveRange(db.Contributions.Local
             .Where(c => recording is not null ? c.RecordingId == recording : c.WorkId == work)
+            .Where(c => c.Source is null || replacesApple)
             .ToList());
 
         for (var position = 0; position < relations.Count; position++)
@@ -452,6 +486,309 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
                 End = relation.End?.ToString(),
             });
         }
+    }
+
+    /// <summary>
+    /// Apple's works that no recording performs any more, gone with their
+    /// composer links: what MusicBrainz replaced, or a merge left behind.
+    /// Their hearts go to what took their place.
+    /// </summary>
+    /// <remarks>
+    /// The change tracker is asked as well as the database, since the
+    /// recording that let go of one is not saved yet, and an album's two
+    /// movements can let go of one piece before the save.
+    /// </remarks>
+    internal async Task DropUnperformedAsync(
+        IEnumerable<(WorkId? Gone, WorkId? Successor)> works,
+        CancellationToken cancellationToken)
+    {
+        foreach (var (id, successor) in works
+            .Where(pair => pair.Gone is not null)
+            .Select(pair => (pair.Gone!.Value, pair.Successor))
+            .DistinctBy(pair => pair.Value))
+        {
+            var work = await db.Works
+                .FirstOrDefaultAsync(w => w.Id == id && w.AppleWorkId != null, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (work is null || db.Entry(work).State == EntityState.Deleted) continue;
+
+            var holders = await db.Recordings
+                .Where(r => r.WorkId == id)
+                .Select(r => r.Id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var tracked = db.ChangeTracker.Entries<Recording>().Select(entry => entry.Entity.Id).ToHashSet();
+
+            if (db.Recordings.Local.Any(r => r.WorkId == id) || holders.Any(holder => !tracked.Contains(holder))) continue;
+
+            db.Relationships.RemoveRange(await db.Relationships
+                .Where(r => r.WorkId == id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false));
+            db.Relationships.RemoveRange(db.Relationships.Local.Where(r => r.WorkId == id).ToList());
+
+            if (successor is { } to) await CarryPieceLovesAsync(id, to, cancellationToken).ConfigureAwait(false);
+
+            db.Works.Remove(work);
+        }
+    }
+
+    /// <summary>
+    /// Hearts on a piece about to go, moved to the whole piece its successor
+    /// is part of as far as the catalogue knows the tree — a heart on a
+    /// composition is on the whole piece, as Subsonic lists them. Every
+    /// account's, once each; one already on the successor keeps the other
+    /// to go with the piece.
+    /// </summary>
+    private async Task CarryPieceLovesAsync(WorkId from, WorkId to, CancellationToken cancellationToken)
+    {
+        var hearts = await db.Loves
+            .IgnoreQueryFilters()
+            .Where(love => love.WorkId == from)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (hearts.Count == 0) return;
+
+        // The tree as saved, and as this save is about to change it: a
+        // movement minted here names its parent only in the change tracker.
+        var parents = await CatalogueEndpoints.WorkParentsAsync(db, cancellationToken).ConfigureAwait(false);
+
+        foreach (var entry in db.ChangeTracker.Entries<Work>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified && entry.Entity.ParentId is { } parent)
+            {
+                parents[entry.Entity.Id] = parent;
+            }
+        }
+
+        var piece = WorkTree.Top(to, parents);
+        var taken = await LovedByAsync(db, love => love.WorkId == piece, cancellationToken).ConfigureAwait(false);
+
+        foreach (var heart in hearts)
+        {
+            if (taken.Add(heart.AccountId)) heart.WorkId = piece;
+        }
+    }
+
+    /// <summary>
+    /// Apple Music Classical's pieces and performers on an album's held
+    /// recordings, where MusicBrainz has none (ADR 0019). Saved by the caller.
+    /// </summary>
+    /// <remarks>
+    /// <b>A piece is minted as a work with no MBID</b>, keyed on Apple's id, so
+    /// the album page's headings, the composer pages, the tag write and
+    /// Subsonic read it as they read MusicBrainz's — and MusicBrainz's replaces
+    /// it the next time the recording is described (<see cref="UpsertAsync"/>),
+    /// the piece going once nothing performs it. Its composers are rebuilt on
+    /// every answer: a contribution each, with the MBID of the one composer
+    /// MusicBrainz credits elsewhere under that name, and a composer link where
+    /// that artist has a row.
+    ///
+    /// <b>Performers only on a recording MusicBrainz names none for</b>, and
+    /// replaced whole by every answer, in MusicBrainz's terms
+    /// (<see cref="ClassicalCatalogue.Links"/>), with no artist row minted.
+    /// A recording two files place on different tracks is nobody's.
+    /// </remarks>
+    internal async Task ApplyClassicalAsync(
+        ReleaseGroupId album,
+        ClassicalAlbum found,
+        IReadOnlyList<KnownComposer> composers,
+        CancellationToken cancellationToken)
+    {
+        var files = await db.MediaFiles
+            .AsNoTracking()
+            .Include(f => f.Track)
+            .Where(f => f.ReleaseGroupId == album && f.RecordingId != null)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var seats = ClassicalCatalogue.Seat(
+            files
+                .Select(f => f.Track is { } track
+                    ? new HeldTrack<MediaFileId>(f.Id, track.DiscNumber, track.Position, f.Quality?.Duration ?? f.FingerprintDuration)
+                    : f.TagTrackNumber is { } number
+                        ? new HeldTrack<MediaFileId>(f.Id, f.TagDiscNumber ?? 1, number, f.Quality?.Duration ?? f.FingerprintDuration)
+                        : (HeldTrack<MediaFileId>?)null)
+                .OfType<HeldTrack<MediaFileId>>(),
+            found.Tracks);
+
+        var placed = files
+            .Where(f => seats.ContainsKey(f.Id))
+            .GroupBy(f => f.RecordingId!.Value)
+            .Where(group => group.Select(f => seats[f.Id]).Distinct().Count() == 1)
+            .ToDictionary(group => group.Key, group => seats[group.First().Id]);
+
+        if (placed.Count == 0) return;
+
+        var keys = placed.Keys.Select(id => (RecordingId?)id).ToList();
+
+        var recordings = await db.Recordings
+            .Where(r => keys.Contains(r.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var held = recordings.Select(r => r.WorkId).OfType<WorkId>().Select(id => (WorkId?)id).ToList();
+
+        var apples = (await db.Works
+                .Where(w => held.Contains(w.Id) && w.AppleWorkId != null)
+                .Select(w => w.Id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToHashSet();
+
+        var performed = (await db.Contributions
+                .Where(c => keys.Contains(c.RecordingId) && c.Source == null && ClassicalCatalogue.PerformerTypes.Contains(c.Type))
+                .Select(c => c.RecordingId)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToHashSet();
+
+        var pieces = await PiecesAsync(
+                [.. recordings
+                    .Where(r => r.WorkId is null || apples.Contains(r.WorkId.Value))
+                    .Select(r => placed[r.Id].Work)
+                    .OfType<ClassicalWork>()],
+                composers,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        var replaced = recordings
+            .Where(r => !performed.Contains(r.Id) && placed[r.Id].Performers.Count > 0)
+            .Select(r => (RecordingId?)r.Id)
+            .ToList();
+
+        db.Contributions.RemoveRange(await db.Contributions
+            .Where(c => replaced.Contains(c.RecordingId) && c.Source == Contribution.AppleMusicClassical)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
+
+        List<(WorkId? Gone, WorkId? Successor)> let = [];
+
+        foreach (var recording in recordings)
+        {
+            var track = placed[recording.Id];
+
+            if (track.Work is { } piece && pieces.TryGetValue(piece.Id, out var work) && recording.WorkId != work.Id
+                && (recording.WorkId is null || apples.Contains(recording.WorkId.Value)))
+            {
+                let.Add((recording.WorkId, work.Id));
+                recording.WorkId = work.Id;
+            }
+
+            if (replaced.Contains(recording.Id))
+            {
+                var position = 0;
+
+                foreach (var performer in track.Performers)
+                {
+                    foreach (var (type, attributes) in ClassicalCatalogue.Links(performer.Roles))
+                    {
+                        db.Contributions.Add(new Contribution
+                        {
+                            Id = Guid.CreateVersion7(),
+                            RecordingId = recording.Id,
+                            Type = type,
+                            Attributes = attributes is null ? null : Clamp(attributes, 500),
+                            Name = Clamp(performer.Name, 1000),
+                            Position = position++,
+                            Source = Contribution.AppleMusicClassical,
+                        });
+                    }
+                }
+            }
+        }
+
+        await DropUnperformedAsync(let, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Apple's pieces as works, found by Apple's id or minted, each with its composers as Apple prints them.</summary>
+    private async Task<Dictionary<string, Work>> PiecesAsync(
+        IReadOnlyList<ClassicalWork> pieces,
+        IReadOnlyList<KnownComposer> composers,
+        CancellationToken cancellationToken)
+    {
+        var distinct = pieces.DistinctBy(piece => piece.Id, StringComparer.Ordinal).ToList();
+        var ids = distinct.Select(piece => piece.Id).ToList();
+
+        // EF queries the database, not the change tracker: a dictionary, so a
+        // piece two albums in one save both name is minted once.
+        var works = (await db.Works
+                .Where(w => w.AppleWorkId != null && ids.Contains(w.AppleWorkId))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(w => w.AppleWorkId!, StringComparer.Ordinal);
+
+        var mbids = composers.Select(composer => (Mbid?)composer.Mbid).Distinct().ToList();
+
+        var artists = (await db.Artists
+                .Where(a => mbids.Contains(a.Mbid))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(a => a.Mbid!.Value);
+
+        foreach (var piece in distinct)
+        {
+            if (!works.TryGetValue(piece.Id, out var work))
+            {
+                work = new Work { Id = WorkId.New(), Title = Clamp(piece.Title, 1000), AppleWorkId = piece.Id };
+                db.Works.Add(work);
+                works[piece.Id] = work;
+            }
+            else
+            {
+                work.Title = Clamp(piece.Title, 1000);
+            }
+
+            var workId = work.Id;
+
+            db.Contributions.RemoveRange(await db.Contributions
+                .Where(c => c.WorkId == workId)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false));
+            db.Relationships.RemoveRange(await db.Relationships
+                .Where(r => r.WorkId == workId)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false));
+
+            for (var position = 0; position < piece.Composers.Count; position++)
+            {
+                var composer = piece.Composers[position];
+                var mbid = ClassicalCatalogue.Composer(composer.Name, composers);
+
+                db.Contributions.Add(new Contribution
+                {
+                    Id = Guid.CreateVersion7(),
+                    WorkId = workId,
+                    Type = "composer",
+                    ArtistMbid = mbid,
+                    Name = Clamp(composer.Name, 1000),
+                    Position = position,
+                    Source = Contribution.AppleMusicClassical,
+                });
+
+                if (mbid is { } known && artists.TryGetValue(known, out var artist))
+                {
+                    db.Relationships.Add(new Relationship
+                    {
+                        Id = Guid.CreateVersion7(),
+                        SourceType = RelationshipTargets.Artist,
+                        SourceId = artist.Id.Value,
+                        TargetType = RelationshipTargets.Work,
+                        TargetId = workId.Value,
+                        Type = RoleName(CreditRole.Writer),
+                        Attribute = artist.Type,
+                        ArtistId = artist.Id,
+                        WorkId = workId,
+                    });
+                }
+            }
+        }
+
+        return works;
     }
 
     /// <summary>

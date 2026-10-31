@@ -12,6 +12,7 @@ using Fonoteca.Providers.Qobuz;
 using Fonoteca.Providers.Wikidata;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace Fonoteca.Integration.Tests;
 
@@ -54,6 +55,12 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     public async ValueTask DisposeAsync()
     {
         foreach (var provider in _providers) await provider.DisposeAsync();
+
+        // A database per test is a connection pool per test, idle until
+        // pruned: released here, or a class this size runs PostgreSQL out of
+        // connections before its last tests start.
+        using var connection = new NpgsqlConnection(_connectionString);
+        NpgsqlConnection.ClearPool(connection);
     }
 
     /// <summary>
@@ -2936,7 +2943,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
     public void TheNewerStagesAreInTheTotal() =>
-        Assert.Equal(42, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9).Total);
+        Assert.Equal(52, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9, Classical: 10).Total);
 
     /// <summary>
     /// A song is asked about as its held file has it, its words are kept, and
@@ -3528,7 +3535,8 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         IAlbumMotions? motions = null,
         IAlbumBooklets? booklets = null,
         ISongLyrics? lyrics = null,
-        ICoverArtArchive? archive = null)
+        ICoverArtArchive? archive = null,
+        IClassicalAlbums? classical = null)
     {
         var services = new ServiceCollection();
 
@@ -3574,6 +3582,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         services.AddSingleton(encyclopedia ?? new StubEncyclopedia());
         services.AddSingleton(banners ?? new StubBanners());
         services.AddSingleton(motions ?? new StubMotions());
+        services.AddSingleton(classical ?? new StubClassical());
         services.AddSingleton(booklets ?? new StubBooklets());
         services.AddSingleton(lyrics ?? new StubLyrics());
         services.AddSingleton(archive ?? new StubArchive());

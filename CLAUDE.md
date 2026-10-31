@@ -51,7 +51,7 @@ the rest.
    `Artists.LookupUtc`, `PortraitLookupUtc`, `DiscographyLookupUtc`,
    `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`, `Recordings.DescribedUtc`,
    `ReleaseGroups.GenresLookupUtc`, `Works.PartOfLookupUtc`, `Works.DescribedUtc`,
-   `Releases.DescribedUtc`, `TempoAndKeyMeasuredUtc`. A library is full of things the provider has never heard
+   `Releases.DescribedUtc`, `TempoAndKeyMeasuredUtc`, `ReleaseGroups.ClassicalLookupUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -203,6 +203,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | files & previews | `Domain/Catalogue/FolderRollup.cs`, `FilePreview.cs` | `Api/Library/FileManagerService.cs` |
 | covers | — | `Providers/CoverArt/`, `Api/Endpoints/CatalogueEndpoints.Cover.cs` |
 | motion artwork | — | `Providers/AppleMusic/AppleMusicMotions.cs`, `EnrichmentService.MotionAsync`, `TagWriteService.EnsureMotionAsync` |
+| classical pieces & performers | `Domain/Catalogue/ClassicalCatalogue.cs` | `Providers/AppleMusic/AppleMusicClassical.cs`, `EnrichmentService.ClassicalAsync`, `CatalogueWriter.ApplyClassicalAsync` |
 | booklets | — | `Providers/CoverArt/AlbumBooklets.cs`, `EnrichmentService.BookletsAsync`, `TagWriteService.EnsureBookletAsync` |
 | lyrics | `Domain/Catalogue/LyricsText.cs` | `Providers/Lrclib/LrclibLyrics.cs`, `EnrichmentService.LyricsAsync`, `TagWriteService.TrashLyricsAsync`, `Api/Subsonic/SubsonicEndpoints.Lyrics.cs` |
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
@@ -258,7 +259,7 @@ the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
 held recordings described again → parent works → works and filed releases
 asked for what the tags need → album genres → artists → portraits → articles,
-banners, covers, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
+Apple Music Classical, banners, covers, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
 
@@ -764,6 +765,17 @@ path and length for a record Undo skips. **A page that changes shape stops the s
 "none"**, so a redesign cannot stamp the whole library. `getAlbumMotion` serves
 it to clients as an animated WebP (`FfmpegCoverScaler.AnimateAsync`, kept per
 size) under Fonoteca's own `fonotecaAlbumMotion` extension.
+
+**Classical pieces and performers** are ADR 0019: an enrichment stage reads
+Apple Music Classical's public album pages, through the motion artwork's
+recognition and page client, for every held album tagged classical. **Only where
+MusicBrainz has nothing.** A piece is a work with no MBID keyed on
+`Works.AppleWorkId`, which `CatalogueWriter.UpsertAsync` replaces with
+MusicBrainz's and drops once nothing performs it; performers go only on a
+recording MusicBrainz names no performer for, as contributions with `Source`
+set, and stay until it names one — `Contribution.Source` null is MusicBrainz's.
+A composer's biography is Apple's only where Wikipedia has none, and Wikipedia
+is asked again weekly and replaces it.
 
 **Album booklets** are ADR 0015 — booklets only, never backs, discs or trays
 (the owner's choice). An enrichment stage lists every edition on the Cover Art

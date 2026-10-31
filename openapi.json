@@ -8092,6 +8092,7 @@
           "pendingWorks",
           "pendingReleases",
           "pendingCovers",
+          "pendingClassical",
           "lastCompleted"
         ],
         "type": "object",
@@ -8180,6 +8181,10 @@
             "format": "int32"
           },
           "pendingCovers": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingClassical": {
             "type": "integer",
             "format": "int32"
           },

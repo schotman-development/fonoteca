@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -306,10 +307,11 @@ public static partial class CatalogueEndpoints
         };
     }
 
-    /// <summary>The biography to show: a person's where they wrote one, Wikipedia's otherwise.</summary>
+    /// <summary>The biography to show: a person's where they wrote one, the source's otherwise.</summary>
     /// <remarks>
     /// A person's text that replaced Wikipedia's keeps Wikipedia's link: an edit
-    /// of CC BY-SA prose is still owed its credit.
+    /// of CC BY-SA prose is still owed its credit. A source is Wikipedia, or
+    /// Apple Music Classical where it filled Wikipedia's gap (ADR 0019).
     /// </remarks>
     private static WrittenText? Written(
         IReadOnlyDictionary<string, string?> edits,
@@ -319,8 +321,8 @@ public static partial class CatalogueEndpoints
         edits.TryGetValue(field, out var mine)
             ? mine is null ? null
                 : text is null ? new WrittenText(mine, "You", null, ByPerson: true)
-                : new WrittenText(mine, "Wikipedia", url, ByPerson: true)
-            : text is null ? null : new WrittenText(text, "Wikipedia", url, ByPerson: false);
+                : new WrittenText(mine, EnrichmentService.BiographySource(url), url, ByPerson: true)
+            : text is null ? null : new WrittenText(text, EnrichmentService.BiographySource(url), url, ByPerson: false);
 
     private static string? Invalid(ArtistEditRequest request)
     {
@@ -453,7 +455,7 @@ public sealed record ArtistProfile(
 public sealed record ArtistLink(string Type, string Url);
 
 /// <summary>Prose with its provenance: somebody else's under their licence, or the owner's.</summary>
-/// <param name="Source">"Wikipedia", or "You" for what a person wrote from nothing.</param>
+/// <param name="Source">"Wikipedia", "Apple Music Classical", or "You" for what a person wrote from nothing.</param>
 /// <param name="ByPerson">A person wrote or edited it; with a <paramref name="Url"/> it was Wikipedia's first.</param>
 /// <param name="Url">The article, for the credit line. Null for a person's text.</param>
 public sealed record WrittenText(string Text, string Source, string? Url, bool ByPerson);

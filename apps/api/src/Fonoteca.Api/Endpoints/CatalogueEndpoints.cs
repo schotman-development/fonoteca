@@ -1721,6 +1721,10 @@ public static partial class CatalogueEndpoints
                 // back to reading the work's title.
                 track.Recording.WorkId,
 
+                // Apple Music Classical's piece, which is the whole piece
+                // rather than a movement, so it heads its own run (ADR 0019).
+                ApplePiece = track.Recording.Work != null && track.Recording.Work.AppleWorkId != null,
+
                 // The recording's own billing line and typed links, which the
                 // credits below are rolled up from.
                 Billed = track.Recording.Credits
@@ -1887,7 +1891,9 @@ public static partial class CatalogueEndpoints
                     // a guest on one song, a compilation's own artist.
                     own is not null && own != credit ? own : null,
                     [.. row.On.Select(edition => edition.Value)],
-                    facts.WorkId is { } work && parents.ContainsKey(work) ? pieceTitles[WorkTree.Top(work, parents)] : null);
+                    facts.WorkId is { } work && parents.ContainsKey(work) ? pieceTitles[WorkTree.Top(work, parents)]
+                        : facts.ApplePiece ? facts.WorkTitle
+                        : null);
             })
             .ToList();
 
@@ -5785,7 +5791,7 @@ public sealed record AlbumTrackRow(
     string? Artist,
     IReadOnlyList<Guid> On,
 
-    /// <summary>The piece its work is a part of — the symphony of a movement — where MusicBrainz says so.</summary>
+    /// <summary>The piece its work is a part of — the symphony of a movement — where MusicBrainz says so, or Apple Music Classical's piece itself.</summary>
     string? PartOf);
 
 /// <summary>

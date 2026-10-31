@@ -1128,6 +1128,33 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
+    /// Apple Music Classical's piece heads its own run: it is the whole piece,
+    /// not a movement of one (ADR 0019).
+    /// </summary>
+    [Fact]
+    public async Task ApplesPieceHeadsTheTracksThatPerformIt()
+    {
+        using var client = _factory!.CreateClient();
+
+        Assert.All((await AlbumAsync(client, _seed.SymphonyAlbum)).Tracks, track => Assert.Null(track.PartOf));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Works
+                .Where(work => work.Title == "Symphony no. 40 in G minor, K. 550")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(work => work.Mbid, (Mbid?)null)
+                        .SetProperty(work => work.AppleWorkId, "wolfgang-amadeus-mozart-1756-k550"),
+                    Token);
+        }
+
+        Assert.All(
+            (await AlbumAsync(client, _seed.SymphonyAlbum)).Tracks,
+            track => Assert.Equal("Symphony no. 40 in G minor, K. 550", track.PartOf));
+    }
+
+    /// <summary>
     /// The album list's four orders, each one a different answer.
     /// </summary>
     /// <remarks>

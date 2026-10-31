@@ -368,7 +368,10 @@ public static class ProviderServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Registers <see cref="IAlbumMotions"/> over Apple Music and the three clients behind it.</summary>
+    /// <summary>
+    /// Registers <see cref="IAlbumMotions"/> and <see cref="IClassicalAlbums"/>
+    /// over Apple Music and the three clients behind them.
+    /// </summary>
     /// <remarks>
     /// <b>Three clients</b>, <see cref="AddQobuz"/>'s split taken one step
     /// further. The search API and the album pages each get the standard
@@ -415,7 +418,9 @@ public static class ProviderServiceCollectionExtensions
         });
 
         // A page is about 400 KB of HTML, most of it the JSON this reads. The
-        // bare album URL redirects to its slugged one on the same host.
+        // bare album URL redirects to its slugged one on the same host. The
+        // classical host's pages go through this client and its gate too,
+        // by absolute address: one browser's pace for one company's pages.
         pages.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
@@ -432,7 +437,9 @@ public static class ProviderServiceCollectionExtensions
         // No decompression: the body is already-compressed video.
         video.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler());
 
+        services.AddSingleton<AppleMusicRecords>();
         services.AddSingleton<IAlbumMotions, AppleMusicMotions>();
+        services.AddSingleton<IClassicalAlbums, AppleMusicClassical>();
 
         return services;
     }

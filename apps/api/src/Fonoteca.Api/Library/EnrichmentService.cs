@@ -11,6 +11,7 @@ using Fonoteca.Domain.Acquisition;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Events;
 using Fonoteca.Domain.Identification;
+using Fonoteca.Providers.AppleMusic;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.Qobuz;
 using Fonoteca.Providers.Wikidata;
@@ -74,6 +75,7 @@ public sealed class EnrichmentService(
     IEncyclopedia encyclopedia,
     IArtistBanners banners,
     IAlbumMotions motions,
+    IClassicalAlbums classical,
     IAlbumBooklets booklets,
     ICoverArtArchive archive,
     QobuzCovers shopCovers,
@@ -215,6 +217,11 @@ public sealed class EnrichmentService(
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            var classicalAlbums = await db.ReleaseGroups
+                .Where(UnaskedClassicalAlbum(NothingFoundCutoff))
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             var booklets = await UnbookletedAlbums(db, NothingFoundCutoff)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -237,7 +244,7 @@ public sealed class EnrichmentService(
 
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres, parentWorks, words, works, releases, covers);
+                recordings, genres, parentWorks, words, works, releases, covers, classicalAlbums);
         }
     }
 
@@ -461,6 +468,15 @@ public sealed class EnrichmentService(
             await BatchesAsync(
                 "biographies",
                 token => BiographiesAsync(ArticleBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            // After the biographies, whose gaps its composers' pages fill:
+            // Wikipedia's article is asked for first, and kept where it has one.
+            var classicalRun = new ClassicalRun();
+
+            await BatchesAsync(
+                "classical albums",
+                token => ClassicalAsync(ClassicalBatchSize, classicalRun, token),
                 counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
             await BatchesAsync(
@@ -1689,12 +1705,24 @@ public sealed class EnrichmentService(
     /// </remarks>
     private readonly record struct PictureBatch(int Claimed);
 
-    /// <summary>Artists nobody has looked for a Wikipedia article about, or found none for a week ago.</summary>
+    /// <summary>
+    /// Artists nobody has looked for a Wikipedia article about, or found none
+    /// for a week ago — whose gap Apple Music Classical may have filled since,
+    /// which Wikipedia's article replaces (ADR 0019).
+    /// </summary>
     private static System.Linq.Expressions.Expression<Func<Artist, bool>> UnreadArtist(
         DateTimeOffset cutoff) =>
         artist => artist.Mbid != null
             && (artist.BiographyLookupUtc == null
-                || (artist.BiographyText == null && artist.BiographyLookupUtc < cutoff));
+                || ((artist.BiographyText == null || artist.BiographyUrl!.StartsWith(ClassicalBiographyPrefix))
+                    && artist.BiographyLookupUtc < cutoff));
+
+    /// <summary>Where an Apple Music Classical biography is credited to, which is how one is told from Wikipedia's.</summary>
+    internal static readonly string ClassicalBiographyPrefix = AppleMusicOptions.ClassicalServer.AbsoluteUri;
+
+    /// <summary>Who a stored biography is credited to, by where it links.</summary>
+    public static string BiographySource(string? url) =>
+        url is not null && url.StartsWith(ClassicalBiographyPrefix, StringComparison.Ordinal) ? "Apple Music Classical" : "Wikipedia";
 
     /// <summary>
     /// Albums the library holds that nobody has looked for an article about.
@@ -2183,6 +2211,174 @@ public sealed class EnrichmentService(
         }
 
         return asks.Count;
+    }
+
+    /// <summary>Albums asked about per batch: few, for the motion stage's reason.</summary>
+    private const int ClassicalBatchSize = 5;
+
+    /// <summary>One run of the classical stage: the composers whose biography it has asked for.</summary>
+    private sealed class ClassicalRun
+    {
+        public HashSet<string> Asked { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Held albums tagged classical that nobody has asked Apple Music Classical
+    /// about, or that it carried no record of a week ago (ADR 0019).
+    /// </summary>
+    /// <remarks>
+    /// <b>Every such album, not only those MusicBrainz left a gap in</b>: the
+    /// composers' biographies come off the same pages. And the loose genre
+    /// test, crossover included, since Apple answers a record it does not
+    /// carry with a 404 — a request a week. A record it carries is never asked
+    /// again.
+    /// </remarks>
+    private static System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UnaskedClassicalAlbum(
+        DateTimeOffset cutoff) =>
+        group => (group.ClassicalLookupUtc == null
+                || (group.AppleClassicalAlbumId == null && group.ClassicalLookupUtc < cutoff))
+            && group.Files.Any()
+            && ((group.Genres != null && group.Genres.Contains("classical"))
+                || group.Files.Any(file => file.Recording != null
+                    && file.Recording.Genres != null
+                    && file.Recording.Genres.Contains("classical")));
+
+    /// <summary>
+    /// Asks Apple Music Classical about one batch of albums: their pieces and
+    /// performers where MusicBrainz has none, and their composers' biographies
+    /// where nobody has one.
+    /// </summary>
+    /// <remarks>
+    /// The albums are asked about as <see cref="AlbumAsksAsync"/> describes
+    /// them, and saved one at a time, as the motion stage saves.
+    ///
+    /// <b>A composer is the one MusicBrainz credits under the printed name</b>
+    /// (<see cref="ClassicalCatalogue.Composer"/>); a biography is asked for
+    /// only where the composer has none. Wikipedia is asked first, by the
+    /// stage before, and again a week on (<see cref="UnreadArtist"/>); its
+    /// article replaces Apple's wherever it has one — and an outage there
+    /// leaves the composer unstamped, so Wikipedia is asked on the next run.
+    /// </remarks>
+    private async Task<int> ClassicalAsync(int size, ClassicalRun run, CancellationToken cancellationToken)
+    {
+        List<AlbumAsk> asks;
+        List<KnownComposer> composers;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            asks = await AlbumAsksAsync(
+                    db,
+                    db.ReleaseGroups.Where(UnaskedClassicalAlbum(NothingFoundCutoff)).OrderBy(group => group.Id),
+                    size,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            composers = asks.Count == 0 ? [] : await KnownComposersAsync(db, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var ask in asks)
+        {
+            var found = await classical.FindAsync(ask.Album, cancellationToken).ConfigureAwait(false);
+
+            var save = scopeFactory.CreateAsyncScope();
+            await using (save.ConfigureAwait(false))
+            {
+                var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+                var id = ask.Id;
+
+                var group = await db.ReleaseGroups
+                    .FirstAsync(row => row.Id == id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (found is not null)
+                {
+                    await new CatalogueWriter(db, new HashSet<Mbid>(), clock)
+                        .ApplyClassicalAsync(id, found, composers, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    await ClassicalBiographiesAsync(db, found, composers, run, cancellationToken).ConfigureAwait(false);
+                }
+
+                group.ClassicalLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+                group.AppleClassicalAlbumId = found?.AlbumId;
+
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return asks.Count;
+    }
+
+    /// <summary>The artists MusicBrainz credits as a composer, under their printed names and their own.</summary>
+    private static async Task<List<KnownComposer>> KnownComposersAsync(FonotecaDbContext db, CancellationToken cancellationToken)
+    {
+        var credited = await db.Contributions
+            .AsNoTracking()
+            .Where(c => c.Type == "composer" && c.ArtistMbid != null && c.Source == null)
+            .Select(c => new { c.ArtistMbid, c.Name })
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        credited.RemoveAll(c => CatalogueEndpoints.Nobody.Contains(c.ArtistMbid!.Value));
+
+        var mbids = credited.Select(c => c.ArtistMbid).Distinct().ToList();
+
+        var artists = await db.Artists
+            .AsNoTracking()
+            .Where(a => mbids.Contains(a.Mbid))
+            .Select(a => new { a.Mbid, a.Name, a.LatinName })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. credited.Select(c => new KnownComposer(c.ArtistMbid!.Value, c.Name, null)),
+            .. artists.Select(a => new KnownComposer(a.Mbid!.Value, a.Name, a.LatinName)),
+        ];
+    }
+
+    /// <summary>Apple's biography for each composer on the album whom nobody has one for.</summary>
+    private async Task ClassicalBiographiesAsync(
+        FonotecaDbContext db,
+        ClassicalAlbum found,
+        IReadOnlyList<KnownComposer> composers,
+        ClassicalRun run,
+        CancellationToken cancellationToken)
+    {
+        var printed = found.Tracks
+            .Select(track => track.Work)
+            .OfType<ClassicalWork>()
+            .SelectMany(work => work.Composers)
+            .DistinctBy(composer => composer.Id, StringComparer.Ordinal)
+            .Where(composer => !run.Asked.Contains(composer.Id))
+            .Select(composer => (composer.Id, Mbid: ClassicalCatalogue.Composer(composer.Name, composers)))
+            .Where(composer => composer.Mbid is not null)
+            .ToList();
+
+        if (printed.Count == 0) return;
+
+        var mbids = printed.Select(composer => composer.Mbid).ToList();
+
+        var gaps = (await db.Artists
+                .Where(a => mbids.Contains(a.Mbid) && a.BiographyText == null)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(a => a.Mbid!.Value);
+
+        foreach (var (apple, mbid) in printed)
+        {
+            if (!gaps.TryGetValue(mbid!.Value, out var artist) || !run.Asked.Add(apple)) continue;
+
+            if (await classical.BiographyAsync(apple, cancellationToken).ConfigureAwait(false) is { } biography)
+            {
+                artist.BiographyText = biography.Text;
+                artist.BiographyUrl = biography.Url.AbsoluteUri;
+            }
+        }
     }
 
     /// <summary>One album to ask a source about.</summary>
@@ -3735,7 +3931,8 @@ public sealed record EnrichmentPending(
     int Lyrics,
     int Works,
     int Releases,
-    int Covers)
+    int Covers,
+    int Classical)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -3747,7 +3944,7 @@ public sealed record EnrichmentPending(
     /// </remarks>
     public int Total =>
         Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
-        + ParentWorks + Lyrics + Works + Releases + Covers;
+        + ParentWorks + Lyrics + Works + Releases + Covers + Classical;
 }
 
 /// <summary>Where a running pass has got to.</summary>

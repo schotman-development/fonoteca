@@ -111,6 +111,18 @@ public sealed class Work
     /// <summary>When it was finished; <see cref="ComposedBegin"/>'s twin.</summary>
     public string? ComposedEnd { get; set; }
 
+    /// <summary>Apple Music Classical's id for the piece, where the work is that catalogue's and not MusicBrainz's.</summary>
+    /// <remarks>
+    /// The provenance and the key (ADR 0019): a recording MusicBrainz links to
+    /// no work is linked to the piece Apple's album page names for its track,
+    /// minted here with no <see cref="Mbid"/> and found again by this id. Such
+    /// a row is MusicBrainz's to replace — the day it links the recording, the
+    /// recording moves to that work and this one goes once nothing performs
+    /// it — and it has no parent, no type and no description, since Apple's
+    /// pages name the piece and nothing about it.
+    /// </remarks>
+    public string? AppleWorkId { get; set; }
+
     public ICollection<Recording> Recordings { get; init; } = [];
     public ICollection<Relationship> Relationships { get; init; } = [];
 
@@ -287,6 +299,17 @@ public sealed class ReleaseGroup
 
     /// <summary>When the genres were last asked for, answer or not. None found is asked again after a week.</summary>
     public DateTimeOffset? GenresLookupUtc { get; set; }
+
+    /// <summary>When Apple Music Classical was last asked about the album, answer or not.</summary>
+    /// <remarks>
+    /// The classical stage's "we asked" stamp (rule 1, ADR 0019). An album Apple
+    /// carries no record of is asked again a week later, since Apple's catalogue
+    /// grows; one it carries (<see cref="AppleClassicalAlbumId"/>) never is.
+    /// </remarks>
+    public DateTimeOffset? ClassicalLookupUtc { get; set; }
+
+    /// <summary>Apple's id for the record the last answer came from, or null where none was found — the provenance.</summary>
+    public string? AppleClassicalAlbumId { get; set; }
 
     public ICollection<Release> Releases { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
@@ -2063,6 +2086,18 @@ public sealed class Contribution
     public string? Begin { get; init; }
 
     public string? End { get; init; }
+
+    /// <summary>Where the link came from: null for MusicBrainz, <see cref="AppleMusicClassical"/> for Apple's album page.</summary>
+    /// <remarks>
+    /// Apple's are performers on a recording MusicBrainz names none for, and
+    /// the composers of the pieces it minted (ADR 0019). A describe replaces
+    /// MusicBrainz's own and leaves Apple's — unless MusicBrainz now names a
+    /// performer itself, when Apple's go: the two are never read together.
+    /// </remarks>
+    public string? Source { get; init; }
+
+    /// <summary>The <see cref="Source"/> of a link read off Apple Music Classical.</summary>
+    public const string AppleMusicClassical = "applemusicclassical";
 }
 
 /// <summary>

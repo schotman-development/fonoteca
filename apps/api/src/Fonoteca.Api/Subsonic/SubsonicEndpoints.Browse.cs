@@ -1,5 +1,6 @@
 using System.Net;
 using Fonoteca.Api.Endpoints;
+using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
@@ -219,7 +220,7 @@ public static partial class SubsonicEndpoints
     private static string? Credited(string? text, string? url) =>
         string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(url)
             ? null
-            : $"{WebUtility.HtmlEncode(text.Trim()).ReplaceLineEndings("<br/>")}<br/><br/><a href=\"{WebUtility.HtmlEncode(url)}\">Read more on Wikipedia</a>";
+            : $"{WebUtility.HtmlEncode(text.Trim()).ReplaceLineEndings("<br/>")}<br/><br/><a href=\"{WebUtility.HtmlEncode(url)}\">Read more on {EnrichmentService.BiographySource(url)}</a>";
 
     /// <summary>
     /// A shelf of albums.

@@ -1,0 +1,10 @@
+
+
+
+{
+ "resultCount":1,
+ "results": [
+{"wrapperType":"collection", "collectionType":"Album", "artistId":279367637, "collectionId":1456009475, "amgArtistId":1266179, "artistName":"Amy Dickson", "collectionName":"In Circles", "collectionCensoredName":"In Circles", "artistViewUrl":"https://music.apple.com/us/artist/amy-dickson/279367637?uo=4", "collectionViewUrl":"https://music.apple.com/us/album/in-circles/1456009475?uo=4", "artworkUrl60":"https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/cc/74/07/cc740731-c5fe-f097-16f6-cf966f6490e5/886447581360.jpg/60x60bb.jpg", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/cc/74/07/cc740731-c5fe-f097-16f6-cf966f6490e5/886447581360.jpg/100x100bb.jpg", "collectionPrice":9.99, "collectionExplicitness":"notExplicit", "trackCount":21, "copyright":"℗ 2019 Australian Broadcasting Corporation under exclusive license to Sony Music Entertainment", "country":"USA", "currency":"USD", "releaseDate":"2019-04-05T07:00:00Z", "primaryGenreName":"Classical"}]
+}
+
+

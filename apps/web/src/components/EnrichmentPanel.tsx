@@ -48,6 +48,7 @@ function pendingSentence(status: {
   readonly pendingWorks: number
   readonly pendingReleases: number
   readonly pendingCovers: number
+  readonly pendingClassical: number
 }): string {
   const parts: string[] = []
 
@@ -147,6 +148,15 @@ function pendingSentence(status: {
       `${status.pendingArticles.toLocaleString()} article${
         status.pendingArticles === 1 ? '' : 's'
       } to look for`,
+    )
+  }
+
+  // Then Apple Music Classical, after the articles whose gaps it fills.
+  if (status.pendingClassical > 0) {
+    parts.push(
+      `${status.pendingClassical.toLocaleString()} classical album${
+        status.pendingClassical === 1 ? '' : 's'
+      } to ask Apple Music Classical about`,
     )
   }
 

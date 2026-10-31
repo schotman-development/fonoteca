@@ -426,6 +426,7 @@ public static class LibraryEndpoints
             PendingWorks: pending.Works,
             PendingReleases: pending.Releases,
             PendingCovers: pending.Covers,
+            PendingClassical: pending.Classical,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -745,6 +746,9 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Album sleeves not yet asked for, or none found a week ago.</summary>
     int PendingCovers,
+
+    /// <summary>Classical albums not yet asked about on Apple Music Classical, or not carried there a week ago.</summary>
+    int PendingClassical,
 
     EnrichmentSummary? LastCompleted);
 

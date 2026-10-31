@@ -611,7 +611,7 @@ public sealed partial class TagWriteService(
                         link.Attributes,
                         link.Name,
                         link.ArtistMbid,
-                        db.Artists.Where(artist => artist.Mbid == link.ArtistMbid).Select(artist => artist.SortName).FirstOrDefault()))
+                        link.ArtistMbid == null ? null : db.Artists.Where(artist => artist.Mbid == link.ArtistMbid).Select(artist => artist.SortName).FirstOrDefault()))
                     .ToList(),
                 file.Recording.Work!.Contributions
                     .OrderBy(link => link.Position)
@@ -620,7 +620,7 @@ public sealed partial class TagWriteService(
                         link.Attributes,
                         link.Name,
                         link.ArtistMbid,
-                        db.Artists.Where(artist => artist.Mbid == link.ArtistMbid).Select(artist => artist.SortName).FirstOrDefault()))
+                        link.ArtistMbid == null ? null : db.Artists.Where(artist => artist.Mbid == link.ArtistMbid).Select(artist => artist.SortName).FirstOrDefault()))
                     .ToList(),
                 file.Recording.Credits
                     .OrderBy(credit => credit.Position)

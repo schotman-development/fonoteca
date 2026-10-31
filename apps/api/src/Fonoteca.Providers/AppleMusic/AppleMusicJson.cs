@@ -32,6 +32,19 @@ internal sealed record ITunesResult
     /// <summary>An ISO timestamp, of which only the year is read.</summary>
     [JsonPropertyName("releaseDate")]
     public string? ReleaseDate { get; init; }
+
+    /// <summary>A track's id, which its album's page names it by.</summary>
+    [JsonPropertyName("trackId")]
+    public long? TrackId { get; init; }
+
+    [JsonPropertyName("discNumber")]
+    public int? DiscNumber { get; init; }
+
+    [JsonPropertyName("trackNumber")]
+    public int? TrackNumber { get; init; }
+
+    [JsonPropertyName("trackTimeMillis")]
+    public long? TrackTimeMillis { get; init; }
 }
 
 [JsonSerializable(typeof(ITunesResults))]

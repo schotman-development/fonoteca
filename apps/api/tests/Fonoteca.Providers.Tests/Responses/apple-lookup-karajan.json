@@ -1,0 +1,10 @@
+
+
+
+{
+ "resultCount":1,
+ "results": [
+{"wrapperType":"collection", "collectionType":"Album", "artistId":579853, "collectionId":1440744257, "amgArtistId":3082667, "artistName":"Berlin Philharmonic Orchestra & Herbert von Karajan", "collectionName":"Beethoven: Symphony Nos. 5 & 6", "collectionCensoredName":"Beethoven: Symphony Nos. 5 & 6", "artistViewUrl":"https://music.apple.com/us/artist/berlin-philharmonic-orchestra/579853?uo=4", "collectionViewUrl":"https://music.apple.com/us/album/beethoven-symphony-nos-5-6/1440744257?uo=4", "artworkUrl60":"https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/94/58/f2/9458f2e8-ea9d-b384-6a52-6d976d5ebc9c/00028943900423.rgb.jpg/60x60bb.jpg", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/94/58/f2/9458f2e8-ea9d-b384-6a52-6d976d5ebc9c/00028943900423.rgb.jpg/100x100bb.jpg", "collectionPrice":9.99, "collectionExplicitness":"notExplicit", "trackCount":9, "copyright":"℗ 1984 Deutsche Grammophon GmbH, Berlin", "country":"USA", "currency":"USD", "releaseDate":"1984-01-01T08:00:00Z", "primaryGenreName":"Classical"}]
+}
+
+

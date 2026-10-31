@@ -558,6 +558,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("RecordingId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Source")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1273,6 +1277,13 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AppleClassicalAlbumId")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTimeOffset?>("ClassicalLookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("EditsJson")
                         .HasColumnType("jsonb");
 
@@ -1416,6 +1427,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AppleWorkId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("ComposedBegin")
                         .HasColumnType("text");
 
@@ -1465,6 +1480,10 @@ namespace Fonoteca.Data.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AppleWorkId")
+                        .IsUnique()
+                        .HasFilter("\"AppleWorkId\" IS NOT NULL");
 
                     b.HasIndex("DescribedUtc");
 

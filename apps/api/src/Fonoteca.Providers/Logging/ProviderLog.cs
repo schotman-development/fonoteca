@@ -219,6 +219,34 @@ internal static partial class ProviderLog
             + "will keep: {Reason}")]
     public static partial void AppleMotionRejected(ILogger logger, string url, string reason);
 
+    /// <remarks>The provenance, for <c>AppleMotionFound</c>'s reason.</remarks>
+    [LoggerMessage(
+        EventId = 1510,
+        Level = LogLevel.Information,
+        Message = "Apple Music Classical album {Album} ({Storefront}) describes {Tracks} tracks of "
+            + "{Artist} - {Title}, matched by {How}")]
+    public static partial void AppleClassicalFound(
+        ILogger logger,
+        string album,
+        string storefront,
+        int tracks,
+        string? artist,
+        string title,
+        string how);
+
+    [LoggerMessage(
+        EventId = 1511,
+        Level = LogLevel.Debug,
+        Message = "Apple Music Classical carries no record of {Artist} - {Title}")]
+    public static partial void AppleClassicalNotFound(ILogger logger, string? artist, string title);
+
+    /// <remarks><c>AppleMotionNoHeader</c>'s reason: one page is odd, every page is the reader gone stale.</remarks>
+    [LoggerMessage(
+        EventId = 1512,
+        Level = LogLevel.Warning,
+        Message = "Apple Music Classical's page for album {Album} lists no tracks; read as nothing to say")]
+    public static partial void AppleClassicalNoTracks(ILogger logger, long album);
+
     [LoggerMessage(
         EventId = 1550,
         Level = LogLevel.Information,
