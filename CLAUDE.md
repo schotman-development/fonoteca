@@ -1100,8 +1100,9 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 ## Accounts
 
 ADR 0018. **The library has no owner; an account owns only its hearts, its
-tags, its playlist folders and its API keys**, and its roles say what it may
-do. Never scope a catalogue fact, a file or a playlist by account.
+tags, its playlist folders, its play queue and its API keys**, and its roles
+say what it may do. Never scope a catalogue fact, a file or a playlist by
+account.
 
 - **ASP.NET Core Identity, and OpenSubsonic's twelve roles** (`AccountRoles`,
   a column, made claims by `AccountClaims`). A fallback policy closes every
@@ -1128,7 +1129,9 @@ do. Never scope a catalogue fact, a file or a playlist by account.
   `Tag`, `SongTag` (through its tag), `PlaylistFolder` and
   `PlaylistPlacement`: a song's tags move with its hearts
   (`CarryLovesAsync`), and a playlist's rename or delete moves or drops every
-  account's place for it (`CatalogueEndpoints.PlacedAsync`).
+  account's place for it (`CatalogueEndpoints.PlacedAsync`). `PlayQueue` is
+  filtered too and moves with nothing: it keeps file ids, and one the library
+  lost is left out when read.
 - **The journal names the account** (`AccountCallerContext`); work with no
   request behind it is `system`, `/mcp` is `agent`.
 

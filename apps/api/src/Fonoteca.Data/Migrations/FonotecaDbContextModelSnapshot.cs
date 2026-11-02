@@ -134,6 +134,33 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("ApiKeys");
                 });
 
+            modelBuilder.Entity("Fonoteca.Data.PlayQueue", b =>
+                {
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChangedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ChangedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Current")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("PositionMs")
+                        .HasColumnType("bigint");
+
+                    b.PrimitiveCollection<List<Guid>>("Songs")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.HasKey("AccountId");
+
+                    b.ToTable("PlayQueues");
+                });
+
             modelBuilder.Entity("Fonoteca.Data.PlaylistFolder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1615,6 +1642,15 @@ namespace Fonoteca.Data.Migrations
                 });
 
             modelBuilder.Entity("Fonoteca.Data.ApiKey", b =>
+                {
+                    b.HasOne("Fonoteca.Data.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.PlayQueue", b =>
                 {
                     b.HasOne("Fonoteca.Data.Account", null)
                         .WithMany()

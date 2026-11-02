@@ -20,12 +20,12 @@ namespace Fonoteca.Data;
 public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> options)
     : IdentityUserContext<Account, Guid>(options)
 {
-    /// <summary>Whose hearts, tags and playlist folders this context sees.</summary>
+    /// <summary>Whose hearts, tags, playlist folders and play queue this context sees.</summary>
     /// <remarks>
     /// Set by the Subsonic guard for the account it signed in. Every query of
     /// <see cref="Loves"/>, <see cref="Tags"/>, <see cref="SongTags"/>,
-    /// <see cref="PlaylistFolders"/> and <see cref="PlaylistPlacements"/> is
-    /// filtered by it, so a handler cannot show one person another's by
+    /// <see cref="PlaylistFolders"/>, <see cref="PlaylistPlacements"/> and
+    /// <see cref="PlayQueues"/> is filtered by it, so a handler cannot show one person another's by
     /// forgetting a <c>Where</c>; code that moves them for everybody
     /// (<c>CatalogueWriter</c>, a playlist's rename) says
     /// <c>IgnoreQueryFilters</c>.
@@ -47,6 +47,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<SongTag> SongTags => Set<SongTag>();
     public DbSet<PlaylistFolder> PlaylistFolders => Set<PlaylistFolder>();
     public DbSet<PlaylistPlacement> PlaylistPlacements => Set<PlaylistPlacement>();
+    public DbSet<PlayQueue> PlayQueues => Set<PlayQueue>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<Contribution> Contributions => Set<Contribution>();
     public DbSet<RecordingSession> RecordingSessions => Set<RecordingSession>();
@@ -492,6 +493,13 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasQueryFilter(x => x.AccountId == AccountId);
             e.HasIndex(x => new { x.AccountId, x.Playlist }).IsUnique();
             e.HasIndex(x => x.Playlist);
+        });
+
+        builder.Entity<PlayQueue>(e =>
+        {
+            e.HasKey(x => x.AccountId);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(x => x.AccountId == AccountId);
         });
 
         builder.Entity<ArtistCredit>(e =>

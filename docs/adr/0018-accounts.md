@@ -108,7 +108,8 @@ no query can see another account's hearts by forgetting a `Where`. The two
 places hearts move for everybody (a merged recording, an album filed again)
 read past the filter and carry each account's hearts separately.
 *Amended 2026-10-22:* an account's tags and playlist folders (ADR 0012) are
-filtered the same way, a song's tags carried with its hearts.
+filtered the same way, a song's tags carried with its hearts. *Amended
+2026-11-02:* so is its play queue (ADR 0012), one per account.
 
 **Playlists stay everyone's**, and a Subsonic client is told the signed-in
 account owns each one, so it lets them be edited. *Amended 2026-10-22:* where

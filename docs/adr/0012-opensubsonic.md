@@ -313,7 +313,20 @@ operas — is no piece, its parts are (`WorkTree.Cut`), in `getCompositions`
 too; a work in another script is named by its English alias where
 MusicBrainz has one (`Works.LatinTitle`, beside the title the tag write
 keeps); and a movement loses the piece in front however it spells it
-(`MovementTitles`).
+(`MovementTitles`). *Amended 2026-11-02:* the play queue is kept,
+`savePlayQueue` and `getPlayQueue`, asked for by Fonoteca's own client to
+reopen where it left off: one per account, the protocol's model, the last
+save winning from whichever client `changedBy` names, in a row of its own
+(`PlayQueue`). Its songs are files, as a playlist's are, kept as sent,
+repeats included; one the library has lost since is left out when read, and
+where that was the song playing, the next one held plays from its start,
+else the nearest before. A save with songs must name one of them in
+`current` (error 10), one with none clears the queue, and nothing saved is
+answered as Navidrome answers it, with the owner, a `changed` in the year 1
+and an empty `changedBy`, the spec saying nothing of that case. A form body is read up to 100,000 entries where
+ASP.NET allows 1024, since a long playlist queued is one `id` per song and a
+client refused once stops saving (the owner's choice). Bookmarks and
+`indexBasedQueue` stay absent (`SubsonicEndpoints.PlayQueue.cs`).
 
 ### Scope
 
@@ -321,7 +334,7 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
-`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation`, and *(amended 2026-10-22)* `getPlaylistFolders`, `createPlaylistFolder`, `updatePlaylistFolder`, `deletePlaylistFolder`, `movePlaylist`, `getTags`, `getTag`, `createTag`, `updateTag`, `deleteTag` — each at both `/rest/x`
+`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation`, and *(amended 2026-10-22)* `getPlaylistFolders`, `createPlaylistFolder`, `updatePlaylistFolder`, `deletePlaylistFolder`, `movePlaylist`, `getTags`, `getTag`, `createTag`, `updateTag`, `deleteTag`, and *(amended 2026-11-02)* `savePlayQueue`, `getPlayQueue` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 *Amended 2026-10-19:* each also takes `POST` with an
 `application/x-www-form-urlencoded` body, read as the query (OpenSubsonic's

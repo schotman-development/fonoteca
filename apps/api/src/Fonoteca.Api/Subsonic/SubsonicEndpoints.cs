@@ -7,6 +7,7 @@ using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -86,7 +87,8 @@ public static partial class SubsonicEndpoints
     /// arguments joined to the query string's before the check, a key in the
     /// body replacing the same key in the URL, so the password can stay out of
     /// the URL and every handler finds the arguments where it always has. Any
-    /// other body is not read.
+    /// other body is not read. It is read under ASP.NET's limits but one:
+    /// <see cref="FormLimits"/>.
     /// </remarks>
     internal static Task Guard(HttpContext context, RequestDelegate next)
     {
@@ -113,9 +115,23 @@ public static partial class SubsonicEndpoints
         && MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
         && type.MediaType.Equals("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// ASP.NET's form limits, but up to 100,000 entries where it allows 1024.
+    /// </summary>
+    /// <remarks>
+    /// <c>savePlayQueue</c> sends one <c>id</c> per song, so a queue of a long
+    /// playlist passes 1024, and a client refused once stops saving its queue
+    /// (the owner's choice). The body is still bounded by Kestrel's request
+    /// size, and is read before sign-in, so that bound is the one an anonymous
+    /// client meets too.
+    /// </remarks>
+    private static readonly FormOptions FormLimits = new() { ValueCountLimit = 100_000 };
+
     private static async Task AdmitFormAsync(HttpContext context, RequestDelegate next)
     {
         IFormCollection form;
+
+        context.Features.Set<IFormFeature>(new FormFeature(context.Request, FormLimits));
 
         try
         {
@@ -267,6 +283,8 @@ public static partial class SubsonicEndpoints
         Map(group, "star", Star);
         Map(group, "unstar", Unstar);
         Map(group, "getStarred2", GetStarred2);
+        Map(group, "savePlayQueue", SavePlayQueue);
+        Map(group, "getPlayQueue", GetPlayQueue);
 
         Map(group, "stream", Stream);
         Map(group, "download", Download);

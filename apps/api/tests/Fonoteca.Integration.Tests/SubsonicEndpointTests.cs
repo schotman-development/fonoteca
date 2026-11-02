@@ -1817,7 +1817,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Assert.Equal(0, missing.GetProperty("error").GetProperty("code").GetInt32());
 
             // Past the form limits, f=json is in the body that went unread.
-            using var flood = new FormUrlEncodedContent([.. login.Select(field => KeyValuePair.Create(field.Item1, field.Item2)), .. Enumerable.Repeat(KeyValuePair.Create("id", song), 1100)]);
+            using var flood = new FormUrlEncodedContent([.. login.Select(field => KeyValuePair.Create(field.Item1, field.Item2)), .. Enumerable.Repeat(KeyValuePair.Create("id", song), 100_001)]);
             using var flooded = await client.PostAsync(new Uri("/rest/star", UriKind.Relative), flood, Token);
             Assert.Equal(HttpStatusCode.OK, flooded.StatusCode);
             Assert.Contains("code=\"0\"", await flooded.Content.ReadAsStringAsync(Token), StringComparison.Ordinal);
@@ -2255,6 +2255,142 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal([piano], song.Elements().Where(element => element.Name.LocalName == "tagIds").Select(element => element.Value));
 
         static Guid SubsonicTag(string id) => Guid.ParseExact(id["tg-".Length..], "N");
+    }
+
+    /// <summary>
+    /// A play queue comes back as it was saved, less what the library has lost
+    /// since, and only to its own account.
+    /// </summary>
+    /// <remarks>
+    /// Removes what it adds, because the class shares one database.
+    /// </remarks>
+    [Fact]
+    public async Task APlayQueueComesBackAsSavedAndOnlyToItsAccount()
+    {
+        using var client = _factory!.CreateClient();
+
+        async Task<JsonElement> Answer(string route, string user = "me")
+        {
+            var separator = route.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            using var response = await client.GetAsync(
+                new Uri($"/rest/{route}{separator}u={user}&p={Password}&v=1.16.1&c=test&f=json", UriKind.Relative),
+                Token);
+
+            return JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response").Clone();
+        }
+
+        static int Code(JsonElement answer) => answer.GetProperty("error").GetProperty("code").GetInt32();
+        static string Status(JsonElement answer) => answer.GetProperty("status").GetString()!;
+
+        async Task<JsonElement> QueueAsync(string user = "me") => (await Answer("getPlayQueue.view", user)).GetProperty("playQueue");
+
+        static List<string> Entries(JsonElement queue) =>
+            queue.TryGetProperty("entry", out var entries) ? [.. entries.EnumerateArray().Select(song => song.GetProperty("id").GetString()!)] : [];
+
+        var filed = $"tr-{_filed.Value:N}";
+        var scanned = $"tr-{_scanned.Value:N}";
+        var lost = $"tr-{Guid.CreateVersion7():N}";
+
+        // Nothing saved: Navidrome's answer, every field the spec requires and no song.
+        static void Unsaved(JsonElement queue, string user)
+        {
+            Assert.Equal(user, queue.GetProperty("username").GetString());
+            Assert.Equal(DateTimeOffset.MinValue, DateTimeOffset.Parse(queue.GetProperty("changed").GetString()!, CultureInfo.InvariantCulture));
+            Assert.Equal(string.Empty, queue.GetProperty("changedBy").GetString());
+            Assert.False(queue.TryGetProperty("current", out _));
+            Assert.Empty(Entries(queue));
+        }
+
+        Unsaved(await QueueAsync(), "me");
+
+        // Saved as a form, a song twice, the client named.
+        using (var form = new FormUrlEncodedContent([
+            new("u", "me"), new("p", Password), new("v", "1.16.1"), new("c", "a phone"), new("f", "json"),
+            new("id", filed), new("id", scanned), new("id", filed), new("current", scanned), new("position", "30500")]))
+        using (var posted = await client.PostAsync(new Uri("/rest/savePlayQueue.view", UriKind.Relative), form, Token))
+        {
+            Assert.Equal("ok", Status(JsonDocument.Parse(await posted.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response")));
+        }
+
+        var saved = await QueueAsync();
+        Assert.Equal([filed, scanned, filed], Entries(saved));
+        Assert.Equal(scanned, saved.GetProperty("current").GetString());
+        Assert.Equal(30_500, saved.GetProperty("position").GetInt64());
+        Assert.Equal("me", saved.GetProperty("username").GetString());
+        Assert.Equal("a phone", saved.GetProperty("changedBy").GetString());
+        Assert.True(DateTimeOffset.TryParse(saved.GetProperty("changed").GetString(), CultureInfo.InvariantCulture, out _));
+        Assert.Equal("My Foolish Heart", saved.GetProperty("entry")[0].GetProperty("title").GetString());
+
+        // A long playlist's worth, past ASP.NET's 1024 form entries.
+        using (var form = new FormUrlEncodedContent([
+            new("u", "me"), new("p", Password), new("v", "1.16.1"), new("c", "a phone"), new("f", "json"), new("current", filed),
+            .. Enumerable.Repeat(new KeyValuePair<string, string>("id", filed), 5_000)]))
+        using (var posted = await client.PostAsync(new Uri("/rest/savePlayQueue.view", UriKind.Relative), form, Token))
+        {
+            Assert.Equal("ok", Status(JsonDocument.Parse(await posted.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response")));
+        }
+
+        Assert.Equal(5_000, Entries(await QueueAsync()).Count);
+
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={filed}&id={scanned}&id={filed}&current={scanned}&position=30500")));
+
+        // A refusal changes nothing.
+        Assert.Equal(10, Code(await Answer($"savePlayQueue.view?id={filed}")));
+        Assert.Equal(10, Code(await Answer($"savePlayQueue.view?id={filed}&current={scanned}")));
+        Assert.Equal(70, Code(await Answer($"savePlayQueue.view?id={filed}&id=al-{Guid.CreateVersion7():N}&current={filed}")));
+        Assert.Equal(70, Code(await Answer($"savePlayQueue.view?id={FolderId("Somebody/A Bootleg/01 Untitled.flac")}&current={filed}")));
+        Assert.Equal([filed, scanned, filed], Entries(await QueueAsync()));
+
+        // A song the library does not hold is left out; where it was playing,
+        // the next one held plays from its start, else the nearest before.
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={filed}&id={lost}&id={scanned}&current={lost}&position=9000")));
+        var skipped = await QueueAsync();
+        Assert.Equal([filed, scanned], Entries(skipped));
+        Assert.Equal(scanned, skipped.GetProperty("current").GetString());
+        Assert.Equal(0, skipped.GetProperty("position").GetInt64());
+
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={scanned}&id={filed}&id={lost}&current={lost}")));
+        Assert.Equal(filed, (await QueueAsync()).GetProperty("current").GetString());
+
+        // A song queued twice is playing at its first place.
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={lost}&id={scanned}&id={lost}&id={filed}&current={lost}")));
+        Assert.Equal(scanned, (await QueueAsync()).GetProperty("current").GetString());
+
+        // A position is milliseconds, past what an int holds.
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={filed}&current={filed}&position=3000000000")));
+        Assert.Equal(3_000_000_000, (await QueueAsync()).GetProperty("position").GetInt64());
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={filed}&current={filed}&position=-5")));
+        Assert.Equal(0, (await QueueAsync()).GetProperty("position").GetInt64());
+
+        Assert.Equal("ok", Status(await Answer($"savePlayQueue.view?id={lost}&current={lost}")));
+        var emptied = await QueueAsync();
+        Assert.Empty(Entries(emptied));
+        Assert.False(emptied.TryGetProperty("current", out _));
+        Assert.Equal("test", emptied.GetProperty("changedBy").GetString());
+
+        // A client that names itself by nothing, or with a NUL.
+        foreach (var (name, stored) in new[] { (string.Empty, string.Empty), ("&c=a%00b", "a\u2400b") })
+        {
+            using var named = await client.GetAsync(new Uri($"/rest/savePlayQueue.view?u=me&p={Password}&v=1.16.1&f=json&id={lost}&current={lost}{name}", UriKind.Relative), Token);
+            Assert.Equal(HttpStatusCode.OK, named.StatusCode);
+            Assert.Equal(stored, (await QueueAsync()).GetProperty("changedBy").GetString());
+        }
+
+        // Somebody else has a queue of their own, and saves at once land as one.
+        Assert.Equal("ok", Status(await Answer("createUser.view?username=queue-listener&password=a-test-passphrase&email=queue@example.org")));
+        Unsaved(await QueueAsync("queue-listener"), "queue-listener");
+        Assert.All(
+            await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Answer($"savePlayQueue.view?id={filed}&current={filed}", "queue-listener"))),
+            save => Assert.Equal("ok", Status(save)));
+        Assert.Equal([filed], Entries(await QueueAsync("queue-listener")));
+        Assert.Empty(Entries(await QueueAsync()));
+
+        // No song clears it.
+        Assert.Equal("ok", Status(await Answer("savePlayQueue.view")));
+        Unsaved(await QueueAsync(), "me");
+        Assert.Equal([filed], Entries(await QueueAsync("queue-listener")));
+
+        Assert.Equal("ok", Status(await Answer("deleteUser.view?username=queue-listener")));
     }
 
     private async Task<JsonElement> BillEvansAsync(HttpClient client) =>
