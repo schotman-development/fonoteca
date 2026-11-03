@@ -5,6 +5,7 @@ using Fonoteca.Providers.AcoustId;
 using Fonoteca.Providers.AppleMusic;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.CoverArt;
+using Fonoteca.Providers.Genres;
 using Fonoteca.Providers.Lrclib;
 using Fonoteca.Providers.RadioBrowser;
 using Fonoteca.Providers.MusicBrainz;
@@ -451,6 +452,14 @@ public static class ProviderServiceCollectionExtensions
     /// </remarks>
     public static IServiceCollection AddAlbumBooklets(this IServiceCollection services) =>
         services.AddSingleton<IAlbumBooklets, AlbumBooklets>();
+
+    /// <summary>Registers <see cref="IAlbumGenres"/>.</summary>
+    /// <remarks>
+    /// After <see cref="AddAppleMusic"/> and <see cref="AddQobuz"/>, whose
+    /// clients it asks; it has no client of its own.
+    /// </remarks>
+    public static IServiceCollection AddAlbumGenres(this IServiceCollection services) =>
+        services.AddSingleton<IAlbumGenres, ShopAlbumGenres>();
 
     /// <summary>Registers <see cref="ISongLyrics"/> over LRCLIB and the client behind it.</summary>
     /// <remarks>

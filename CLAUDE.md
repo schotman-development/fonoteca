@@ -52,7 +52,7 @@ the rest.
    `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`, `Recordings.DescribedUtc`,
    `ReleaseGroups.GenresLookupUtc`, `Works.PartOfLookupUtc`, `Works.DescribedUtc`,
    `Releases.DescribedUtc`, `TempoAndKeyMeasuredUtc`, `ReleaseGroups.ClassicalLookupUtc`,
-   `GenreDescriptions.LookupUtc`. A library is full of things the provider has never heard
+   `GenreDescriptions.LookupUtc`, `ReleaseGroups.ShopGenresLookupUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -204,6 +204,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | files & previews | `Domain/Catalogue/FolderRollup.cs`, `FilePreview.cs` | `Api/Library/FileManagerService.cs` |
 | covers | — | `Providers/CoverArt/`, `Api/Endpoints/CatalogueEndpoints.Cover.cs` |
 | motion artwork | — | `Providers/AppleMusic/AppleMusicMotions.cs`, `EnrichmentService.MotionAsync`, `TagWriteService.EnsureMotionAsync` |
+| shop genres | `Domain/Catalogue/ShopGenres.cs` | `Providers/Genres/ShopAlbumGenres.cs`, `EnrichmentService.ShopGenresAsync` |
 | classical pieces & performers | `Domain/Catalogue/ClassicalCatalogue.cs` | `Providers/AppleMusic/AppleMusicClassical.cs`, `EnrichmentService.ClassicalAsync`, `CatalogueWriter.ApplyClassicalAsync` |
 | booklets | — | `Providers/CoverArt/AlbumBooklets.cs`, `EnrichmentService.BookletsAsync`, `TagWriteService.EnsureBookletAsync` |
 | lyrics | `Domain/Catalogue/LyricsText.cs` | `Providers/Lrclib/LrclibLyrics.cs`, `EnrichmentService.LyricsAsync`, `TagWriteService.TrashLyricsAsync`, `Api/Subsonic/SubsonicEndpoints.Lyrics.cs` |
@@ -259,7 +260,7 @@ run rather than a no-op.
 the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
 held recordings described again → parent works → works and filed releases
-asked for what the tags need → album genres → artists → portraits → articles,
+asked for what the tags need → album genres → artists → shop genres → portraits → articles,
 Apple Music Classical, album articles, genre descriptions, banners, covers, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
@@ -306,7 +307,10 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   the Ring is four operas and op. 8 four concertos. Climb from the
   recording's own work through that dictionary, never from the `ParentId` on
   its row. Album genres are a release-group lookup each
-  (`ReleaseGroups.Genres`), same rule. Artists carry `LinksJson`, every URL
+  (`ReleaseGroups.Genres`), same rule; where MusicBrainz has none on the album
+  or any recording, Apple Music's goes there, else Qobuz's (ADR 0020,
+  `GenresSource` naming the shop), stated as MusicBrainz states genres
+  (`ShopGenres`) and replaced by MusicBrainz's once it has any. Artists carry `LinksJson`, every URL
   relation, which is how a later source finds one by identity.
 - **A merged MBID is followed, never refused.** WS/2 answers it with the
   survivor's document, so a different id coming back *is* the merge.

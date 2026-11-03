@@ -140,6 +140,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.SecondaryTypes).HasMaxLength(500);
             e.Property(x => x.ReviewUrl).HasMaxLength(1000);
             e.Property(x => x.Genres).HasMaxLength(1000);
+            e.Property(x => x.GenresSource).HasMaxLength(50);
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.Property(x => x.AppleClassicalAlbumId).HasMaxLength(50);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");

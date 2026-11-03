@@ -77,6 +77,7 @@ public sealed class EnrichmentService(
     IAlbumMotions motions,
     IClassicalAlbums classical,
     IAlbumBooklets booklets,
+    IAlbumGenres albumGenres,
     ICoverArtArchive archive,
     QobuzCovers shopCovers,
     ISongLyrics lyrics,
@@ -244,9 +245,15 @@ public sealed class EnrichmentService(
 
             var genreDescriptions = (await UnaskedGenresAsync(db, cancellationToken).ConfigureAwait(false)).Count;
 
+            var shopGenres = await db.ReleaseGroups
+                .Where(UngenredShopAlbum(NothingFoundCutoff))
+                .CountAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres, parentWorks, words, works, releases, covers, classicalAlbums, genreDescriptions);
+                recordings, genres, parentWorks, words, works, releases, covers, classicalAlbums, genreDescriptions,
+                shopGenres);
         }
     }
 
@@ -455,6 +462,17 @@ public sealed class EnrichmentService(
                 ClaimArtistsAsync(cancellationToken),
                 artist => DescribeAsync(artist, counts, cancellationToken),
                 artist => artist.Name).ConfigureAwait(false);
+
+            // A shop's genres for an album MusicBrainz has none for: after the
+            // album genres above and the artists' names the shop's record is
+            // matched by, and before the classical stage, which picks its
+            // albums by genre.
+            await ForgetShopGenresAsync(cancellationToken).ConfigureAwait(false);
+
+            await BatchesAsync(
+                "shop genres",
+                token => ShopGenresAsync(ShopGenresBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
             // Fourth, and not through DrainAsync, because its unit is a set —
             // see PicturesAsync. Last because it is the cheapest thing here by
@@ -2306,6 +2324,110 @@ public sealed class EnrichmentService(
     }
 
     /// <summary>Albums asked about per batch: few, for the motion stage's reason.</summary>
+    private const int ShopGenresBatchSize = 5;
+
+    /// <summary>
+    /// Held albums MusicBrainz has no genre for, on the album or on any of its
+    /// recordings, that no shop has been asked about, or that none had a genre
+    /// for a week ago (ADR 0020).
+    /// </summary>
+    /// <remarks>
+    /// MusicBrainz is asked first: an album it describes waits for the album
+    /// genre stage's answer, so a shop never fills what MusicBrainz would. An
+    /// album with no MBID, a download filed as the shop sold it, has nobody
+    /// else to ask. One a shop answered has genres and leaves the worklist.
+    /// </remarks>
+    private static System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UngenredShopAlbum(
+        DateTimeOffset cutoff) =>
+        group => group.Genres == null
+            && (group.Mbid == null || group.GenresLookupUtc != null)
+            && group.Files.Any()
+            && !group.Files.Any(file => file.Recording != null && file.Recording.Genres != null)
+            && (group.ShopGenresLookupUtc == null || group.ShopGenresLookupUtc < cutoff);
+
+    /// <summary>
+    /// Takes a shop's genres off every album one of whose recordings
+    /// MusicBrainz has since given genres, so every reader takes those instead.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FileGenres"/> prefers an album's genres to a recording's, so
+    /// a shop's answer left in place would outrank MusicBrainz's. The stamp
+    /// stays: the shop was asked, and the album is off the worklist anyway.
+    /// </remarks>
+    private async Task ForgetShopGenresAsync(CancellationToken cancellationToken)
+    {
+        var scope = scopeFactory.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            await db.ReleaseGroups
+                .Where(group => group.GenresSource != null
+                    && group.Files.Any(file => file.Recording != null && file.Recording.Genres != null))
+                .ExecuteUpdateAsync(
+                    update => update
+                        .SetProperty(group => group.Genres, (string?)null)
+                        .SetProperty(group => group.GenresSource, (string?)null),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Asks the shops for one batch of albums' genres, writing each answer as it comes.
+    /// </summary>
+    /// <remarks>
+    /// The albums are asked about as <see cref="AlbumAsksAsync"/> describes
+    /// them, and saved one at a time, as the motion stage saves — a throw is an
+    /// outage, and ends the stage with the rest unstamped.
+    /// </remarks>
+    private async Task<int> ShopGenresAsync(int size, CancellationToken cancellationToken)
+    {
+        List<AlbumAsk> asks;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            asks = await AlbumAsksAsync(
+                    db,
+                    db.ReleaseGroups.Where(UngenredShopAlbum(NothingFoundCutoff)).OrderBy(group => group.Id),
+                    size,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        foreach (var ask in asks)
+        {
+            var found = await albumGenres.FindAsync(ask.Album, cancellationToken).ConfigureAwait(false);
+
+            var save = scopeFactory.CreateAsyncScope();
+            await using (save.ConfigureAwait(false))
+            {
+                var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+                var id = ask.Id;
+
+                var group = await db.ReleaseGroups
+                    .FirstAsync(row => row.Id == id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                group.ShopGenresLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
+
+                if (found is not null)
+                {
+                    group.Genres = Joined(found.Genres);
+                    group.GenresSource = found.Source;
+                }
+
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return asks.Count;
+    }
+
+    /// <summary>Albums asked about per batch: few, for the motion stage's reason.</summary>
     private const int ClassicalBatchSize = 5;
 
     /// <summary>One run of the classical stage: the composers whose biography it has asked for.</summary>
@@ -3234,13 +3356,16 @@ public sealed class EnrichmentService(
             && (recording.DescribedUtc == null
                 || (recording.Genres == null && recording.DescribedUtc < cutoff));
 
-    /// <summary>Held albums whose genres nobody has asked for, or found none of a week ago.</summary>
+    /// <summary>
+    /// Held albums whose genres nobody has asked for, or found none of a week
+    /// ago — a shop's genres included, which are MusicBrainz finding none.
+    /// </summary>
     private static System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UngenredAlbum(
         DateTimeOffset cutoff) =>
         group => group.Mbid != null
             && group.Files.Any()
             && (group.GenresLookupUtc == null
-                || (group.Genres == null && group.GenresLookupUtc < cutoff));
+                || ((group.Genres == null || group.GenresSource != null) && group.GenresLookupUtc < cutoff));
 
     /// <summary>
     /// Works some other work is a part of, not yet asked what they are a part of
@@ -3481,6 +3606,7 @@ public sealed class EnrichmentService(
     }
 
     /// <summary>One held album's genres, stamped whether or not MusicBrainz has any.</summary>
+    /// <remarks>A shop's genres stand until MusicBrainz has some of its own (ADR 0020).</remarks>
     private async Task GenresAsync(
         PendingDescription<ReleaseGroupId> album,
         Tally counts,
@@ -3511,7 +3637,12 @@ public sealed class EnrichmentService(
             if (row is null) return;
 
             row.GenresLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
-            row.Genres = Joined(genres ?? []);
+
+            if (genres is { Count: > 0 } || row.GenresSource is null)
+            {
+                row.Genres = Joined(genres ?? []);
+                row.GenresSource = null;
+            }
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -4009,6 +4140,7 @@ public enum EnrichmentStatus
 /// <param name="Releases">Releases a file is filed under, never asked for their ASIN, script and track ids.</param>
 /// <param name="Covers">Sleeves the tag write would draw from that nobody has asked for, or found none of a week ago.</param>
 /// <param name="GenreDescriptions">Genres whose article nobody has asked for, or found none of a week ago.</param>
+/// <param name="ShopGenres">Held albums MusicBrainz has no genre for that no shop has been asked about, or had none for a week ago.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
@@ -4026,7 +4158,8 @@ public sealed record EnrichmentPending(
     int Releases,
     int Covers,
     int Classical,
-    int GenreDescriptions)
+    int GenreDescriptions,
+    int ShopGenres)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -4038,7 +4171,7 @@ public sealed record EnrichmentPending(
     /// </remarks>
     public int Total =>
         Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
-        + ParentWorks + Lyrics + Works + Releases + Covers + Classical + GenreDescriptions;
+        + ParentWorks + Lyrics + Works + Releases + Covers + Classical + GenreDescriptions + ShopGenres;
 }
 
 /// <summary>Where a running pass has got to.</summary>

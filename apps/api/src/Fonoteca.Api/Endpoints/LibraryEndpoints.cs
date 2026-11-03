@@ -428,6 +428,7 @@ public static class LibraryEndpoints
             PendingCovers: pending.Covers,
             PendingClassical: pending.Classical,
             PendingGenreDescriptions: pending.GenreDescriptions,
+            PendingShopGenres: pending.ShopGenres,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -753,6 +754,9 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Genres whose Wikipedia article is not yet asked for, or none found a week ago.</summary>
     int PendingGenreDescriptions,
+
+    /// <summary>Albums MusicBrainz has no genre for, not yet asked about at the shops, or none found a week ago.</summary>
+    int PendingShopGenres,
 
     EnrichmentSummary? LastCompleted);
 

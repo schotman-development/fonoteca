@@ -300,6 +300,18 @@ public sealed class ReleaseGroup
     /// <summary>When the genres were last asked for, answer or not. None found is asked again after a week.</summary>
     public DateTimeOffset? GenresLookupUtc { get; set; }
 
+    /// <summary>The shop <see cref="Genres"/> came from, or null where they are MusicBrainz's.</summary>
+    /// <remarks>
+    /// Asked only where MusicBrainz has no genre for the album or any of its
+    /// recordings (ADR 0020), and stated as MusicBrainz states them
+    /// (<see cref="ShopGenres"/>). MusicBrainz is still asked weekly, and its
+    /// answer replaces the shop's.
+    /// </remarks>
+    public string? GenresSource { get; set; }
+
+    /// <summary>When the shops were last asked for the album's genres, answer or not. None found is asked again after a week.</summary>
+    public DateTimeOffset? ShopGenresLookupUtc { get; set; }
+
     /// <summary>When Apple Music Classical was last asked about the album, answer or not.</summary>
     /// <remarks>
     /// The classical stage's "we asked" stamp (rule 1, ADR 0019). An album Apple

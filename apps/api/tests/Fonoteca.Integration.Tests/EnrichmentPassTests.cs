@@ -2970,6 +2970,154 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     private static async Task<int> PendingGenreDescriptionsAsync(IServiceProvider services) =>
         (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).GenreDescriptions;
 
+    /// <summary>
+    /// An album MusicBrainz has no genre for takes a shop's, once MusicBrainz
+    /// has been asked; MusicBrainz is still asked weekly, and the shop's stand
+    /// until it answers with genres of its own.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumMusicBrainzHasNoGenreForTakesAShopsUntilMusicBrainzHasOne()
+    {
+        var group = (await SeedLinkedAsync(heldAlbum: true))!.Value;
+
+        var shops = new StubAlbumGenres(("Symphonies", new AlbumGenresFound(["classical", "orchestral"], "Apple Music", "title")));
+        var catalogue = new StubCatalogue(recording: null, work: null);
+        var services = Build(Answering(Recording), catalogue, albumGenres: shops);
+
+        await EnrichAsync(services);
+
+        Assert.Equal("Symphonies", Assert.Single(shops.Asked).Title);
+        Assert.Equal(("classical, orchestral", "Apple Music"), await GenresOfAsync(group));
+        Assert.Equal(0, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).ShopGenres);
+
+        await AgeAlbumGenresLookupAsync(group);
+        await EnrichAsync(services);
+
+        Assert.Single(shops.Asked);
+        Assert.Equal(("classical, orchestral", "Apple Music"), await GenresOfAsync(group));
+
+        await AgeAlbumGenresLookupAsync(group);
+        catalogue.AlbumGenres = ["symphony"];
+        await EnrichAsync(services);
+
+        Assert.Equal(("symphony", null), await GenresOfAsync(group));
+    }
+
+    /// <summary>
+    /// An album no shop had a genre for is asked again a week on, and an outage
+    /// stamps nothing.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumNoShopHadAGenreForIsAskedAgainAfterAWeek()
+    {
+        var group = (await SeedLinkedAsync(heldAlbum: true))!.Value;
+
+        var down = new StubAlbumGenres { Unavailable = true };
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(null, null), albumGenres: down));
+
+        Assert.Single(down.Asked);
+
+        var shops = new StubAlbumGenres();
+        var services = Build(Answering(Recording), new StubCatalogue(null, null), albumGenres: shops);
+
+        Assert.Equal(1, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).ShopGenres);
+
+        await EnrichAsync(services);
+        await EnrichAsync(services);
+
+        Assert.Single(shops.Asked);
+        Assert.Equal((null, null), await GenresOfAsync(group));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ReleaseGroups
+                .Where(row => row.Id == group)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.ShopGenresLookupUtc, DateTimeOffset.UtcNow.AddDays(-8)), Token);
+        }
+
+        await EnrichAsync(services);
+
+        Assert.Equal(2, shops.Asked.Count);
+    }
+
+    /// <summary>
+    /// A shop's genres give way once MusicBrainz gives one of the album's
+    /// recordings genres, and an album whose recordings have some is never asked.
+    /// </summary>
+    [Fact]
+    public async Task AShopsGenresGiveWayToARecordingsFromMusicBrainz()
+    {
+        var group = (await SeedLinkedAsync(heldAlbum: true))!.Value;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var album = await db.ReleaseGroups.SingleAsync(row => row.Id == group, Token);
+            album.Genres = "classical";
+            album.GenresSource = "Qobuz";
+            album.GenresLookupUtc = DateTimeOffset.UtcNow;
+            album.ShopGenresLookupUtc = DateTimeOffset.UtcNow;
+
+            var recording = await db.Recordings.SingleAsync(row => row.Mbid == Recording, Token);
+            recording.Genres = "symphony";
+            recording.DescribedUtc = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var shops = new StubAlbumGenres();
+        await EnrichAsync(Build(Answering(Recording), new StubCatalogue(null, null), albumGenres: shops));
+
+        Assert.Empty(shops.Asked);
+        Assert.Equal((null, null), await GenresOfAsync(group));
+    }
+
+    /// <summary>
+    /// Only an album with no genre on it or on any recording, once MusicBrainz
+    /// has been asked about it, is a question for the shops.
+    /// </summary>
+    [Fact]
+    public async Task OnlyAnAlbumWithNoGenreAnywhereAfterMusicBrainzIsAShopsQuestion()
+    {
+        var group = (await SeedLinkedAsync(heldAlbum: true))!.Value;
+        var enrichment = Build(Answering(Recording), new StubCatalogue(null, null)).GetRequiredService<EnrichmentService>();
+
+        async Task<int> PendingAsync(Action<ReleaseGroup, Recording> set)
+        {
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                set(
+                    await db.ReleaseGroups.SingleAsync(row => row.Id == group, Token),
+                    await db.Recordings.SingleAsync(row => row.Mbid == Recording, Token));
+
+                await db.SaveChangesAsync(Token);
+            }
+
+            return (await enrichment.CountPendingAsync(Token)).ShopGenres;
+        }
+
+        Assert.Equal(0, await PendingAsync((_, _) => { }));
+        Assert.Equal(1, await PendingAsync((album, _) => album.GenresLookupUtc = DateTimeOffset.UtcNow));
+        Assert.Equal(0, await PendingAsync((album, _) => album.Genres = "jazz"));
+        Assert.Equal(0, await PendingAsync((album, recording) => (album.Genres, recording.Genres) = (null, "jazz")));
+    }
+
+    private async Task<(string? Genres, string? Source)> GenresOfAsync(ReleaseGroupId group)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var row = await db.ReleaseGroups.AsNoTracking().SingleAsync(album => album.Id == group, Token);
+
+        return (row.Genres, row.GenresSource);
+    }
+
+    private async Task AgeAlbumGenresLookupAsync(ReleaseGroupId group)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        await db.ReleaseGroups
+            .Where(row => row.Id == group)
+            .ExecuteUpdateAsync(update => update.SetProperty(row => row.GenresLookupUtc, DateTimeOffset.UtcNow.AddDays(-8)), Token);
+    }
+
     /// <summary>A recording or album no file holds is on neither worklist.</summary>
     [Fact]
     public async Task OnlyHeldRecordingsAndAlbumsAreDescribed()
@@ -2998,7 +3146,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
     public void TheNewerStagesAreInTheTotal() =>
-        Assert.Equal(63, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9, Classical: 10, GenreDescriptions: 11).Total);
+        Assert.Equal(75, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9, Classical: 10, GenreDescriptions: 11, ShopGenres: 12).Total);
 
     /// <summary>
     /// A song is asked about as its held file has it, its words are kept, and
@@ -3591,7 +3739,8 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         IAlbumBooklets? booklets = null,
         ISongLyrics? lyrics = null,
         ICoverArtArchive? archive = null,
-        IClassicalAlbums? classical = null)
+        IClassicalAlbums? classical = null,
+        IAlbumGenres? albumGenres = null)
     {
         var services = new ServiceCollection();
 
@@ -3639,6 +3788,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         services.AddSingleton(motions ?? new StubMotions());
         services.AddSingleton(classical ?? new StubClassical());
         services.AddSingleton(booklets ?? new StubBooklets());
+        services.AddSingleton(albumGenres ?? new StubAlbumGenres());
         services.AddSingleton(lyrics ?? new StubLyrics());
         services.AddSingleton(archive ?? new StubArchive());
 
@@ -3784,6 +3934,23 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             if (Unavailable) throw new ProviderUnavailableException("stub", "Apple Music is down.");
 
             return Task.FromResult(videos.FirstOrDefault(video => video.Barcode == album.Barcode).Found);
+        }
+    }
+
+    /// <summary>Answers genres for the album titles it was told about, and records the asking.</summary>
+    private sealed class StubAlbumGenres(params (string Title, AlbumGenresFound Found)[] albums) : IAlbumGenres
+    {
+        public bool Unavailable { get; init; }
+
+        public List<AlbumToFind> Asked { get; } = [];
+
+        public Task<AlbumGenresFound?> FindAsync(AlbumToFind album, CancellationToken cancellationToken = default)
+        {
+            lock (Asked) Asked.Add(album);
+
+            if (Unavailable) throw new ProviderUnavailableException("stub", "The shops are down.");
+
+            return Task.FromResult(albums.FirstOrDefault(entry => entry.Title == album.Title).Found);
         }
     }
 

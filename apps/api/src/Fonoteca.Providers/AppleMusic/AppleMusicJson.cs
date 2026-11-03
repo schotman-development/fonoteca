@@ -29,6 +29,10 @@ internal sealed record ITunesResult
     [JsonPropertyName("artistName")]
     public string? ArtistName { get; init; }
 
+    /// <summary>A record's one genre, in English: "Contemporary Blues", "Classical".</summary>
+    [JsonPropertyName("primaryGenreName")]
+    public string? PrimaryGenreName { get; init; }
+
     /// <summary>An ISO timestamp, of which only the year is read.</summary>
     [JsonPropertyName("releaseDate")]
     public string? ReleaseDate { get; init; }

@@ -1353,6 +1353,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<DateTimeOffset?>("GenresLookupUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("GenresSource")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<Guid?>("Mbid")
                         .HasColumnType("uuid");
 
@@ -1376,6 +1380,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<string>("SecondaryTypes")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset?>("ShopGenresLookupUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Title")
                         .IsRequired()

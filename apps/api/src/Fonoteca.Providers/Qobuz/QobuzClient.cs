@@ -680,7 +680,16 @@ public sealed class QobuzClient(
                 .Select(goody => Uri.TryCreate(NullIfBlank(goody.Url) ?? goody.OriginalUrl, UriKind.Absolute, out var url)
                     ? new QobuzGoody(goody.Id, goody.FileFormatId ?? 0, NullIfBlank(goody.Name), url)
                     : null)
-                .OfType<QobuzGoody>()]);
+                .OfType<QobuzGoody>()],
+            GenrePath(body.Genre));
+    }
+
+    /// <summary>The genre's ids, broadest first and its own last, or none where the album carries no genre.</summary>
+    private static IReadOnlyList<int> GenrePath(QobuzGenreBody? genre)
+    {
+        IReadOnlyList<int> path = genre?.Path ?? [];
+
+        return genre?.Id is { } own && !path.Contains(own) ? [.. path, own] : path;
     }
 
     /// <summary>A trimmed value, or null where the service sent nothing usable.</summary>
@@ -771,7 +780,8 @@ public sealed record QobuzAlbum(
     string? Upc = null,
     string? Label = null,
     IReadOnlyList<string>? Artists = null,
-    IReadOnlyList<QobuzGoody>? Goodies = null);
+    IReadOnlyList<QobuzGoody>? Goodies = null,
+    IReadOnlyList<int>? GenrePath = null);
 
 /// <summary>Something the shop sells with an album beyond the audio — in practice a PDF booklet.</summary>
 /// <param name="FileFormatId">21 is a PDF.</param>

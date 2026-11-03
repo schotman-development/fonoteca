@@ -15,6 +15,7 @@ namespace Fonoteca.Providers.Logging;
 ///   1450-1499  Wikidata
 ///   1500-1549  Apple Music
 ///   1550-1599  Album booklets
+///   1600-1609  Album genres
 ///
 /// Deliberately sparse. An identification pass makes one of these calls per
 /// file, so anything logged per lookup is logged 100,000 times — Debug is where
@@ -283,4 +284,10 @@ internal static partial class ProviderLog
         Level = LogLevel.Warning,
         Message = "{Source} was not asked for the logo of station '{Station}', so the next source is: {Reason}")]
     public static partial void StationLogoSourceFailed(ILogger logger, string source, string station, string reason);
+
+    [LoggerMessage(
+        EventId = 1600,
+        Level = LogLevel.Debug,
+        Message = "{Source} has a genre for {Artist} - {Title}, its record recognised by {How}")]
+    public static partial void AlbumGenresFound(ILogger logger, string source, string? artist, string title, string how);
 }

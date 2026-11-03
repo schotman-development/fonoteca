@@ -299,6 +299,10 @@ builder.Services.AddQobuz(options =>
 // enrichment stage. After both of the clients it asks.
 builder.Services.AddAlbumBooklets();
 
+// A shop's genre for an album MusicBrainz has none for, Apple Music's and else
+// Qobuz's: the shop genre enrichment stage. After both of the clients it asks.
+builder.Services.AddAlbumGenres();
+
 // Singleton, because the one-at-a-time semaphore in it has to be one semaphore.
 builder.Services.AddSingleton<QobuzDownloadService>();
 

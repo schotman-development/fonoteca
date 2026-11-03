@@ -2599,6 +2599,8 @@ export interface components {
             pendingClassical: number;
             /** Format: int32 */
             pendingGenreDescriptions: number;
+            /** Format: int32 */
+            pendingShopGenres: number;
             lastCompleted: null | components["schemas"]["EnrichmentSummary"];
         };
         EnrichmentSummary: {

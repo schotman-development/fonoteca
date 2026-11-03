@@ -50,6 +50,7 @@ function pendingSentence(status: {
   readonly pendingCovers: number
   readonly pendingClassical: number
   readonly pendingGenreDescriptions: number
+  readonly pendingShopGenres: number
 }): string {
   const parts: string[] = []
 
@@ -103,6 +104,15 @@ function pendingSentence(status: {
       `${status.pendingGenres.toLocaleString()} album${
         status.pendingGenres === 1 ? '' : 's'
       } to ask genres for`,
+    )
+  }
+
+  // Then the shops, for albums MusicBrainz has no genre for.
+  if (status.pendingShopGenres > 0) {
+    parts.push(
+      `${status.pendingShopGenres.toLocaleString()} album${
+        status.pendingShopGenres === 1 ? '' : 's'
+      } to ask the shops genres for`,
     )
   }
 

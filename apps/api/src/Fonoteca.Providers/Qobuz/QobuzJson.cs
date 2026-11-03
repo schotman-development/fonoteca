@@ -90,6 +90,20 @@ internal sealed record QobuzAlbumBody
     /// </summary>
     [JsonPropertyName("goodies")]
     public IReadOnlyList<QobuzGoodyBody>? Goodies { get; init; }
+
+    [JsonPropertyName("genre")]
+    public QobuzGenreBody? Genre { get; init; }
+}
+
+/// <summary>The shop's genre for an album, named in the account's language; its ids are what is read.</summary>
+internal sealed record QobuzGenreBody
+{
+    [JsonPropertyName("id")]
+    public int? Id { get; init; }
+
+    /// <summary>The ids above it and its own, broadest first.</summary>
+    [JsonPropertyName("path")]
+    public IReadOnlyList<int>? Path { get; init; }
 }
 
 internal sealed record QobuzGoodyBody
