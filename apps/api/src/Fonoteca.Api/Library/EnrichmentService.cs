@@ -118,7 +118,7 @@ public sealed class EnrichmentService(
     /// with. Unlike <see cref="MaxGenresLength"/> this one is a preference, and
     /// it is what keeps the clamp below from ever having anything to do.
     /// </remarks>
-    private const int MaxGenres = 12;
+    internal const int MaxGenres = 12;
 
     /// <summary>How often progress reaches the browser. Not per file.</summary>
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(250);
@@ -2363,6 +2363,8 @@ public sealed class EnrichmentService(
 
             await db.ReleaseGroups
                 .Where(group => group.GenresSource != null
+                    && group.GenresSource != GenreSources.Person
+                    && group.GenresSource != GenreSources.Agent
                     && group.Files.Any(file => file.Recording != null && file.Recording.Genres != null))
                 .ExecuteUpdateAsync(
                     update => update
@@ -3358,12 +3360,15 @@ public sealed class EnrichmentService(
 
     /// <summary>
     /// Held albums whose genres nobody has asked for, or found none of a week
-    /// ago — a shop's genres included, which are MusicBrainz finding none.
+    /// ago — a shop's genres included, which are MusicBrainz finding none —
+    /// and that no person or agent has named the genres of.
     /// </summary>
     private static System.Linq.Expressions.Expression<Func<ReleaseGroup, bool>> UngenredAlbum(
         DateTimeOffset cutoff) =>
         group => group.Mbid != null
             && group.Files.Any()
+            && group.GenresSource != GenreSources.Person
+            && group.GenresSource != GenreSources.Agent
             && (group.GenresLookupUtc == null
                 || ((group.Genres == null || group.GenresSource != null) && group.GenresLookupUtc < cutoff));
 
@@ -3638,7 +3643,7 @@ public sealed class EnrichmentService(
 
             row.GenresLookupUtc = StoreTime.ToStorePrecision(clock.UtcNow);
 
-            if (genres is { Count: > 0 } || row.GenresSource is null)
+            if (!GenreSources.IsDecided(row.GenresSource) && (genres is { Count: > 0 } || row.GenresSource is null))
             {
                 row.Genres = Joined(genres ?? []);
                 row.GenresSource = null;

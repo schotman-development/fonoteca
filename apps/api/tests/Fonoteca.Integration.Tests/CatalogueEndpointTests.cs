@@ -912,6 +912,71 @@ public sealed class CatalogueEndpointTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
+    /// A person's genres for an album replace what it carried, are listed as
+    /// the genre tree lists any album's, and taken back hand it to MusicBrainz
+    /// and the shops again; an empty list where MusicBrainz's stand takes
+    /// nothing.
+    /// </summary>
+    [Fact]
+    public async Task APersonSaysWhichGenresAnAlbumIs()
+    {
+        using var client = _factory!.CreateClient();
+
+        Uri GenresOf(Guid album) => new($"/api/catalogue/albums/{album}/genres", UriKind.Relative);
+
+        using var saved = await client.PutAsJsonAsync(GenresOf(_seed.SeesawAlbum), new AlbumGenresRequest([" Blues Rock", "blues", "Blues"]), Token);
+        saved.EnsureSuccessStatusCode();
+
+        var answer = await saved.Content.ReadFromJsonAsync<AlbumGenresResponse>(Token);
+
+        Assert.Equal(["blues rock", "blues"], answer!.Genres);
+        Assert.Equal(GenreSources.Person, answer.Source);
+
+        var genres = (await client.GetFromJsonAsync<GenreListResponse>(new Uri("/api/catalogue/genres", UriKind.Relative), Token))!.Genres;
+
+        Assert.Equal(1, genres.Single(genre => genre.Name == "Blues Rock").Albums);
+
+        using var unknown = await client.PutAsJsonAsync(GenresOf(_seed.SeesawAlbum), new AlbumGenresRequest(["blues", "not a genre"]), Token);
+        using var tooMany = await client.PutAsJsonAsync(GenresOf(_seed.SeesawAlbum), new AlbumGenresRequest([.. Enumerable.Repeat("blues", 13)]), Token);
+        using var nowhere = await client.PutAsJsonAsync(GenresOf(Guid.NewGuid()), new AlbumGenresRequest(["blues"]), Token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, nowhere.StatusCode);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ReleaseGroups
+                .Where(g => g.Id == new ReleaseGroupId(_seed.SeesawAlbum))
+                .ExecuteUpdateAsync(
+                    update => update
+                        .SetProperty(g => g.GenresLookupUtc, DateTimeOffset.UtcNow)
+                        .SetProperty(g => g.ShopGenresLookupUtc, DateTimeOffset.UtcNow),
+                    Token);
+        }
+
+        using var takenBack = await client.PutAsJsonAsync(GenresOf(_seed.SeesawAlbum), new AlbumGenresRequest([]), Token);
+        takenBack.EnsureSuccessStatusCode();
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await check.ReleaseGroups.SingleAsync(g => g.Id == new ReleaseGroupId(_seed.SeesawAlbum), Token);
+
+        Assert.Null(row.Genres);
+        Assert.Null(row.GenresSource);
+        Assert.Null(row.GenresLookupUtc);
+        Assert.Null(row.ShopGenresLookupUtc);
+
+        await check.ReleaseGroups
+            .Where(g => g.Id == new ReleaseGroupId(_seed.SeesawAlbum))
+            .ExecuteUpdateAsync(update => update.SetProperty(g => g.Genres, "blues rock"), Token);
+
+        using var nothingToTakeBack = await client.PutAsJsonAsync(GenresOf(_seed.SeesawAlbum), new AlbumGenresRequest([]), Token);
+
+        Assert.Equal(["blues rock"], (await nothingToTakeBack.Content.ReadFromJsonAsync<AlbumGenresResponse>(Token))!.Genres);
+    }
+
+    /// <summary>
     /// The Genres screen: an album is under the genres it carries and their
     /// tops, a fusion under both, the most albums first, and the album and
     /// artist lists narrow to one.

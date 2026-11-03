@@ -489,6 +489,21 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
             .ConfigureAwait(false));
     }
 
+    [McpServerTool(Name = "set_album_genres")]
+    [Description(
+        "Say which genres an album (release group, by catalogue id as get_album takes it) is: each "
+        + "a MusicBrainz genre or one of Fonoteca's tree, most important first, at most twelve. They "
+        + "replace MusicBrainz's and the shops' genres, and no enrichment run replaces them; the files "
+        + "get them at the next tag write. An empty list takes them back. Recorded as an agent's. "
+        + "Show the owner the genres first.")]
+    public async Task<string> SetAlbumGenres(
+        Guid album,
+        [Description("Genre names, most important first, e.g. [\"blues\", \"blues rock\"].")] string[] genres,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .SetAlbumGenres(album, new AlbumGenresRequest(genres), Get<FonotecaDbContext>(), Agent, cancellationToken)
+            .ConfigureAwait(false));
+
     [McpServerTool(Name = "undo_folder_edit")]
     [Description(
         "Step one album folder back by one edit to its files, newest first: a tag write's tags, "

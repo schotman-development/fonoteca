@@ -4061,6 +4061,69 @@
         }
       }
     },
+    "/api/catalogue/albums/{id}/genres": {
+      "put": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Say which genres an album is, over MusicBrainz's and the shops'.",
+        "description": "Each a MusicBrainz genre or one of Fonoteca's tree, most important first, at most twelve. They replace the album's genres and no enrichment run replaces them; the files get them at the next tag write. An empty list takes a person's genres back, and MusicBrainz and the shops are asked again on the next enrichment run.",
+        "operationId": "SetAlbumGenres",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlbumGenresRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumGenresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/tracks": {
       "get": {
         "tags": [
@@ -5725,6 +5788,44 @@
               "integer"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "AlbumGenresRequest": {
+        "required": [
+          "genres"
+        ],
+        "type": "object",
+        "properties": {
+          "genres": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AlbumGenresResponse": {
+        "required": [
+          "genres",
+          "source"
+        ],
+        "type": "object",
+        "properties": {
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

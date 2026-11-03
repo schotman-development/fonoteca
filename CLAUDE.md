@@ -310,7 +310,9 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   (`ReleaseGroups.Genres`), same rule; where MusicBrainz has none on the album
   or any recording, Apple Music's goes there, else Qobuz's (ADR 0020,
   `GenresSource` naming the shop), stated as MusicBrainz states genres
-  (`ShopGenres`) and replaced by MusicBrainz's once it has any. Artists carry `LinksJson`, every URL
+  (`ShopGenres`) and replaced by MusicBrainz's once it has any. A person's
+  or an agent's (`PUT …/albums/{id}/genres`, `set_album_genres`;
+  `GenreSources`) go in the same column and no rule replaces them. Artists carry `LinksJson`, every URL
   relation, which is how a later source finds one by identity.
 - **A merged MBID is followed, never refused.** WS/2 answers it with the
   survivor's document, so a different id coming back *is* the merge.
@@ -1084,14 +1086,14 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Twenty-five tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Twenty-six tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
 `list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
 `release_slots`, `start_pass`, `cancel_pass`, `decide_recording`,
 `decide_component`, `file_under_release`, `mark_folder_unreleased`,
 `reopen_folder`, `set_folder_album`, `undo_folder_edit`, `folder_tags`,
-`edit_tags`.
+`edit_tags`, `set_album_genres`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every

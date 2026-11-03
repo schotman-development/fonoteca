@@ -1478,6 +1478,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/albums/{id}/genres": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Say which genres an album is, over MusicBrainz's and the shops'.
+         * @description Each a MusicBrainz genre or one of Fonoteca's tree, most important first, at most twelve. They replace the album's genres and no enrichment run replaces them; the files get them at the next tag write. An empty list takes a person's genres back, and MusicBrainz and the shops are asked again on the next enrichment run.
+         */
+        put: operations["SetAlbumGenres"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/tracks": {
         parameters: {
             query?: never;
@@ -1963,6 +1983,13 @@ export interface components {
             files: components["schemas"]["AlbumFileRow"][];
             /** Format: int32 */
             dynamicRange: null | number;
+        };
+        AlbumGenresRequest: {
+            genres: null | string[];
+        };
+        AlbumGenresResponse: {
+            genres: string[];
+            source: null | string;
         };
         AlbumListResponse: {
             /** Format: int32 */
@@ -7070,6 +7097,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenreListResponse"];
+                };
+            };
+        };
+    };
+    SetAlbumGenres: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlbumGenresRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumGenresResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

@@ -1,4 +1,6 @@
+using Fonoteca.Api.Library;
 using Fonoteca.Data;
+using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +11,10 @@ namespace Fonoteca.Api.Endpoints;
  * Fonoteca's own genres (`Genres`), as the Genres screen browses them. An
  * album's are what its files carry (`FileGenres.OfAlbum`), so the screen,
  * the tags and Subsonic list an album under the same names.
+ *
+ * And a person's answer to which genres an album is, which goes in the
+ * album's own genres column, named as theirs (`GenreSources`, ADR 0020), so
+ * every reader takes it — the SQL ones too — and no rule replaces it.
  */
 public static partial class CatalogueEndpoints
 {
@@ -26,6 +32,73 @@ public static partial class CatalogueEndpoints
                 + "their tops. `covers` are up to four releases whose stored sleeves stand for "
                 + "the genre, albums with one first. The albums and artists of a genre are "
                 + "`/albums?genre=` and `/artists?genre=`.");
+
+        group.MapPut("/albums/{id:guid}/genres", SetAlbumGenres)
+            .RequireRole(AccountRoles.CoverArt)
+            .WithName("SetAlbumGenres")
+            .WithSummary("Say which genres an album is, over MusicBrainz's and the shops'.")
+            .WithDescription(
+                "Each a MusicBrainz genre or one of Fonoteca's tree, most important first, at most "
+                + "twelve. They replace the album's genres and no enrichment run replaces them; the "
+                + "files get them at the next tag write. An empty list takes a person's genres back, "
+                + "and MusicBrainz and the shops are asked again on the next enrichment run.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+    }
+
+    internal static async Task<Results<Ok<AlbumGenresResponse>, ProblemHttpResult>> SetAlbumGenres(
+        Guid id,
+        AlbumGenresRequest request,
+        FonotecaDbContext db,
+        ICallerContext caller,
+        CancellationToken cancellationToken)
+    {
+        if (request?.Genres is not { } typed || typed.Count > EnrichmentService.MaxGenres)
+        {
+            return TypedResults.Problem(
+                title: "Not a list of genres",
+                detail: $"The body names the album's genres, at most {EnrichmentService.MaxGenres}.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (GenreSources.Stated(typed, out var unknown) is not { } stated)
+        {
+            return TypedResults.Problem(
+                title: "Not a genre",
+                detail: $"'{unknown}' is neither a MusicBrainz genre nor one of Fonoteca's.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var groupId = new ReleaseGroupId(id);
+
+        var album = await db.ReleaseGroups
+            .FirstOrDefaultAsync(row => row.Id == groupId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (album is null)
+        {
+            return TypedResults.Problem(
+                title: "No such album",
+                detail: $"The catalogue has no album with id {id}.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (stated.Count > 0)
+        {
+            album.Genres = EnrichmentService.Joined(stated);
+            album.GenresSource = caller is AgentCallerContext ? GenreSources.Agent : GenreSources.Person;
+        }
+        else if (GenreSources.IsDecided(album.GenresSource))
+        {
+            album.Genres = null;
+            album.GenresSource = null;
+            album.GenresLookupUtc = null;
+            album.ShopGenresLookupUtc = null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return TypedResults.Ok(new AlbumGenresResponse(FileGenres.Split(album.Genres), album.GenresSource));
     }
 
     internal static async Task<Ok<GenreListResponse>> GetGenres(
@@ -133,6 +206,13 @@ public static partial class CatalogueEndpoints
 
     private sealed record AlbumGenres(ReleaseGroupId Id, int Files, bool HasCover, IReadOnlyList<string> Genres);
 }
+
+/// <param name="Genres">MusicBrainz's spellings or the tree's, most important first; empty takes a person's back.</param>
+public sealed record AlbumGenresRequest(IReadOnlyList<string?>? Genres);
+
+/// <param name="Genres">The album's genres as stored, MusicBrainz's spellings.</param>
+/// <param name="Source">Who stated them: "person", "agent", a shop, or null for MusicBrainz.</param>
+public sealed record AlbumGenresResponse(IReadOnlyList<string> Genres, string? Source);
 
 /// <summary>The genres the held albums carry, most albums first.</summary>
 public sealed record GenreListResponse(IReadOnlyList<GenreSummary> Genres);

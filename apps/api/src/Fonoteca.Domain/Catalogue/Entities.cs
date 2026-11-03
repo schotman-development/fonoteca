@@ -300,12 +300,13 @@ public sealed class ReleaseGroup
     /// <summary>When the genres were last asked for, answer or not. None found is asked again after a week.</summary>
     public DateTimeOffset? GenresLookupUtc { get; set; }
 
-    /// <summary>The shop <see cref="Genres"/> came from, or null where they are MusicBrainz's.</summary>
+    /// <summary>Who stated <see cref="Genres"/>: a shop, a person or an agent, or null where they are MusicBrainz's.</summary>
     /// <remarks>
-    /// Asked only where MusicBrainz has no genre for the album or any of its
-    /// recordings (ADR 0020), and stated as MusicBrainz states them
-    /// (<see cref="ShopGenres"/>). MusicBrainz is still asked weekly, and its
-    /// answer replaces the shop's.
+    /// A shop is asked only where MusicBrainz has no genre for the album or any
+    /// of its recordings (ADR 0020), and its genres are stated as MusicBrainz
+    /// states them (<see cref="ShopGenres"/>); MusicBrainz is still asked
+    /// weekly, and its answer replaces the shop's. A person's or an agent's
+    /// (<see cref="GenreSources"/>) no rule replaces.
     /// </remarks>
     public string? GenresSource { get; set; }
 

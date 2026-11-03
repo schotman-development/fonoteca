@@ -3101,6 +3101,44 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(0, await PendingAsync((album, recording) => (album.Genres, recording.Genres) = (null, "jazz")));
     }
 
+    /// <summary>
+    /// A person's genres for an album are replaced by no rule: MusicBrainz is
+    /// not asked again, the shops are not asked, and its recordings gaining
+    /// genres takes nothing off it.
+    /// </summary>
+    [Theory]
+    [InlineData(GenreSources.Person)]
+    [InlineData(GenreSources.Agent)]
+    public async Task APersonsGenresForAnAlbumAreReplacedByNoRule(string source)
+    {
+        var group = (await SeedLinkedAsync(heldAlbum: true))!.Value;
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var album = await db.ReleaseGroups.SingleAsync(row => row.Id == group, Token);
+            album.Genres = "blues";
+            album.GenresSource = source;
+            album.GenresLookupUtc = DateTimeOffset.UtcNow.AddDays(-8);
+
+            var recording = await db.Recordings.SingleAsync(row => row.Mbid == Recording, Token);
+            recording.Genres = "jazz";
+            recording.DescribedUtc = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        var shops = new StubAlbumGenres();
+        var catalogue = new StubCatalogue(null, null) { AlbumGenres = ["rock"] };
+        var services = Build(Answering(Recording), catalogue, albumGenres: shops);
+
+        Assert.Equal(0, (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Genres);
+
+        await EnrichAsync(services);
+
+        Assert.Empty(shops.Asked);
+        Assert.Equal(("blues", source), await GenresOfAsync(group));
+    }
+
     private async Task<(string? Genres, string? Source)> GenresOfAsync(ReleaseGroupId group)
     {
         await using var db = PostgresFixture.CreateContext(_connectionString);

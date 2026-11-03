@@ -452,6 +452,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             ("POST", "/api/files/trash"),
             ("POST", "/api/files/upload?path=x.flac"),
             ("POST", "/api/catalogue/folders/tags"),
+            ("PUT", $"/api/catalogue/albums/{Guid.NewGuid()}/genres"),
             ("POST", "/api/qobuz/albums/1/download"),
         })
         {
@@ -661,6 +662,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             "POST /api/library/tags Admin",
             "POST /api/qobuz/albums/{albumId}/download Admin",
             "POST /api/qobuz/albums/{albumId}/upgrade Admin",
+            "PUT /api/catalogue/albums/{id:guid}/genres CoverArt",
         ];
 
         var actual = _factory!.Services.GetRequiredService<EndpointDataSource>().Endpoints

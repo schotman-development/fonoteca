@@ -57,6 +57,7 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         "release_slots",
         "reopen_folder",
         "search_releases",
+        "set_album_genres",
         "set_folder_album",
         "start_pass",
         "undo_folder_edit",
@@ -210,6 +211,35 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 
         Assert.Equal(ReleaseAttributionOutcome.AlbumByAgent, row.AttributionOutcome);
         Assert.NotNull(row.ReleaseGroupId);
+    }
+
+    /// <summary>An album's genres an agent names are the agent's, and its list of names arrives whole.</summary>
+    [Fact]
+    public async Task AnAlbumsGenresNamedThroughTheEndpointAreTheAgentsNotTheOwners()
+    {
+        var album = ReleaseGroupId.New();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.ReleaseGroups.Add(new ReleaseGroup { Id = album, Title = "Tokyo 1988" });
+            await db.SaveChangesAsync(Cancel);
+        }
+
+        await using var mcp = await ConnectAsync();
+
+        var result = await mcp.CallToolAsync(
+            "set_album_genres",
+            new Dictionary<string, object?> { ["album"] = album.Value, ["genres"] = new[] { "rock", "blues rock" } },
+            cancellationToken: Cancel);
+
+        Assert.True(result.IsError is not true, Text(result));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await check.ReleaseGroups.SingleAsync(group => group.Id == album, Cancel);
+
+        Assert.Equal("rock, blues rock", row.Genres);
+        Assert.Equal(GenreSources.Agent, row.GenresSource);
     }
 
     /// <summary>

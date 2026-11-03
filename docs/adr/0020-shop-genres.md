@@ -59,7 +59,7 @@ recordings genres, since `FileGenres` prefers an album's to a recording's.
 **Genres typed by hand on every album**: the tag editor puts a person's GENRE
 in the files, which other players read, but not in the catalogue's genres the
 genre tree and Subsonic list; and for a hundred albums it is a week of
-somebody's evenings.
+somebody's evenings. For the few no shop answers, see the amendment below.
 
 **A column apart from MusicBrainz's genres** would keep the two sources apart
 for good, at the price of every reader learning a second column. `GenresSource`
@@ -76,3 +76,24 @@ Known and accepted:
   album makes it classical on every screen.
 - An album a shop answered is never asked again, so a better answer later is
   missed; clearing `ShopGenresLookupUtc` and the genres by hand re-asks.
+
+## Amendment, 2026-11-03: a person's genres
+
+The first run left 18 of 119 albums with no answer from either shop. The
+owner's choice was to fill them by hand, through `/mcp` as they would, and for
+that to reach what Fonoteca and its client show rather than only the files.
+
+`PUT /api/catalogue/albums/{id}/genres` (and the `set_album_genres` tool) says
+which genres an album is. They go in the same column, `GenresSource` set to
+`person` or `agent` (`GenreSources`), so every reader takes them unchanged, and
+no rule replaces them: the album-genre stage does not ask MusicBrainz about the
+album again, the shops are not asked, and a recording gaining genres takes
+nothing off it. Each must be a name the genre tree folds, in MusicBrainz's
+spelling; one it does not fold is refused rather than stored as "Other". An
+empty list takes them back and clears both stamps, so MusicBrainz and then the
+shops are asked again.
+
+A person's answer over MusicBrainz's replaces it in that column. What
+MusicBrainz said is not kept beside it, but taking the person's genres back
+asks again, and that brings it back. This is the trade the shops' genres
+already made, for the same reason: every reader keeps reading one column.
