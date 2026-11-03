@@ -21,7 +21,10 @@ analyse, and that no pass is running. A download writes its own folder's tags
 at once, and neither that nor the AcoustID tag counts. If a write is still
 running, wait for its own job id in the API log
 (`journalctl --user -u fonoteca-api.service -o cat`, `Tag write finished
-(<jobId>)`), since each download logs a finish line of its own.
+(<jobId>)`), since each download logs a finish line of its own. The log is
+mostly SQL, so grep it with `-o short-iso` for
+`Tag write (started|finished)|Analysis started|Enrichment (started|finished)`
+to see which runs wrote what, and when.
 
 ## Before touching anything
 
@@ -104,7 +107,10 @@ writes; the user's answer there is the go-ahead.
 Re-run `plan.py` right before applying and assert that it equals the plan
 you checked, so nothing moved in between. To hold files back (production
 keeping its copy), drop their paths from `changed` and `only_copy` in a
-copy of the plan and apply that copy.
+copy of the plan and apply that copy. Check files that were held back before
+again, one by one, at every sync: a later tag write can repair one (on
+2026-11-02 it rewrote 4 of the 15 damaged MP3s, which then decoded exactly
+as production's copies), and only the files still damaged stay held back.
 
 `python3 -I apply.py <plan>.json "/mnt/vault/media/music-trash/<date> sync"`
 does all of the following in this order, so a path is never missing: new
