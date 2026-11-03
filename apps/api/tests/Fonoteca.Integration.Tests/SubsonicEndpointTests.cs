@@ -432,6 +432,137 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A stream asked for in a format comes in it, a bitrate alone as MP3, and
+    /// <c>raw</c> or a download as the file itself; a file ffmpeg cannot decode
+    /// is an error rather than an empty song.
+    /// </summary>
+    [Fact]
+    public async Task AStreamIsTranscodedToTheFormatAskedForAndADownloadNever()
+    {
+        var tone = await ToneAsync();
+        using var client = _factory!.CreateClient();
+
+        foreach (var (format, mediaType) in new[] { ("opus", "audio/ogg"), ("mp3", "audio/mpeg"), ("aac", "audio/aac") })
+        {
+            using var transcoded = await SongAsync(client, "stream", $"id={tone}&format={format}&maxBitRate=64");
+
+            Assert.Equal(mediaType, transcoded.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("nosniff", Assert.Single(transcoded.Headers.GetValues("X-Content-Type-Options")));
+
+            var (codec, seconds) = Decoded(await transcoded.Content.ReadAsByteArrayAsync(Token));
+
+            Assert.Equal(format, codec);
+            Assert.InRange(seconds, 5.8, 6.2);
+        }
+
+        using (var alone = await SongAsync(client, "stream", $"id={tone}&maxBitRate=128"))
+        {
+            Assert.Equal("audio/mpeg", alone.Content.Headers.ContentType?.MediaType);
+        }
+
+        var original = await File.ReadAllBytesAsync(Path.Combine(_root, TonePath), Token);
+
+        foreach (var (method, query) in new[] { ("stream", "format=raw&maxBitRate=64"), ("download", "format=opus&maxBitRate=64") })
+        {
+            using var untouched = await SongAsync(client, method, $"id={tone}&{query}");
+
+            Assert.Equal("audio/flac", untouched.Content.Headers.ContentType?.MediaType);
+            Assert.Equal(original, await untouched.Content.ReadAsByteArrayAsync(Token));
+        }
+
+        // The fixture's own song is 4 KB of nothing a decoder can read.
+        var refused = (await JsonAsync(client, $"/rest/stream.view?id=tr-{_filed.Value:N}&format=opus"))
+            .GetProperty("subsonic-response");
+
+        Assert.Equal("failed", refused.GetProperty("status").GetString());
+        Assert.Equal(0, refused.GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    /// <summary>
+    /// A transcode starts at <c>timeOffset</c>, and with
+    /// <c>estimateContentLength</c> sends exactly the length it estimated:
+    /// padded where the music ends first, cut where a row claims less music
+    /// than the file holds.
+    /// </summary>
+    [Fact]
+    public async Task ATranscodeStartsAtItsOffsetAndSendsTheLengthItEstimated()
+    {
+        var tone = await ToneAsync();
+        using var client = _factory!.CreateClient();
+
+        using var seeked = await SongAsync(client, "stream", $"id={tone}&format=opus&maxBitRate=64&timeOffset=4&estimateContentLength=true");
+
+        var bytes = await seeked.Content.ReadAsByteArrayAsync(Token);
+
+        Assert.Equal(new Transcode(StreamCodec.Opus, 64).EstimatedLength(TimeSpan.FromSeconds(2)), seeked.Content.Headers.ContentLength);
+        Assert.Equal(seeked.Content.Headers.ContentLength, bytes.Length);
+        Assert.InRange(Decoded(bytes).Seconds, 1.8, 2.2);
+        Assert.All(bytes[^1024..], padding => Assert.Equal(0, padding));
+
+        // An offset no TimeSpan holds is past the end, not a failure.
+        using var beyond = await SongAsync(client, "stream", $"id={tone}&format=opus&timeOffset=1e300");
+        Assert.Equal("audio/ogg", beyond.Content.Headers.ContentType?.MediaType);
+
+        var understated = await ToneAsync("Somebody/Tones/02 A.flac", claimedSeconds: 1);
+
+        using var cut = await SongAsync(client, "stream", $"id={understated}&format=mp3&maxBitRate=64&estimateContentLength=true");
+
+        var promised = new Transcode(StreamCodec.Mp3, 64).EstimatedLength(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(promised, cut.Content.Headers.ContentLength);
+        Assert.Equal(promised, (await cut.Content.ReadAsByteArrayAsync(Token)).Length);
+    }
+
+    private const string TonePath = "Somebody/Tones/01 A.flac";
+
+    /// <summary>Six seconds of A as a FLAC, with the row a probe would have left; its song id.</summary>
+    private async Task<string> ToneAsync(string path = TonePath, int claimedSeconds = 6)
+    {
+        var absolute = Path.Combine(_root, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=6", "-ac", "2", "-c:a", "flac", absolute);
+
+        var file = new MediaFile
+        {
+            Id = MediaFileId.New(),
+            Path = path,
+            SizeBytes = new FileInfo(absolute).Length,
+            LastModifiedUtc = DateTimeOffset.Parse("2026-01-04T00:00:00Z", CultureInfo.InvariantCulture),
+            Quality = new AudioQuality
+            {
+                Codec = "flac",
+                SampleRateHz = 44_100,
+                Channels = 2,
+                BitDepth = 16,
+                BitrateBps = 200_000,
+                IsLossless = true,
+                Duration = TimeSpan.FromSeconds(claimedSeconds),
+            },
+        };
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        db.MediaFiles.Add(file);
+        await db.SaveChangesAsync(Token);
+
+        return $"tr-{file.Id.Value:N}";
+    }
+
+    private Task<HttpResponseMessage> SongAsync(HttpClient client, string method, string query) =>
+        client.GetAsync(new Uri($"/rest/{method}.view?{Credentials}&{query}", UriKind.Relative), Token);
+
+    /// <summary>What ffprobe makes of some bytes: the codec, and how long they play.</summary>
+    private (string Codec, double Seconds) Decoded(byte[] bytes)
+    {
+        var file = Path.Combine(_root, $"decoded-{Guid.NewGuid():N}");
+        File.WriteAllBytes(file, bytes);
+
+        var lines = Tool("ffprobe", "-v", "error", "-show_entries", "stream=codec_name:format=duration", "-of", "csv=p=0", file)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return (lines[0], double.Parse(lines[1], CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
     /// A file with a row but no album is a song with no album, not an error.
     /// </summary>
     /// <remarks>
@@ -1571,7 +1702,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
     }
 
     /// <summary>

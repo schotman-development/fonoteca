@@ -22,6 +22,7 @@ namespace Fonoteca.Api.Logging;
 ///   1280-1289  candidate warming — filling the worklist's answers ahead of a click
 ///   1290-1299  acquisition — manual Qobuz downloads into staging
 ///   1400-1409  the file manager — trashing, moving and uploading by hand
+///   1700-1709  Subsonic streams — transcodes
 ///   1300-1399  external providers — in Fonoteca.Providers.Logging.ProviderLog,
 ///              another assembly, but the same numbering
 /// </remarks>
@@ -899,4 +900,16 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Smart playlist '{Path}' has rules that do not read back, so its file was not written.")]
     public static partial void SmartPlaylistUnreadable(ILogger logger, string path);
+
+    [LoggerMessage(
+        EventId = 1700,
+        Level = LogLevel.Warning,
+        Message = "'{Path}' would not transcode to {Format}: {Reason}")]
+    public static partial void TranscodeFailed(ILogger logger, string path, string format, string reason);
+
+    [LoggerMessage(
+        EventId = 1701,
+        Level = LogLevel.Warning,
+        Message = "'{Path}' ran past its estimated {Length} bytes as {Format}; the rest was not sent.")]
+    public static partial void TranscodeOverran(ILogger logger, string path, string format, long length);
 }

@@ -122,6 +122,11 @@ builder.Services.AddSingleton(sp => new FfmpegAudioHasher(
     sp.GetRequiredService<FileSystemAudioFileStore>(),
     sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
 
+// Subsonic's stream in a smaller format, encoded as it is sent.
+builder.Services.AddSingleton(sp => new FfmpegTranscoder(
+    sp.GetRequiredService<FileSystemAudioFileStore>(),
+    sp.GetRequiredService<IOptions<FonotecaOptions>>().Value.FfmpegPath));
+
 // getCoverArt's size: each cover scaled once and kept, named by its bytes. In
 // the temp folder, since a cleared one only costs scaling again.
 builder.Services.AddSingleton(sp =>

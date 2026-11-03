@@ -107,7 +107,7 @@ internal static class ProcessRunner
     }
 
     /// <summary>Best-effort kill of the whole tree; a process that already exited is not an error.</summary>
-    private static void Kill(Process process)
+    internal static void Kill(Process process)
     {
         try
         {

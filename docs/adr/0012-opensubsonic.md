@@ -218,6 +218,19 @@ the thing to reach for; the framework already does ranging.
 bytes go out raw. ffmpeg is already a dependency, so the upgrade is a pipe when
 somebody is measured to need it — over a LAN, FLAC is what the clients want
 anyway.
+*Amended 2026-11-03:* wanted, for the client's streaming quality and its
+smaller downloads (the owner's choice). `stream` re-encodes through an ffmpeg
+pipe, nothing kept: `format` `mp3`, `opus` (in Ogg) or `aac` (ADTS), at
+`maxBitRate` clamped to 32–320, or each format's transparent default (320,
+160, 256); a `maxBitRate` alone is MP3; `raw`, nothing asked, or a file
+already in the format it would be sent as, at or below the rate asked, is the
+file (`Transcode.For`). The `Content-Type` names what
+was sent. `estimateContentLength` promises a length over every measured
+transcode and keeps to it exactly, padding with zeros or cutting; `timeOffset`
+seeks a transcode and is advertised as `transcodeOffset`, and a seek is always
+a transcode, since the original cannot start at an offset. Only Opus stays
+gapless through a pipe. Stereo or mono at 44.1 or 48 kHz, no tags or
+pictures. `download` is always the file, as the spec says.
 
 **No star, no rating, no play count.** There is no user table, no listen table
 and nothing to hang them on, and the tempting shortcut is wrong: `Artist.Followed`
@@ -365,8 +378,8 @@ buttons to draw, and a server that does not answer reads to them as broken
 rather than as limited. It states every role, and the three that are true are
 the three this surface has: stream, download, cover art. *Amended 2026-10-21:*
 an account's roles are its own now (ADR 0018), and `getUser` reports them, its
-email and its `maxBitRate` — kept, but applied by nothing, since nothing
-transcodes. OpenSubsonic's user management is here too: `getUsers`,
+email and its `maxBitRate` — kept, but applied by nothing: `stream`
+transcodes to the rate a request asks for, never to the account's. OpenSubsonic's user management is here too: `getUsers`,
 `createUser`, `updateUser`, `deleteUser` and `changePassword`, each the
 accounts page's own handler, so the last admin and the password rules are that
 page's (`SubsonicEndpoints.Users.cs`). Another account is an admin's to read
@@ -527,7 +540,8 @@ means, and it may then be right for `/rest` to show one song — because by then
 the duplicates will have been dealt with rather than hidden.
 
 **When somebody streams over cellular.** That is the measurement that buys
-transcoding, and not before.
+transcoding, and not before. *Revisited 2026-11-03:* Fonoteca's own client
+asked for it, and `stream` transcodes (above).
 
 **When a client is measured to need the `apiKey` extension.** It replaces
 `u`/`p`/`t`/`s` with a single key and would let the recoverable password go, at

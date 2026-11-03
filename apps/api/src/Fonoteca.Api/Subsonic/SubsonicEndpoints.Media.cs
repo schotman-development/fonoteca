@@ -20,7 +20,7 @@ namespace Fonoteca.Api.Subsonic;
 /// The bytes: one song, and one picture of an album.
 /// </summary>
 /// <remarks>
-/// <b>Nothing here serves a file itself.</b> Both routes resolve an id to a
+/// <b>Nothing here serves a file itself.</b> Each route resolves an id to a
 /// library-relative path and hand it to <c>FileEndpoints.GetContent</c>, which
 /// already answers <c>Range</c>, <c>If-Range</c> and 206 through
 /// <c>PhysicalFile</c>, already resolves the path through
@@ -33,28 +33,57 @@ namespace Fonoteca.Api.Subsonic;
 /// escapes the library root, and <i>lexical containment is not containment</i>
 /// is a lesson this repository has already paid for once.
 ///
-/// <b>No transcoding.</b> <c>maxBitRate</c> and <c>format</c> are accepted and
-/// ignored and the bytes go out as they are. ffmpeg is already a dependency, so
-/// the upgrade is a pipe on the day somebody is measured to need it; over a LAN,
-/// what these clients want is the FLAC.
+/// <b>A stream is transcoded where something smaller was asked for</b>
+/// (<see cref="Transcode.For"/>, <see cref="TranscodedAsync"/>): through the
+/// same store, so its containment is the same. Everything else, and every
+/// download, is the file.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
-    private static Task<IResult> Stream(
+    private static async Task<IResult> Stream(
         HttpContext http,
         FileSystemAudioFileStore store,
+        FfmpegTranscoder transcoder,
         FonotecaDbContext db,
-        CancellationToken cancellationToken) =>
-        Serve(http, AccountRoles.Stream, store, db, cancellationToken);
+        ILogger<FfmpegTranscoder> logger,
+        CancellationToken cancellationToken)
+    {
+        if (!May(http, AccountRoles.Stream)) return NotAuthorized();
+
+        var path = await PathOfAsync(db, Text(http, "id"), cancellationToken).ConfigureAwait(false);
+
+        if (path is null) return SubsonicResult.Error(70, "No such song.");
+
+        if (!AudioFormats.IsAudioFile(path)) return FileEndpoints.GetContent(store, http, path);
+
+        var quality = await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.Path == path)
+            .Select(file => file.Quality)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var offset = TimeOffset(http);
+
+        var transcode = Transcode.For(
+            Text(http, "format"),
+            Number(http, "maxBitRate", fallback: 0, max: int.MaxValue),
+            quality,
+            seeking: offset > TimeSpan.Zero);
+
+        return transcode is null
+            ? FileEndpoints.GetContent(store, http, path)
+            : await TranscodedAsync(http, transcoder, path, transcode, offset, quality?.Duration, logger, cancellationToken)
+                .ConfigureAwait(false);
+    }
 
     /// <summary>
-    /// The same bytes, and deliberately the same handler, under the download
-    /// role rather than the stream role.
+    /// The file, whatever was asked for, under the download role rather than
+    /// the stream role.
     /// </summary>
     /// <remarks>
     /// The protocol distinguishes them so a server can transcode one and not the
-    /// other. This one transcodes neither, so a difference between them would be
-    /// a difference with nothing behind it.
+    /// other, and says a download is "the original media data".
     /// </remarks>
     private static Task<IResult> Download(
         HttpContext http,
