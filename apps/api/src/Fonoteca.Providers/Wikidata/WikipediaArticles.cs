@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
@@ -144,6 +145,61 @@ public sealed class WikipediaArticles(IHttpClientFactory clients, IOptions<Wikid
         CancellationToken cancellationToken = default) =>
         FindAsync("P436", AlbumListings, groups, cancellationToken);
 
+    /// <remarks>
+    /// <b>Wikipedia's own summary</b> (<c>api/rest_v1/page/summary</c>): the
+    /// lead's first paragraph with pronunciations and references taken out,
+    /// which <c>exintro</c> leaves as empty brackets ("Baroque music (UK:  or
+    /// US: )"). It follows redirects, and says when a title is a
+    /// disambiguation page, which is no answer; so is a title with no article.
+    /// One request per title: a genre list is about a hundred.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, Article>> LeadsAsync(
+        IReadOnlyCollection<string> titles,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(titles);
+        RequireContact();
+
+        var found = new Dictionary<string, Article>(StringComparer.Ordinal);
+
+        foreach (var title in titles.Distinct(StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (await SummaryAsync(title, cancellationToken).ConfigureAwait(false) is { } article)
+            {
+                found[title] = article;
+            }
+        }
+
+        return found;
+    }
+
+    private async Task<Article?> SummaryAsync(string title, CancellationToken cancellationToken)
+    {
+        var payload = await GetOrMissingAsync(
+                "api/rest_v1/page/summary/" + Uri.EscapeDataString(title.Replace(' ', '_')) + "?redirect=true",
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (payload is null) return null;
+
+        using var document = Parse(payload);
+        var summary = document.RootElement;
+
+        if (summary.ValueKind != JsonValueKind.Object) throw Unavailable("Wikipedia's summary was not an object");
+
+        return summary.TryGetProperty("type", out var type) && type.GetString() == "standard"
+            && summary.TryGetProperty("extract", out var extract) && extract.GetString()?.Trim() is { Length: > 0 } text
+            && summary.TryGetProperty("content_urls", out var urls)
+            && urls.TryGetProperty("desktop", out var desktop)
+            && desktop.TryGetProperty("page", out var page)
+            && Uri.TryCreate(page.GetString(), UriKind.Absolute, out var url)
+            && IsCreditable(url)
+                ? new Article(text, url)
+                : null;
+    }
+
     private async Task<IReadOnlyDictionary<Mbid, Article>> FindAsync(
         string property,
         HashSet<string> listings,
@@ -151,14 +207,7 @@ public sealed class WikipediaArticles(IHttpClientFactory clients, IOptions<Wikid
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(ids);
-
-        if (string.IsNullOrWhiteSpace(options.Value.Contact))
-        {
-            throw new ProviderRejectedException(
-                ProviderName,
-                "Wikipedia requires a contact in the User-Agent. Set Fonoteca:MusicBrainzContact "
-                + "to a URL or email address.");
-        }
+        RequireContact();
 
         var found = new Dictionary<Mbid, Article>();
         var wanted = ids.Distinct().ToList();
@@ -188,6 +237,27 @@ public sealed class WikipediaArticles(IHttpClientFactory clients, IOptions<Wikid
 
         return found;
     }
+
+    private void RequireContact()
+    {
+        if (string.IsNullOrWhiteSpace(options.Value.Contact))
+        {
+            throw new ProviderRejectedException(
+                ProviderName,
+                "Wikipedia requires a contact in the User-Agent. Set Fonoteca:MusicBrainzContact "
+                + "to a URL or email address.");
+        }
+    }
+
+    /// <summary>
+    /// Only an English Wikipedia article's own URL, since it is printed as a
+    /// link on this application's origin.
+    /// </summary>
+    private static bool IsCreditable(Uri url) =>
+        url.Scheme == Uri.UriSchemeHttps
+        && url.Host.Equals(Server.Host, StringComparison.OrdinalIgnoreCase)
+        && url.AbsolutePath.StartsWith("/wiki/", StringComparison.Ordinal)
+        && url.AbsoluteUri.Length <= MaxUrlLength;
 
     /// <summary>The ids as a <c>VALUES</c> list, formatted from <see cref="Guid"/> so nothing needs escaping.</summary>
     private static string Query(string property, IEnumerable<Mbid> ids)
@@ -241,14 +311,7 @@ public sealed class WikipediaArticles(IHttpClientFactory clients, IOptions<Wikid
             if (!Guid.TryParse(mbid, out var id) || !asked.Contains(new Mbid(id))) continue;
             if (!taken.Add(new Mbid(id))) continue;
 
-            if (!Uri.TryCreate(article, UriKind.Absolute, out var url)
-                || url.Scheme != Uri.UriSchemeHttps
-                || !url.Host.Equals(Server.Host, StringComparison.OrdinalIgnoreCase)
-                || !url.AbsolutePath.StartsWith("/wiki/", StringComparison.Ordinal)
-                || url.AbsoluteUri.Length > MaxUrlLength)
-            {
-                continue;
-            }
+            if (!Uri.TryCreate(article, UriKind.Absolute, out var url) || !IsCreditable(url)) continue;
 
             var title = Uri.UnescapeDataString(url.AbsolutePath["/wiki/".Length..]).Replace('_', ' ');
 
@@ -370,7 +433,12 @@ public sealed class WikipediaArticles(IHttpClientFactory clients, IOptions<Wikid
         return (line.Trim('=').Trim(), depth);
     }
 
-    private async Task<string> GetAsync(string path, CancellationToken cancellationToken)
+    private async Task<string> GetAsync(string path, CancellationToken cancellationToken) =>
+        await GetOrMissingAsync(path, cancellationToken).ConfigureAwait(false)
+            ?? throw Unavailable("Wikipedia answered 404");
+
+    /// <summary>The page, or null where there is no such page: a 404 is an answer here, not an outage.</summary>
+    private async Task<string?> GetOrMissingAsync(string path, CancellationToken cancellationToken)
     {
         var http = clients.CreateClient(HttpClientName);
 
@@ -396,6 +464,8 @@ public sealed class WikipediaArticles(IHttpClientFactory clients, IOptions<Wikid
 
         using (response)
         {
+            if (response.StatusCode == HttpStatusCode.NotFound) return null;
+
             var payload = await response.Content.ReadAsStringAsync(cancellationToken)
                 .ConfigureAwait(false);
 

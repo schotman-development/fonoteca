@@ -51,7 +51,8 @@ the rest.
    `Artists.LookupUtc`, `PortraitLookupUtc`, `DiscographyLookupUtc`,
    `LastVerifiedUtc`, `Releases.ProviderCheckedUtc`, `Recordings.DescribedUtc`,
    `ReleaseGroups.GenresLookupUtc`, `Works.PartOfLookupUtc`, `Works.DescribedUtc`,
-   `Releases.DescribedUtc`, `TempoAndKeyMeasuredUtc`, `ReleaseGroups.ClassicalLookupUtc`. A library is full of things the provider has never heard
+   `Releases.DescribedUtc`, `TempoAndKeyMeasuredUtc`, `ReleaseGroups.ClassicalLookupUtc`,
+   `GenreDescriptions.LookupUtc`. A library is full of things the provider has never heard
    of; keyed on the identifier, every one is re-asked forever and the worklist
    never empties. The stamp goes on when the answer is "no such thing" too, and
    is left null **only** when the lookup did not happen. Where a source gains
@@ -259,7 +260,7 @@ the ones above wrote:** identified files → person-filed files
 (`ClaimPersonFiledAsync`, promoting `LinkedByPerson` to `Linked` with credits) →
 held recordings described again → parent works → works and filed releases
 asked for what the tags need → album genres → artists → portraits → articles,
-Apple Music Classical, banners, covers, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
+Apple Music Classical, album articles, genre descriptions, banners, covers, motion, booklets → lyrics → discographies. `CountPendingAsync` returns one number per
 stage with `Pending` as the sum; **a stage added here is a number added to four
 places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
 

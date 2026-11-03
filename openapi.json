@@ -8093,6 +8093,7 @@
           "pendingReleases",
           "pendingCovers",
           "pendingClassical",
+          "pendingGenreDescriptions",
           "lastCompleted"
         ],
         "type": "object",
@@ -8185,6 +8186,10 @@
             "format": "int32"
           },
           "pendingClassical": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingGenreDescriptions": {
             "type": "integer",
             "format": "int32"
           },

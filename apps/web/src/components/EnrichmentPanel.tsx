@@ -49,6 +49,7 @@ function pendingSentence(status: {
   readonly pendingReleases: number
   readonly pendingCovers: number
   readonly pendingClassical: number
+  readonly pendingGenreDescriptions: number
 }): string {
   const parts: string[] = []
 
@@ -147,6 +148,15 @@ function pendingSentence(status: {
     parts.push(
       `${status.pendingArticles.toLocaleString()} article${
         status.pendingArticles === 1 ? '' : 's'
+      } to look for`,
+    )
+  }
+
+  // Each genre's article, after the albums' on the same encyclopedia.
+  if (status.pendingGenreDescriptions > 0) {
+    parts.push(
+      `${status.pendingGenreDescriptions.toLocaleString()} genre description${
+        status.pendingGenreDescriptions === 1 ? '' : 's'
       } to look for`,
     )
   }

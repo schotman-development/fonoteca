@@ -400,12 +400,13 @@ public static partial class SubsonicEndpoints
     /// nested at any depth: <c>getTags</c>, <c>getTag</c>, <c>createTag</c>,
     /// <c>updateTag</c>, <c>deleteTag</c>, and a song's <c>tagIds</c>.
     /// <c>fonotecaGenres</c> is a <c>getGenres</c> entry's <c>parents</c>, the
-    /// genres it sits under in Fonoteca's tree.
+    /// genres it sits under in Fonoteca's tree, and from version 2 its
+    /// <c>description</c>, <c>descriptionSource</c> and <c>descriptionUrl</c>.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1, 2]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

@@ -45,6 +45,9 @@ public static partial class SubsonicEndpoints
     /// </remarks>
     private const string IgnoredArticles = "The El La Los Las Le Les";
 
+    /// <summary>Where every genre's description comes from, as getGenres credits it.</summary>
+    private const string GenreDescriptionSource = "Wikipedia";
+
     private static async Task<IResult> GetArtists(
         FonotecaDbContext db,
         CancellationToken cancellationToken)
@@ -295,6 +298,10 @@ public static partial class SubsonicEndpoints
     /// Fonoteca's <c>fonotecaGenres</c>: left out for a top and for
     /// <see cref="Genres.Other"/>, both tops for a fusion. A genre carried is
     /// carried with its tops, so each parent is in the list too.
+    /// <c>description</c> is the lead of the Wikipedia article
+    /// <see cref="GenreArticles"/> names for it, with <c>descriptionSource</c>
+    /// and the article as <c>descriptionUrl</c> to credit; left out where there
+    /// is none, or it was read from an article no longer named.
     /// </remarks>
     private static async Task<IResult> GetGenres(
         FonotecaDbContext db,
@@ -327,6 +334,14 @@ public static partial class SubsonicEndpoints
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var descriptions = (await db.GenreDescriptions
+                .AsNoTracking()
+                .Where(description => description.Text != null)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .Where(GenreArticles.IsCurrent)
+            .ToDictionary(description => description.Genre, StringComparer.OrdinalIgnoreCase);
+
         return SubsonicResult.Ok(
             "genres",
             list => list.Children("genre", genres, (writer, genre) =>
@@ -335,6 +350,13 @@ public static partial class SubsonicEndpoints
                 writer.Attr("albumCount", albumCounts.GetValueOrDefault(genre));
 
                 if (Genres.TopsOf(genre) is { Count: > 0 } parents) writer.StringsAttr("parents", parents);
+
+                if (descriptions.GetValueOrDefault(genre) is { } description)
+                {
+                    writer.Attr("description", description.Text);
+                    writer.Attr("descriptionSource", GenreDescriptionSource);
+                    writer.Attr("descriptionUrl", description.Url);
+                }
 
                 writer.Value(genre);
             }));

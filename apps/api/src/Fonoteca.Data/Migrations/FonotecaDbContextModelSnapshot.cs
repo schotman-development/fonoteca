@@ -669,6 +669,32 @@ namespace Fonoteca.Data.Migrations
                     b.ToTable("DiscoveredRecords");
                 });
 
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.GenreDescription", b =>
+                {
+                    b.Property<string>("Genre")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("LookupUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Text")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Url")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Genre");
+
+                    b.ToTable("GenreDescriptions");
+                });
+
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Love", b =>
                 {
                     b.Property<Guid>("Id")

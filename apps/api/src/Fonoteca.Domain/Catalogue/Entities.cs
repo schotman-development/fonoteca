@@ -2182,3 +2182,29 @@ public sealed class SmartPlaylist
     /// <summary>When the name or the rules last changed; part of what deals a random order.</summary>
     public required DateTimeOffset ChangedUtc { get; set; }
 }
+
+/// <summary>
+/// The lead of the article <see cref="GenreArticles"/> names for one of
+/// Fonoteca's genres, for a genre's page.
+/// </summary>
+/// <remarks>
+/// Rule 1: <see cref="LookupUtc"/> is "we asked", stamped on an answer of "no
+/// article" too, and a lookup that found nothing is asked again after a week.
+/// <see cref="Title"/> is the article asked for, so changing a genre's
+/// article in <see cref="GenreArticles"/> asks again with no hand-written
+/// update.
+/// </remarks>
+public sealed class GenreDescription
+{
+    public required string Genre { get; init; }
+
+    public required string Title { get; set; }
+
+    /// <summary>The article's lead, plain text, as Wikipedia summarises it.</summary>
+    public string? Text { get; set; }
+
+    /// <summary>The article itself, which a page credits beside the text (CC BY-SA).</summary>
+    public string? Url { get; set; }
+
+    public required DateTimeOffset LookupUtc { get; set; }
+}

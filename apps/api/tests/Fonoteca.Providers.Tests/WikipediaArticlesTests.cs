@@ -248,6 +248,53 @@ public sealed class WikipediaArticlesTests : IDisposable
         foreach (var provider in _providers) provider.Dispose();
     }
 
+    /// <summary>
+    /// A title's lead comes from Wikipedia's summary, under the title asked for
+    /// and crediting the article it redirected to; a disambiguation page and a
+    /// missing page are no answer, and an outage is not one either.
+    /// </summary>
+    [Fact]
+    public async Task AGenresLeadIsWikipediasSummary()
+    {
+        var (articles, stub) = Build(request => request.Uri.AbsolutePath switch
+        {
+            "/api/rest_v1/page/summary/Cool_jazz" => Ok("""
+                {"type":"standard","title":"Cool jazz",
+                 "extract":"Cool jazz is a style of modern jazz music. ",
+                 "content_urls":{"desktop":{"page":"https://en.wikipedia.org/wiki/Cool_jazz"}}}
+                """),
+            "/api/rest_v1/page/summary/Dixieland" => Ok("""
+                {"type":"standard","title":"Dixieland jazz",
+                 "extract":"Dixieland jazz is a style of jazz.",
+                 "content_urls":{"desktop":{"page":"https://en.wikipedia.org/wiki/Dixieland_jazz"}}}
+                """),
+            "/api/rest_v1/page/summary/Contemporary_R%26B" => Ok("""
+                {"type":"standard","title":"Contemporary R&B","extract":"Contemporary R&B is a popular music genre.",
+                 "content_urls":{"desktop":{"page":"https://en.wikipedia.org/wiki/Contemporary_R%26B"}}}
+                """),
+            "/api/rest_v1/page/summary/Bebop" => Ok("""
+                {"type":"standard","title":"Bebop","extract":"Bebop is a style of jazz.",
+                 "content_urls":{"desktop":{"page":"https://example.org/wiki/Bebop"}}}
+                """),
+            "/api/rest_v1/page/summary/Swing" => Ok("""
+                {"type":"disambiguation","title":"Swing","extract":"Swing may refer to:",
+                 "content_urls":{"desktop":{"page":"https://en.wikipedia.org/wiki/Swing"}}}
+                """),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+
+        var found = await articles.LeadsAsync(["Cool jazz", "Dixieland", "Contemporary R&B", "Bebop", "Swing", "No such article"], Token);
+
+        Assert.Equal(["Contemporary R&B", "Cool jazz", "Dixieland"], found.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("Cool jazz is a style of modern jazz music.", found["Cool jazz"].Text);
+        Assert.Equal("https://en.wikipedia.org/wiki/Dixieland_jazz", found["Dixieland"].Url.AbsoluteUri);
+        Assert.Contains("redirect=true", stub.Requests[0].Uri.Query, StringComparison.Ordinal);
+
+        var (down, _) = Build(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+
+        await Assert.ThrowsAsync<ProviderUnavailableException>(() => down.LeadsAsync(["Cool jazz"], Token));
+    }
+
     /// <summary>A <c>prop=extracts</c> body whose article is these lines.</summary>
     private static string Extract(params string[] lines) =>
         "{\"batchcomplete\":true,\"query\":{\"pages\":[{\"pageid\":1,\"ns\":0,"

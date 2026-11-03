@@ -25,6 +25,11 @@ public interface IEncyclopedia
     Task<IReadOnlyDictionary<Mbid, Article>> ReleaseGroupsAsync(
         IReadOnlyCollection<Mbid> groups,
         CancellationToken cancellationToken = default);
+
+    /// <summary>The lead of each of these articles, keyed by the title asked for.</summary>
+    Task<IReadOnlyDictionary<string, Article>> LeadsAsync(
+        IReadOnlyCollection<string> titles,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>An article's prose, as plain text, and where it came from.</summary>
@@ -32,7 +37,7 @@ public interface IEncyclopedia
 /// Paragraphs separated by a blank line. The whole article rather than its lead
 /// — a lead is one sentence on most of the artists a catalogue holds — with the
 /// source's lists and appendices dropped and the length clamped by whoever
-/// fetched it.
+/// fetched it; from <see cref="IEncyclopedia.LeadsAsync"/>, the lead.
 /// </param>
 /// <param name="Url">The article, which the page credits beside the text.</param>
 public sealed record Article(string Text, Uri Url);

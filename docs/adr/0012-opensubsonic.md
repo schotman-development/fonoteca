@@ -517,6 +517,16 @@ Added with the enrichment stages that fill `ReleaseGroups.Genres` and
 a fusion — so a client can draw the tree the albums are filed by. JSON gives
 an array; XML one attribute joined by ", ", since a genre's name is its
 element's text and a child element inside it breaks a pull parser reading it.
+*Amended 2026-11-03:* `fonotecaGenres` version 2, asked for by the client's
+genre pages: each entry carries `description`, the lead of the English
+Wikipedia article picked by hand for the genre (`GenreArticles`, the owner's
+choice over finding one through Wikidata, since the tree's genres are not
+MusicBrainz's), with `descriptionSource` ("Wikipedia") and the article as
+`descriptionUrl` to credit, as its licence asks. An enrichment stage fetches
+Wikipedia's own summary for each genre the songs carry, into
+`GenreDescriptions`, stamped "we asked" and asked again after a week where it
+found none. Four genres have no article of their own and carry none; four
+share a broader one's by Wikipedia's redirect.
 
 **A song's `bitDepth` is the one its audio uses**, where the Analyse pass found
 a lossless file padded beyond it, and its `replayGain` carries the values the tag

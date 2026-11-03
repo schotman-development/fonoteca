@@ -427,6 +427,7 @@ public static class LibraryEndpoints
             PendingReleases: pending.Releases,
             PendingCovers: pending.Covers,
             PendingClassical: pending.Classical,
+            PendingGenreDescriptions: pending.GenreDescriptions,
             LastCompleted: enrichment.LastCompleted));
     }
 
@@ -749,6 +750,9 @@ public sealed record EnrichmentStatusResponse(
 
     /// <summary>Classical albums not yet asked about on Apple Music Classical, or not carried there a week ago.</summary>
     int PendingClassical,
+
+    /// <summary>Genres whose Wikipedia article is not yet asked for, or none found a week ago.</summary>
+    int PendingGenreDescriptions,
 
     EnrichmentSummary? LastCompleted);
 

@@ -2915,6 +2915,61 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(0, pending.Genres);
     }
 
+    /// <summary>
+    /// Each genre the songs carry is asked for its article once: one found is
+    /// kept with its link, one with none is stamped, and a second run asks
+    /// nothing.
+    /// </summary>
+    [Fact]
+    public async Task EachHeldGenreIsDescribedOnce()
+    {
+        await SeedLinkedAsync(heldAlbum: true);
+
+        var leads = new Dictionary<string, string> { ["Bebop"] = "Bebop is a style of jazz." };
+        var encyclopedia = new StubEncyclopedia { Leads = leads };
+
+        var services = Build(
+            Answering(Recording),
+            new StubCatalogue(recording: null, work: null) { AlbumGenres = ["bebop"] },
+            encyclopedia: encyclopedia);
+
+        await EnrichAsync(services);
+        Assert.Equal(0, await PendingGenreDescriptionsAsync(services));
+        await EnrichAsync(services);
+
+        Assert.Equal(["Bebop", "Jazz"], encyclopedia.AskedTitles.Order(StringComparer.Ordinal));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var described = await db.GenreDescriptions.AsNoTracking().OrderBy(row => row.Genre).ToListAsync(Token);
+
+            Assert.Equal(["Bebop", "Jazz"], described.Select(row => row.Genre));
+            Assert.Equal("Bebop is a style of jazz.", described[0].Text);
+            Assert.Equal("https://en.wikipedia.org/wiki/Bebop", described[0].Url);
+            Assert.Null(described[1].Text);
+            Assert.Null(described[1].Url);
+
+            await db.GenreDescriptions
+                .Where(row => row.Genre == "Jazz")
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.LookupUtc, DateTimeOffset.UtcNow.AddDays(-8)), Token);
+        }
+
+        // A week on, the genre found nothing for is asked again, and its row takes the answer.
+        Assert.Equal(1, await PendingGenreDescriptionsAsync(services));
+        leads["Jazz"] = "Jazz is a music genre.";
+        await EnrichAsync(services);
+
+        await using var after = PostgresFixture.CreateContext(_connectionString);
+        var jazz = await after.GenreDescriptions.AsNoTracking().SingleAsync(row => row.Genre == "Jazz", Token);
+
+        Assert.Equal("Jazz is a music genre.", jazz.Text);
+        Assert.Equal("https://en.wikipedia.org/wiki/Jazz", jazz.Url);
+        Assert.True(jazz.LookupUtc > DateTimeOffset.UtcNow.AddDays(-1));
+    }
+
+    private static async Task<int> PendingGenreDescriptionsAsync(IServiceProvider services) =>
+        (await services.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).GenreDescriptions;
+
     /// <summary>A recording or album no file holds is on neither worklist.</summary>
     [Fact]
     public async Task OnlyHeldRecordingsAndAlbumsAreDescribed()
@@ -2943,7 +2998,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     /// <summary>The newer stages count towards "is there anything to do", or the button could never reach them.</summary>
     [Fact]
     public void TheNewerStagesAreInTheTotal() =>
-        Assert.Equal(52, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9, Classical: 10).Total);
+        Assert.Equal(63, new EnrichmentPending(0, 0, 0, 0, 0, 0, 0, 0, Recordings: 3, Genres: 4, ParentWorks: 5, Lyrics: 6, Works: 7, Releases: 8, Covers: 9, Classical: 10, GenreDescriptions: 11).Total);
 
     /// <summary>
     /// A song is asked about as its held file has it, its words are kept, and
@@ -3676,6 +3731,28 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         public Task<IReadOnlyDictionary<Mbid, Article>> ReleaseGroupsAsync(
             IReadOnlyCollection<Mbid> groups,
             CancellationToken cancellationToken = default) => Answer(groups);
+
+        /// <summary>Article leads by title, for the genres.</summary>
+        public IReadOnlyDictionary<string, string> Leads { get; init; } = new Dictionary<string, string>();
+
+        public List<string> AskedTitles { get; } = [];
+
+        public Task<IReadOnlyDictionary<string, Article>> LeadsAsync(
+            IReadOnlyCollection<string> titles,
+            CancellationToken cancellationToken = default)
+        {
+            lock (AskedTitles) AskedTitles.AddRange(titles);
+
+            if (Unavailable) throw new ProviderUnavailableException("stub", "Wikipedia is down.");
+
+            IReadOnlyDictionary<string, Article> found = titles
+                .Where(Leads.ContainsKey)
+                .ToDictionary(
+                    title => title,
+                    title => new Article(Leads[title], new Uri($"https://en.wikipedia.org/wiki/{Uri.EscapeDataString(title)}")));
+
+            return Task.FromResult(found);
+        }
 
         private Task<IReadOnlyDictionary<Mbid, Article>> Answer(IReadOnlyCollection<Mbid> ids)
         {

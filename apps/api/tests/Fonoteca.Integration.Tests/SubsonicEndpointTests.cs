@@ -3033,6 +3033,93 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// A genre carries the lead of the article named for it, with its source
+    /// and link, in JSON and XML alike; one read from an article no longer
+    /// named carries none.
+    /// </summary>
+    [Fact]
+    public async Task AGenreCarriesItsDescription()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.ReleaseGroups.ExecuteUpdateAsync(
+                update => update.SetProperty(group => group.Genres, "cool jazz, blues"),
+                Token);
+
+            db.GenreDescriptions.AddRange(
+                new GenreDescription
+                {
+                    Genre = "Cool Jazz",
+                    Title = GenreArticles.Titles["Cool Jazz"],
+                    Text = "Cool jazz is a style of modern jazz music.",
+                    Url = "https://en.wikipedia.org/wiki/Cool_jazz",
+                    LookupUtc = DateTimeOffset.UtcNow,
+                },
+                new GenreDescription
+                {
+                    Genre = "Blues",
+                    Title = GenreArticles.Titles["Blues"],
+                    LookupUtc = DateTimeOffset.UtcNow,
+                },
+                new GenreDescription
+                {
+                    Genre = "Jazz",
+                    Title = "Jazz (an article no longer named)",
+                    Text = "Stale.",
+                    Url = "https://en.wikipedia.org/wiki/Jazz_(word)",
+                    LookupUtc = DateTimeOffset.UtcNow,
+                });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var genres = (await JsonAsync(client, "/rest/getGenres.view"))
+            .GetProperty("subsonic-response")
+            .GetProperty("genres")
+            .GetProperty("genre")
+            .EnumerateArray()
+            .ToList();
+
+        var cool = genres.Single(genre => genre.GetProperty("value").GetString() == "Cool Jazz");
+        Assert.Equal("Cool jazz is a style of modern jazz music.", cool.GetProperty("description").GetString());
+        Assert.Equal("Wikipedia", cool.GetProperty("descriptionSource").GetString());
+        Assert.Equal("https://en.wikipedia.org/wiki/Cool_jazz", cool.GetProperty("descriptionUrl").GetString());
+
+        var jazz = genres.Single(genre => genre.GetProperty("value").GetString() == "Jazz");
+        Assert.False(jazz.TryGetProperty("description", out _));
+        Assert.False(jazz.TryGetProperty("descriptionSource", out _));
+        Assert.False(jazz.TryGetProperty("descriptionUrl", out _));
+
+        var blues = genres.Single(genre => genre.GetProperty("value").GetString() == "Blues");
+        Assert.False(blues.TryGetProperty("descriptionSource", out _));
+
+        using var response = await client.GetAsync(
+            new Uri($"/rest/getGenres.view?{Credentials}", UriKind.Relative),
+            Token);
+
+        var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+        XNamespace ns = "http://subsonic.org/restapi";
+        var element = xml.Descendants(ns + "genre").Single(genre => genre.Value == "Cool Jazz");
+
+        Assert.Equal("Cool jazz is a style of modern jazz music.", element.Attribute("description")?.Value);
+        Assert.Equal("Wikipedia", element.Attribute("descriptionSource")?.Value);
+        Assert.Equal("https://en.wikipedia.org/wiki/Cool_jazz", element.Attribute("descriptionUrl")?.Value);
+
+        var versions = (await JsonAsync(client, "/rest/getOpenSubsonicExtensions.view"))
+            .GetProperty("subsonic-response")
+            .GetProperty("openSubsonicExtensions")
+            .EnumerateArray()
+            .Single(extension => extension.GetProperty("name").GetString() == "fonotecaGenres")
+            .GetProperty("versions")
+            .EnumerateArray()
+            .Select(version => version.GetInt32());
+
+        Assert.Equal([1, 2], versions);
+    }
+
+    /// <summary>
     /// A song carries its ReplayGain — the album values over its album folder —
     /// and the bit depth its audio really uses.
     /// </summary>

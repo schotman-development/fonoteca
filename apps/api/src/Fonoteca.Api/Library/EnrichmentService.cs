@@ -242,9 +242,11 @@ public sealed class EnrichmentService(
             var covers = await UncoveredReleases(db, CoverCutoff).CountAsync(cancellationToken).ConfigureAwait(false)
                 + await UncoveredAlbums(db, CoverCutoff).CountAsync(cancellationToken).ConfigureAwait(false);
 
+            var genreDescriptions = (await UnaskedGenresAsync(db, cancellationToken).ConfigureAwait(false)).Count;
+
             return new EnrichmentPending(
                 unasked + personFiled, artists, portraits, discographies, articles, banners, motion, booklets,
-                recordings, genres, parentWorks, words, works, releases, covers, classicalAlbums);
+                recordings, genres, parentWorks, words, works, releases, covers, classicalAlbums, genreDescriptions);
         }
     }
 
@@ -482,6 +484,11 @@ public sealed class EnrichmentService(
             await BatchesAsync(
                 "album articles",
                 token => ReviewsAsync(ArticleBatchSize, token),
+                counts, jobId, pending, cancellationToken).ConfigureAwait(false);
+
+            await BatchesAsync(
+                "genre descriptions",
+                token => GenreDescriptionsAsync(ArticleBatchSize, token),
                 counts, jobId, pending, cancellationToken).ConfigureAwait(false);
 
             await BatchesAsync(
@@ -1937,6 +1944,91 @@ public sealed class EnrichmentService(
         }
 
         return page.Count;
+    }
+
+    private async Task<int> GenreDescriptionsAsync(int size, CancellationToken cancellationToken)
+    {
+        List<KeyValuePair<string, string>> page;
+
+        var claim = scopeFactory.CreateAsyncScope();
+        await using (claim.ConfigureAwait(false))
+        {
+            var db = claim.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            page = [.. (await UnaskedGenresAsync(db, cancellationToken).ConfigureAwait(false)).Take(Math.Max(size, 1))];
+        }
+
+        if (page.Count == 0) return 0;
+
+        var found = await encyclopedia
+            .LeadsAsync([.. page.Select(genre => genre.Value)], cancellationToken)
+            .ConfigureAwait(false);
+
+        var stampedAt = StoreTime.ToStorePrecision(clock.UtcNow);
+
+        var save = scopeFactory.CreateAsyncScope();
+        await using (save.ConfigureAwait(false))
+        {
+            var db = save.ServiceProvider.GetRequiredService<FonotecaDbContext>();
+
+            var names = page.Select(genre => genre.Key).ToList();
+
+            var rows = await db.GenreDescriptions
+                .Where(row => names.Contains(row.Genre))
+                .ToDictionaryAsync(row => row.Genre, StringComparer.Ordinal, cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var (genre, title) in page)
+            {
+                if (!rows.TryGetValue(genre, out var row))
+                {
+                    row = new GenreDescription { Genre = genre, Title = title, LookupUtc = stampedAt };
+                    db.GenreDescriptions.Add(row);
+                }
+
+                var article = found.GetValueOrDefault(title);
+
+                row.Title = title;
+                row.Text = article?.Text;
+                row.Url = article?.Url.AbsoluteUri;
+                row.LookupUtc = stampedAt;
+            }
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return page.Count;
+    }
+
+    /// <summary>
+    /// The genres getGenres lists that have no description asked for yet.
+    /// </summary>
+    /// <remarks>
+    /// A hundred-odd genres at most, so the rule runs here rather than in SQL;
+    /// what the songs carry is read as the distinct pairs of genre lists a file
+    /// takes them from, a few hundred rows however large the library.
+    /// </remarks>
+    private async Task<IReadOnlyList<KeyValuePair<string, string>>> UnaskedGenresAsync(
+        FonotecaDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var stated = await db.MediaFiles
+            .AsNoTracking()
+            .Select(file => new
+            {
+                Album = file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
+                Recording = file.Recording != null ? file.Recording.Genres : null,
+            })
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var asked = await db.GenreDescriptions.AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
+
+        return GenreArticles.Unasked(
+            stated.SelectMany(pair => FileGenres.Of(pair.Album, pair.Recording)),
+            asked,
+            NothingFoundCutoff);
     }
 
     private async Task<int> BannersAsync(int size, CancellationToken cancellationToken)
@@ -3916,6 +4008,7 @@ public enum EnrichmentStatus
 /// <param name="Works">Works nobody has asked MusicBrainz for their languages and parts.</param>
 /// <param name="Releases">Releases a file is filed under, never asked for their ASIN, script and track ids.</param>
 /// <param name="Covers">Sleeves the tag write would draw from that nobody has asked for, or found none of a week ago.</param>
+/// <param name="GenreDescriptions">Genres whose article nobody has asked for, or found none of a week ago.</param>
 public sealed record EnrichmentPending(
     int Files,
     int Artists,
@@ -3932,7 +4025,8 @@ public sealed record EnrichmentPending(
     int Works,
     int Releases,
     int Covers,
-    int Classical)
+    int Classical,
+    int GenreDescriptions)
 {
     /// <summary>The size of the job, which is what "is there anything to do" reads.</summary>
     /// <remarks>
@@ -3944,7 +4038,7 @@ public sealed record EnrichmentPending(
     /// </remarks>
     public int Total =>
         Files + Artists + Portraits + Discographies + Articles + Banners + Motion + Booklets + Recordings + Genres
-        + ParentWorks + Lyrics + Works + Releases + Covers + Classical;
+        + ParentWorks + Lyrics + Works + Releases + Covers + Classical + GenreDescriptions;
 }
 
 /// <summary>Where a running pass has got to.</summary>
