@@ -361,6 +361,12 @@ meaning. So one artist's greatest hits is no compilation by that flag but is
 by its types, and a client asked by Fonoteca's own to leave compilations out
 of an artist's own albums reads both (`CatalogueTags.ReleaseTypesOf`, shared
 with the tag write).
+*Amended 2026-11-03:* every id those `artists` hand out answers, asked by
+Fonoteca's own client: an orchestra billed after its conductor was error 70.
+getArtists and search3 list every artist an album is billed to, not only the
+first, with `albumCount` counting each album that bills them (the owner's
+choice); getArtist lists the albums whose `artists` include it, and answers
+any artist the catalogue holds, a song's or a loved composer's, with none.
 
 ### Scope
 

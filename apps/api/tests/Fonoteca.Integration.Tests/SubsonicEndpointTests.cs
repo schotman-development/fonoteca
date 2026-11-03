@@ -1853,6 +1853,67 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// Every artist an album is billed to has a page listing it, and is in the
+    /// artists list and in search, not only the first; an artist billed on no
+    /// album still answers, with none, and an id nobody has does not.
+    /// </summary>
+    [Fact]
+    public async Task EveryArtistAnAlbumBillsHasAPageAndIsListed()
+    {
+        var conductor = new Artist { Id = ArtistId.New(), Name = "Nikolaus Harnoncourt" };
+        var orchestra = new Artist { Id = ArtistId.New(), Name = "Concertgebouworkest" };
+        var unbilled = new Artist { Id = ArtistId.New(), Name = "Anton Webern" };
+        var mozart = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Mozart: Symphonies 39-41" };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Artists.AddRange(conductor, orchestra, unbilled);
+            db.ReleaseGroups.Add(mozart);
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Nikolaus Harnoncourt/Mozart/01 Allegro.flac",
+                SizeBytes = 1,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                ReleaseGroupId = mozart.Id,
+            });
+            db.ArtistCredits.AddRange(
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = conductor.Id, ReleaseGroupId = mozart.Id, Position = 0, JoinPhrase = ", " },
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = orchestra.Id, ReleaseGroupId = mozart.Id, Position = 1 });
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        async Task<JsonElement> Answer(string method) =>
+            (await JsonAsync(client, $"/rest/{method}")).GetProperty("subsonic-response");
+
+        static List<string?> Names(JsonElement artists) =>
+            [.. artists.EnumerateArray().Select(artist => artist.GetProperty("name").GetString())];
+
+        var page = (await Answer($"getArtist.view?id=ar-{orchestra.Id.Value:N}")).GetProperty("artist");
+
+        Assert.Equal("Concertgebouworkest", page.GetProperty("name").GetString());
+        Assert.Equal(1, page.GetProperty("albumCount").GetInt32());
+        Assert.Equal(["Mozart: Symphonies 39-41"], Names(page.GetProperty("album")));
+
+        var listed = (await Answer("getArtists.view")).GetProperty("artists").GetProperty("index").EnumerateArray()
+            .SelectMany(index => Names(index.GetProperty("artist")))
+            .ToList();
+
+        Assert.Contains("Concertgebouworkest", listed);
+        Assert.Contains("Nikolaus Harnoncourt", listed);
+        Assert.DoesNotContain("Anton Webern", listed);
+        Assert.Equal(["Concertgebouworkest"], Names((await Answer("search3.view?query=concertgebouw")).GetProperty("searchResult3").GetProperty("artist")));
+
+        var none = (await Answer($"getArtist.view?id=ar-{unbilled.Id.Value:N}")).GetProperty("artist");
+
+        Assert.Equal(0, none.GetProperty("albumCount").GetInt32());
+        Assert.True(!none.TryGetProperty("album", out var albums) || albums.GetArrayLength() == 0);
+        Assert.Equal(70, (await Answer($"getArtist.view?id=ar-{Guid.NewGuid():N}")).GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    /// <summary>
     /// An artist with a banner carries <c>bannerArt</c>, which getCoverArt
     /// serves at the width asked for and apart from the artist's own picture;
     /// an artist with none, or whose provider's banner a person removed,

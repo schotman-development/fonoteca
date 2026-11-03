@@ -82,17 +82,14 @@ public static partial class SubsonicEndpoints
             return SubsonicResult.Error(70, "No such artist.");
         }
 
-        // One pass over the albums, not two: the artists are derived from the
-        // same list this endpoint then filters, and that list is the expensive
-        // query on this surface.
-        var everything = await AlbumsAsync(db, artist: null, cancellationToken).ConfigureAwait(false);
-        var artists = await ArtistsOfAsync(db, everything, cancellationToken).ConfigureAwait(false);
+        var albums = await AlbumsAsync(db, artistId, cancellationToken).ConfigureAwait(false);
 
-        var artist = artists.FirstOrDefault(row => row.Id == artistId);
+        // Any artist the catalogue holds, billed on an album or not: a song's
+        // artists and a loved composer carry ids a client opens here too.
+        var artist = (await ArtistsOfAsync(db, albums, cancellationToken, [artistId]).ConfigureAwait(false))
+            .FirstOrDefault(row => row.Id == artistId);
 
         if (artist is null) return SubsonicResult.Error(70, "No such artist.");
-
-        var albums = everything.Where(album => album.ArtistId == artistId).ToList();
 
         return SubsonicResult.Ok("artist", root =>
         {

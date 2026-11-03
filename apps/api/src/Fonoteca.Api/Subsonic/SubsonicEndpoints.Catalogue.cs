@@ -26,7 +26,8 @@ namespace Fonoteca.Api.Subsonic;
 public static partial class SubsonicEndpoints
 {
     /// <summary>
-    /// The artists the album list is billed to.
+    /// The artists the album list is billed to: everyone on an album's
+    /// billing line, not only the first, as its <c>artists</c> name them.
     /// </summary>
     /// <remarks>
     /// Takes the albums rather than fetching them, because every caller already
@@ -42,8 +43,8 @@ public static partial class SubsonicEndpoints
         IReadOnlyCollection<ArtistId>? also = null)
     {
         var counts = albums
-            .Where(album => album.ArtistId is not null)
-            .CountBy(album => album.ArtistId!.Value)
+            .SelectMany(album => album.Artists, (_, billed) => billed.Id)
+            .CountBy(id => id)
             .ToDictionary();
 
         var billed = counts.Keys.Concat(also ?? []).Distinct().ToList();
@@ -219,7 +220,7 @@ public static partial class SubsonicEndpoints
             .ToList();
 
         return artist is { } billedTo
-            ? albums.Where(album => album.ArtistId == billedTo).ToList()
+            ? albums.Where(album => album.Artists.Any(billed => billed.Id == billedTo)).ToList()
             : albums;
     }
 
