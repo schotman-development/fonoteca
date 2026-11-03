@@ -1041,6 +1041,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("WorkId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("WorkSource")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DescribedUtc");

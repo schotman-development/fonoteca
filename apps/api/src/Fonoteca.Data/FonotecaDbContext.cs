@@ -121,6 +121,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Isrc).HasMaxLength(20);
             e.Property(x => x.Isrcs).HasMaxLength(1000);
             e.Property(x => x.Genres).HasMaxLength(1000);
+            e.Property(x => x.WorkSource).HasMaxLength(50);
 
             // The recording stage's worklist reads this.
             e.HasIndex(x => x.DescribedUtc);

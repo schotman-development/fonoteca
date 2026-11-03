@@ -4124,6 +4124,69 @@
         }
       }
     },
+    "/api/catalogue/recordings/{id}/work": {
+      "put": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "Say which MusicBrainz work a recording performs, over MusicBrainz's own link.",
+        "description": "The work by its MusicBrainz id: a movement where the recording is one. MusicBrainz is asked for it, so the piece it is part of, its place there and its composers come with it, and no enrichment run replaces it; the files get it at the next tag write. Null takes a person's link back, and MusicBrainz and Apple Music Classical are asked again on the next enrichment run.",
+        "operationId": "SetRecordingWork",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingWorkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingWorkResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/catalogue/tracks": {
       "get": {
         "tags": [
@@ -10991,6 +11054,58 @@
             "type": "string"
           },
           "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RecordingWorkRequest": {
+        "required": [
+          "work"
+        ],
+        "type": "object",
+        "properties": {
+          "work": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "RecordingWorkResponse": {
+        "required": [
+          "work",
+          "mbid",
+          "title",
+          "source"
+        ],
+        "type": "object",
+        "properties": {
+          "work": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "mbid": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "source": {
             "type": [
               "null",
               "string"

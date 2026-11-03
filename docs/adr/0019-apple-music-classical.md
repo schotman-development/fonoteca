@@ -104,3 +104,16 @@ Known and accepted:
   contribution and no link and no biography.
 - Apple's piece has no type, key, date or parent. Whether it is classical is
   decided by its recordings' and album's genres alone (`ClassicalWorks.Is`).
+
+*Amended 2026-11-03:* of 96 held tracks of concert pieces on classical albums
+performing no work, Apple had the piece for one album (the *Nutcracker*
+above), and MusicBrainz held the works for 89 without linking the recordings
+to them. A person or an agent now names the work
+(`WorkSources`, `Recordings.WorkSource`): a MusicBrainz work only, the owner's
+choice, fetched whole so its piece, place and composers come as for a link
+MusicBrainz states, its composers' artist rows and links included. It
+replaces Apple's piece, and neither MusicBrainz nor Apple replaces it; it goes
+with the files where a merge or the shop's catch-up folds their recording into
+another. Taken back, the recording is described again and its album asked of
+Apple again. The other seven perform two pieces no source has, and
+stay without until MusicBrainz has them.

@@ -1498,6 +1498,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogue/recordings/{id}/work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Say which MusicBrainz work a recording performs, over MusicBrainz's own link.
+         * @description The work by its MusicBrainz id: a movement where the recording is one. MusicBrainz is asked for it, so the piece it is part of, its place there and its composers come with it, and no enrichment run replaces it; the files get it at the next tag write. Null takes a person's link back, and MusicBrainz and Apple Music Classical are asked again on the next enrichment run.
+         */
+        put: operations["SetRecordingWork"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/catalogue/tracks": {
         parameters: {
             query?: never;
@@ -3346,6 +3366,18 @@ export interface components {
             acoustId: null | string;
             tag: string;
             detail: null | string;
+        };
+        RecordingWorkRequest: {
+            /** Format: uuid */
+            work: null | string;
+        };
+        RecordingWorkResponse: {
+            /** Format: uuid */
+            work: null | string;
+            /** Format: uuid */
+            mbid: null | string;
+            title: null | string;
+            source: null | string;
         };
         RelatedArtist: {
             /** Format: uuid */
@@ -7136,6 +7168,50 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    SetRecordingWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingWorkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingWorkResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

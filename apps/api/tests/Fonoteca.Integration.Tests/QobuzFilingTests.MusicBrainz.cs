@@ -81,6 +81,8 @@ public sealed partial class QobuzFilingTests
             await seed.SaveChangesAsync(Token);
         }
 
+        await LinkEveryWorkAsync();
+
         musicBrainz.Releases.Add(Rumours());
         var swept = await factory.Services.GetRequiredService<MusicBrainzCatchUp>().SweepAsync(Token);
 
@@ -96,6 +98,7 @@ public sealed partial class QobuzFilingTests
         Assert.Empty(await db.ReleaseGroups.Where(group => group.Mbid == null).ToListAsync(Token));
         Assert.Single(await db.DomainEvents.Where(entry => entry.Type == MusicBrainzCatchUp.MatchedEvent).ToListAsync(Token));
         await EverythingIsLovedAsync(db);
+        await EveryWorkIsLinkedAsync(db);
         Assert.Equal(1, await db.Loves.CountAsync(love => love.ReleaseGroupId != null, Token));
         Assert.Equal(
             (await db.ReleaseGroups.SingleAsync(Token)).Id,
@@ -166,8 +169,14 @@ public sealed partial class QobuzFilingTests
         Assert.Equal(asked, musicBrainz.Calls);
     }
 
-    [Fact]
-    public async Task AnIsrcTheCatalogueAlreadyHoldsFoldsTheShopsRecordingIntoIt()
+    /// <summary>
+    /// The shop's row folds into the one holding its ISRC, hearts and a
+    /// person's work link with it, unless that one has a link of its own.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnIsrcTheCatalogueAlreadyHoldsFoldsTheShopsRecordingIntoIt(bool linkedAlready)
     {
         Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
 
@@ -175,11 +184,20 @@ public sealed partial class QobuzFilingTests
         var factory = Factory(mutation: false, musicBrainz);
         await DownloadAsync(factory);
         await LoveEverythingAsync();
+        await LinkEveryWorkAsync();
 
         var held = new Recording { Id = RecordingId.New(), Title = "Dreams", Mbid = Dreams };
+        var own = new Work { Id = WorkId.New(), Title = "Dreams", Mbid = new Mbid(Guid.CreateVersion7()) };
 
         await using (var db = PostgresFixture.CreateContext(_connectionString))
         {
+            if (linkedAlready)
+            {
+                db.Works.Add(own);
+                held.WorkId = own.Id;
+                held.WorkSource = WorkSources.Agent;
+            }
+
             db.Recordings.Add(held);
             await db.SaveChangesAsync(Token);
         }
@@ -193,6 +211,11 @@ public sealed partial class QobuzFilingTests
         Assert.Equal(held.Id, dreams.Track!.RecordingId);
         Assert.Equal(1, await check.Recordings.CountAsync(recording => recording.Title == "Dreams", Token));
         await EverythingIsLovedAsync(check);
+
+        var linked = await check.Recordings.SingleAsync(recording => recording.Id == held.Id, Token);
+
+        Assert.Equal(linkedAlready, linked.WorkId == own.Id);
+        Assert.Equal(linkedAlready ? WorkSources.Agent : WorkSources.Person, linked.WorkSource);
     }
 
     [Fact]
@@ -222,6 +245,7 @@ public sealed partial class QobuzFilingTests
         // A pressing the barcode search never finds, named by a person.
         musicBrainz.Releases.Add(Rumours() with { Barcode = null });
         await LoveEverythingAsync();
+        await LinkEveryWorkAsync();
 
         using var client = factory.CreateClient();
         using var response = await client.PostAsJsonAsync(
@@ -245,7 +269,28 @@ public sealed partial class QobuzFilingTests
         Assert.Empty(await db.Releases.Where(release => release.Mbid == null).ToListAsync(Token));
         Assert.Empty(await db.Recordings.Where(recording => recording.Mbid == null).ToListAsync(Token));
         await EverythingIsLovedAsync(db);
+        await EveryWorkIsLinkedAsync(db);
     }
+
+    /// <summary>A person's work link on every song a download filed, to see each follow its files.</summary>
+    private async Task LinkEveryWorkAsync()
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        var piece = new Work { Id = WorkId.New(), Title = "Rumours", Mbid = new Mbid(Guid.CreateVersion7()) };
+        db.Works.Add(piece);
+
+        foreach (var recording in await db.Recordings.ToListAsync(Token))
+        {
+            recording.WorkId = piece.Id;
+            recording.WorkSource = WorkSources.Person;
+        }
+
+        await db.SaveChangesAsync(Token);
+    }
+
+    private async Task EveryWorkIsLinkedAsync(FonotecaDbContext db) =>
+        Assert.All(await db.MediaFiles.Include(file => file.Recording).ToListAsync(Token), file =>
+            Assert.Equal(WorkSources.Person, file.Recording!.WorkSource));
 
     /// <summary>A heart on every song and album a download filed, to see each follow its files.</summary>
     private async Task LoveEverythingAsync()

@@ -152,6 +152,13 @@ public sealed class Recording
     public WorkId? WorkId { get; set; }
     public Work? Work { get; set; }
 
+    /// <summary>Who linked <see cref="WorkId"/>: a person or an agent, or null where MusicBrainz or Apple did.</summary>
+    /// <remarks>
+    /// Describing the recording again keeps a person's or an agent's link
+    /// (<see cref="WorkSources"/>), whatever MusicBrainz links.
+    /// </remarks>
+    public string? WorkSource { get; set; }
+
     /// <summary>
     /// The recording's ISRC as the shop that delivered it stated it, or null.
     /// </summary>

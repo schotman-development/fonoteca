@@ -504,6 +504,28 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
             .SetAlbumGenres(album, new AlbumGenresRequest(genres), Get<FonotecaDbContext>(), Agent, cancellationToken)
             .ConfigureAwait(false));
 
+    [McpServerTool(Name = "set_recording_work")]
+    [Description(
+        "Say which MusicBrainz work a recording (by catalogue id, as get_album lists it) performs, where "
+        + "MusicBrainz links none or the wrong one: the work's MusicBrainz id, the movement where the "
+        + "recording is one. MusicBrainz is asked for the work, so the piece it is part of, its place there "
+        + "and its composers come with it, and no enrichment run replaces it. Null takes the link back. "
+        + "Recorded as an agent's. Show the owner the works first.")]
+    public async Task<string> SetRecordingWork(
+        Guid recording,
+        [Description("The work's MusicBrainz id, or null to take the link back.")] Guid? work,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .SetRecordingWork(
+                recording,
+                new RecordingWorkRequest(work),
+                Get<FonotecaDbContext>(),
+                Get<IMusicBrainzCatalogue>(),
+                Agent,
+                Get<IClock>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
     [McpServerTool(Name = "undo_folder_edit")]
     [Description(
         "Step one album folder back by one edit to its files, newest first: a tag write's tags, "

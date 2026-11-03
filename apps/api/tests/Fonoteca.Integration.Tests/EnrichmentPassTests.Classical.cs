@@ -459,6 +459,72 @@ public sealed partial class EnrichmentPassTests
     }
 
     /// <summary>
+    /// A person's or an agent's work for a recording is replaced by neither
+    /// MusicBrainz describing it again nor Apple's piece for its track.
+    /// </summary>
+    [Theory]
+    [InlineData(WorkSources.Person)]
+    [InlineData(WorkSources.Agent)]
+    public async Task APersonsWorkForARecordingIsReplacedByNoRule(string source)
+    {
+        var seed = await SeedClassicalAlbumAsync();
+
+        await LinkByHandAsync(seed, source);
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(recording: RecordingWith([Credit(Karajan, "Herbert von Karajan")], []), work: WorkWith([])),
+            classical: new StubClassical(("Beethoven: Symphonies Nos. 5 & 6", AppleAlbum()))));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await check.Recordings.AsNoTracking().SingleAsync(r => r.Id == seed.Unknown, Token);
+
+        Assert.Equal(seed.Ninth, row.WorkId);
+        Assert.Equal(source, row.WorkSource);
+        Assert.NotNull(row.DescribedUtc);
+    }
+
+    /// <summary>A recording MusicBrainz has merged into another leaves a person's work to the survivor.</summary>
+    [Fact]
+    public async Task AMergedRecordingsSurvivorKeepsAPersonsWork()
+    {
+        var seed = await SeedClassicalAlbumAsync();
+        var merged = await LinkByHandAsync(seed, WorkSources.Person);
+        var survivor = Mb("6f8b0d2c-4e5a-4c7d-9e1f-3a5b7c9d1e2f");
+
+        await EnrichAsync(Build(
+            Answering(Recording),
+            new StubCatalogue(
+                recording: RecordingWith([Credit(Karajan, "Herbert von Karajan")], []),
+                work: WorkWith([]),
+                merged: new Dictionary<Mbid, Mbid> { [merged] = survivor })));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await check.Recordings.AsNoTracking().SingleAsync(r => r.Mbid == survivor, Token);
+
+        Assert.Equal(seed.Ninth, row.WorkId);
+        Assert.Equal(WorkSources.Person, row.WorkSource);
+    }
+
+    /// <summary>The seed's unknown recording linked to the Ninth by hand and left to be described again; its MBID.</summary>
+    private async Task<Mbid> LinkByHandAsync(ClassicalSeed seed, string source)
+    {
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+
+        var recording = await db.Recordings.SingleAsync(r => r.Id == seed.Unknown, Token);
+
+        recording.WorkId = seed.Ninth;
+        recording.WorkSource = source;
+        recording.DescribedUtc = null;
+
+        await db.SaveChangesAsync(Token);
+
+        return recording.Mbid!.Value;
+    }
+
+    /// <summary>
     /// A piece another recording still performs stays when MusicBrainz names
     /// the work of one of them.
     /// </summary>

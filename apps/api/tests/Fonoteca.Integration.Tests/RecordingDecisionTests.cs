@@ -63,6 +63,15 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     /// <summary>The cluster that scores higher and names something else.</summary>
     private static readonly Guid RivalCluster = new("dddddddd-4444-4444-8444-444444444444");
 
+    /// <summary>The one work MusicBrainz answers for: a movement, under its symphony.</summary>
+    private static readonly Mbid Finale = new(new Guid("eeeeeeee-5555-4555-8555-555555555555"));
+
+    private static readonly Mbid Symphony = new(new Guid("ffffffff-6666-4666-8666-666666666666"));
+
+    private static readonly Mbid Brahms = new(new Guid("c70d12a2-24fe-4f83-a6e6-57d84f8efb51"));
+
+    private static readonly Mbid Unanswered = new(new Guid("dddddddd-4444-4444-8444-444444444444"));
+
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
 
@@ -1024,6 +1033,98 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
     }
 
     /// <summary>
+    /// A person's work for a recording replaces Apple's piece, comes with its
+    /// symphony for the climb and its composer for the composer pages, and
+    /// taken back hands the recording to MusicBrainz and its album to Apple
+    /// again; a work or a recording nobody has is refused, and MusicBrainz
+    /// down changes nothing.
+    /// </summary>
+    [Fact]
+    public async Task APersonSaysWhichWorkARecordingPerforms()
+    {
+        var recording = RecordingId.New();
+        var album = ReleaseGroupId.New();
+        var described = DateTimeOffset.Parse("2026-10-31T10:00:00Z", CultureInfo.InvariantCulture);
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Database.MigrateAsync(Token);
+
+            var piece = new Work { Id = WorkId.New(), Title = "Symphony No. 3 in F Major, Op. 90", AppleWorkId = "johannes-brahms-1833-pp3" };
+
+            db.Works.Add(piece);
+            db.Recordings.Add(new Recording { Id = recording, Title = "Symphony No. 3 in F Major, Op. 90 IV. Allegro", WorkId = piece.Id, DescribedUtc = described });
+            db.ReleaseGroups.Add(new ReleaseGroup { Id = album, Title = "Essential Brahms", ClassicalLookupUtc = described, AppleClassicalAlbumId = "1" });
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Brahms/04 Allegro.flac",
+                SizeBytes = 1,
+                LastModifiedUtc = described,
+                RecordingId = recording,
+                ReleaseGroupId = album,
+            });
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        await using var factory = FactoryWith(allowMutation: false);
+        using var client = factory.CreateClient();
+
+        Uri WorkOf(Guid id) => new($"/api/catalogue/recordings/{id}/work", UriKind.Relative);
+
+        using var linked = await client.PutAsJsonAsync(WorkOf(recording.Value), new RecordingWorkRequest(Finale.Value), Token);
+        linked.EnsureSuccessStatusCode();
+
+        var answer = (await linked.Content.ReadFromJsonAsync<RecordingWorkResponse>(Token))!;
+
+        Assert.Equal(Finale.Value, answer.Mbid);
+        Assert.Equal("Symphony no. 3 in F major, op. 90: IV. Allegro", answer.Title);
+        Assert.Equal(WorkSources.Person, answer.Source);
+
+        await using (var check = PostgresFixture.CreateContext(_connectionString))
+        {
+            var row = await check.Recordings.AsNoTracking().Include(r => r.Work).SingleAsync(r => r.Id == recording, Token);
+            var whole = await check.Works.AsNoTracking().SingleAsync(w => w.Mbid == Symphony, Token);
+
+            Assert.Equal(WorkSources.Person, row.WorkSource);
+            Assert.Equal((whole.Id, 4), (row.Work!.ParentId!.Value, row.Work.Position!.Value));
+            Assert.Null(whole.PartOfLookupUtc);
+            Assert.False(await check.Works.AnyAsync(w => w.AppleWorkId != null, Token));
+
+            var composer = await check.Relationships.AsNoTracking().SingleAsync(r => r.WorkId == row.WorkId, Token);
+
+            Assert.Equal("composer", composer.Type);
+            Assert.Equal(Brahms, (await check.Artists.AsNoTracking().SingleAsync(a => a.Id == composer.ArtistId, Token)).Mbid);
+        }
+
+        using var noWork = await client.PutAsJsonAsync(WorkOf(recording.Value), new RecordingWorkRequest(Guid.NewGuid()), Token);
+        using var noRecording = await client.PutAsJsonAsync(WorkOf(Guid.NewGuid()), new RecordingWorkRequest(Finale.Value), Token);
+        using var down = await client.PutAsJsonAsync(WorkOf(recording.Value), new RecordingWorkRequest(Unanswered.Value), Token);
+
+        Assert.Equal(HttpStatusCode.NotFound, noWork.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, noRecording.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, down.StatusCode);
+
+        await using (var unchanged = PostgresFixture.CreateContext(_connectionString))
+        {
+            Assert.Equal(Finale, (await unchanged.Recordings.AsNoTracking().Include(r => r.Work).SingleAsync(r => r.Id == recording, Token)).Work!.Mbid);
+        }
+
+        using var takenBack = await client.PutAsJsonAsync(WorkOf(recording.Value), new RecordingWorkRequest(null), Token);
+        takenBack.EnsureSuccessStatusCode();
+
+        await using var after = PostgresFixture.CreateContext(_connectionString);
+
+        var cleared = await after.Recordings.AsNoTracking().SingleAsync(r => r.Id == recording, Token);
+
+        Assert.Null(cleared.WorkId);
+        Assert.Null(cleared.WorkSource);
+        Assert.Null(cleared.DescribedUtc);
+        Assert.Null((await after.ReleaseGroups.AsNoTracking().SingleAsync(g => g.Id == album, Token)).ClassicalLookupUtc);
+    }
+
+    /// <summary>
     /// One ambiguous file, on disk and in the catalogue.
     /// </summary>
     /// <remarks>
@@ -1208,9 +1309,24 @@ public sealed class RecordingDecisionTests(PostgresFixture postgres) : IAsyncLif
         public Task<IReadOnlyList<Mbid>> RecordingsForIsrcAsync(string isrc, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Mbid>>([]);
 
+        /// <summary>
+        /// Only <see cref="Finale"/>, the fourth part of <see cref="Symphony"/>
+        /// and <see cref="Brahms"/>'s; <see cref="Unanswered"/> finds MusicBrainz down.
+        /// </summary>
         public Task<MusicBrainzWork?> GetWorkAsync(
             Mbid id,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<MusicBrainzWork?>(null);
+            id == Unanswered
+                ? throw new ProviderUnavailableException("musicbrainz", "Down.")
+                : Task.FromResult(id == Finale
+                    ? new MusicBrainzWork(
+                        Finale,
+                        "Symphony no. 3 in F major, op. 90: IV. Allegro",
+                        null,
+                        [new MusicBrainzRelation("composer", null, Brahms, "Johannes Brahms", "Brahms, Johannes", "Person", null)],
+                        Symphony,
+                        "Symphony no. 3 in F major, op. 90",
+                        Position: 4)
+                    : null);
     }
 }

@@ -1292,7 +1292,7 @@ public static partial class CatalogueEndpoints
         {
             if (row.RecordingId is { } shopped)
             {
-                await CatalogueWriter.CarryMintedLovesAsync(db, shopped, recording, cancellationToken).ConfigureAwait(false);
+                await CatalogueWriter.CarryFromMintedAsync(db, shopped, recording, cancellationToken).ConfigureAwait(false);
             }
 
             row.RecordingId = recording;

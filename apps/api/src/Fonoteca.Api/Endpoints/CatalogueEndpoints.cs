@@ -600,6 +600,7 @@ public static partial class CatalogueEndpoints
         MapOverviewEndpoints(group);
         MapDuplicateEndpoints(group);
         MapGenreEndpoints(group);
+        MapRecordingWorkEndpoints(group);
         MapBrowseEndpoints(group);
         MapPlaylistEndpoints(group);
 

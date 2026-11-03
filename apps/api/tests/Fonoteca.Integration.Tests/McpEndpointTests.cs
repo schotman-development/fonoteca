@@ -59,6 +59,7 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         "search_releases",
         "set_album_genres",
         "set_folder_album",
+        "set_recording_work",
         "start_pass",
         "undo_folder_edit",
     ];
@@ -242,6 +243,35 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(GenreSources.Agent, row.GenresSource);
     }
 
+    /// <summary>A recording's work an agent names is the agent's.</summary>
+    [Fact]
+    public async Task ARecordingsWorkNamedThroughTheEndpointIsTheAgentsNotTheOwners()
+    {
+        var recording = RecordingId.New();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Recordings.Add(new Recording { Id = recording, Title = "Symphony No. 3 in F Major, Op. 90 IV. Allegro" });
+            await db.SaveChangesAsync(Cancel);
+        }
+
+        await using var mcp = await ConnectAsync();
+
+        var result = await mcp.CallToolAsync(
+            "set_recording_work",
+            new Dictionary<string, object?> { ["recording"] = recording.Value, ["work"] = AnyRelease.Work.Value },
+            cancellationToken: Cancel);
+
+        Assert.True(result.IsError is not true, Text(result));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+
+        var row = await check.Recordings.AsNoTracking().Include(r => r.Work).SingleAsync(r => r.Id == recording, Cancel);
+
+        Assert.Equal(AnyRelease.Work, row.Work?.Mbid);
+        Assert.Equal(WorkSources.Agent, row.WorkSource);
+    }
+
     /// <summary>
     /// The seating arrives with all three fields bound.
     /// </summary>
@@ -318,9 +348,11 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
     private static string Text(CallToolResult result) =>
         string.Join('\n', result.Content.OfType<TextContentBlock>().Select(block => block.Text));
 
-    /// <summary>A MusicBrainz where every release id names one album, and nothing else answers.</summary>
+    /// <summary>A MusicBrainz where every release id names one album, one work answers, and nothing else does.</summary>
     private sealed class AnyRelease : IMusicBrainzCatalogue
     {
+        public static readonly Mbid Work = new(Guid.Parse("33333333-3333-4333-8333-333333333333"));
+
         public Task<MusicBrainzRelease?> GetReleaseAsync(Mbid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<MusicBrainzRelease?>(new MusicBrainzRelease(
                 id,
@@ -379,6 +411,6 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
             Task.FromResult<IReadOnlyList<Mbid>>([]);
 
         public Task<MusicBrainzWork?> GetWorkAsync(Mbid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult<MusicBrainzWork?>(null);
+            Task.FromResult(id == Work ? new MusicBrainzWork(Work, "Symphony no. 3 in F major, op. 90: IV. Allegro", null, []) : null);
     }
 }

@@ -309,7 +309,10 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   its row. **A recording's work link is MusicBrainz's hand edit and goes
   wrong**: of several, the first whose title states no other movement than
   the recording's is taken, and a movement number is served and tagged only
-  where the two titles do not disagree (`MovementNumbers`). Album genres are a release-group lookup each
+  where the two titles do not disagree (`MovementNumbers`). Where it links
+  none, a person or an agent names a MusicBrainz work
+  (`PUT …/recordings/{id}/work`, `set_recording_work`; `WorkSources`), and
+  describing the recording again never replaces it. Album genres are a release-group lookup each
   (`ReleaseGroups.Genres`), same rule; where MusicBrainz has none on the album
   or any recording, Apple Music's goes there, else Qobuz's (ADR 0020,
   `GenresSource` naming the shop), stated as MusicBrainz states genres
@@ -1089,14 +1092,14 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Twenty-six tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Twenty-seven tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
 `list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
 `release_slots`, `start_pass`, `cancel_pass`, `decide_recording`,
 `decide_component`, `file_under_release`, `mark_folder_unreleased`,
 `reopen_folder`, `set_folder_album`, `undo_folder_edit`, `folder_tags`,
-`edit_tags`, `set_album_genres`.
+`edit_tags`, `set_album_genres`, `set_recording_work`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every

@@ -292,6 +292,7 @@ public sealed class MusicBrainzCatchUp(
                 var into = holder.Value;
 
                 await CatalogueWriter.CarryLovesAsync(db, recording, into, cancellationToken).ConfigureAwait(false);
+                await CatalogueWriter.CarryWorkLinkAsync(db, recording, into, cancellationToken).ConfigureAwait(false);
 
                 await db.MediaFiles
                     .Where(file => file.RecordingId == recording)
@@ -358,7 +359,7 @@ public sealed class MusicBrainzCatchUp(
 
             if (file.RecordingId is { } shopped)
             {
-                await CatalogueWriter.CarryMintedLovesAsync(db, shopped, recording, cancellationToken).ConfigureAwait(false);
+                await CatalogueWriter.CarryFromMintedAsync(db, shopped, recording, cancellationToken).ConfigureAwait(false);
             }
 
             if (file.ReleaseGroupId is { } shelved && group is { } named)

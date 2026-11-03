@@ -83,11 +83,14 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         recording.Duration = source.Length;
 
         // MusicBrainz's work replaces Apple's, and its silence keeps it (ADR 0019).
-        recording.WorkId = workRow?.Id
-            ?? (previous is { } held
-                && await db.Works.AnyAsync(w => w.Id == held && w.AppleWorkId != null, cancellationToken).ConfigureAwait(false)
-                    ? previous
-                    : null);
+        // A person's or an agent's link it never replaces.
+        recording.WorkId = recording.WorkSource is not null
+            ? previous
+            : workRow?.Id
+                ?? (previous is { } held
+                    && await db.Works.AnyAsync(w => w.Id == held && w.AppleWorkId != null, cancellationToken).ConfigureAwait(false)
+                        ? previous
+                        : null);
         recording.Genres = EnrichmentService.Joined(source.Genres ?? []);
         recording.Isrcs = Isrcs(source.Isrcs);
         recording.DescribedUtc = StoreTime.ToStorePrecision(clock.UtcNow);
@@ -173,6 +176,25 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         }
     }
 
+    /// <summary>
+    /// A person's or an agent's work link goes with the files to the recording
+    /// row that now holds them, wherever the old row is about to go: the link
+    /// is about the performance. One the new row has of its own stays. Saved
+    /// by the caller.
+    /// </summary>
+    internal static async Task CarryWorkLinkAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
+    {
+        if (from == to
+            || await db.Recordings.FindAsync([from], cancellationToken).ConfigureAwait(false) is not { WorkSource: not null } linked
+            || await db.Recordings.FindAsync([to], cancellationToken).ConfigureAwait(false) is not { WorkSource: null } into)
+        {
+            return;
+        }
+
+        into.WorkId = linked.WorkId;
+        into.WorkSource = linked.WorkSource;
+    }
+
     /// <summary>The accounts already loving what <paramref name="loves"/> names, tracked or saved.</summary>
     private static async Task<HashSet<Guid?>> LovedByAsync(
         FonotecaDbContext db,
@@ -185,15 +207,17 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
-    /// <see cref="CarryLovesAsync"/> for a file leaving a recording a download
-    /// minted, the one kind its move makes go. A recording MusicBrainz knows
-    /// stays, and keeps its heart for its other copies.
+    /// <see cref="CarryLovesAsync"/> and <see cref="CarryWorkLinkAsync"/> for a
+    /// file leaving a recording a download minted, the one kind its move makes
+    /// go. A recording MusicBrainz knows stays, and keeps its heart and its
+    /// link for its other copies.
     /// </summary>
-    internal static async Task CarryMintedLovesAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
+    internal static async Task CarryFromMintedAsync(FonotecaDbContext db, RecordingId from, RecordingId to, CancellationToken cancellationToken)
     {
         if (await db.Recordings.AnyAsync(recording => recording.Id == from && recording.Mbid == null, cancellationToken).ConfigureAwait(false))
         {
             await CarryLovesAsync(db, from, to, cancellationToken).ConfigureAwait(false);
+            await CarryWorkLinkAsync(db, from, to, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -281,6 +305,7 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         }
 
         await CarryLovesAsync(db, stale.Id, survivor.Id, cancellationToken).ConfigureAwait(false);
+        await CarryWorkLinkAsync(db, stale.Id, survivor.Id, cancellationToken).ConfigureAwait(false);
 
         db.ArtistCredits.RemoveRange(await db.ArtistCredits
             .Where(c => c.RecordingId == stale.Id)
@@ -317,7 +342,8 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         return stale.WorkId;
     }
 
-    private async Task<Work> UpsertWorkAsync(
+    /// <summary>A work as its own lookup describes it, found by its MBID or minted, its parent minted from the stub.</summary>
+    internal async Task<Work> UpsertWorkAsync(
         MusicBrainzWork source,
         CancellationToken cancellationToken)
     {
@@ -921,23 +947,48 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
             // performance of it — so it hangs off the work when there is one.
             // Without a work there is nowhere else to put it, and the
             // recording is the honest second choice.
-            var toWork = credit.Role == CreditRole.Writer && work is not null;
-
-            db.Relationships.Add(new Relationship
-            {
-                Id = Guid.CreateVersion7(),
-                SourceType = RelationshipTargets.Artist,
-                SourceId = artist.Id.Value,
-                TargetType = toWork ? RelationshipTargets.Work : RelationshipTargets.Recording,
-                TargetId = toWork ? work!.Id.Value : recording.Id.Value,
-                Type = RoleName(credit.Role),
-                Attribute = credit.ArtistType,
-                ArtistId = artist.Id,
-                WorkId = toWork ? work!.Id : null,
-                RecordingId = toWork ? null : recording.Id,
-            });
+            db.Relationships.Add(credit.Role == CreditRole.Writer && work is not null
+                ? Link(artist, credit, null, work.Id)
+                : Link(artist, credit, recording.Id, null));
         }
     }
+
+    /// <summary>
+    /// A work's writers as <see cref="ApplyCreditsAsync"/> files those of the
+    /// work a recording performs — a composer link on the work and an artist
+    /// row each — for a work a person or an agent names. Replaces the last answer.
+    /// </summary>
+    internal async Task ApplyWritersAsync(Work row, MusicBrainzWork source, CancellationToken cancellationToken)
+    {
+        db.Relationships.RemoveRange(await db.Relationships
+            .Where(r => r.WorkId == row.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
+
+        foreach (var credit in PrimaryCredits.Writers(source))
+        {
+            artistsTouched.Add(credit.ArtistId);
+
+            var artist = await UpsertArtistAsync(credit, cancellationToken).ConfigureAwait(false);
+
+            db.Relationships.Add(Link(artist, credit, null, row.Id));
+        }
+    }
+
+    /// <summary>An artist's link to the recording, or to the work where one is given.</summary>
+    private static Relationship Link(Artist artist, PrimaryCredit credit, RecordingId? recording, WorkId? work) => new()
+    {
+        Id = Guid.CreateVersion7(),
+        SourceType = RelationshipTargets.Artist,
+        SourceId = artist.Id.Value,
+        TargetType = work is null ? RelationshipTargets.Recording : RelationshipTargets.Work,
+        TargetId = work?.Value ?? recording!.Value.Value,
+        Type = RoleName(credit.Role),
+        Attribute = credit.ArtistType,
+        ArtistId = artist.Id,
+        WorkId = work,
+        RecordingId = recording,
+    };
 
     private async Task<Artist> UpsertArtistAsync(
         PrimaryCredit credit,

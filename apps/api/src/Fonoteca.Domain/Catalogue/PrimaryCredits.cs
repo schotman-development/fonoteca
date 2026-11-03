@@ -149,12 +149,7 @@ public static class PrimaryCredits
             found.Add(FromRelation(relation, role.Value));
         }
 
-        foreach (var relation in work?.Relations ?? [])
-        {
-            if (!WorkRoles.Contains(relation.Type)) continue;
-
-            found.Add(FromRelation(relation, CreditRole.Writer));
-        }
+        if (work is not null) found.AddRange(Writers(work));
 
         // Sorted before de-duplication, so which of an artist's several roles
         // survives is the strongest one rather than the first one parsed.
@@ -176,6 +171,17 @@ public static class PrimaryCredits
         }
 
         return credits;
+    }
+
+    /// <summary>Who wrote the work: composer, writer, lyricist or librettist, once each.</summary>
+    public static IReadOnlyList<PrimaryCredit> Writers(MusicBrainzWork work)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+
+        return [.. work.Relations
+            .Where(relation => WorkRoles.Contains(relation.Type))
+            .Select(relation => FromRelation(relation, CreditRole.Writer))
+            .DistinctBy(credit => credit.ArtistId)];
     }
 
     /// <summary>Which role, if any, this recording relation confers.</summary>
