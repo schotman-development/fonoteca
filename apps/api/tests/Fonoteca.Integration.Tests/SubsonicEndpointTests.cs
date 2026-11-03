@@ -1647,6 +1647,73 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// An album carries OpenSubsonic's artists and release types, and is a
+    /// compilation where its files' COMPILATION says so: billed to Various
+    /// Artists, here beside a soloist billed twice under a shorter name. One
+    /// artist's album with no types stated is neither.
+    /// </summary>
+    [Fact]
+    public async Task AnAlbumCarriesItsArtistsItsReleaseTypesAndWhetherItIsACompilation()
+    {
+        var evans = await AlbumIdAsync();
+        var various = new Artist { Id = ArtistId.New(), Name = "Various Artists", Mbid = CatalogueTags.VariousArtists };
+        var baker = new Artist { Id = ArtistId.New(), Name = "Chet Baker" };
+        var ballads = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Ballads", PrimaryType = "Album", SecondaryTypes = "Compilation, Live" };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Artists.AddRange(various, baker);
+            db.ReleaseGroups.Add(ballads);
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Various Artists/Ballads/01 One.flac",
+                SizeBytes = 1,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                ReleaseGroupId = ballads.Id,
+            });
+            db.ArtistCredits.AddRange(
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = various.Id, ReleaseGroupId = ballads.Id, Position = 0, JoinPhrase = " & " },
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = baker.Id, ReleaseGroupId = ballads.Id, Position = 1, CreditedAs = "Chet", JoinPhrase = " = " },
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = baker.Id, ReleaseGroupId = ballads.Id, Position = 2, CreditedAs = "Chet" });
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var compilation = (await JsonAsync(client, $"/rest/getAlbum.view?id=al-{ballads.Id.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("album");
+
+        Assert.True(compilation.GetProperty("isCompilation").GetBoolean());
+        Assert.Equal(["album", "compilation", "live"], compilation.GetProperty("releaseTypes").EnumerateArray().Select(type => type.GetString()));
+
+        // The line as the sleeve bills it; the list once each, as getArtist names them.
+        Assert.Equal("Various Artists & Chet = Chet", compilation.GetProperty("artist").GetString());
+        Assert.Equal(
+            [($"ar-{various.Id.Value:N}", "Various Artists"), ($"ar-{baker.Id.Value:N}", "Chet Baker")],
+            compilation.GetProperty("artists").EnumerateArray().Select(artist => (artist.GetProperty("id").GetString(), artist.GetProperty("name").GetString())));
+
+        var own = (await JsonAsync(client, $"/rest/getAlbum.view?id={evans}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("album");
+
+        Assert.False(own.GetProperty("isCompilation").GetBoolean());
+        Assert.Equal(0, own.GetProperty("releaseTypes").GetArrayLength());
+        Assert.Equal(["Bill Evans"], own.GetProperty("artists").EnumerateArray().Select(artist => artist.GetProperty("name").GetString()));
+
+        // In the XML list the flag is an attribute, the types and the artists repeated elements.
+        using var xml = await client.GetAsync(new Uri($"/rest/getAlbumList2.view?type=alphabeticalByName&{Credentials}", UriKind.Relative), Token);
+        var listed = XDocument.Parse(await xml.Content.ReadAsStringAsync(Token))
+            .Descendants()
+            .Single(element => element.Name.LocalName == "album" && element.Attribute("name")?.Value == "Ballads");
+
+        Assert.Equal("true", listed.Attribute("isCompilation")?.Value);
+        Assert.Equal(["album", "compilation", "live"], listed.Elements().Where(element => element.Name.LocalName == "releaseTypes").Select(element => element.Value));
+        Assert.Equal([$"ar-{various.Id.Value:N}", $"ar-{baker.Id.Value:N}"], listed.Elements().Where(element => element.Name.LocalName == "artists").Select(element => element.Attribute("id")?.Value));
+    }
+
+    /// <summary>
     /// An artist with a provider's picture carries a cover art id, and
     /// getCoverArt serves the picture itself, fetched once and scaled per size,
     /// so a client never contacts the CDN; an artist with none carries no id.

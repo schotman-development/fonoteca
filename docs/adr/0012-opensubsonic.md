@@ -333,6 +333,16 @@ by Fonoteca's own client: at most 500 RMS amplitudes from 0 to 1, evenly
 spaced over the song, which the analyse pass keeps from the same decode as
 its summaries (`MediaFile.Waveform`). A song not analysed since is not found
 (error 70), and a client keeps its plain bar (`SubsonicEndpoints.Waveform.cs`).
+*Amended 2026-11-02:* an album carries OpenSubsonic's `artists`, each artist
+it is billed to, once and in billing order, named as getArtist names them, as
+a song's are; its `releaseTypes`, MusicBrainz's primary type and then its
+secondary ones, lowercased as the files' `RELEASETYPE` is ("album",
+"compilation"); and `isCompilation`, true where the album is billed to
+Various Artists, which is what the files' `COMPILATION` says, Picard's
+meaning. So one artist's greatest hits is no compilation by that flag but is
+by its types, and a client asked by Fonoteca's own to leave compilations out
+of an artist's own albums reads both (`CatalogueTags.ReleaseTypesOf`, shared
+with the tag write).
 
 ### Scope
 

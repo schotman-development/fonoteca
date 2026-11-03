@@ -278,6 +278,10 @@ public static class CatalogueTags
     /// <summary>MusicBrainz's Various Artists, whose album Picard tags a compilation.</summary>
     public static readonly Mbid VariousArtists = new(Guid.Parse("89ad4ac3-39f7-470e-963a-56509c546377"));
 
+    /// <summary>An album's MusicBrainz types, its primary one first, as MusicBrainz spells them: "Album", "Compilation".</summary>
+    public static IReadOnlyList<string> ReleaseTypesOf(string? primaryType, string? secondaryTypes) =>
+        [.. new[] { primaryType }.OfType<string>().Concat(FileGenres.Split(secondaryTypes))];
+
     /// <summary>
     /// foobar2000's and Mp3tag's name for the same words, which Navidrome reads
     /// too: a file the catalogue gives words to carries them once, under

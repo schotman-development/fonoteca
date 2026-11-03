@@ -2563,7 +2563,7 @@ public sealed partial class TagWriteService(
             ComposerMbids = [.. ComposerLinks.Where(link => link.Mbid is not null).Select(link => link.Mbid!.Value).Distinct()],
             Website = RecordingCredits.FirstOrDefault() is { } first ? ArtistLinks.Homepage(first.Links) : null,
             Compilation = Mbids(ReleaseCredits).Contains(CatalogueTags.VariousArtists),
-            ReleaseTypes = AlbumFacts is null ? [] : [.. new[] { AlbumFacts.PrimaryType }.OfType<string>().Concat(FileGenres.Split(AlbumFacts.SecondaryTypes))],
+            ReleaseTypes = AlbumFacts is null ? [] : CatalogueTags.ReleaseTypesOf(AlbumFacts.PrimaryType, AlbumFacts.SecondaryTypes),
             OriginalYear = AlbumFacts?.FirstReleaseYear,
             Languages = FileGenres.Split(WorkFacts?.Languages),
 

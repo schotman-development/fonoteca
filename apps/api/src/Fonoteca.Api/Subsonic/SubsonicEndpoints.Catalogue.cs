@@ -124,6 +124,8 @@ public static partial class SubsonicEndpoints
                 row.Title,
                 row.Mbid,
                 row.FirstReleaseYear,
+                row.PrimaryType,
+                row.SecondaryTypes,
                 SongCount = row.Files.Count,
 
                 // Each file's length in the order its song takes it, so the
@@ -171,6 +173,13 @@ public static partial class SubsonicEndpoints
         var loved = await LovedAsync(db.Loves.Where(love => love.ReleaseGroupId != null), love => love.ReleaseGroupId!.Value, cancellationToken)
             .ConfigureAwait(false);
 
+        var various = await db.Artists
+            .AsNoTracking()
+            .Where(row => row.Mbid == CatalogueTags.VariousArtists)
+            .Select(row => (ArtistId?)row.Id)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
         var albums = rows
             .Select(row =>
             {
@@ -178,10 +187,10 @@ public static partial class SubsonicEndpoints
                 var edits = PersonEdits.Combine(row.EditsJson, display?.EditsJson);
 
                 var billed = display is { Artists.Count: > 0 }
-                    ? display.Artists.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.Name, credit.JoinPhrase)).ToList()
-                    : row.Credits.Select(credit => (credit.ArtistId, Name: credit.CreditedAs ?? credit.Name, credit.JoinPhrase)).ToList();
+                    ? display.Artists.Select(credit => (credit.ArtistId, credit.CreditedAs, credit.Name, credit.JoinPhrase)).ToList()
+                    : row.Credits.Select(credit => (credit.ArtistId, credit.CreditedAs, credit.Name, credit.JoinPhrase)).ToList();
 
-                var line = CatalogueEndpoints.CreditLine(billed.Select(credit => (credit.Name, credit.JoinPhrase)));
+                var line = CatalogueEndpoints.CreditLine(billed.Select(credit => (credit.CreditedAs ?? credit.Name, credit.JoinPhrase)));
 
                 return new Album(
                     row.Id,
@@ -195,7 +204,13 @@ public static partial class SubsonicEndpoints
                     row.Added.Value,
                     Minted(row.Added.Value) ?? row.Created,
                     FileGenres.OfAlbum(row.Genres, row.RecordingGenres),
-                    loved.TryGetValue(row.Id, out var starred) ? starred : null);
+                    loved.TryGetValue(row.Id, out var starred) ? starred : null,
+                    [.. billed.DistinctBy(credit => credit.ArtistId).Select(credit => (credit.ArtistId, credit.Name))],
+
+                    // Spelt as the files' RELEASETYPE is, and a compilation
+                    // as their COMPILATION is: billed to Various Artists.
+                    [.. CatalogueTags.ReleaseTypesOf(row.PrimaryType, row.SecondaryTypes).Select(type => type.ToLowerInvariant())],
+                    various is { } compilers && billed.Any(credit => credit.ArtistId == compilers));
             })
             .ToList();
 

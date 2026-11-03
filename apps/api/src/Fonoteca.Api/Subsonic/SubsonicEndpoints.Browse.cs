@@ -549,7 +549,17 @@ public static partial class SubsonicEndpoints
         writer.Attr("genre", album.Genres.Count > 0 ? album.Genres[0] : null);
         writer.Attr("musicBrainzId", album.Mbid?.Value.ToString());
         writer.Attr("isDir", true);
+        writer.Attr("isCompilation", album.IsCompilation);
+
+        // OpenSubsonic's, as a song's: each artist the album is billed to,
+        // once, named as getArtist names them.
+        writer.Children<(ArtistId Id, string Name)>("artists", album.Artists, static (artists, artist) =>
+        {
+            artists.Attr("id", SubsonicIds.Artist(artist.Id));
+            artists.Attr("name", artist.Name);
+        });
         writer.Children("genres", album.Genres, WriteGenre);
+        writer.Strings("releaseTypes", album.ReleaseTypes);
     }
 
     /// <summary>OpenSubsonic's list beside the protocol's single <c>genre</c>, which keeps the first.</summary>
@@ -722,7 +732,10 @@ internal sealed record Album(
     Guid Added,
     DateTimeOffset? Created,
     IReadOnlyList<string> Genres,
-    DateTimeOffset? Starred);
+    DateTimeOffset? Starred,
+    IReadOnlyList<(ArtistId Id, string Name)> Artists,
+    IReadOnlyList<string> ReleaseTypes,
+    bool IsCompilation);
 
 /// <summary>A media file, as a song.</summary>
 /// <param name="Id">Already in its wire form: a catalogued file is <c>tr-</c>, anything else <c>fo-</c>.</param>
