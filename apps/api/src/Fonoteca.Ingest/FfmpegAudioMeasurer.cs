@@ -33,6 +33,12 @@ namespace Fonoteca.Ingest;
 /// zero is leading silence, one ending at the last sample trailing.</item>
 /// </list>
 ///
+/// The waveform is a branch of its own off the decoded audio, ending in a
+/// sink, so the stream the summaries read their rate from is untouched:
+/// resampled to 8 kHz so a window is a tenth of a second at any rate, one
+/// <c>astats</c> RMS level per window, printed by <c>ametadata</c> to stdout,
+/// where nothing else is written.
+///
 /// Only the first audio stream is mapped, so a cover attached as a video stream
 /// is never decoded. A file that will not decode is the file's fault; one this
 /// process cannot start is the tool's, and ends the pass.
@@ -48,12 +54,21 @@ public sealed class FfmpegAudioMeasurer(
     /// </summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
 
+    /// <summary>At most this many levels in a waveform: a bar for every two pixels of a seek bar on a wide screen.</summary>
+    public const int WaveformLevels = 500;
+
     private const string Filters =
-        "ebur128=peak=true+sample:framelog=quiet,"
+        "asplit[waveform],"
+        + "ebur128=peak=true+sample:framelog=quiet,"
         + "astats=measure_perchannel=none:measure_overall=Bit_depth+Peak_count+Peak_level+Number_of_samples,"
         + "silencedetect=n=-60dB:d=0.5,"
         + "apad=pad_len=1,"
-        + "drmeter";
+        + "drmeter;"
+        + "[waveform]aresample=8000,"
+        + "asetnsamples=n=800:p=0,"
+        + "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level,"
+        + @"ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file='pipe\:1',"
+        + "anullsink";
 
     private static readonly TimeSpan RegexBudget = TimeSpan.FromSeconds(1);
 
@@ -69,6 +84,7 @@ public sealed class FfmpegAudioMeasurer(
     private static readonly Regex Dr = new(@"Overall DR: " + Number, RegexOptions.CultureInvariant, RegexBudget);
     private static readonly Regex SilenceStart = new(@"silence_start: " + Number, RegexOptions.CultureInvariant, RegexBudget);
     private static readonly Regex SilenceEnd = new(@"silence_end: " + Number + @" \| silence_duration: " + Number, RegexOptions.CultureInvariant, RegexBudget);
+    private static readonly Regex WindowLevel = new(@"lavfi\.astats\.Overall\.RMS_level=" + Number, RegexOptions.CultureInvariant, RegexBudget);
 
     /// <summary>The decoded stream's rate, from the output side: <c>Audio: pcm_s16le, 44100 Hz</c>.</summary>
     private static readonly Regex Rate = new(@"Audio: [^,\n]+, (\d+) Hz", RegexOptions.CultureInvariant, RegexBudget);
@@ -81,7 +97,7 @@ public sealed class FfmpegAudioMeasurer(
 
     private readonly TimeSpan _timeout = timeout ?? DefaultTimeout;
 
-    public async Task<AudioMeasurement?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default)
+    public async Task<MeasuredAudio?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default)
     {
         var absolute = _files.AbsolutePathFor(path);
 
@@ -117,7 +133,9 @@ public sealed class FfmpegAudioMeasurer(
                 isFileFault: true);
         }
 
-        return Parse(result.StandardError);
+        return Parse(result.StandardError) is { } measurement
+            ? new MeasuredAudio(measurement, Waveform(result.StandardOutput))
+            : null;
     }
 
     /// <summary>The filters' summaries, read off ffmpeg's stderr; null where nothing was measured.</summary>
@@ -176,6 +194,32 @@ public sealed class FfmpegAudioMeasurer(
             TrailingSilenceSeconds = Math.Round(trailing, 3),
             DurationSeconds = duration is { } seconds ? Math.Round(seconds, 3) : null,
         };
+    }
+
+    /// <summary>The windows' levels off ffmpeg's stdout, averaged into at most <see cref="WaveformLevels"/> evenly spaced ones.</summary>
+    /// <remarks>
+    /// Averaged as power, since a level is an RMS: the mean of the windows'
+    /// squares is the square of the whole span's. A silent window is zero.
+    /// </remarks>
+    public static float[] Waveform(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        var powers = WindowLevel.Matches(output)
+            .Select(match => Value(match.Groups[1].Value) is { } decibels ? Math.Pow(10, decibels / 10) : 0)
+            .ToArray();
+
+        var levels = new float[Math.Min(powers.Length, WaveformLevels)];
+
+        for (var level = 0; level < levels.Length; level++)
+        {
+            var from = (int)((long)level * powers.Length / levels.Length);
+            var to = (int)((long)(level + 1) * powers.Length / levels.Length);
+
+            levels[level] = (float)Math.Sqrt(new ArraySegment<double>(powers, from, to - from).Average());
+        }
+
+        return levels;
     }
 
     private static double? Read(Regex pattern, string log) =>

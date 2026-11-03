@@ -425,6 +425,10 @@ analysed; the tag write puts all four values in the files, replacing a file's
 own (the owner's choice), and Subsonic serves them. The DR figures go in too,
 as `DYNAMIC RANGE` and `ALBUM DYNAMIC RANGE` — foobar2000's DR Meter's names,
 no standard naming any — the album's only where every track has one.
+**The same decode keeps the waveform** a client's seek bar is drawn from
+(`MediaFile.Waveform`, a branch off the decoded audio so no summary moves): at
+most 500 RMS amplitudes, evenly spaced, a column apart from the measurement
+because every song list reads that; Subsonic serves it as `getWaveform`.
 **Every analysed file is on the tag write's worklist**, since a gain needs no
 identity — one the catalogue has not answered (`TagWriteService.Answered`) gets
 its ReplayGain and DR alone, its tempo, key and fingerprint, and a lyrics

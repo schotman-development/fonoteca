@@ -117,13 +117,44 @@ public sealed class FfmpegAudioMeasurerTests : IDisposable
         Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
 
         var source = extension == "mp3" ? Corpus.Mp3 : Corpus.Flac;
-        var measured = await new FfmpegAudioMeasurer(new FileSystemAudioFileStore(Corpus.Directory), "ffmpeg")
-            .MeasureAsync(new LibraryPath(Path.GetFileName(source)), Token);
+        var measured = (await new FfmpegAudioMeasurer(new FileSystemAudioFileStore(Corpus.Directory), "ffmpeg")
+            .MeasureAsync(new LibraryPath(Path.GetFileName(source)), Token))?.Measurement;
 
         Assert.NotNull(measured);
         Assert.InRange(measured.IntegratedLufs ?? 0, -40, -5);
         Assert.NotNull(measured.LoudnessRangeLu);
         Assert.NotNull(measured.TruePeakDbtp);
+    }
+
+    /// <summary>Two seconds of nothing, then three of a tone: a level every tenth of a second, from none to the tone's.</summary>
+    [Fact]
+    public async Task TheWaveformIsTheLevelOverTime()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        Make("rise.flac", "-f", "lavfi", "-i", "sine=frequency=440:duration=5,volume='if(gte(t,2),1,0)':eval=frame", "-c:a", "flac");
+
+        var levels = (await MeasureWithWaveformAsync("rise.flac"))!.Waveform;
+
+        // The sine source's amplitude is an eighth of full scale, so its RMS is that over √2.
+        Assert.Equal(50, levels.Length);
+        Assert.All(levels[..20], level => Assert.Equal(0, level));
+        Assert.All(levels[21..], level => Assert.InRange(level, 0.087, 0.090));
+    }
+
+    /// <summary>More windows than a waveform holds are averaged as power, and digital silence is no level.</summary>
+    [Fact]
+    public void WindowsAreAveragedIntoAtMostFiveHundredLevels()
+    {
+        var output = string.Concat(Enumerable.Range(0, 1000).Select(window =>
+            $"frame:{window}\nlavfi.astats.Overall.RMS_level={(window % 2 == 0 ? "-inf" : "-6.020600")}\n"));
+
+        var levels = FfmpegAudioMeasurer.Waveform(output);
+
+        // −6.0206 dB is an RMS of a half; with a silent window beside it, a half over √2.
+        Assert.Equal(FfmpegAudioMeasurer.WaveformLevels, levels.Length);
+        Assert.All(levels, level => Assert.InRange(level, 0.3535, 0.3536));
+        Assert.Empty(FfmpegAudioMeasurer.Waveform(string.Empty));
     }
 
     /// <summary>Bytes that are not audio are the file's fault; a missing ffmpeg is the tool's.</summary>
@@ -170,7 +201,10 @@ public sealed class FfmpegAudioMeasurerTests : IDisposable
         Assert.Null(FfmpegAudioMeasurer.Parse("nothing measured here"));
     }
 
-    private Task<Domain.Catalogue.AudioMeasurement?> MeasureAsync(string name) =>
+    private async Task<Domain.Catalogue.AudioMeasurement?> MeasureAsync(string name) =>
+        (await MeasureWithWaveformAsync(name))?.Measurement;
+
+    private Task<MeasuredAudio?> MeasureWithWaveformAsync(string name) =>
         new FfmpegAudioMeasurer(new FileSystemAudioFileStore(_root), "ffmpeg").MeasureAsync(new LibraryPath(name), Token);
 
     private void Make(string name, params string[] arguments)

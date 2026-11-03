@@ -621,6 +621,7 @@ public sealed class LibraryScanService(
                 row.Integrity = IntegrityState.Unchecked;
                 row.LastVerifiedUtc = null;
                 row.Measurement = null;
+                row.Waveform = null;
                 row.MeasuredUtc = null;
                 row.TempoAndKey = null;
                 row.TempoAndKeyMeasuredUtc = null;

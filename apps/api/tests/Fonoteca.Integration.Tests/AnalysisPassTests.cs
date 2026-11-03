@@ -216,7 +216,7 @@ public sealed class AnalysisPassTests(PostgresFixture postgres) : IAsyncLifetime
     /// <summary>Measures every file, and meanwhile a scan records new bytes for it.</summary>
     private sealed class ChangingMeasurer(string connectionString) : IAudioMeasurer
     {
-        public async Task<AudioMeasurement?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default)
+        public async Task<MeasuredAudio?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default)
         {
             await using var db = PostgresFixture.CreateContext(connectionString);
 
@@ -224,7 +224,7 @@ public sealed class AnalysisPassTests(PostgresFixture postgres) : IAsyncLifetime
             row.SizeBytes++;
             await db.SaveChangesAsync(cancellationToken);
 
-            return new AudioMeasurement { IntegratedLufs = -14 };
+            return new MeasuredAudio(new AudioMeasurement { IntegratedLufs = -14 }, [0.5f]);
         }
     }
 

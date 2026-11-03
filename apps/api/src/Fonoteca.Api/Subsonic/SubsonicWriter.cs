@@ -52,8 +52,11 @@ internal interface ISubsonicWriter
     /// <summary>A repeated child: sibling elements in XML, an array in JSON.</summary>
     void Children<T>(string name, IEnumerable<T> items, Action<ISubsonicWriter, T> body);
 
-    /// <summary>A repeated scalar, which only the extension list needs.</summary>
+    /// <summary>A repeated scalar: an array in JSON, sibling elements holding it in XML.</summary>
     void Numbers(string name, IEnumerable<int> values);
+
+    /// <inheritdoc cref="Numbers(string, IEnumerable{int})"/>
+    void Numbers(string name, IEnumerable<double> values);
 
     /// <summary>A repeated text: an array in JSON, sibling elements holding it in XML.</summary>
     void Strings(string name, IEnumerable<string> values);
@@ -363,6 +366,20 @@ internal sealed class SubsonicResult : IResult
             json.WriteEndArray();
         }
 
+        public void Numbers(string name, IEnumerable<double> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+
+            json.WriteStartArray(name);
+
+            foreach (var value in values)
+            {
+                json.WriteNumberValue(value);
+            }
+
+            json.WriteEndArray();
+        }
+
         public void Strings(string name, IEnumerable<string> values)
         {
             ArgumentNullException.ThrowIfNull(values);
@@ -454,6 +471,16 @@ internal sealed class SubsonicResult : IResult
             foreach (var value in values)
             {
                 xml.WriteElementString(name, value.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        public void Numbers(string name, IEnumerable<double> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+
+            foreach (var value in values)
+            {
+                xml.WriteElementString(name, value.ToString("R", CultureInfo.InvariantCulture));
             }
         }
 

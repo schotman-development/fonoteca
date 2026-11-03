@@ -324,14 +324,14 @@ public sealed class AnalysisService(
             return;
         }
 
-        AudioMeasurement? measurement = null;
+        MeasuredAudio? measured = null;
         TempoAndKey? heard = null;
 
         if (file.Loudness)
         {
             try
             {
-                measurement = await measurer.MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+                measured = await measurer.MeasureAsync(path, cancellationToken).ConfigureAwait(false);
             }
             catch (AudioProbeFailedException cause) when (cause.IsFileFault)
             {
@@ -371,7 +371,8 @@ public sealed class AnalysisService(
 
             if (file.Loudness)
             {
-                row.Measurement = measurement;
+                row.Measurement = measured?.Measurement;
+                row.Waveform = measured?.Waveform;
                 row.MeasuredUtc = now;
             }
 
@@ -384,7 +385,7 @@ public sealed class AnalysisService(
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var answered = file.Loudness ? measurement is not null : heard is not null;
+        var answered = file.Loudness ? measured is not null : heard is not null;
         Interlocked.Increment(ref answered ? ref counts.Measured : ref counts.Unmeasurable);
     }
 

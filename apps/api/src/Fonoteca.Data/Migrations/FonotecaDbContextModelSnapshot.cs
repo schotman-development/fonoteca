@@ -854,6 +854,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid?>("TrackId")
                         .HasColumnType("uuid");
 
+                    b.PrimitiveCollection<float[]>("Waveform")
+                        .HasColumnType("real[]");
+
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Measurement", "Fonoteca.Domain.Catalogue.MediaFile.Measurement#AudioMeasurement", b1 =>
                         {
                             b1.Property<double?>("DurationSeconds")

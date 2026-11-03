@@ -326,7 +326,13 @@ answered as Navidrome answers it, with the owner, a `changed` in the year 1
 and an empty `changedBy`, the spec saying nothing of that case. A form body is read up to 100,000 entries where
 ASP.NET allows 1024, since a long playlist queued is one `id` per song and a
 client refused once stops saving (the owner's choice). Bookmarks and
-`indexBasedQueue` stay absent (`SubsonicEndpoints.PlayQueue.cs`).
+`indexBasedQueue` stay absent (`SubsonicEndpoints.PlayQueue.cs`). *Amended
+2026-11-02:* `getWaveform`, under Fonoteca's own `fonotecaWaveform`
+extension, gives a song's level over time for a client's seek bar, asked for
+by Fonoteca's own client: at most 500 RMS amplitudes from 0 to 1, evenly
+spaced over the song, which the analyse pass keeps from the same decode as
+its summaries (`MediaFile.Waveform`). A song not analysed since is not found
+(error 70), and a client keeps its plain bar (`SubsonicEndpoints.Waveform.cs`).
 
 ### Scope
 
@@ -334,7 +340,7 @@ One route group, one writer, one guard, in `Fonoteca.Api/Subsonic/`:
 `ping`, `getLicense`, `getOpenSubsonicExtensions`, `getUser`, `getMusicFolders`,
 `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`,
 `getAlbumList2`, `getSong`, `search3`, `getGenres`, `getSongsByGenre`, `getComposers`, `getCompositions`, `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getCoverArt`, `getAlbumMotion`,
-`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation`, and *(amended 2026-10-22)* `getPlaylistFolders`, `createPlaylistFolder`, `updatePlaylistFolder`, `deletePlaylistFolder`, `movePlaylist`, `getTags`, `getTag`, `createTag`, `updateTag`, `deleteTag`, and *(amended 2026-11-02)* `savePlayQueue`, `getPlayQueue` — each at both `/rest/x`
+`getPlaylists`, `star`, `unstar`, `getStarred2`, `scrobble`, `getScanStatus`, `startScan`, and *(amended 2026-10-21)* `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword`, `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation`, and *(amended 2026-10-22)* `getPlaylistFolders`, `createPlaylistFolder`, `updatePlaylistFolder`, `deletePlaylistFolder`, `movePlaylist`, `getTags`, `getTag`, `createTag`, `updateTag`, `deleteTag`, and *(amended 2026-11-02)* `savePlayQueue`, `getPlayQueue`, `getWaveform` — each at both `/rest/x`
 and `/rest/x.view`, because half the client ecosystem still sends the suffix.
 *Amended 2026-10-19:* each also takes `POST` with an
 `application/x-www-form-urlencoded` body, read as the query (OpenSubsonic's

@@ -831,6 +831,18 @@ public sealed class MediaFile
     /// <summary>When the measure pass last asked, answer or not. A scan that sees the audio change clears it.</summary>
     public DateTimeOffset? MeasuredUtc { get; set; }
 
+    /// <summary>
+    /// The audio's level over time, which a client draws its seek bar from: the
+    /// RMS amplitude against full scale, evenly spaced over the decoded length,
+    /// a few hundred at most — or null where nothing was measured.
+    /// </summary>
+    /// <remarks>
+    /// Filled by the same decode as <see cref="Measurement"/> and cleared with
+    /// it, but a column of its own: every song list reads the measurement, and
+    /// only Subsonic's <c>getWaveform</c> reads this.
+    /// </remarks>
+    public float[]? Waveform { get; set; }
+
     /// <summary>What Essentia heard — tempo and key — or null where it could not listen.</summary>
     public TempoAndKey? TempoAndKey { get; set; }
 

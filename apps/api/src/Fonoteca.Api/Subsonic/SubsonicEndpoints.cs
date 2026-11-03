@@ -275,6 +275,7 @@ public static partial class SubsonicEndpoints
         Map(group, "getSong", GetSong);
         Map(group, "getLyrics", GetLyrics);
         Map(group, "getLyricsBySongId", GetLyricsBySongId);
+        Map(group, "getWaveform", GetWaveform);
         Map(group, "search3", Search3);
         Map(group, "getGenres", GetGenres);
         Map(group, "getSongsByGenre", GetSongsByGenre);
@@ -372,8 +373,8 @@ public static partial class SubsonicEndpoints
 
     /// <summary>
     /// The extensions this server implements: timed lyrics, playlist folders,
-    /// and Fonoteca's own album motion, performance dates, compositions and
-    /// tags.
+    /// and Fonoteca's own album motion, waveforms, performance dates,
+    /// compositions and tags.
     /// </summary>
     /// <remarks>
     /// The presence of the response is how a client learns the server is an
@@ -383,6 +384,8 @@ public static partial class SubsonicEndpoints
     /// version 1 only: version 2's translations, word cues and singers are
     /// nothing LRCLIB or a tag here holds. <c>fonotecaAlbumMotion</c> is
     /// <c>getAlbumMotion</c>, which only a client that looks for it asks for.
+    /// <c>fonotecaWaveform</c> is <c>getWaveform</c>: a song's level over time,
+    /// for a seek bar.
     /// <c>fonotecaPerformance</c> is two fields the protocol has no place for: a
     /// song's <c>recorded</c> (<c>from</c>, <c>to</c>, <c>places</c>) and its
     /// piece's <c>composed</c> (<c>from</c>, <c>to</c>), each date an ItemDate.
@@ -399,7 +402,7 @@ public static partial class SubsonicEndpoints
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

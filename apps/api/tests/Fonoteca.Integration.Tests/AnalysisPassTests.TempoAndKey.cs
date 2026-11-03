@@ -68,6 +68,7 @@ public sealed class AnalysisPassTempoAndKeyTests(PostgresFixture postgres) : IAs
 
         var row = await ReadAsync(file);
         Assert.Equal(-14, row.Measurement!.IntegratedLufs);
+        Assert.Equal([0.5f], row.Waveform);
         Assert.NotNull(row.MeasuredUtc);
         Assert.Equal(120, row.TempoAndKey!.Bpm);
         Assert.Equal("A", row.TempoAndKey.Key);
@@ -162,6 +163,7 @@ public sealed class AnalysisPassTempoAndKeyTests(PostgresFixture postgres) : IAs
         var row = await ReadAsync(file);
         Assert.Null(row.MeasuredUtc);
         Assert.Null(row.Measurement);
+        Assert.Null(row.Waveform);
         Assert.Null(row.TempoAndKey);
         Assert.Null(row.TempoAndKeyMeasuredUtc);
     }
@@ -199,6 +201,7 @@ public sealed class AnalysisPassTempoAndKeyTests(PostgresFixture postgres) : IAs
             LastModifiedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture),
             MeasuredUtc = measured ? Measured : null,
             Measurement = measured ? new AudioMeasurement { IntegratedLufs = -9 } : null,
+            Waveform = measured ? [0.25f] : null,
             TempoAndKeyMeasuredUtc = tempo ? Measured : null,
             TempoAndKey = tempo ? new TempoAndKey { Bpm = 90, BpmConfidence = 2, Key = "C", Scale = "major", KeyStrength = 0.5 } : null,
         });
@@ -231,10 +234,10 @@ public sealed class AnalysisPassTempoAndKeyTests(PostgresFixture postgres) : IAs
     {
         public List<string> Asked { get; } = [];
 
-        public Task<AudioMeasurement?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default)
+        public Task<MeasuredAudio?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default)
         {
             lock (Asked) Asked.Add(path.Value);
-            return Task.FromResult<AudioMeasurement?>(new AudioMeasurement { IntegratedLufs = -14 });
+            return Task.FromResult<MeasuredAudio?>(new MeasuredAudio(new AudioMeasurement { IntegratedLufs = -14 }, [0.5f]));
         }
     }
 

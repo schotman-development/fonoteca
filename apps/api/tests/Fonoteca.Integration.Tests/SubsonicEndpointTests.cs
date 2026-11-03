@@ -1571,7 +1571,42 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
+    }
+
+    /// <summary>
+    /// A measured song's waveform is its levels, in either format; a song with
+    /// none, or an id naming no song, is not found.
+    /// </summary>
+    [Fact]
+    public async Task ASongsWaveformIsServedByItsId()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            (await db.MediaFiles.SingleAsync(file => file.Id == _filed, Token)).Waveform = [0f, 0.123456f, 1f];
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var levels = (await JsonAsync(client, $"/rest/getWaveform.view?id=tr-{_filed.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("waveform")
+            .GetProperty("level")
+            .EnumerateArray()
+            .Select(level => level.GetDouble());
+
+        Assert.Equal([0, 0.1235, 1], levels);
+
+        using var xml = await client.GetAsync(new Uri($"/rest/getWaveform.view?id=tr-{_filed.Value:N}&{Credentials}", UriKind.Relative), Token);
+        var waveform = XDocument.Parse(await xml.Content.ReadAsStringAsync(Token)).Descendants().Single(element => element.Name.LocalName == "waveform");
+        Assert.Equal(["0", "0.1235", "1"], waveform.Elements().Select(element => element.Value));
+
+        foreach (var id in new[] { $"tr-{_scanned.Value:N}", "tr-nonsense", string.Empty })
+        {
+            var refused = (await JsonAsync(client, $"/rest/getWaveform.view?id={id}")).GetProperty("subsonic-response");
+            Assert.Equal(70, refused.GetProperty("error").GetProperty("code").GetInt32());
+        }
     }
 
     /// <summary>

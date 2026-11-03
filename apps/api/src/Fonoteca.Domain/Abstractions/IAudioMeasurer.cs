@@ -17,5 +17,9 @@ public interface IAudioMeasurer
     /// <exception cref="AudioProbeFailedException">
     /// The tool could not run (<c>IsFileFault</c> false), or this file would not decode.
     /// </exception>
-    Task<AudioMeasurement?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default);
+    Task<MeasuredAudio?> MeasureAsync(LibraryPath path, CancellationToken cancellationToken = default);
 }
+
+/// <summary>What one decode found: the summaries, and the level over time.</summary>
+/// <param name="Waveform">See <see cref="MediaFile.Waveform"/>.</param>
+public sealed record MeasuredAudio(AudioMeasurement Measurement, float[] Waveform);
