@@ -25,11 +25,11 @@ internal static class MusicBrainzMapper
     public static MusicBrainzRecording ToRecording(IRecording source)
     {
         // MusicBrainz allows a recording to be a performance of more than one
-        // work — a medley, a segue. The first is taken and the rest dropped,
-        // because the catalogue's Recording.WorkId is a single link and inventing
-        // a second one here would be modelling the exception before anything
-        // asks about it. Visible in the title when it happens.
-        var performance = FirstWorkLink(source.Relationships);
+        // work — a medley, a segue, or a wrong link beside the right one. One
+        // is taken and the rest dropped, because the catalogue's
+        // Recording.WorkId is a single link and inventing a second one here
+        // would be modelling the exception before anything asks about it.
+        var performance = PerformedWork(source.Title, source.Relationships);
 
         return new MusicBrainzRecording(
             Id: new Mbid(source.Id),
@@ -435,15 +435,17 @@ internal static class MusicBrainzMapper
         return appearances;
     }
 
-    /// <summary>The work this recording is a performance of, if MusicBrainz links one.</summary>
-    private static IWork? FirstWorkLink(IReadOnlyList<IRelationship>? relationships)
+    /// <summary>
+    /// The work this recording is a performance of, if MusicBrainz links one:
+    /// the first whose title names no other movement than the recording's
+    /// (<see cref="MovementNumbers"/>), else the first.
+    /// </summary>
+    private static IWork? PerformedWork(string? title, IReadOnlyList<IRelationship>? relationships)
     {
-        foreach (var relationship in relationships ?? [])
-        {
-            if (relationship.Work is { } work) return work;
-        }
+        var works = (relationships ?? []).Select(relationship => relationship.Work).OfType<IWork>().ToList();
 
-        return null;
+        return works.FirstOrDefault(work => title is null || work.Title is null || !MovementNumbers.Disagree(title, work.Title))
+            ?? works.FirstOrDefault();
     }
 
     /// <summary>
@@ -453,7 +455,7 @@ internal static class MusicBrainzMapper
     /// Relationships to works, releases, places and URLs are dropped here rather
     /// than filtered later: this file exists so that MusicBrainz's shape stops at
     /// its boundary, and a relation with no artist has nothing the catalogue can
-    /// store. The work link is read separately by <see cref="FirstWorkLink"/>,
+    /// store. The work link is read separately by <see cref="PerformedWork"/>,
     /// and the places, areas and the performance's dates by <see cref="ToSessions"/>.
     ///
     /// <see cref="MusicBrainzRelation.Attribute"/> is the first attribute, which

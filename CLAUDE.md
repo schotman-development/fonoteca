@@ -306,7 +306,10 @@ places** — the record, the wire, `EnrichmentPanel`'s sentence, and `Total`.
   (`Works.PartsTyped`) is cut off in `WorkParentsAsync` (`WorkTree.Cut`), so
   the Ring is four operas and op. 8 four concertos. Climb from the
   recording's own work through that dictionary, never from the `ParentId` on
-  its row. Album genres are a release-group lookup each
+  its row. **A recording's work link is MusicBrainz's hand edit and goes
+  wrong**: of several, the first whose title states no other movement than
+  the recording's is taken, and a movement number is served and tagged only
+  where the two titles do not disagree (`MovementNumbers`). Album genres are a release-group lookup each
   (`ReleaseGroups.Genres`), same rule; where MusicBrainz has none on the album
   or any recording, Apple Music's goes there, else Qobuz's (ADR 0020,
   `GenresSource` naming the shop), stated as MusicBrainz states genres

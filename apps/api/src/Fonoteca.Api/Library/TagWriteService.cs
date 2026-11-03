@@ -2590,7 +2590,9 @@ public sealed partial class TagWriteService(
 
         /// <summary>
         /// The work, and where it is a movement of a whole whose order is known,
-        /// the whole as the work and the movement beside it.
+        /// the whole as the work and the movement beside it — numbered only
+        /// where the recording's own title states no other movement
+        /// (<see cref="MovementNumbers"/>).
         /// </summary>
         private CatalogueTagSource Movements(CatalogueTagSource source) =>
             WorkFacts switch
@@ -2600,7 +2602,7 @@ public sealed partial class TagWriteService(
                 {
                     Work = whole,
                     MovementName = WorkTags.MovementName(work.Title, whole),
-                    Movement = work.Position,
+                    Movement = RecordingTitle is not null && MovementNumbers.Disagree(RecordingTitle, work.Title) ? null : work.Position,
                     MovementTotal = work.PartCount,
                 },
                 var work => source with { Work = work.Title },

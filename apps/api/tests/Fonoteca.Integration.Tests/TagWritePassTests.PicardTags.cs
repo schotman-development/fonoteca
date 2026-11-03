@@ -105,6 +105,33 @@ public sealed partial class TagWritePassTests
     }
 
     /// <summary>
+    /// A recording whose own title names another movement than the work it is
+    /// linked to gets no movement number: one of the two is wrong, and the
+    /// number is the work's.
+    /// </summary>
+    [Fact]
+    public async Task ARecordingNamingAnotherMovementThanItsWorkGetsNoMovementNumber()
+    {
+        SkipWithoutTools();
+        await SeedAsync((PicardTrack, 1));
+        await SeedPicardFactsAsync();
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            (await db.Recordings.SingleAsync(Token)).Title = "Kind of Blue Suite: III. Blue in Green";
+            await db.SaveChangesAsync(Token);
+        }
+
+        await RunAsync(TagWriteScope.Library);
+
+        var reading = await new TagReader(new FileSystemAudioFileStore(_root))
+            .ReadAsync(new LibraryPath(PicardTrack), cancellationToken: Token);
+
+        Assert.Equal("Kind of Blue Suite", reading.Find(CatalogueTags.Work));
+        Assert.Null(reading.Find(CatalogueTags.Movement));
+    }
+
+    /// <summary>
     /// A file held to its album alone has the album's facts and none of a
     /// pressing's: which edition it is would be a claim nothing proved.
     /// </summary>

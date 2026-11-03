@@ -758,7 +758,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
 
     /// <summary>
     /// A classical song names its piece and its movement, a whole piece names
-    /// only itself, and a song names neither; each says who composed it.
+    /// only itself, and a song names neither; each says who composed it. A
+    /// movement whose recording's own title names another has no number.
     /// </summary>
     [Fact]
     public async Task AClassicalSongNamesItsPieceAndMovement()
@@ -792,6 +793,9 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         var recordings = works
             .Select(work => new Recording { Id = RecordingId.New(), Title = work.Title, WorkId = work.Id })
             .ToList();
+
+        // Linked to the first movement, though its own title names the finale.
+        recordings.Add(new Recording { Id = RecordingId.New(), Title = "Symphony No. 5 in C minor, Op. 67: IV. Allegro", WorkId = movement.Id });
         var files = recordings
             .Select((recording, i) => new MediaFile
             {
@@ -852,6 +856,10 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Assert.Equal(1, part.GetProperty("number").GetInt32());
             Assert.Equal(4, part.GetProperty("count").GetInt32());
             Assert.Equal("Ludwig van Beethoven", first.GetProperty("displayComposer").GetString());
+
+            var finale = Assert.Single(songs["Symphony No. 5 in C minor, Op. 67: IV. Allegro"].GetProperty("movements").EnumerateArray());
+            Assert.False(finale.TryGetProperty("number", out _));
+            Assert.Equal(4, finale.GetProperty("count").GetInt32());
 
             var whole = songs[overture.Title];
             Assert.Equal(overture.Title, Assert.Single(whole.GetProperty("works").EnumerateArray()).GetProperty("name").GetString());

@@ -326,7 +326,12 @@ operas — is no piece, its parts are (`WorkTree.Cut`), in `getCompositions`
 too; a work in another script is named by its English alias where
 MusicBrainz has one (`Works.LatinTitle`, beside the title the tag write
 keeps); and a movement loses the piece in front however it spells it
-(`MovementTitles`). *Amended 2026-11-02:* the play queue is kept,
+(`MovementTitles`). *Amended 2026-11-03:* a movement's `number` is left out
+where the recording's own title states another movement than its work's
+name, and of several works MusicBrainz links a recording to, the work is the
+first that states no other (`MovementNumbers`), asked for by Fonoteca's own
+client after five links here named the wrong movement; the tag write's
+`MOVEMENT` follows the same rule. *Amended 2026-11-02:* the play queue is kept,
 `savePlayQueue` and `getPlayQueue`, asked for by Fonoteca's own client to
 reopen where it left off: one per account, the protocol's model, the last
 save winning from whichever client `changedBy` names, in a row of its own

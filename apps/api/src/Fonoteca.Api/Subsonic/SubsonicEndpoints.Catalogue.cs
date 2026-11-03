@@ -386,7 +386,7 @@ public static partial class SubsonicEndpoints
             .Select(row => Describe(
                 row,
                 albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain,
-                row.Work is { } work ? works.GetValueOrDefault(work) : null,
+                row.Work is { } work ? AsPerformed(works.GetValueOrDefault(work), row.RecordingTitle) : null,
                 row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default,
                 row.Recording is { } song && lovedSongs.TryGetValue(song, out var loved) ? loved
                     : lovedFiles.TryGetValue(row.Id, out var own) ? own : null,
@@ -640,6 +640,19 @@ public static partial class SubsonicEndpoints
                 piece == id ? null : MovementOf(works[id], works[parents[id]], whole));
         });
     }
+
+    /// <summary>
+    /// The work as one recording of it performs it: unnumbered where the
+    /// recording's own title states another movement than the work's name,
+    /// which is the work's title after the piece, numeral and all
+    /// (<see cref="MovementNumbers"/>).
+    /// </summary>
+    private static SongWork? AsPerformed(SongWork? work, string? recordingTitle) =>
+        work?.Movement is { Number: not null } movement
+        && recordingTitle is not null
+        && MovementNumbers.Disagree(recordingTitle, movement.Name)
+            ? work with { Movement = movement with { Number = null } }
+            : work;
 
     private static SongPiece PieceOf(WorkFacts whole) =>
         new(whole.Title, whole.Mbid, Performance.Span([(whole.ComposedBegin, whole.ComposedEnd)]));

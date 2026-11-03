@@ -443,6 +443,23 @@ public sealed class MusicBrainzCatalogueTests : IDisposable
     }
 
     /// <summary>
+    /// The Menuetto of Schubert's Second, linked to its first movement and
+    /// then to its own: the work is the one naming the movement the
+    /// recording's title does.
+    /// </summary>
+    [Fact]
+    public async Task OfSeveralWorksTheOneNamingTheRecordingsMovementIsTaken()
+    {
+        var (catalogue, _) = Build(Recorded("recording-schubert-menuetto.json"));
+
+        var recording = await catalogue.GetRecordingAsync(new Mbid(Guid.Parse("02f5f04b-621d-450f-b34a-4c6fd8f8d0c6")), Token);
+
+        Assert.NotNull(recording);
+        Assert.Equal(new Mbid(Guid.Parse("5b1f5c61-8763-3689-b730-eca5b3fcd3b8")), recording.WorkId);
+        Assert.Equal("Symphony no. 2 in B-flat major, D. 125: III. Menuetto & Trio", recording.WorkTitle);
+    }
+
+    /// <summary>
     /// Everything a credit line cannot carry, off an artist document.
     /// </summary>
     /// <remarks>
