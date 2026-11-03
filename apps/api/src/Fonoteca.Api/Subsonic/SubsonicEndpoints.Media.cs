@@ -109,14 +109,14 @@ public static partial class SubsonicEndpoints
     }
 
     /// <summary>
-    /// A picture of an album, an artist, an artist's record, a folder, or a
-    /// radio station.
+    /// A picture of an album, an artist, an artist's banner, an artist's record,
+    /// a folder, or a radio station.
     /// </summary>
     /// <remarks>
-    /// One endpoint over five existing answers, which is why the ids carry a
+    /// One endpoint over six existing answers, which is why the ids carry a
     /// prefix at all. An album — or a song filed under one — is the stored
     /// <c>ReleaseCover</c>, fetched once and served under an ETag. An artist is
-    /// the artist page's picture (<see cref="ArtistPortraitAsync"/>), a station
+    /// the artist page's picture, a banner its banner (<see cref="ArtistPictureAsync"/>), a station
     /// the logo its file names (<see cref="StationLogoAsync"/>). Anything
     /// else is a path, and a path's picture is the file's embedded cover or the
     /// folder's own <c>cover.jpg</c>. Each comes no larger than the <c>size</c>
@@ -150,10 +150,18 @@ public static partial class SubsonicEndpoints
 
         if (SubsonicIds.AsArtist(id) is { } artist)
         {
-            var portrait = await ArtistPortraitAsync(http, artist, db, store, clients, cancellationToken)
+            var portrait = await ArtistPictureAsync(http, artist, ArtistImageKind.Portrait, db, store, clients, cancellationToken)
                 .ConfigureAwait(false);
 
             return await SizedAsync(http, scaler, portrait, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (SubsonicIds.AsBanner(id) is { } bannered)
+        {
+            var banner = await ArtistPictureAsync(http, bannered, ArtistImageKind.Banner, db, store, clients, cancellationToken)
+                .ConfigureAwait(false);
+
+            return await SizedAsync(http, scaler, banner, cancellationToken).ConfigureAwait(false);
         }
 
         var album = SubsonicIds.AsAlbum(id)
@@ -197,7 +205,7 @@ public static partial class SubsonicEndpoints
     private static readonly string KeptLogos = Path.Combine(Path.GetTempPath(), "fonoteca-logos");
 
     /// <summary>
-    /// The artist page's picture, as bytes.
+    /// The artist page's picture or banner, as bytes.
     /// </summary>
     /// <remarks>
     /// <b>Fonoteca serves it, so a client never contacts the CDN</b> (the
@@ -209,16 +217,17 @@ public static partial class SubsonicEndpoints
     /// fetch, and a new pick is a new address. A refusal or an outage is not
     /// kept, so the next view asks again.
     /// </remarks>
-    private static async Task<IResult> ArtistPortraitAsync(
+    private static async Task<IResult> ArtistPictureAsync(
         HttpContext http,
         ArtistId artist,
+        ArtistImageKind kind,
         FonotecaDbContext db,
         FileSystemAudioFileStore store,
         IHttpClientFactory clients,
         CancellationToken cancellationToken)
     {
         var answer = await CatalogueEndpoints
-            .GetArtistImage(artist.Value, ArtistImageKind.Portrait, db, store, http, TagWriteService.ShelfWidth, cancellationToken)
+            .GetArtistImage(artist.Value, kind, db, store, http, TagWriteService.ShelfWidth, cancellationToken)
             .ConfigureAwait(false);
 
         if (answer.Result is not RedirectHttpResult { Url: var url }) return answer;

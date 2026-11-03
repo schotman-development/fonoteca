@@ -1702,7 +1702,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaArtistBanner", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
     }
 
     /// <summary>
@@ -1842,6 +1842,82 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal("true", listed.Attribute("isCompilation")?.Value);
         Assert.Equal(["album", "compilation", "live"], listed.Elements().Where(element => element.Name.LocalName == "releaseTypes").Select(element => element.Value));
         Assert.Equal([$"ar-{various.Id.Value:N}", $"ar-{baker.Id.Value:N}"], listed.Elements().Where(element => element.Name.LocalName == "artists").Select(element => element.Attribute("id")?.Value));
+    }
+
+    /// <summary>
+    /// An artist with a banner carries <c>bannerArt</c>, which getCoverArt
+    /// serves at the width asked for and apart from the artist's own picture;
+    /// an artist with none, or whose provider's banner a person removed,
+    /// carries no id.
+    /// </summary>
+    [Fact]
+    public async Task AnArtistsBannerIsACoverArtIdOfItsOwn()
+    {
+        var made = Path.Combine(_root, "banner-1200x300.jpg");
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=navy:s=1200x300", "-frames:v", "1", made);
+        var original = await File.ReadAllBytesAsync(made, Token);
+        File.Delete(made);
+
+        var scaler = _factory!.Services.GetRequiredService<Fonoteca.Ingest.FfmpegCoverScaler>();
+        using var client = _factory.CreateClient();
+
+        try
+        {
+            Assert.False((await BillEvansAsync(client)).TryGetProperty("bannerArt", out _));
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                (await db.Artists.SingleAsync(row => row.Name == "Bill Evans", Token)).BannerUrl = "https://www.theaudiodb.com/images/media/artist/banner/evans.jpg";
+                await db.SaveChangesAsync(Token);
+            }
+
+            var provided = await BillEvansAsync(client);
+            Assert.True(provided.TryGetProperty("bannerArt", out _));
+            Assert.False(provided.TryGetProperty("coverArt", out _));
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                (await db.Artists.SingleAsync(row => row.Name == "Bill Evans", Token)).EditsJson =
+                    PersonEdits.Write(new Dictionary<string, string?> { [ArtistImageKind.Banner.Name] = string.Empty });
+                await db.SaveChangesAsync(Token);
+            }
+
+            Assert.False((await BillEvansAsync(client)).TryGetProperty("bannerArt", out _));
+
+            await using (var db = PostgresFixture.CreateContext(_connectionString))
+            {
+                db.ArtistImages.Add(new ArtistImage
+                {
+                    ArtistId = (await db.Artists.SingleAsync(row => row.Name == "Bill Evans", Token)).Id,
+                    Kind = ArtistImageKind.Banner.Name,
+                    Bytes = original,
+                    MediaType = "image/jpeg",
+                    SavedUtc = DateTimeOffset.Parse("2026-01-05T00:00:00Z", CultureInfo.InvariantCulture),
+                });
+                await db.SaveChangesAsync(Token);
+            }
+
+            var bannered = await BillEvansAsync(client);
+            var banner = bannered.GetProperty("bannerArt").GetString()!;
+
+            Assert.Equal("ab-" + bannered.GetProperty("id").GetString()!["ar-".Length..], banner);
+            Assert.False(bannered.TryGetProperty("coverArt", out _));
+            Assert.Equal(original, await PictureAsync(client, banner, null));
+
+            var file = Path.Combine(_root, "banner-scaled.jpg");
+            await File.WriteAllBytesAsync(file, await PictureAsync(client, banner, 600), Token);
+            Assert.Equal(
+                "600,150",
+                Tool("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file).Trim());
+            File.Delete(file);
+        }
+        finally
+        {
+            foreach (var kind in new[] { ".jpg", ".as-is" })
+            {
+                File.Delete(Path.Combine(scaler.Directory, Fonoteca.Ingest.FfmpegCoverScaler.KeyOf(original, 600) + kind));
+            }
+        }
     }
 
     /// <summary>

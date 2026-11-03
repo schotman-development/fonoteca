@@ -255,7 +255,7 @@ public static partial class SubsonicEndpoints
                 .ConfigureAwait(false))
             .ToDictionary(
                 artist => artist.Mbid,
-                artist => new Composer(artist.Id, artist.Name, artist.SortName, artist.Mbid, Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl), artist.BeganYear));
+                artist => new Composer(artist.Id, artist.Name, artist.SortName, artist.Mbid, Pictured(ArtistImageKind.Portrait, artist.Uploaded, artist.EditsJson, artist.PortraitUrl), artist.BeganYear));
 
         var composers = credited
             .Where(credit => credit.Type == CatalogueEndpoints.ComposerLink && artists.ContainsKey(credit.Artist))

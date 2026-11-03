@@ -482,6 +482,14 @@ write's download, kept in the temp folder under its address and scaled per
 `size` as covers are. `artistImageUrl` stays for clients that read only that.
 It was once deliberately absent, the URL alone on the element and nothing
 proxied.
+*Amended 2026-11-03:* so is an artist's banner, for the client's genre tiles
+(the owner's choice), under Fonoteca's own `fonotecaArtistBanner`: an artist
+with an uploaded banner or a provider's carries `bannerArt` = `ab-` and its
+id, on every artist element (getArtists, getArtist, search3, getStarred2),
+and `getCoverArt` answers it with what the artist page's banner shows, the
+same way, scaled to `size` on its longest side, which for a banner is its
+width. Like `coverArt`, a banner only on the shelf (`backdrop.*`) carries no
+id. An album's `artists` carry none; a client reads them off getArtists.
 
 **An audio format the `FilePreview` allowlist does not name is served as an
 attachment.** `ape`, `wv`, `dsf` and `wma` go out as `application/octet-stream`

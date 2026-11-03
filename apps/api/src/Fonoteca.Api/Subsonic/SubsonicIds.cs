@@ -30,6 +30,7 @@ namespace Fonoteca.Api.Subsonic;
 internal static class SubsonicIds
 {
     private const string ArtistPrefix = "ar-";
+    private const string BannerPrefix = "ab-";
     private const string AlbumPrefix = "al-";
     private const string SongPrefix = "tr-";
     private const string PathPrefix = "fo-";
@@ -41,6 +42,9 @@ internal static class SubsonicIds
     private const string RadioStationPrefix = "ir-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
+
+    /// <summary>An artist's banner (<c>fonotecaArtistBanner</c>), a picture apart from the artist's own.</summary>
+    internal static string Banner(ArtistId id) => BannerPrefix + id.Value.ToString("N");
 
     internal static string Album(ReleaseGroupId id) => AlbumPrefix + id.Value.ToString("N");
 
@@ -69,6 +73,9 @@ internal static class SubsonicIds
 
     internal static ArtistId? AsArtist(string? id) =>
         Guid(id, ArtistPrefix) is { } value ? new ArtistId(value) : null;
+
+    internal static ArtistId? AsBanner(string? id) =>
+        Guid(id, BannerPrefix) is { } value ? new ArtistId(value) : null;
 
     internal static ReleaseGroupId? AsAlbum(string? id) =>
         Guid(id, AlbumPrefix) is { } value ? new ReleaseGroupId(value) : null;

@@ -525,6 +525,10 @@ public static partial class SubsonicEndpoints
         // placeholder. `artistImageUrl` stays for clients that read only that.
         writer.Attr("coverArt", artist.Pictured ? SubsonicIds.Artist(artist.Id) : null);
         writer.Attr("artistImageUrl", artist.Portrait);
+
+        // The wide picture behind the artist page (`fonotecaArtistBanner`),
+        // served by getCoverArt the same way.
+        writer.Attr("bannerArt", artist.Bannered ? SubsonicIds.Banner(artist.Id) : null);
         writer.Attr("starred", artist.Starred);
     }
 
@@ -700,6 +704,7 @@ public static partial class SubsonicEndpoints
 /// shelf is not looked for here, since that is a listing of the library root
 /// per artist; the tag write puts one there from those two.
 /// </param>
+/// <param name="Bannered">The same, for their banner.</param>
 internal sealed record SubsonicArtist(
     ArtistId Id,
     string Name,
@@ -708,6 +713,7 @@ internal sealed record SubsonicArtist(
     string? Portrait,
     int AlbumCount,
     bool Pictured,
+    bool Bannered,
     DateTimeOffset? Starred);
 
 /// <summary>A release group, as an album.</summary>

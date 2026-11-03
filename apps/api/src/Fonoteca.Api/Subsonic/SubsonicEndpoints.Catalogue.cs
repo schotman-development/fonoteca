@@ -62,8 +62,11 @@ public static partial class SubsonicEndpoints
                 artist.Mbid,
                 artist.PortraitUrl,
                 artist.EditsJson,
+                artist.BannerUrl,
                 Uploaded = db.ArtistImages.Any(image =>
                     image.ArtistId == artist.Id && image.Kind == ArtistImageKind.Portrait.Name),
+                BannerUploaded = db.ArtistImages.Any(image =>
+                    image.ArtistId == artist.Id && image.Kind == ArtistImageKind.Banner.Name),
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -79,16 +82,17 @@ public static partial class SubsonicEndpoints
                 artist.Mbid,
                 artist.PortraitUrl,
                 counts.GetValueOrDefault(artist.Id),
-                Pictured(artist.Uploaded, artist.EditsJson, artist.PortraitUrl),
+                Pictured(ArtistImageKind.Portrait, artist.Uploaded, artist.EditsJson, artist.PortraitUrl),
+                Pictured(ArtistImageKind.Banner, artist.BannerUploaded, artist.EditsJson, artist.BannerUrl),
                 loved.TryGetValue(artist.Id, out var starred) ? starred : null))
             .OrderBy(artist => artist.SortName ?? artist.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(artist => artist.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    /// <summary>Whether an upload or a provider's picture stands for an artist: what getCoverArt serves for their id.</summary>
-    private static bool Pictured(bool uploaded, string? edits, string? portrait) =>
-        uploaded || PersonEdits.Apply(PersonEdits.Read(edits), ArtistImageKind.Portrait.Name, portrait) is { Length: > 0 };
+    /// <summary>Whether an upload or a provider's picture of this kind stands for an artist: what getCoverArt serves for it.</summary>
+    private static bool Pictured(ArtistImageKind kind, bool uploaded, string? edits, string? provided) =>
+        uploaded || PersonEdits.Apply(PersonEdits.Read(edits), kind.Name, provided) is { Length: > 0 };
 
     /// <summary>
     /// Every album the library holds files for.

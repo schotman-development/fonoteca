@@ -387,6 +387,8 @@ public static partial class SubsonicEndpoints
     /// <c>fonotecaWaveform</c> is <c>getWaveform</c>: a song's level over time,
     /// for a seek bar.
     /// <c>transcodeOffset</c> is <c>timeOffset</c> on a transcoded stream.
+    /// <c>fonotecaArtistBanner</c> is an artist's <c>bannerArt</c>, a
+    /// getCoverArt id for the wide picture behind the artist page.
     /// <c>fonotecaPerformance</c> is two fields the protocol has no place for: a
     /// song's <c>recorded</c> (<c>from</c>, <c>to</c>, <c>places</c>) and its
     /// piece's <c>composed</c> (<c>from</c>, <c>to</c>), each date an ItemDate.
@@ -403,7 +405,7 @@ public static partial class SubsonicEndpoints
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);
