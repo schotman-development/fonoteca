@@ -34,7 +34,7 @@ public sealed partial class AppleMusicClassical(
     AppleMusicRecords records,
     ILogger<AppleMusicClassical> logger) : IClassicalAlbums
 {
-    /// <summary>Tracks the lookup answers at most; a longer album's later tracks are nobody's.</summary>
+    /// <summary>Songs one lookup asks for at most; a longer album's later tracks are nobody's.</summary>
     private const int MaxTracks = 200;
 
     public async Task<ClassicalAlbum?> FindAsync(AlbumToFind album, CancellationToken cancellationToken = default)
@@ -151,9 +151,13 @@ public sealed partial class AppleMusicClassical(
             return null;
         }
 
+        // Each song by its own id, never the album's songs: Apple answers that
+        // with no song at all for some records it carries (Previn's
+        // Nutcracker, 2025), and every track of the page then went unplaced.
+        var songs = string.Join(',', listed.Take(MaxTracks).Select(track => track.Song.ToString(CultureInfo.InvariantCulture)));
+
         var places = (await records.ResultsAsync(
-                    $"lookup?id={album.ToString(CultureInfo.InvariantCulture)}&entity=song&limit={MaxTracks}"
-                    + $"&country={Uri.EscapeDataString(storefront)}",
+                    $"lookup?id={songs}&country={Uri.EscapeDataString(storefront)}",
                     cancellationToken)
                 .ConfigureAwait(false))
             .Where(row => row.WrapperType == "track"

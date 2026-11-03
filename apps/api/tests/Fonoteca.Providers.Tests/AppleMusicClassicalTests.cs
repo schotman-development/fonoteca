@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -19,13 +20,23 @@ namespace Fonoteca.Providers.Tests;
 /// Beethoven Fifth and Sixth (two pieces, an orchestra and its conductor),
 /// Amy Dickson's <i>In Circles</i> (a recital whose page leaves several
 /// tracks under no linked piece), each with its barcode lookup and its track
-/// lookup, and Peter Sculthorpe's composer page.
+/// lookup, and Peter Sculthorpe's composer page. Previn's <i>Nutcracker</i>
+/// was recorded the same way on 2026-11-03.
 /// </remarks>
 public sealed class AppleMusicClassicalTests : IDisposable
 {
     private const string KarajanBarcode = "00028943900423";
 
     private const string InCirclesBarcode = "886447581360";
+
+    private const string NutcrackerBarcode = "5059460454842";
+
+    /// <summary>The first song each record's page lists, which its track lookup asks for first.</summary>
+    private const string KarajanFirstSong = "1440744516";
+
+    private const string InCirclesFirstSong = "1456009476";
+
+    private const string NutcrackerFirstSong = "1850693207";
 
     private static readonly TimeSpan Gate = TimeSpan.FromMilliseconds(1);
 
@@ -102,6 +113,34 @@ public sealed class AppleMusicClassicalTests : IDisposable
     }
 
     /// <summary>
+    /// Each track is numbered by the lookup of its own id, so a record whose
+    /// album lookup lists no songs still has every track placed.
+    /// </summary>
+    /// <remarks>
+    /// Apple answered Previn's <i>Nutcracker</i> songs, asked by the album's
+    /// id, with the album alone; asked by their own ids, with all 22, in one
+    /// lookup.
+    /// </remarks>
+    [Fact]
+    public async Task EachTrackIsNumberedByTheLookupOfItsOwnId()
+    {
+        var (classical, stub) = Build(Recorded());
+
+        var found = await classical.FindAsync(Album(NutcrackerBarcode, "The Nutcracker (Tchaikovsky)"), Token);
+
+        Assert.NotNull(found);
+        Assert.Equal(Enumerable.Range(1, 22), found.Tracks.Select(track => track.Number));
+        Assert.Equal(TimeSpan.FromMilliseconds(208200), found.Tracks[0].Length);
+        Assert.Equal("pyotr-ilyich-tchaikovsky-1840-pp31", found.Tracks[0].Work?.Id);
+
+        var asked = stub.Requests.Single(request => request.Uri.Query.StartsWith($"?id={NutcrackerFirstSong}", StringComparison.Ordinal)).Uri.Query;
+        var ids = asked[4..asked.IndexOf('&', StringComparison.Ordinal)].Split(',');
+
+        Assert.Equal(22, ids.Distinct().Count());
+        Assert.All(ids, id => Assert.True(long.TryParse(id, CultureInfo.InvariantCulture, out _), id));
+    }
+
+    /// <summary>
     /// A record Apple Music Classical does not carry is nothing to say, and
     /// its tracks are never looked up.
     /// </summary>
@@ -111,7 +150,7 @@ public sealed class AppleMusicClassicalTests : IDisposable
         var (classical, stub) = Build(Recorded(page: _ => new HttpResponseMessage(HttpStatusCode.NotFound)));
 
         Assert.Null(await classical.FindAsync(Album(KarajanBarcode), Token));
-        Assert.DoesNotContain(stub.Requests, request => request.Uri.Query.Contains("entity=song", StringComparison.Ordinal));
+        Assert.DoesNotContain(stub.Requests, request => request.Uri.Query.StartsWith($"?id={KarajanFirstSong}", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -142,7 +181,7 @@ public sealed class AppleMusicClassicalTests : IDisposable
         }));
 
         Assert.Null(await classical.FindAsync(Album(KarajanBarcode), Token));
-        Assert.DoesNotContain(stub.Requests, request => request.Uri.Query.Contains("entity=song", StringComparison.Ordinal));
+        Assert.DoesNotContain(stub.Requests, request => request.Uri.Query.StartsWith($"?id={KarajanFirstSong}", StringComparison.Ordinal));
     }
 
     /// <summary>A track the lookup does not number is nobody's; the rest keep their places.</summary>
@@ -207,7 +246,7 @@ public sealed class AppleMusicClassicalTests : IDisposable
         foreach (var provider in _providers) provider.Dispose();
     }
 
-    /// <summary>Apple, as recorded: the two records' lookups and pages, and one composer's page.</summary>
+    /// <summary>Apple, as recorded: the three records' lookups and pages, and one composer's page.</summary>
     private static Func<RecordedRequest, HttpResponseMessage> Recorded(
         Func<RecordedRequest, HttpResponseMessage>? page = null,
         string? songs = null) =>
@@ -223,8 +262,10 @@ public sealed class AppleMusicClassicalTests : IDisposable
                 {
                     _ when query.Contains($"upc={KarajanBarcode}", StringComparison.Ordinal) => Json(Fixture("apple-lookup-karajan.json")),
                     _ when query.Contains($"upc={InCirclesBarcode}", StringComparison.Ordinal) => Json(Fixture("apple-lookup-in-circles.json")),
-                    _ when query.Contains("id=1440744257", StringComparison.Ordinal) => Json(songs ?? Fixture("apple-lookup-karajan-songs.json")),
-                    _ when query.Contains("id=1456009475", StringComparison.Ordinal) => Json(Fixture("apple-lookup-in-circles-songs.json")),
+                    _ when query.Contains($"upc={NutcrackerBarcode}", StringComparison.Ordinal) => Json(Fixture("apple-lookup-nutcracker.json")),
+                    _ when query.StartsWith($"?id={KarajanFirstSong}", StringComparison.Ordinal) => Json(songs ?? Fixture("apple-lookup-karajan-songs.json")),
+                    _ when query.StartsWith($"?id={InCirclesFirstSong}", StringComparison.Ordinal) => Json(Fixture("apple-lookup-in-circles-songs.json")),
+                    _ when query.StartsWith($"?id={NutcrackerFirstSong}", StringComparison.Ordinal) => Json(Fixture("apple-lookup-nutcracker-songs.json")),
                     _ => Json(Fixture("apple-lookup-none.json")),
                 };
             }
@@ -235,6 +276,7 @@ public sealed class AppleMusicClassicalTests : IDisposable
                 {
                     "/us/album/1440744257" => page?.Invoke(request) ?? Text(Fixture("apple-classical-album-karajan.html")),
                     "/us/album/1456009475" => page?.Invoke(request) ?? Text(Fixture("apple-classical-album-in-circles.html")),
+                    "/us/album/1850693206" => page?.Invoke(request) ?? Text(Fixture("apple-classical-album-nutcracker.html")),
                     "/us/artist/60621959" => Text(Fixture("apple-classical-composer-sculthorpe.html")),
                     _ => new HttpResponseMessage(HttpStatusCode.NotFound),
                 };

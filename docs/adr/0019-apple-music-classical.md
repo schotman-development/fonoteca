@@ -34,7 +34,9 @@ record an album is:
    tracks' `workName` is whatever the label typed — a composer's surname, the
    track's own title.
 2. The documented lookup, for each track's disc, number and length, since the
-   page numbers nothing.
+   page numbers nothing. *Amended 2026-11-03:* each song by its own id, as the
+   page names it. Asked for the album's songs, Apple answered two records it
+   carries (Previn's *Nutcracker*, a Shostakovich cycle) with no song at all.
 
 A held file is the track at its disc and number whose length is within three
 seconds of its own (`ClassicalCatalogue.Seat`); a file of unknown length is

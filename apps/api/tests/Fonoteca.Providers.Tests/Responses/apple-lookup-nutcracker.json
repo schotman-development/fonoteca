@@ -1,0 +1,10 @@
+
+
+
+{
+ "resultCount":1,
+ "results": [
+{"wrapperType":"collection", "collectionType":"Album", "artistId":702496, "collectionId":1850693206, "amgArtistId":7367, "artistName":"André Previn & London Symphony Orchestra", "collectionName":"The Nutcracker (Tchaikovsky)", "collectionCensoredName":"The Nutcracker (Tchaikovsky)", "artistViewUrl":"https://music.apple.com/us/artist/andr%C3%A9-previn/702496?uo=4", "collectionViewUrl":"https://music.apple.com/us/album/the-nutcracker-tchaikovsky/1850693206?uo=4", "artworkUrl60":"https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/31/25/63/31256373-e3f9-e95d-00ef-b9ae84b1095c/5059460454842.jpg/60x60bb.jpg", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/31/25/63/31256373-e3f9-e95d-00ef-b9ae84b1095c/5059460454842.jpg/100x100bb.jpg", "collectionExplicitness":"notExplicit", "trackCount":22, "copyright":"℗ 2025 Warner Music Group - X5 Music Group", "country":"USA", "currency":"USD", "releaseDate":"2025-12-21T08:00:00Z", "primaryGenreName":"Classical"}]
+}
+
+
