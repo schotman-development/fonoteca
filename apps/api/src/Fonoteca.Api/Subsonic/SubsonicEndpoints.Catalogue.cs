@@ -219,10 +219,35 @@ public static partial class SubsonicEndpoints
             })
             .ToList();
 
-        return artist is { } billedTo
-            ? albums.Where(album => album.Artists.Any(billed => billed.Id == billedTo)).ToList()
-            : albums;
+        if (artist is not { } billedTo) return albums;
+
+        var appearsOn = await AppearancesAsync(db, billedTo, cancellationToken).ConfigureAwait(false);
+
+        return albums
+            .Where(album => album.Artists.Any(billed => billed.Id == billedTo) || appearsOn.Contains(album.Id))
+            .ToList();
     }
+
+    /// <summary>The albums holding a song billed to the artist, whoever the album itself is billed to.</summary>
+    /// <remarks>
+    /// So an artist billed only on songs — a guest on one track, a choir on a
+    /// classical album — has a page with something on it. Only the page:
+    /// <c>getArtists</c> still lists the artists albums are billed to (the
+    /// owner's choice, over 570 more mostly classical performers).
+    /// </remarks>
+    private static async Task<HashSet<ReleaseGroupId>> AppearancesAsync(
+        FonotecaDbContext db,
+        ArtistId artist,
+        CancellationToken cancellationToken) =>
+        (await db.MediaFiles
+            .AsNoTracking()
+            .Where(file => file.ReleaseGroupId != null
+                && db.ArtistCredits.Any(credit => credit.ArtistId == artist && credit.RecordingId == file.RecordingId))
+            .Select(file => file.ReleaseGroupId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+        .ToHashSet();
 
     /// <summary>
     /// When a UUIDv7 was made: its first 48 bits are Unix milliseconds. Null

@@ -1914,6 +1914,56 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// An artist billed only on a song has the album holding it on their page,
+    /// and is still not in the artists list (the owner's choice).
+    /// </summary>
+    [Fact]
+    public async Task AnArtistBilledOnASongHasItsAlbumOnTheirPage()
+    {
+        var band = new Artist { Id = ArtistId.New(), Name = "Tom Petty" };
+        var guest = new Artist { Id = ArtistId.New(), Name = "Prince" };
+        var live = new ReleaseGroup { Id = ReleaseGroupId.New(), Title = "Hall of Fame Live" };
+        var song = new Recording { Id = RecordingId.New(), Title = "While My Guitar Gently Weeps" };
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            db.Artists.AddRange(band, guest);
+            db.ReleaseGroups.Add(live);
+            db.Recordings.Add(song);
+            db.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "Prince/Hall of Fame/01 While My Guitar Gently Weeps.flac",
+                SizeBytes = 1,
+                LastModifiedUtc = DateTimeOffset.Parse("2026-01-03T00:00:00Z", CultureInfo.InvariantCulture),
+                ReleaseGroupId = live.Id,
+                RecordingId = song.Id,
+            });
+            db.ArtistCredits.AddRange(
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = band.Id, ReleaseGroupId = live.Id, Position = 0 },
+                new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = guest.Id, RecordingId = song.Id, Position = 0 });
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        async Task<JsonElement> Answer(string method) =>
+            (await JsonAsync(client, $"/rest/{method}")).GetProperty("subsonic-response");
+
+        var page = (await Answer($"getArtist.view?id=ar-{guest.Id.Value:N}")).GetProperty("artist");
+
+        Assert.Equal(1, page.GetProperty("albumCount").GetInt32());
+        Assert.Equal(["Hall of Fame Live"], page.GetProperty("album").EnumerateArray().Select(album => album.GetProperty("name").GetString()));
+
+        var listed = (await Answer("getArtists.view")).GetProperty("artists").GetProperty("index").EnumerateArray()
+            .SelectMany(index => index.GetProperty("artist").EnumerateArray().Select(artist => artist.GetProperty("name").GetString()))
+            .ToList();
+
+        Assert.Contains("Tom Petty", listed);
+        Assert.DoesNotContain("Prince", listed);
+    }
+
+    /// <summary>
     /// An artist with a banner carries <c>bannerArt</c>, which getCoverArt
     /// serves at the width asked for and apart from the artist's own picture;
     /// an artist with none, or whose provider's banner a person removed,

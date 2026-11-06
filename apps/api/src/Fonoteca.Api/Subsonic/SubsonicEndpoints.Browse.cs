@@ -91,6 +91,9 @@ public static partial class SubsonicEndpoints
 
         if (artist is null) return SubsonicResult.Error(70, "No such artist.");
 
+        // The albums listed, not only the ones billed to them.
+        artist = artist with { AlbumCount = albums.Count };
+
         return SubsonicResult.Ok("artist", root =>
         {
             WriteArtist(root, artist);
