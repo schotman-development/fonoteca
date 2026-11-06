@@ -251,6 +251,48 @@ public sealed partial class EnrichmentPassTests
         Assert.Equal(2008, (await db.ReleaseGroups.AsNoTracking().SingleAsync(g => g.Id == groupId, Token)).FirstReleaseYear);
     }
 
+    /// <summary>
+    /// An album held with no pressing, whose stored edition bills nobody the
+    /// catalogue knew, has that edition described and its artists minted — or
+    /// it is on no artist's page. One whose editions bill somebody is not asked.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task AnAlbumHeldWithNoPressingIsBilledFromItsEdition(bool alreadyBilled, bool asked)
+    {
+        var (groupId, releaseId) = await SeedFiledReleaseAsync(PressingMbid, path: null, askedAgo: null);
+
+        await using (var seed = PostgresFixture.CreateContext(_connectionString))
+        {
+            seed.MediaFiles.Add(new MediaFile
+            {
+                Id = MediaFileId.New(),
+                Path = "A/One/01.flac",
+                SizeBytes = 1024,
+                LastModifiedUtc = DateTimeOffset.UtcNow,
+                ReleaseGroupId = groupId,
+            });
+
+            if (alreadyBilled)
+            {
+                var artist = new Artist { Id = ArtistId.New(), Name = "Somebody" };
+                seed.Artists.Add(artist);
+                seed.ArtistCredits.Add(new ArtistCredit { Id = Guid.CreateVersion7(), ArtistId = artist.Id, ReleaseId = releaseId, Position = 0 });
+            }
+
+            await seed.SaveChangesAsync(Token);
+        }
+
+        var answer = Pressing() with { Credits = [new MusicBrainzCredit(TrioMbid, "Avishai Cohen Trio", null, null, null, "Group")] };
+
+        await EnrichAsync(Build(Answering(Recording), ReleasesAnswering(answer)));
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(asked, await db.Artists.AnyAsync(a => a.Mbid == TrioMbid, Token));
+        Assert.Equal(asked, (await db.Releases.SingleAsync(r => r.Id == releaseId, Token)).DescribedUtc is not null);
+    }
+
     /// <summary>An album's first-release year already known is kept.</summary>
     [Fact]
     public async Task AnAlbumsKnownFirstYearIsKept()
