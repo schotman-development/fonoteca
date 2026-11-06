@@ -873,7 +873,8 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
     {
         await SeedArtistAsync(Karajan, "Karajan");
 
-        var catalogue = new StubCatalogue(recording: null, work: null, artist: Conductor());
+        var alias = new MusicBrainzAlias("Karajan", null, false, "Artist name");
+        var catalogue = new StubCatalogue(recording: null, work: null, artist: Conductor() with { Aliases = [alias] });
         var services = Build(Answering(Recording), catalogue);
 
         await EnrichAsync(services);
@@ -893,6 +894,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(1989, artist.EndedYear);
         Assert.True(artist.Ended);
         Assert.Equal("classical, opera", artist.Genres);
+        Assert.Equal([alias], ArtistAliases.Read(artist.AliasesJson));
         Assert.NotNull(artist.LookupUtc);
     }
 

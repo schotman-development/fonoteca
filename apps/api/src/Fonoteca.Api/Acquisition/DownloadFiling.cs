@@ -392,30 +392,57 @@ public sealed class DownloadFiling(
         }
     }
 
-    /// <summary>Every artist by normalised name, so a credit is linked only where exactly one answers to it.</summary>
+    /// <summary>
+    /// Every artist by normalised name and by MusicBrainz alias, so a credit is
+    /// linked only where exactly one answers to it.
+    /// </summary>
     private static async Task<Artists> ArtistsAsync(FonotecaDbContext db, CancellationToken cancellationToken)
     {
-        var known = await db.Artists
-            .AsNoTracking()
-            .Select(artist => new { artist.Id, artist.Name, artist.LatinName, artist.Type })
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var known = (await db.Artists
+                .AsNoTracking()
+                .Select(artist => new { artist.Id, artist.Name, artist.LatinName, artist.Type, artist.Mbid, artist.AliasesJson })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false))
+            .Select(artist => (
+                Artist: new Artist { Id = artist.Id, Name = artist.Name, Type = artist.Type },
+                Identified: artist.Mbid is not null,
+                Names: new[] { artist.Name, artist.LatinName }.OfType<string>(),
+                Aliases: ArtistAliases.Read(artist.AliasesJson).Where(alias => alias.IsName).Select(alias => alias.Name)))
+            .ToList();
 
-        var byName = known
-            .SelectMany(artist => new[] { artist.Name, artist.LatinName }
-                .OfType<string>()
+        var identified = known.Where(artist => artist.Identified).ToList();
+
+        return new Artists(
+            db,
+            [
+                ByName(identified.Select(artist => (artist.Artist, artist.Names))),
+                ByName(identified.Select(artist => (artist.Artist, artist.Aliases))),
+                ByName(known.Where(artist => !artist.Identified).Select(artist => (artist.Artist, artist.Names))),
+            ]);
+    }
+
+    private static Dictionary<string, List<Artist>> ByName(IEnumerable<(Artist Artist, IEnumerable<string> Names)> artists) =>
+        artists
+            .SelectMany(artist => artist.Names
                 .Select(ArtistNameMatch.Normalise)
                 .Where(name => name.Length > 0)
                 .Distinct(StringComparer.Ordinal)
-                .Select(name => (Name: name, Artist: new Artist { Id = artist.Id, Name = artist.Name, Type = artist.Type })))
+                .Select(name => (Name: name, artist.Artist)))
             .GroupBy(pair => pair.Name, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Select(pair => pair.Artist).ToList(), StringComparer.Ordinal);
 
-        return new Artists(db, byName);
-    }
-
-    /// <summary>The run's artists: linked on a unique name, else minted once and reused for the album.</summary>
-    private sealed class Artists(FonotecaDbContext db, Dictionary<string, List<Artist>> byName)
+    /// <summary>
+    /// The run's artists: linked on a unique name, else minted once and reused
+    /// for the album.
+    /// </summary>
+    /// <remarks>
+    /// The first of <paramref name="tiers"/> anyone answers in decides:
+    /// MusicBrainz's artists by name, then by alias, then one an earlier
+    /// download minted. MusicBrainz before a minted row, or the "Royal
+    /// Concertgebouw Orchestra" one download minted would go on taking every
+    /// later download's credits from Koninklijk Concertgebouworkest.
+    /// </remarks>
+    private sealed class Artists(FonotecaDbContext db, IReadOnlyList<Dictionary<string, List<Artist>>> tiers)
     {
         private readonly Dictionary<string, Artist> _minted = new(StringComparer.Ordinal);
 
@@ -425,7 +452,11 @@ public sealed class DownloadFiling(
 
             if (_minted.TryGetValue(name, out var mine)) return mine;
 
-            if (name.Length > 0 && byName.TryGetValue(name, out var found) && found is [var only]) return only;
+            if (name.Length > 0
+                && tiers.Select(tier => tier.GetValueOrDefault(name)).FirstOrDefault(found => found is not null) is [var only])
+            {
+                return only;
+            }
 
             var artist = new Artist
             {

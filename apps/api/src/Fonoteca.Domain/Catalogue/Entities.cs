@@ -1707,6 +1707,18 @@ public sealed class Artist
     /// </remarks>
     public string? LatinName { get; set; }
 
+    /// <summary>
+    /// The other names MusicBrainz knows the artist by, as a JSON array, or
+    /// null before the artist stage has asked.
+    /// </summary>
+    /// <remarks>
+    /// How a shop's credit finds an artist MusicBrainz files under another
+    /// name: Qobuz bills Koninklijk Concertgebouworkest as "Royal Concertgebouw
+    /// Orchestra", its English alias. Rewritten whenever the artist is
+    /// described. Read with <see cref="ArtistAliases"/>.
+    /// </remarks>
+    public string? AliasesJson { get; set; }
+
     public Mbid? Mbid { get; set; }
 
     /// <summary>Person, Group, Orchestra, Choir.</summary>

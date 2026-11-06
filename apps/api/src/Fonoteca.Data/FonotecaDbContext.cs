@@ -358,6 +358,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.BiographyUrl).HasMaxLength(1000);
             e.Property(x => x.BannerUrl).HasMaxLength(1000);
             e.Property(x => x.LinksJson).HasColumnType("jsonb");
+            e.Property(x => x.AliasesJson).HasColumnType("jsonb");
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
             e.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops");

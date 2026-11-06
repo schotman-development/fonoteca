@@ -299,6 +299,77 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
     }
 
     [Fact]
+    public async Task AnArtistMusicBrainzKnowsByTheShopsNameIsLinkedByThatAlias()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var band = new Artist { Id = ArtistId.New(), Name = "Fleetwood Mac", Mbid = new Mbid(Guid.NewGuid()) };
+        var singer = Known("Stephanie Nicks", new MusicBrainzAlias("Stevie Nicks", "en", true, "Artist name"));
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Database.MigrateAsync(Token);
+            db.Artists.AddRange(
+                band,
+                singer,
+                // Known as the band too, but the band answers by name.
+                Known("The Mac", new MusicBrainzAlias("Fleetwood Mac", null, false, "Artist name")),
+                // A search hint is not a name, or two would answer to "Stevie Nicks".
+                Known("Stevie Wonder", new MusicBrainzAlias("Stevie Nicks", null, false, "Search hint")),
+                // Minted by an earlier download, and MusicBrainz's artist answers before it.
+                new Artist { Id = ArtistId.New(), Name = "Stevie Nicks" });
+            await db.SaveChangesAsync(Token);
+        }
+
+        await DownloadAsync(Factory(mutation: false));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        Assert.All(await check.ArtistCredits.ToListAsync(Token), credit => Assert.Equal(band.Id, credit.ArtistId));
+
+        var writers = await check.Relationships.Where(link => link.Type == "composer").ToListAsync(Token);
+        Assert.Equal(2, writers.Count);
+        Assert.All(writers, link => Assert.Equal(singer.Id, link.ArtistId));
+        Assert.Equal(5, await check.Artists.CountAsync(Token));
+    }
+
+    [Fact]
+    public async Task AnAliasTwoArtistsShareLinksNeither()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        var alias = new MusicBrainzAlias("Stevie Nicks", "en", true, "Artist name");
+
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            await db.Database.MigrateAsync(Token);
+            db.Artists.AddRange(
+                Known("Stephanie Nicks", alias),
+                Known("Stephanie Lynn Nicks", alias),
+                // Two answering by alias decide it, and the row below does not get a say.
+                new Artist { Id = ArtistId.New(), Name = "Stevie Nicks" });
+            await db.SaveChangesAsync(Token);
+        }
+
+        await DownloadAsync(Factory(mutation: false));
+
+        await using var check = PostgresFixture.CreateContext(_connectionString);
+        var writer = (await check.Relationships.FirstAsync(link => link.Type == "composer", Token)).ArtistId;
+        var minted = await check.Artists.Where(artist => artist.Name == "Stevie Nicks").OrderBy(artist => artist.Id).ToListAsync(Token);
+        Assert.Equal(2, minted.Count);
+        Assert.Equal(minted[1].Id, writer);
+    }
+
+    /// <summary>An artist MusicBrainz has described, with one alias.</summary>
+    private static Artist Known(string name, MusicBrainzAlias alias) =>
+        new()
+        {
+            Id = ArtistId.New(),
+            Name = name,
+            Mbid = new Mbid(Guid.NewGuid()),
+            AliasesJson = ArtistAliases.Write([alias]),
+        };
+
+    [Fact]
     public async Task ADownloadIsRefusedWhileAPassRuns()
     {
         var factory = Factory(mutation: false);

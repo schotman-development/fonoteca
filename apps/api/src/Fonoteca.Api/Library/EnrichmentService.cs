@@ -3223,6 +3223,7 @@ public sealed class EnrichmentService(
                 // leave the old transliteration printed over a name that no
                 // longer needs one.
                 row.LatinName = LatinNames.Of(row.Name, described.Aliases);
+                row.AliasesJson = ArtistAliases.Write(described.Aliases ?? []);
                 row.Type = described.Type ?? row.Type;
                 row.Disambiguation = described.Disambiguation ?? row.Disambiguation;
                 row.Country = described.Country;
@@ -3392,11 +3393,27 @@ public sealed class EnrichmentService(
     private static readonly System.Linq.Expressions.Expression<Func<Work, bool>> UndescribedWork =
         work => work.Mbid != null && work.DescribedUtc == null;
 
-    /// <summary>Releases a file is filed under, never asked for their ASIN, script and track ids.</summary>
+    /// <summary>
+    /// Releases a file is filed under, never asked for their ASIN, script and
+    /// track ids — and the editions of an album held with no pressing, where
+    /// no edition of it bills anybody.
+    /// </summary>
+    /// <remarks>
+    /// The second half because a billing is written with its artists minted
+    /// only here: an edition stored by attribution bills only artists the
+    /// catalogue already held, so an album billed to Various Artists alone
+    /// had no album artist and was on no artist's page. Narrowed to albums
+    /// billing nobody, since every stored edition of every album held to its
+    /// album alone is 2,652 lookups to mend one.
+    /// </remarks>
     private static IQueryable<Release> UndescribedReleases(FonotecaDbContext db) =>
         db.Releases.Where(release => release.Mbid != null
             && release.DescribedUtc == null
-            && db.MediaFiles.Any(file => file.ReleaseId == release.Id));
+            && (db.MediaFiles.Any(file => file.ReleaseId == release.Id)
+                || (db.MediaFiles.Any(file => file.ReleaseId == null && file.ReleaseGroupId == release.ReleaseGroupId)
+                    && !db.ArtistCredits.Any(credit => credit.ReleaseGroupId == release.ReleaseGroupId)
+                    && !db.Releases.Any(edition => edition.ReleaseGroupId == release.ReleaseGroupId
+                        && db.ArtistCredits.Any(credit => credit.ReleaseId == edition.Id)))));
 
     /// <summary>A worklist a page at a time, each item once.</summary>
     /// <remarks>

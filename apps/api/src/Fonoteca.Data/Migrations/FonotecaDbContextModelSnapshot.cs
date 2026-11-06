@@ -371,6 +371,9 @@ namespace Fonoteca.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AliasesJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTimeOffset?>("BannerLookupUtc")
                         .HasColumnType("timestamp with time zone");
 

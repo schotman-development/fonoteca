@@ -252,8 +252,9 @@ each the owner's choice or forced by what the code turned out to be.
   (`MusicBrainzCatchUp`), and by ISRC where the barcode finds nothing; naming a
   download's album by hand re-files it at once. The release a download minted
   is removed once MusicBrainz's takes its files.
-- **A credited artist is linked only where exactly one answers to the name**,
-  else minted with no MBID; only billed, conductor, ensemble and writer are
-  kept, as for a MusicBrainz recording.
+- **A credited artist is linked only where exactly one answers to the name**:
+  an artist MusicBrainz knows by it, else by an alias, else one an earlier
+  download minted; else minted with no MBID. Only billed, conductor, ensemble
+  and writer are kept, as for a MusicBrainz recording.
 - **A replacement deletes the archived files' rows**, and one replacing an album
   MusicBrainz knows is filed only under a release its barcode names.
