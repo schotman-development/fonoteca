@@ -306,12 +306,14 @@ public sealed class DownloadFiling(
         }
 
         var date = Dated(album.ReleaseDate);
+        var (primaryType, secondaryType) = ShopReleaseType.Of(album.ReleaseType);
 
         var group = new ReleaseGroup
         {
             Id = ReleaseGroupId.New(),
             Title = album.Title,
-            PrimaryType = "Album",
+            PrimaryType = primaryType,
+            SecondaryTypes = secondaryType,
             FirstReleaseYear = date.Year,
         };
 

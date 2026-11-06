@@ -681,7 +681,8 @@ public sealed class QobuzClient(
                     ? new QobuzGoody(goody.Id, goody.FileFormatId ?? 0, NullIfBlank(goody.Name), url)
                     : null)
                 .OfType<QobuzGoody>()],
-            GenrePath(body.Genre));
+            GenrePath(body.Genre),
+            NullIfBlank(body.ReleaseType) ?? NullIfBlank(body.ProductType));
     }
 
     /// <summary>The genre's ids, broadest first and its own last, or none where the album carries no genre.</summary>
@@ -764,6 +765,7 @@ public sealed record QobuzArtist(string Name, string? ImageUrl, int AlbumCount, 
 /// <c>QobuzAlbumBody.Upc</c> and ADR 0011 — and the only field here that can
 /// later tie this album to a MusicBrainz release without a person deciding.
 /// </param>
+/// <param name="ReleaseType">The shop's word for what it is — "album", "single", "epmini" — or null.</param>
 public sealed record QobuzAlbum(
     string Id,
     string Title,
@@ -781,7 +783,8 @@ public sealed record QobuzAlbum(
     string? Label = null,
     IReadOnlyList<string>? Artists = null,
     IReadOnlyList<QobuzGoody>? Goodies = null,
-    IReadOnlyList<int>? GenrePath = null);
+    IReadOnlyList<int>? GenrePath = null,
+    string? ReleaseType = null);
 
 /// <summary>Something the shop sells with an album beyond the audio — in practice a PDF booklet.</summary>
 /// <param name="FileFormatId">21 is a PDF.</param>

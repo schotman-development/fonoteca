@@ -224,6 +224,7 @@ public sealed class QobuzClientTests : IDisposable
 
         Assert.NotNull(band);
         Assert.Equal("Rhino/Warner Records", band.Label);
+        Assert.Equal("album", band.ReleaseType);
         Assert.Equal(["Fleetwood Mac"], band.Artists);
         Assert.Empty(album.Artists!);
         Assert.Equal("USWB10101367", band.Tracks[0].Isrc);

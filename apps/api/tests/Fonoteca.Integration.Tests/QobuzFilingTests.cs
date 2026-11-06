@@ -130,6 +130,7 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal("Rhino/Warner Records", release.Label);
         Assert.Equal((1977, 2, 4), (release.ReleasedYear, release.ReleasedMonth, release.ReleasedDay));
         Assert.Equal(body.Filing.AlbumId, release.ReleaseGroupId!.Value.Value);
+        Assert.Equal(("Album", null), (release.ReleaseGroup!.PrimaryType, release.ReleaseGroup.SecondaryTypes));
 
         var files = await db.MediaFiles.Include(file => file.Recording).Include(file => file.Track).OrderBy(file => file.Path).ToListAsync(Token);
         Assert.Equal(["Fleetwood Mac/Rumours/01 The Chain.flac", "Fleetwood Mac/Rumours/02 Dreams.flac"], files.Select(file => file.Path));

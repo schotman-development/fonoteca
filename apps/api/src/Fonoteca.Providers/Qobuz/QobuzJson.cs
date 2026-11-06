@@ -37,6 +37,14 @@ internal sealed record QobuzAlbumBody
     [JsonPropertyName("tracks_count")]
     public int? TracksCount { get; init; }
 
+    /// <summary>"album", "single", "ep", "epmini", "compilation", "live"…; no documented list.</summary>
+    [JsonPropertyName("release_type")]
+    public string? ReleaseType { get; init; }
+
+    /// <summary>The same vocabulary, read where <see cref="ReleaseType"/> is absent.</summary>
+    [JsonPropertyName("product_type")]
+    public string? ProductType { get; init; }
+
     /// <summary>Whether the account may stream it at all — region and subscription tier.</summary>
     [JsonPropertyName("streamable")]
     public bool? Streamable { get; init; }
