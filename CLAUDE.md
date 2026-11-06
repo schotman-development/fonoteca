@@ -162,7 +162,7 @@ Fonoteca.Api        minimal API, OpenAPI, SignalR, health
 Fonoteca.Domain     PURE — entities, matching, quality ranking
 Fonoteca.Ingest     walk, probe, fingerprint
 Fonoteca.Tagging    read/write, dry-run diff, undo journal
-Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic | lrclib | radiobrowser
+Fonoteca.Providers  acoustid | musicbrainz | qobuz | coverart | wikidata | audiodb | applemusic | lrclib
 Fonoteca.Jobs       empty — Hangfire refs, a reference to Domain, no source
 Fonoteca.Data       EF Core, migrations
 ```
@@ -198,6 +198,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | enrich | `Domain/Catalogue/PrimaryCredits.cs`, `LatinNames.cs` | `Providers/MusicBrainz/MusicBrainzCatalogue.cs` |
 | portraits | `Domain/Catalogue/ArtistNameMatch.cs`, `Abstractions/ArtistPortraitSources.cs` | `Providers/{Wikidata,Qobuz,AudioDb}/*Portraits.cs` |
 | attribute | `Domain/Identification/ReleaseAttribution.cs`, `EditionProof.cs`, `FolderOrder.cs`, `ReleaseFit.cs`, `Catalogue/AlbumFolder.cs` (and its TS twin `ALBUM_FOLDER_DEPTH` in `seating.ts` — change both), `Catalogue/Editions.cs`, `Catalogue/TrackTitles.cs` | `Api/Matching/ComponentCandidates.cs` |
+| albums from tags | `Domain/Catalogue/TagAlbums.cs` | `Api/Library/TagAlbumFiling.cs`, run by `ReleaseAttributionService` |
 | probe | `Domain/Abstractions/IAudioProbe.cs` | `Ingest/FfprobeAudioProbe.cs` |
 | tag write | `Domain/Catalogue/CatalogueTags.cs`, `FileNaming.cs` | `Tagging/TagWriter.cs`, `Tagging/CatalogueTagFields.cs`, `Api/Library/TagWriteService.Rename.cs` |
 | by-hand matching | `web/src/pages/seating.ts`, `identify.ts` | `Api/Endpoints/CatalogueEndpoints.{AlbumMatching,Identify}.cs` |
@@ -211,7 +212,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | acquisition | `Domain/Acquisition/UpgradeScan.cs`, `UpgradeReplacement.cs`, `StagedFileName.cs`, `Discography.cs` | `Api/Acquisition/{QobuzDownloadService,AlbumReplacementService}.cs` |
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
-| radio | `Domain/Catalogue/RadioStationFile.cs`, `PageIcons.cs` | `Api/Subsonic/SubsonicEndpoints.Radio.cs`, `Providers/Radio/StationLogos.cs` |
+| radio | `Domain/Catalogue/RadioStationFile.cs` | `Api/Subsonic/SubsonicEndpoints.Radio.cs` |
 | duplicates | `Domain/Catalogue/Duplicates.cs` | `Api/Endpoints/CatalogueEndpoints.Duplicates.cs`, trashed through `FileManagerService` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
@@ -411,6 +412,19 @@ filed as the CD it resembles is a lie every later screen repeats.
   from them, which is what makes "the deluxe has two you do not" answerable. A
   *refused* folder's shortlist goes to `ReleaseCandidateSet`, keyed on the one
   `ReleaseLookupUtc` its files share.
+- **A folder nobody could identify gets an album from its own tags**
+  (`TagAlbums`, `TagAlbumFiling`, client issue #65, the owner's choice), at
+  the end of every attribution run: one album per album folder, named by the
+  album tag every file shares, else the folder; songs, artists, numbers and
+  known genres from each file; artists linked on a tagged MBID, else on a
+  unique name (`ArtistsByName`, shared with `DownloadFiling`). Only settled
+  files with no recording and no album, in a folder no other album holds.
+  **It answers nothing** — no outcome or stamp moves, so Identify and every
+  worklist see what they saw, and any later filing replaces it. Keyed on
+  `ReleaseGroups.TagFolder` and rebuilt in place from the tags each run (ids
+  kept), except a folder with a file it cannot read. The tag write treats
+  these files as unanswered and never renames their folder, and the tag
+  editor corrects them per file.
 - **Known failure, expected fixed by the folder cut and NOT re-measured.**
   Michael Jackson's albums attributed wrongly; the loss was in `GatherAsync`, not
   in the rule. **Run the pass against the real mirror before believing that.**
@@ -870,19 +884,22 @@ at the top of the library, no row, believed like a static playlist and
 written through `PlaylistFiles`' reads, writes, lock and mount check (the
 owner's choice, so stations go wherever the library goes). Subsonic is the
 only way in; a station's id is `ir-` and its file's name, kept while its name
-is. Saving one looks up a logo for `image` (`StationLogos`, the owner's
-sources): a large icon the station's home page names, then Wikidata's `P154`
-on the item whose stream (`P963`) or official website (`P856`) is the
-station's, then radio-browser.info by stream, then the page's share picture,
-small icons and a `/favicon.ico` it answers for. An update keeps the file's
-own logo while the stream is unchanged. **The home page is the one address
-nobody vetted** — anyone can enter one on radio-browser — so its client
-connects only to public addresses (`StationHomepages.ConnectAsync`), no proxy,
-redirects included. `getCoverArt` serves the logo under the station's id,
-fetched once through that client and kept by address, and always as a PNG
-ffmpeg made (`FfmpegCoverScaler.PngAsync`): a logo is often transparent,
-which a scaled JPEG paints black, and often a `favicon.ico`, which no client
-is handed as fetched. Fonoteca never plays a stream.
+is. **A station's logo is the PNG beside it** (`Radio/<name>.png`,
+`RadioStationFile.LogoPathFor`), picked by hand — the owner's choice on
+2026-11-04, over the home page, Wikidata and radio-browser lookup it
+replaced, which found favicons as often as logos. Nothing looks one up: a
+station saved from a client has none until somebody adds the file. A rename
+takes it along, a delete trashes it, and an `image` another program wrote in
+the XSPF is kept and never read. `getCoverArt` serves it under the station's
+id as a PNG ffmpeg sized (`FfmpegCoverScaler.PngAsync`). **The stations on
+offer are a catalogue shipped with the server** (`Fonoteca.Api/RadioCatalogue/`,
+XSPF and PNG pairs copied beside the binaries), curated by hand and listed by
+`getRadioCatalogue` under `rc-` ids — offered, never saved on its own (the
+owner's choice). Saving a stream the catalogue holds copies its logo in, and
+its country, languages and genres — track `meta` elements under
+`urn:fonoteca:radio:*` rels, set by hand like the logo, served as
+`countryCode`/`languageCodes`/`genres` on every station (catalogue v2) and kept
+by an update, which has no parameter for them. Fonoteca never plays a stream.
 
 ## Acquisition
 
@@ -893,14 +910,18 @@ tags are written at once. **Read the ADR before touching this** — most of what
 looks like an oversight is written up there.
 
 - **The shop is an authority about the album, not the audio.** Files are linked
-  to a release minted from the shop's facts and keyed on its barcode (one minted
+  to a release minted from the shop's facts — typed by its `release_type`
+  (`ShopReleaseType`: single, EP, compilation, live, else album) — and keyed on its barcode (one minted
   from an earlier download of that barcode is found again), outcomes
   `LinkedByProvider`/`AttributedByProvider`, recording and release settled —
   but not `AcoustIdDecidedUtc` and no lookup stamp, so identification still
   fingerprints the audio and nobody claims MusicBrainz was asked. The shop's
   credit string gives the four roles the catalogue keeps (`ProviderCredits`);
-  a credited artist is linked only where exactly one answers to the name, else
-  minted with no MBID (the owner's choice). No badge marks a download's album.
+  a credited artist is linked only where exactly one answers to the name —
+  MusicBrainz's artists first, then their aliases (`Artists.AliasesJson`, not a
+  search hint: Qobuz's "Royal Concertgebouw Orchestra" is Koninklijk
+  Concertgebouworkest), then one an earlier download minted — else minted with
+  no MBID (the owner's choice). No badge marks a download's album.
 - **A download takes `LibraryWorkGate`**, and a busy gate refuses it (409) —
   the owner's choice, over waiting. **Its tags are written** under that lease
   through `TagWriteService.WriteFolderAsync`, the one tag write that is not a
