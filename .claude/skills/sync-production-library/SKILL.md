@@ -50,6 +50,11 @@ to see which runs wrote what, and when.
    if it is unchanged, Aria's album ids hold. Pair a stale file with its
    renamed successor by folder, track-number prefix and extension. Run the
    decodes four at a time in the background; 287 pairs took a few minutes.
+   For changed files (same path), `compare.py <plan>.json <out>.jsonl` (beside
+   this file, `source ~/.local/opt/env.sh` first) writes both audio MD5s, both
+   ALBUM tags and the MP3 ID3 gap test per path, resumably; about 2.6 pairs/s.
+   Run it with `run_in_background` and wait for its notification; a
+   `while pgrep -f compare.py` loop matches its own command line and never ends.
    Different audio from a tag write is damage, not a new rip: on 2026-10-31
    it was a stray 0x00 byte after the ID3v2 tag that hid the LAME header.
    Compare packet counts and `start_pts` with ffprobe to see which it is.
