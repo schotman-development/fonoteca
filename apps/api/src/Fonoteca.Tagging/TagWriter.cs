@@ -376,7 +376,9 @@ public sealed class TagWriter(
 
         await using (source.ConfigureAwait(false))
         {
-            var track = new Track(Id3Prefix.Past(source, plan.Path.Value), Path.GetExtension(plan.Path.Value));
+            var mp3 = plan.Path.Value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase);
+            var original = mp3 ? Id3v2Repair.Padded(source) : Id3Prefix.Past(source, plan.Path.Value);
+            var track = new Track(original, Path.GetExtension(plan.Path.Value));
 
             // ATL 7.16 judges an ID3v2 date's precision wrongly on load: a 2.4
             // "2017" becomes "2017-01-01" on save, a 2.3 TYER+TDAT loses its day.
@@ -430,7 +432,7 @@ public sealed class TagWriter(
                 return "ATL declined to write the file.";
             }
 
-            if (plan.Path.Value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)) Id3v1Trailer.Write(staged.Content, track);
+            if (mp3) Id3v1Trailer.Write(staged.Content, track);
         }
 
         await staged.Content.FlushAsync(cancellationToken).ConfigureAwait(false);

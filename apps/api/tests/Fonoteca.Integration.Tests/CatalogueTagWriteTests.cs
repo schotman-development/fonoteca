@@ -1137,6 +1137,23 @@ public sealed class CatalogueTagWriteTests : IDisposable
         Assert.Equal(length, new ATL.Track(Path.Combine(_root, path.Value)).DurationMs, 1.0);
     }
 
+    /// <summary>
+    /// Padding shorter than a frame header, which 357 MP3s here carry from
+    /// writes before the rule above: ATL keeps it as the start of the audio,
+    /// where it hides the LAME header and adds a frame.
+    /// </summary>
+    [Fact]
+    public async Task ShortPaddingStaysOutOfTheAudio()
+    {
+        SkipWithoutTools();
+
+        var path = await Mp3Tagged("short-padding.mp3", 3, Frame("TIT2", [0, .. "Old"u8]), new byte[1]);
+        var audio = DecodedAudioHash(path);
+
+        Assert.Equal(TagWriteStatus.Written, (await Write(Writer(allowMutation: true), path)).Status);
+        Assert.Equal(audio, DecodedAudioHash(path));
+    }
+
     /// <summary>An original date ATL would give a day it never had refuses the write.</summary>
     [Fact]
     public async Task AnOriginalDateGivenADayRefusesTheWrite()

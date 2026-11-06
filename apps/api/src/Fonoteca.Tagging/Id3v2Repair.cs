@@ -57,6 +57,49 @@ internal static class Id3v2Repair
     }
 
     /// <summary>
+    /// The file to hand ATL: the original, or a copy in memory whose padding is
+    /// grown to a frame header's length where it was shorter.
+    /// </summary>
+    /// <remarks>
+    /// ATL 7.16 takes padding of one to nine bytes for audio and misjudges where
+    /// the first frame starts. Measured both ways: it kept the zeros in front of
+    /// the first frame, or it dropped that frame's header. Either way ffmpeg
+    /// misses the LAME header and decodes a frame too many without the gapless
+    /// trim. Writes before the rule in <see cref="Repair"/> left 357 MP3s here
+    /// with such padding, and 72 decoded differently after their next write.
+    /// </remarks>
+    public static Stream Padded(Stream original)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+
+        if (Read(original) is not var (version, flags, tag)
+            || Frames(version, flags, tag) is not { } frames
+            || tag.Length - End(frames) is 0 or >= 10)
+        {
+            original.Position = 0;
+            return original;
+        }
+
+        var end = End(frames);
+        var copy = new MemoryStream(checked((int)original.Length + 10));
+        var header = new byte[10];
+
+        original.Position = 0;
+        original.ReadExactly(header);
+        WriteSize(header.AsSpan(6, 4), end + 10, 4);
+
+        copy.Write(header);
+        copy.Write(tag.AsSpan(0, end));
+        copy.Write(new byte[10]);
+
+        original.Position = 10 + tag.Length;
+        original.CopyTo(copy);
+        copy.Position = 0;
+
+        return copy;
+    }
+
+    /// <summary>
     /// Repairs the tag at the start of the stream in place. Null when nothing is
     /// left wrong; otherwise why the write should not go ahead.
     /// </summary>
@@ -205,6 +248,8 @@ internal static class Id3v2Repair
 
         return frames;
     }
+
+    private static int End(List<Frame> frames) => frames is [.., var last] ? last.At + 10 + last.Size : 0;
 
     private static int Syncsafe(ReadOnlySpan<byte> value) =>
         (value[0] & 0x80) != 0 || (value[1] & 0x80) != 0 || (value[2] & 0x80) != 0 || (value[3] & 0x80) != 0
