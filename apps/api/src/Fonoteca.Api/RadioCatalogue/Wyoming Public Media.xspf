@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>Wyoming Public Media</title>
+  <trackList>
+    <track>
+      <location>https://wyoming-public-ice.streamguys1.com/WPR128MP3</location>
+      <title>Wyoming Public Media</title>
+      <info>https://www.wyomingpublicmedia.org/</info>
+      <meta rel="urn:fonoteca:radio:country">US</meta>
+      <meta rel="urn:fonoteca:radio:language">en</meta>
+      <meta rel="urn:fonoteca:radio:genre">news</meta>
+      <meta rel="urn:fonoteca:radio:genre">talk</meta>
+    </track>
+  </trackList>
+</playlist>

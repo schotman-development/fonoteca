@@ -8,7 +8,6 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Ingest;
 using Fonoteca.Providers.Qobuz;
-using Fonoteca.Providers.Radio;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
@@ -110,14 +109,15 @@ public static partial class SubsonicEndpoints
 
     /// <summary>
     /// A picture of an album, an artist, an artist's banner, an artist's record,
-    /// a folder, or a radio station.
+    /// a folder, a radio station, or a station the catalogue offers.
     /// </summary>
     /// <remarks>
     /// One endpoint over six existing answers, which is why the ids carry a
     /// prefix at all. An album — or a song filed under one — is the stored
     /// <c>ReleaseCover</c>, fetched once and served under an ETag. An artist is
     /// the artist page's picture, a banner its banner (<see cref="ArtistPictureAsync"/>), a station
-    /// the logo its file names (<see cref="StationLogoAsync"/>). Anything
+    /// the logo beside its file (<see cref="StationLogoAsync"/>), saved or in
+    /// the catalogue. Anything
     /// else is a path, and a path's picture is the file's embedded cover or the
     /// folder's own <c>cover.jpg</c>. Each comes no larger than the <c>size</c>
     /// asked for (<see cref="SizedAsync"/>).
@@ -145,7 +145,16 @@ public static partial class SubsonicEndpoints
 
         if (SubsonicIds.AsRadioStation(id) is not null)
         {
-            return await StationLogoAsync(http, id, files, scaler, clients, cancellationToken).ConfigureAwait(false);
+            var saved = StationPath(id) is { } station ? files.AbsolutePathFor(RadioStationFile.LogoPathFor(station)) : null;
+
+            return await StationLogoAsync(http, saved, scaler, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (SubsonicIds.AsCatalogueStation(id) is not null)
+        {
+            var offered = CatalogueStationPath(id) is { } station ? Path.ChangeExtension(station, RadioStationFile.LogoExtension) : null;
+
+            return await StationLogoAsync(http, offered, scaler, cancellationToken).ConfigureAwait(false);
         }
 
         if (SubsonicIds.AsArtist(id) is { } artist)
@@ -201,9 +210,6 @@ public static partial class SubsonicEndpoints
     /// <summary>Where a provider's artist picture is kept once fetched.</summary>
     private static readonly string KeptPortraits = Path.Combine(Path.GetTempPath(), "fonoteca-portraits");
 
-    /// <summary>Where a station's logo is kept once fetched, as it came.</summary>
-    private static readonly string KeptLogos = Path.Combine(Path.GetTempPath(), "fonoteca-logos");
-
     /// <summary>
     /// The artist page's picture or banner, as bytes.
     /// </summary>
@@ -252,64 +258,28 @@ public static partial class SubsonicEndpoints
     }
 
     /// <summary>
-    /// A radio station's logo, the one its file's <c>image</c> names, as a PNG
-    /// no larger than the <c>size</c> asked for.
+    /// A radio station's logo, the PNG at <paramref name="logo"/> beside its
+    /// file, no larger than the <c>size</c> asked for.
     /// </summary>
     /// <remarks>
-    /// <b>Fonoteca serves it, so a client never contacts the station's site</b>
-    /// (the owner's choice, 2026-10-23), which a browser could not read anyway:
-    /// most send no CORS headers. Fetched through the station home pages'
-    /// client, which connects to nothing but the public internet, since the
-    /// address is anybody's, and kept as the artist pictures are, under its
-    /// address: a new logo in the file is a new address. Any image type is
-    /// taken, a site's <c>favicon.ico</c> included, because no byte of it goes
-    /// out as fetched: ffmpeg makes the PNG that does, which also keeps the
-    /// transparency a scaled JPEG would paint black.
+    /// Put there by hand, but passed through ffmpeg all the same, which sizes
+    /// it and keeps the transparency a scaled JPEG would paint black.
     /// </remarks>
     private static async Task<IResult> StationLogoAsync(
         HttpContext http,
-        string? id,
-        PlaylistFiles files,
+        string? logo,
         FfmpegCoverScaler scaler,
-        IHttpClientFactory clients,
         CancellationToken cancellationToken)
     {
-        if (StationPath(id) is not { } path
-            || await files.ReadAsync(path, cancellationToken).ConfigureAwait(false) is not { } file
-            || RadioStationFile.Read(file.Text, path)?.ImageUrl is not { } url)
-        {
-            return SubsonicResult.Error(70, "No such cover art.");
-        }
-
-        var (kept, key, refused) = await KeepAsync(
-                KeptLogos,
-                url,
-                () => TagWriteService.DownloadPictureAsync(
-                    clients.CreateClient(StationHomepages.HttpClientName),
-                    url,
-                    mediaType => mediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true,
-                    cancellationToken),
-                _ => "logo",
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        if (kept is null)
-        {
-            return TypedResults.Problem(title: "No picture", detail: $"The station's logo could not be fetched: {refused}.", statusCode: StatusCodes.Status502BadGateway);
-        }
+        if (logo is null || !File.Exists(logo)) return SubsonicResult.Error(70, "No such cover art.");
 
         var size = int.TryParse(Text(http, "size"), NumberStyles.None, CultureInfo.InvariantCulture, out var asked) ? asked : 0;
-
-        var png = await scaler
-            .PngAsync(await File.ReadAllBytesAsync(kept, cancellationToken).ConfigureAwait(false), size, cancellationToken)
-            .ConfigureAwait(false);
-
-        // Kept no longer, so a site that fixes the picture behind the address is asked again.
-        if (png is null) File.Delete(kept);
+        var bytes = await File.ReadAllBytesAsync(logo, cancellationToken).ConfigureAwait(false);
+        var png = await scaler.PngAsync(bytes, size, cancellationToken).ConfigureAwait(false);
 
         return png is null
             ? TypedResults.Problem(title: "No picture", detail: "The station's logo is not a picture ffmpeg can read.", statusCode: StatusCodes.Status502BadGateway)
-            : TypedResults.File(png, "image/png", entityTag: new EntityTagHeaderValue($"\"{key[..16]}\""));
+            : TypedResults.File(png, "image/png", entityTag: new EntityTagHeaderValue($"\"{FfmpegCoverScaler.KeyOf(bytes, size)[..16]}\""));
     }
 
     /// <summary>

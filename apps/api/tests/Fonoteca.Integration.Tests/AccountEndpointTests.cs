@@ -9,7 +9,6 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Fixtures;
 using Fonoteca.Ingest;
-using Fonoteca.Providers.Radio;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
@@ -35,7 +34,6 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
     private string _connectionString = string.Empty;
     private string _root = string.Empty;
     private WebApplicationFactory<Program>? _factory;
-    private readonly StubLogos _logos = new();
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -57,7 +55,6 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             builder.ConfigureTestServices(services =>
             {
                 services.Configure<SecurityStampValidatorOptions>(stamp => stamp.ValidationInterval = TimeSpan.Zero);
-                services.AddSingleton<IStationLogos>(_logos);
             });
         });
 
@@ -687,8 +684,8 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
     }
 
     /// <summary>
-    /// A station is an XSPF file in the library's Radio folder, its logo
-    /// looked up when it is saved; everyone's to list and an admin's to change.
+    /// A station is an XSPF file in the library's Radio folder, its logo the
+    /// PNG beside it; everyone's to list and an admin's to change.
     /// </summary>
     [Fact]
     public async Task InternetRadioIsEveryonesToListAndAnAdminsToChange()
@@ -720,14 +717,13 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Ra%EF%BF%BFdio&streamUrl=https://example.org/live")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl=https://example.org/%EF%BF%BE")));
         Assert.Equal(50, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asYou}&name=Radio&streamUrl=https://example.org/live")));
-        Assert.Empty(_logos.Asked);
 
         var stream = Uri.EscapeDataString("https://example.org/live?format=mp3&bitrate=128");
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio&streamUrl={stream}&homepageUrl=https://example.org")));
         Assert.Equal(0, ErrorCode(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=radio&streamUrl=https://example.org/second")));
 
         Assert.Equal(
-            new RadioStation("Radio", "https://example.org/live?format=mp3&bitrate=128", "https://example.org", StubLogos.Logo),
+            new RadioStation("Radio", "https://example.org/live?format=mp3&bitrate=128", "https://example.org"),
             RadioStationFile.Read(ReadFile("Radio/Radio.xspf"), "Radio/Radio.xspf"));
 
         var station = Assert.Single(Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asYou}")));
@@ -756,18 +752,18 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.True(File.Exists(Path.Combine(_root, "Artist", "x.xspf")));
         Assert.True(File.Exists(Path.Combine(_root, "Radio", ".hidden.xspf")));
 
-        // A rename moves the file, and the same stream keeps the logo it has without asking again.
+        // A rename moves the file and takes its logo along.
+        WriteFile("Radio/Radio.png", "logo");
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl={stream}")));
         Assert.False(File.Exists(Path.Combine(_root, "Radio", "Radio.xspf")));
-        Assert.Equal(StubLogos.Logo, RadioStationFile.Read(ReadFile("Radio/Renamed.xspf"), "Radio/Renamed.xspf")?.ImageUrl);
-        Assert.Single(_logos.Asked);
+        Assert.False(File.Exists(Path.Combine(_root, "Radio", "Radio.png")));
+        Assert.Equal("logo", ReadFile("Radio/Renamed.png"));
 
-        // An update restates the station: no home page sent is none kept, and a new stream is asked about.
+        // An update restates the station: no home page sent is none kept.
         id = Uri.EscapeDataString("ir-Renamed.xspf");
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Renamed&streamUrl=http://example.org/other")));
-        Assert.Equal(["https://example.org/live?format=mp3&bitrate=128", "http://example.org/other"], _logos.Asked.Take(2));
         Assert.Equal(
-            new RadioStation("Renamed", "http://example.org/other", null, null),
+            new RadioStation("Renamed", "http://example.org/other", null),
             RadioStationFile.Read(ReadFile("Radio/Renamed.xspf"), "Radio/Renamed.xspf"));
 
         // Whatever else writes a station there is believed.
@@ -788,52 +784,38 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.Equal(["ir-hand.xspf", "ir-Renamed.xspf"], stations.Select(each => each.GetProperty("id").GetString()));
         Assert.False(stations[1].TryGetProperty("homePageUrl", out _));
 
+        // A delete trashes the logo with the station.
         Assert.Equal("ok", Status(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
         Assert.False(File.Exists(Path.Combine(_root, "Radio", "Renamed.xspf")));
+        Assert.False(File.Exists(Path.Combine(_root, "Radio", "Renamed.png")));
         Assert.Single(Directory.EnumerateFiles(_root + "-trash", "Renamed.xspf", SearchOption.AllDirectories));
+        Assert.Single(Directory.EnumerateFiles(_root + "-trash", "Renamed.png", SearchOption.AllDirectories));
         Assert.Equal(70, ErrorCode(await SubsonicAsync(client, $"deleteInternetRadioStation.view?{asMe}&id={id}")));
         Assert.Equal(["By hand"], Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}")).Select(each => each.GetProperty("name").GetString()));
     }
 
     /// <summary>
-    /// A station whose file names a logo carries a cover art id, and
-    /// getCoverArt serves the logo itself: fetched once, as a PNG whatever the
-    /// site sent, sized, transparent where it was. A new logo in the file is a
-    /// new fetch, a failed one keeps nothing, and a station with none carries
-    /// no id.
+    /// A station with a PNG beside its file carries a cover art id, and
+    /// getCoverArt serves that logo as a PNG, sized, transparent where it was.
+    /// A station with none carries no id, and an id names nothing outside the
+    /// Radio folder.
     /// </summary>
     [Fact]
-    public async Task AStationsLogoComesFromFonotecaAsAPngFetchedOnce()
+    public async Task AStationsLogoIsThePngBesideItsFile()
     {
-        var run = Guid.NewGuid().ToString("N");
-        var icon = $"https://station.example/{run}/favicon.ico";
-        var moved = $"https://station.example/{run}/logo.png";
-        var gone = $"https://station.example/{run}/gone.png";
-        var page = $"https://station.example/{run}/page.png";
-        var broken = $"https://station.example/{run}/broken.png";
-
-        var made = Path.Combine(_root, "made.ico");
-        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red@0.5:s=128x64,format=rgba", "-frames:v", "1", "-c:v", "png", "-f", "ico", made);
+        var made = Path.Combine(_root, "Radio", "Logo.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(made)!);
+        Tool("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red@0.5:s=128x64,format=rgba", "-frames:v", "1", made);
         var bytes = await File.ReadAllBytesAsync(made, Token);
-        File.Delete(made);
 
-        var site = new StubHttpHandler(request => request.Uri.AbsoluteUri == gone ? new HttpResponseMessage(HttpStatusCode.NotFound)
-            : request.Uri.AbsoluteUri == page ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html></html>", Encoding.UTF8, "text/html") }
-            : request.Uri.AbsoluteUri == broken ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) { Headers = { ContentType = new("image/png") } } }
-            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) { Headers = { ContentType = new("image/vnd.microsoft.icon") } } });
-
-        await using var factory = _factory!.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
-            services.AddHttpClient(StationHomepages.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => site)));
-
-        var scaler = factory.Services.GetRequiredService<FfmpegCoverScaler>();
-        var kept = Path.Combine(Path.GetTempPath(), "fonoteca-logos");
-        using var me = (await factory.SetUpAsync("me", Password, Token)).Client;
-        using var client = factory.CreateClient();
+        var scaler = _factory!.Services.GetRequiredService<FfmpegCoverScaler>();
+        using var me = (await _factory.SetUpAsync("me", Password, Token)).Client;
+        using var client = _factory.CreateClient();
         var asMe = $"u=me&p={Password}";
 
-        void Station(string name, string? logo) => WriteFile($"Radio/{name}.xspf", $"""
+        void Station(string name) => WriteFile($"Radio/{name}.xspf", $"""
             <playlist version="1" xmlns="http://xspf.org/ns/0/">
-              <trackList><track><location>https://example.org/{name}</location><title>{name}</title>{(logo is null ? "" : $"<image>{logo}</image>")}</track></trackList>
+              <trackList><track><location>https://example.org/{name}</location><title>{name}</title><image>https://example.org/{name}.png</image></track></trackList>
             </playlist>
             """);
 
@@ -857,8 +839,8 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
 
         try
         {
-            Station("Logo", icon);
-            Station("Plain", null);
+            Station("Logo");
+            Station("Plain");
 
             var stations = Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"));
             Assert.Equal("ir-Logo.xspf", stations[0].GetProperty("coverArt").GetString());
@@ -867,52 +849,108 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             var small = await LogoAsync("ir-Logo.xspf", 32);
             Assert.Equal((HttpStatusCode.OK, "image/png"), (small.Status, small.Type));
             Assert.Equal("32,16,rgba", Shape(small.Body));
-            Assert.Equal(small.Body, (await LogoAsync("ir-Logo.xspf", 32)).Body);
             Assert.Equal("128,64,rgba", Shape((await LogoAsync("ir-Logo.xspf", null)).Body));
             Assert.Equal("128,64,rgba", Shape((await LogoAsync("ir-Logo.xspf", 1000)).Body));
-            Assert.Equal(icon, Assert.Single(site.Requests).Uri.AbsoluteUri);
-
-            Station("Logo", moved);
-            Assert.Equal(HttpStatusCode.OK, (await LogoAsync("ir-Logo.xspf", 32)).Status);
-            Assert.Equal(moved, site.Requests[^1].Uri.AbsoluteUri);
-
-            Station("Logo", gone);
-            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
-            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
-            Assert.Equal(4, site.Requests.Count);
-
-            // A page where a picture should be is no logo; a picture ffmpeg cannot read is not kept, so it is asked again.
-            Station("Logo", page);
-            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
-            Station("Logo", broken);
-            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
-            Assert.Equal(HttpStatusCode.BadGateway, (await LogoAsync("ir-Logo.xspf", 32)).Status);
-            Assert.Equal(7, site.Requests.Count);
 
             WriteFile("Secret.xspf", "<playlist/>");
+            WriteFile("Secret.png", "not a station's");
 
             foreach (var none in (string[])["ir-Plain.xspf", "ir-Missing.xspf", "ir-../Secret.xspf", "ir-..\\Secret.xspf", "ir-.hidden.xspf"])
             {
                 var answer = await LogoAsync(none, 32);
                 Assert.Equal(70, ErrorCode(JsonDocument.Parse(answer.Body).RootElement.GetProperty("subsonic-response")));
             }
-
-            Assert.Equal(7, site.Requests.Count);
         }
         finally
         {
-            foreach (var url in (string[])[icon, moved, gone, page, broken])
-            {
-                var key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
-                if (Directory.Exists(kept)) foreach (var file in Directory.EnumerateFiles(kept, key + ".*")) File.Delete(file);
-            }
-
             foreach (var size in (int[])[0, 32, 1000])
             {
                 foreach (var kind in (string[])[".png", ".as-is"]) File.Delete(Path.Combine(scaler.Directory, FfmpegCoverScaler.KeyOf(bytes, size) + kind));
             }
         }
     }
+
+    /// <summary>
+    /// The catalogue that ships with the server is offered, never saved on its
+    /// own: getRadioCatalogue lists it with its logos, and saving one of its
+    /// streams brings the catalogue's logo along.
+    /// </summary>
+    [Fact]
+    public async Task TheCatalogueIsOfferedAndASavedStationTakesItsLogo()
+    {
+        using var me = (await _factory!.SetUpAsync("me", Password, Token)).Client;
+        using var client = _factory.CreateClient();
+        var asMe = $"u=me&p={Password}";
+        WriteFile("Artist/Album/01 - Song.flac", "audio");
+
+        var extension = Assert.Single(
+            (await SubsonicAsync(client, "getOpenSubsonicExtensions.view?")).GetProperty("openSubsonicExtensions").EnumerateArray(),
+            each => each.GetProperty("name").GetString() == "fonotecaRadioCatalogue");
+        Assert.Equal([1, 2], extension.GetProperty("versions").EnumerateArray().Select(version => version.GetInt32()));
+
+        var offered = Assert.IsType<List<JsonElement>>(Catalogue(await SubsonicAsync(client, $"getRadioCatalogue.view?{asMe}")));
+        var radio1 = Assert.Single(offered, each => each.GetProperty("name").GetString() == "NPO Radio 1");
+        Assert.Equal("rc-NPO Radio 1.xspf", radio1.GetProperty("id").GetString());
+        Assert.Equal("rc-NPO Radio 1.xspf", radio1.GetProperty("coverArt").GetString());
+        Assert.All(offered, each => Assert.StartsWith("https://", each.GetProperty("streamUrl").GetString(), StringComparison.Ordinal));
+        Assert.Empty(Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}")));
+
+        using (var logo = await client.GetAsync(new Uri($"/rest/getCoverArt.view?{asMe}&v=1.16.1&c=test&f=json&size=64&id={Uri.EscapeDataString("rc-NPO Radio 1.xspf")}", UriKind.Relative), Token))
+        {
+            Assert.Equal((HttpStatusCode.OK, "image/png"), (logo.StatusCode, logo.Content.Headers.ContentType?.MediaType));
+        }
+
+        foreach (var none in (string[])["rc-Missing.xspf", "rc-../NPO Radio 1.xspf", "rc-..\\Fonoteca.Api.dll", "rc-.hidden.xspf"])
+        {
+            using var answer = await client.GetAsync(new Uri($"/rest/getCoverArt.view?{asMe}&v=1.16.1&c=test&f=json&id={Uri.EscapeDataString(none)}", UriKind.Relative), Token);
+            Assert.Equal(70, ErrorCode(JsonDocument.Parse(await answer.Content.ReadAsStringAsync(Token)).RootElement.GetProperty("subsonic-response")));
+        }
+
+        var stream = Uri.EscapeDataString(radio1.GetProperty("streamUrl").GetString()!);
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Radio%201&streamUrl={stream}")));
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"createInternetRadioStation.view?{asMe}&name=Elsewhere&streamUrl=https://example.org/live")));
+
+        var shipped = Path.Combine(AppContext.BaseDirectory, "RadioCatalogue", "NPO Radio 1.png");
+        Assert.Equal(await File.ReadAllBytesAsync(shipped, Token), await File.ReadAllBytesAsync(Path.Combine(_root, "Radio", "Radio 1.png"), Token));
+        Assert.False(File.Exists(Path.Combine(_root, "Radio", "Elsewhere.png")));
+
+        Assert.All(offered, each =>
+        {
+            Assert.Matches("^[A-Z]{2}$", each.GetProperty("countryCode").GetString()!);
+            Assert.All(Texts(each, "languageCodes"), code => Assert.Matches("^[a-z]{2}$", code));
+            Assert.NotEmpty(Texts(each, "genres"));
+        });
+        Assert.Equal("NL nl news,talk", Shelves(radio1));
+
+        var saved = Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}"));
+        var radio1Saved = Assert.Single(saved, each => each.GetProperty("name").GetString() == "Radio 1");
+        Assert.Equal(Shelves(radio1), Shelves(radio1Saved));
+        Assert.False(Assert.Single(saved, each => each.GetProperty("name").GetString() == "Elsewhere").TryGetProperty("countryCode", out _));
+
+        foreach (var method in (string[])["getRadioCatalogue", "getInternetRadioStations"])
+        {
+            using var xml = await client.GetAsync(new Uri($"/rest/{method}.view?{asMe}&v=1.16.1&c=test&f=xml", UriKind.Relative), Token);
+            var text = await xml.Content.ReadAsStringAsync(Token);
+            Assert.Equal(HttpStatusCode.OK, xml.StatusCode);
+            Assert.Contains("<genres>news</genres>", text, StringComparison.Ordinal);
+        }
+
+        var id = Uri.EscapeDataString(radio1Saved.GetProperty("id").GetString()!);
+        Assert.Equal("ok", Status(await SubsonicAsync(client, $"updateInternetRadioStation.view?{asMe}&id={id}&name=Radio%20One&streamUrl={stream}")));
+        Assert.Equal(
+            Shelves(radio1),
+            Shelves(Assert.Single(Stations(await SubsonicAsync(client, $"getInternetRadioStations.view?{asMe}")), each => each.GetProperty("name").GetString() == "Radio One")));
+    }
+
+    /// <summary>A station's country, languages and genres as one text, so two stations' compare by value.</summary>
+    private static string Shelves(JsonElement station) =>
+        $"{(station.TryGetProperty("countryCode", out var country) ? country.GetString() : null)} {string.Join(',', Texts(station, "languageCodes"))} {string.Join(',', Texts(station, "genres"))}";
+
+    private static string[] Texts(JsonElement station, string name) =>
+        station.TryGetProperty(name, out var list) ? [.. list.EnumerateArray().Select(each => each.GetString()!)] : [];
+
+    private static List<JsonElement> Catalogue(JsonElement response) =>
+        response.GetProperty("radioCatalogue").TryGetProperty("internetRadioStation", out var list) ? [.. list.EnumerateArray()] : [];
 
     private static string Tool(string name, params string[] arguments)
     {
@@ -942,20 +980,6 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
     }
 
     private string ReadFile(string relativePath) => File.ReadAllText(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-
-    /// <summary>radio-browser, answering every stream but one with the same logo.</summary>
-    private sealed class StubLogos : IStationLogos
-    {
-        public const string Logo = "https://example.org/logo.png";
-
-        public List<string> Asked { get; } = [];
-
-        public Task<string?> FindAsync(RadioStation station, CancellationToken cancellationToken = default)
-        {
-            Asked.Add(station.StreamUrl);
-            return Task.FromResult(station.StreamUrl.EndsWith("/other", StringComparison.Ordinal) ? null : (string?)Logo);
-        }
-    }
 
     private static string[] Roles(JsonElement account) =>
         [.. account.GetProperty("roles").EnumerateArray().Select(role => role.GetString()!)];

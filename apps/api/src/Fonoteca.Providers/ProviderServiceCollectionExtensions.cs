@@ -7,10 +7,8 @@ using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.CoverArt;
 using Fonoteca.Providers.Genres;
 using Fonoteca.Providers.Lrclib;
-using Fonoteca.Providers.RadioBrowser;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
-using Fonoteca.Providers.Radio;
 using Fonoteca.Providers.Wikidata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -506,69 +504,6 @@ public static class ProviderServiceCollectionExtensions
         });
 
         services.AddSingleton<ISongLyrics, LrclibLyrics>();
-
-        return services;
-    }
-
-    /// <summary>Registers <see cref="IStationLogos"/> over a station's home page, Wikidata and radio-browser.info.</summary>
-    /// <remarks>
-    /// After <see cref="AddWikidata"/>, whose client it asks. radio-browser's
-    /// client is <see cref="AddLrclib"/>'s shape with the deadline cut short,
-    /// and the home pages' as short with no retry: a lookup runs inside the
-    /// request that saves a station, which is saved without a logo rather than
-    /// kept waiting for one. The home pages' client has no gate, since each
-    /// page is somebody else's server, asked once.
-    /// </remarks>
-    public static IServiceCollection AddStationLogos(
-        this IServiceCollection services,
-        Action<RadioBrowserOptions> configure)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configure);
-
-        services.Configure(configure);
-
-        services.AddKeyedSingleton(RadioBrowserOptions.HttpClientName, (provider, _) =>
-            new RequestGate(Options<RadioBrowserOptions>(provider).MinimumRequestInterval));
-
-        var client = services.AddHttpClient(RadioBrowserOptions.HttpClientName, (provider, http) =>
-        {
-            http.BaseAddress = RadioBrowserOptions.Server;
-            http.DefaultRequestHeaders.Add("User-Agent", $"Fonoteca/0.1 ( {Options<RadioBrowserOptions>(provider).Contact} )");
-            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        });
-
-        client.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-        });
-
-        AddResilienceThenGate(client, RadioBrowserOptions.HttpClientName, options =>
-        {
-            options.Retry.MaxRetryAttempts = 1;
-            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
-            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        services.AddHttpClient(StationHomepages.HttpClientName, (provider, http) =>
-        {
-            http.Timeout = TimeSpan.FromSeconds(10);
-            http.DefaultRequestHeaders.Add("User-Agent", $"Fonoteca/0.1 ( {Options<RadioBrowserOptions>(provider).Contact} )");
-            http.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.5");
-        })
-        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.All,
-            MaxAutomaticRedirections = 5,
-            // A proxy would be the one connection the address check never sees.
-            UseProxy = false,
-            ConnectCallback = StationHomepages.ConnectAsync,
-        });
-
-        services.AddSingleton<RadioBrowserLogos>();
-        services.AddSingleton<StationHomepages>();
-        services.AddSingleton<WikidataStationLogos>();
-        services.AddSingleton<IStationLogos, StationLogos>();
 
         return services;
     }

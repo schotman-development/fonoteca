@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>ICI Musique</title>
+  <trackList>
+    <track>
+      <location>https://playerservices.streamtheworld.com/api/livestream-redirect/CBFXFM_SRC.mp3</location>
+      <title>ICI Musique</title>
+      <info>https://ici.radio-canada.ca/ohdio/musique</info>
+      <meta rel="urn:fonoteca:radio:country">CA</meta>
+      <meta rel="urn:fonoteca:radio:language">fr</meta>
+      <meta rel="urn:fonoteca:radio:genre">pop</meta>
+    </track>
+  </trackList>
+</playlist>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>BR-Klassik</title>
+  <trackList>
+    <track>
+      <location>https://dispatcher.rndfnk.com/br/brklassik/live/mp3/high</location>
+      <title>BR-Klassik</title>
+      <info>https://www.br-klassik.de/index.html</info>
+      <meta rel="urn:fonoteca:radio:country">DE</meta>
+      <meta rel="urn:fonoteca:radio:language">de</meta>
+      <meta rel="urn:fonoteca:radio:genre">classical</meta>
+    </track>
+  </trackList>
+</playlist>

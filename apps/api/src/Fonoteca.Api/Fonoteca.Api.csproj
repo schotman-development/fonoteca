@@ -14,6 +14,11 @@
     <ProjectReference Include="../Fonoteca.Jobs/Fonoteca.Jobs.csproj" />
   </ItemGroup>
 
+  <!-- The curated radio stations the server offers to save, read from beside the binaries. -->
+  <ItemGroup>
+    <None Include="RadioCatalogue/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Extensions.ApiDescription.Server">

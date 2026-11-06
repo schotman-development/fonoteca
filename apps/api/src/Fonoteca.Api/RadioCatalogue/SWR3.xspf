@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>SWR3</title>
+  <trackList>
+    <track>
+      <location>https://liveradio.swr.de/sw282p3/swr3/play.mp3</location>
+      <title>SWR3</title>
+      <info>https://www.swr3.de/</info>
+      <meta rel="urn:fonoteca:radio:country">DE</meta>
+      <meta rel="urn:fonoteca:radio:language">de</meta>
+      <meta rel="urn:fonoteca:radio:genre">pop</meta>
+    </track>
+  </trackList>
+</playlist>

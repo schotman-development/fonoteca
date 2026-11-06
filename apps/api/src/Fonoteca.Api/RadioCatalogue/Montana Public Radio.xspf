@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>Montana Public Radio</title>
+  <trackList>
+    <track>
+      <location>https://playerservices.streamtheworld.com/api/livestream-redirect/KUFMFM.mp3</location>
+      <title>Montana Public Radio</title>
+      <info>https://www.mtpr.org/</info>
+      <meta rel="urn:fonoteca:radio:country">US</meta>
+      <meta rel="urn:fonoteca:radio:language">en</meta>
+      <meta rel="urn:fonoteca:radio:genre">news</meta>
+      <meta rel="urn:fonoteca:radio:genre">talk</meta>
+    </track>
+  </trackList>
+</playlist>

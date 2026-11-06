@@ -426,6 +426,26 @@ client never asks the station's site, which a browser could not read anyway
 for want of CORS headers. The five rows
 were written out as files once, before the migration dropped the table.
 
+*Amended 2026-11-04:* the logo lookup is gone, the owner's choice — what it
+found "looks terrible for the most part", a favicon as often as a logo, and
+the owner wants a curated list instead. A station's logo is a PNG beside its
+file under the same name, picked by hand; nothing looks one up, and the XSPF's
+`image` is no longer read. `coverArt` is present where that file is, and
+`getCoverArt` serves it sized, so a client still never asks the station's site.
+The curated stations are offered, not saved (the owner's choice): they ship
+with the server in `Fonoteca.Api/RadioCatalogue/`, and `getRadioCatalogue`,
+under Fonoteca's own `fonotecaRadioCatalogue` extension, lists them in
+`radioCatalogue` as `internetRadioStation` entries with `rc-` ids, `coverArt`
+the same id. A person saves one with `createInternetRadioStation`; a saved
+stream that a catalogue station has brings that station's logo along.
+Later the same day, version 2 of the extension (the owner's choice, so a client
+shelves the catalogue as it shelves a radio directory): every station, saved or
+offered, carries `countryCode` (ISO 3166-1 alpha-2), `languageCodes` (ISO 639-1)
+and `genres` (MusicBrainz's spelling, plus `news` and `talk`), each left out
+where the file names none. They are `meta` elements in the XSPF, set by hand;
+saving a catalogue stream copies them with the logo, and an update keeps the
+file's, since `updateInternetRadioStation` has no parameter for them.
+
 **Everything else under `/rest` answers error 0 naming the method**, through a
 catch-all the literal routes outrank. A bare 404 is the failure mode that turns
 one missing feature into an unusable server, because a client that gets an HTTP

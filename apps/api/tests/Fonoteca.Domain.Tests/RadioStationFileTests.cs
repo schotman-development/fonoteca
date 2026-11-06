@@ -7,8 +7,7 @@ public sealed class RadioStationFileTests
     private static readonly RadioStation Radio5 = new(
         "NPO Radio 5",
         "https://icecast.omroep.nl/radio5-bb-mp3",
-        "https://www.nporadio5.nl/",
-        "https://www.nporadio5.nl/apple-touch-icon.png");
+        "https://www.nporadio5.nl/");
 
     [Fact]
     public void ANewFileIsXspfWithEachFieldWhereTheSpecPutsIt()
@@ -23,7 +22,6 @@ public sealed class RadioStationFileTests
                   <location>https://icecast.omroep.nl/radio5-bb-mp3</location>
                   <title>NPO Radio 5</title>
                   <info>https://www.nporadio5.nl/</info>
-                  <image>https://www.nporadio5.nl/apple-touch-icon.png</image>
                 </track>
               </trackList>
             </playlist>
@@ -33,6 +31,7 @@ public sealed class RadioStationFileTests
 
         Assert.Equal("Radio/NPO Radio 5.xspf", RadioStationFile.PathFor("NPO Radio 5"));
         Assert.Equal("Radio/ACDC Radio.xspf", RadioStationFile.PathFor("AC/DC Radio"));
+        Assert.Equal("Radio/NPO Radio 5.png", RadioStationFile.LogoPathFor("Radio/NPO Radio 5.xspf"));
     }
 
     [Fact]
@@ -40,15 +39,14 @@ public sealed class RadioStationFileTests
     {
         Assert.Equal(Radio5, RadioStationFile.Read(RadioStationFile.Write(null, Radio5), "Radio/x.xspf"));
 
-        var bare = Radio5 with { HomePageUrl = null, ImageUrl = null };
+        var bare = Radio5 with { HomePageUrl = null };
         var text = RadioStationFile.Write(RadioStationFile.Write(null, Radio5), bare);
 
         Assert.Equal(bare, RadioStationFile.Read(text, "Radio/x.xspf"));
         Assert.DoesNotContain("<info>", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("<image>", text, StringComparison.Ordinal);
     }
 
-    /// <summary>radio-browser's own export, its identifier and comment kept, a field added in the spec's place.</summary>
+    /// <summary>radio-browser's own export, its identifier, comment and logo address kept, a field added in the spec's place.</summary>
     [Fact]
     public void AnotherProgramsFileIsReadAndOnlyTheStationsFieldsChange()
     {
@@ -68,7 +66,7 @@ public sealed class RadioStationFileTests
             """;
 
         Assert.Equal(
-            new RadioStation("NPO Radio 5", "https://icecast.omroep.nl/radio5-sb-aac", null, "https://www.nporadio5.nl/apple-touch-icon.png"),
+            new RadioStation("NPO Radio 5", "https://icecast.omroep.nl/radio5-sb-aac", null),
             RadioStationFile.Read(exported, "Radio/radio5.xspf"));
 
         var text = RadioStationFile.Write(exported, Radio5);
@@ -76,7 +74,7 @@ public sealed class RadioStationFileTests
         Assert.Equal(Radio5, RadioStationFile.Read(text, "Radio/radio5.xspf"));
         Assert.Contains("<!-- exported -->", text, StringComparison.Ordinal);
         Assert.Contains("<identifier>radiobrowser:5cb448f8-1f80-4d78-bc23-ef2394378708</identifier>", text, StringComparison.Ordinal);
-        Assert.Matches(@"(?s)<identifier>.*<title>NPO Radio 5</title>\s*<info>.*</info>\s*<image>", text);
+        Assert.Matches(@"(?s)<identifier>.*<title>NPO Radio 5</title>\s*<info>.*</info>\s*<image>https://www.nporadio5.nl/apple-touch-icon.png</image>", text);
     }
 
     [Fact]
@@ -101,7 +99,6 @@ public sealed class RadioStationFileTests
               <trackList><track>
                 <location>file:///music/live.mp3</location>
                 <info>javascript:alert(1)</info>
-                <image>data:image/png;base64,AAAA</image>
               </track></trackList>
             </playlist>
             """;
@@ -114,11 +111,71 @@ public sealed class RadioStationFileTests
 
         Assert.Equal("https://example.org/live", station?.StreamUrl);
         Assert.Null(station!.HomePageUrl);
-        Assert.Null(station.ImageUrl);
 
         Assert.Null(RadioStationFile.Read("#EXTM3U\nhttps://example.org/live\n", "Radio/a.xspf"));
         Assert.Null(RadioStationFile.Read("<html><body/></html>", "Radio/a.xspf"));
         Assert.False(RadioStationFile.WebAddress("https://example.org/\u0001"));
+    }
+
+    /// <summary>Country, languages and genres are meta elements, one per value, before an extension and after everything else.</summary>
+    [Fact]
+    public void AStationsShelvesAreMetaElementsAndReadBack()
+    {
+        var shelved = Radio5 with { CountryCode = "NL", LanguageCodes = ["nl"], Genres = ["pop", "r&b"] };
+        const string extended = """
+            <playlist version="1" xmlns="http://xspf.org/ns/0/">
+              <trackList><track>
+                <location>https://icecast.omroep.nl/radio5-bb-mp3</location>
+                <meta rel="urn:fonoteca:radio:genre">jazz</meta>
+                <meta rel="http://example.org/other">kept</meta>
+                <extension application="http://example.org/app"><x/></extension>
+              </track></trackList>
+            </playlist>
+            """;
+
+        var text = RadioStationFile.Write(extended, shelved);
+
+        Assert.Equal(shelved, RadioStationFile.Read(text, "Radio/x.xspf"));
+        Assert.Matches(
+            "(?s)<info>.*<meta rel=\"http://example.org/other\">kept</meta>\\s*"
+            + "<meta rel=\"urn:fonoteca:radio:country\">NL</meta>\\s*<meta rel=\"urn:fonoteca:radio:language\">nl</meta>\\s*"
+            + "<meta rel=\"urn:fonoteca:radio:genre\">pop</meta>\\s*<meta rel=\"urn:fonoteca:radio:genre\">r&amp;b</meta>\\s*<extension",
+            text);
+        Assert.DoesNotContain(">jazz<", text, StringComparison.Ordinal);
+
+        var cleared = RadioStationFile.Write(text, Radio5);
+        Assert.DoesNotContain("urn:fonoteca:radio", cleared, StringComparison.Ordinal);
+        Assert.Equal(Radio5, RadioStationFile.Read(cleared, "Radio/x.xspf"));
+        Assert.NotEqual(Radio5, shelved);
+        Assert.NotEqual(shelved, shelved with { LanguageCodes = ["de"] });
+        Assert.Equal(shelved, Radio5.ShelvedAs(shelved));
+    }
+
+    /// <summary>A code that is no ISO code is not read, one in another case is, and a value said twice counts once.</summary>
+    [Fact]
+    public void OnlyCodesAreReadAsCountryAndLanguage()
+    {
+        const string loose = """
+            <playlist version="1" xmlns="http://xspf.org/ns/0/">
+              <trackList><track>
+                <location>https://example.org/live</location>
+                <meta rel="urn:fonoteca:radio:country">Netherlands</meta>
+                <meta rel="urn:fonoteca:radio:country">nl</meta>
+                <meta rel="urn:fonoteca:radio:language">NL</meta>
+                <meta rel="urn:fonoteca:radio:language">dut</meta>
+                <meta rel="urn:fonoteca:radio:language">nl</meta>
+                <meta rel="urn:fonoteca:radio:genre"> Jazz </meta>
+                <meta rel="urn:fonoteca:radio:genre">jazz</meta>
+                <meta rel="urn:fonoteca:radio:genre"></meta>
+              </track></trackList>
+            </playlist>
+            """;
+
+        var station = RadioStationFile.Read(loose, "Radio/a.xspf")!;
+
+        Assert.Equal("NL", station.CountryCode);
+        Assert.Equal(["nl"], station.LanguageCodes);
+        Assert.Equal(["Jazz"], station.Genres);
     }
 
     [Fact]

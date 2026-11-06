@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>WDR 3</title>
+  <trackList>
+    <track>
+      <location>https://wdr-wdr3-live.icecastssl.wdr.de/wdr/wdr3/live/mp3/256/stream.mp3</location>
+      <title>WDR 3</title>
+      <info>https://www1.wdr.de/radio/wdr3/index.html</info>
+      <meta rel="urn:fonoteca:radio:country">DE</meta>
+      <meta rel="urn:fonoteca:radio:language">de</meta>
+      <meta rel="urn:fonoteca:radio:genre">classical</meta>
+      <meta rel="urn:fonoteca:radio:genre">jazz</meta>
+    </track>
+  </trackList>
+</playlist>

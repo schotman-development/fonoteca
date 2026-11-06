@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>Bayern 3</title>
+  <trackList>
+    <track>
+      <location>https://dispatcher.rndfnk.com/br/br3/live/mp3/mid</location>
+      <title>Bayern 3</title>
+      <info>https://www.bayern3.de/</info>
+      <meta rel="urn:fonoteca:radio:country">DE</meta>
+      <meta rel="urn:fonoteca:radio:language">de</meta>
+      <meta rel="urn:fonoteca:radio:genre">pop</meta>
+    </track>
+  </trackList>
+</playlist>

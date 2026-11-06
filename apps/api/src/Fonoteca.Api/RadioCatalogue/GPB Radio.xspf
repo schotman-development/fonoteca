@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>GPB Radio</title>
+  <trackList>
+    <track>
+      <location>https://gpb.streamguys1.com/im/gpb-atlanta-aac-website</location>
+      <title>GPB Radio</title>
+      <info>https://www.gpb.org/</info>
+      <meta rel="urn:fonoteca:radio:country">US</meta>
+      <meta rel="urn:fonoteca:radio:language">en</meta>
+      <meta rel="urn:fonoteca:radio:genre">news</meta>
+      <meta rel="urn:fonoteca:radio:genre">talk</meta>
+    </track>
+  </trackList>
+</playlist>

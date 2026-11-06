@@ -1710,7 +1710,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaArtistBanner", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaArtistBanner", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres", "fonotecaRadioCatalogue"], extensions);
     }
 
     /// <summary>

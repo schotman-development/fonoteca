@@ -40,6 +40,7 @@ internal static class SubsonicIds
     private const string PlaylistFolderPrefix = "pd-";
     private const string TagPrefix = "tg-";
     private const string RadioStationPrefix = "ir-";
+    private const string CatalogueStationPrefix = "rc-";
 
     internal static string Artist(ArtistId id) => ArtistPrefix + id.Value.ToString("N");
 
@@ -60,6 +61,9 @@ internal static class SubsonicIds
 
     /// <summary>An internet radio station, which is its file: the file's name in the Radio folder.</summary>
     internal static string RadioStation(string name) => RadioStationPrefix + name;
+
+    /// <summary>A station the server offers to save, by its file's name in the shipped catalogue.</summary>
+    internal static string CatalogueStation(string name) => CatalogueStationPrefix + name;
 
     /// <summary>A folder of an account's playlists (<c>playlistFolders</c>), never a directory.</summary>
     internal static string PlaylistFolder(Guid id) => PlaylistFolderPrefix + id.ToString("N");
@@ -96,6 +100,8 @@ internal static class SubsonicIds
     internal static string? AsPlaylistFile(string? id) => Name(id, PlaylistFilePrefix);
 
     internal static string? AsRadioStation(string? id) => Name(id, RadioStationPrefix);
+
+    internal static string? AsCatalogueStation(string? id) => Name(id, CatalogueStationPrefix);
 
     /// <summary>
     /// The library-relative path a folder id carries, or null when the id is not

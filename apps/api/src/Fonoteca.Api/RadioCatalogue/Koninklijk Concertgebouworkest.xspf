@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>Koninklijk Concertgebouworkest</title>
+  <trackList>
+    <track>
+      <location>https://i1.cdn.jetstre.am:8000/sz=RCOLiveWebradio=aac320</location>
+      <title>Koninklijk Concertgebouworkest</title>
+      <info>https://www.concertgebouworkest.nl/</info>
+      <meta rel="urn:fonoteca:radio:country">NL</meta>
+      <meta rel="urn:fonoteca:radio:language">nl</meta>
+      <meta rel="urn:fonoteca:radio:genre">classical</meta>
+    </track>
+  </trackList>
+</playlist>

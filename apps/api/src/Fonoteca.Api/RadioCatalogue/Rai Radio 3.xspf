@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>Rai Radio 3</title>
+  <trackList>
+    <track>
+      <location>https://icestreaming.rai.it/3.mp3</location>
+      <title>Rai Radio 3</title>
+      <info>https://www.raiplaysound.it/radio3</info>
+      <meta rel="urn:fonoteca:radio:country">IT</meta>
+      <meta rel="urn:fonoteca:radio:language">it</meta>
+      <meta rel="urn:fonoteca:radio:genre">classical</meta>
+      <meta rel="urn:fonoteca:radio:genre">talk</meta>
+    </track>
+  </trackList>
+</playlist>

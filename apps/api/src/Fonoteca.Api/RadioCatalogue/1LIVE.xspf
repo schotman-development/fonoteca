@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>1LIVE</title>
+  <trackList>
+    <track>
+      <location>https://wdr-1live-live.icecastssl.wdr.de/wdr/1live/live/mp3/128/stream.mp3</location>
+      <title>1LIVE</title>
+      <info>https://www1.wdr.de/radio/1live/index.html</info>
+      <meta rel="urn:fonoteca:radio:country">DE</meta>
+      <meta rel="urn:fonoteca:radio:language">de</meta>
+      <meta rel="urn:fonoteca:radio:genre">pop</meta>
+      <meta rel="urn:fonoteca:radio:genre">hip hop</meta>
+    </track>
+  </trackList>
+</playlist>

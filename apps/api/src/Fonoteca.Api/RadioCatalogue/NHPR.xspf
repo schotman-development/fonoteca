@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>NHPR</title>
+  <trackList>
+    <track>
+      <location>https://nhpr-live.streamguys1.com/nhpr</location>
+      <title>NHPR</title>
+      <info>https://www.nhpr.org/</info>
+      <meta rel="urn:fonoteca:radio:country">US</meta>
+      <meta rel="urn:fonoteca:radio:language">en</meta>
+      <meta rel="urn:fonoteca:radio:genre">news</meta>
+      <meta rel="urn:fonoteca:radio:genre">talk</meta>
+    </track>
+  </trackList>
+</playlist>

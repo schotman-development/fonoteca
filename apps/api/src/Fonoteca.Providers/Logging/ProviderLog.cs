@@ -278,13 +278,6 @@ internal static partial class ProviderLog
         Message = "The Cover Art Archive could not give release {Edition}, left out of its album's booklet: {Reason}")]
     public static partial void BookletEditionUnavailable(ILogger logger, Mbid edition, string reason);
 
-    /// <remarks>Logged rather than thrown: the next source is asked, and a station is saved without a logo before it is refused.</remarks>
-    [LoggerMessage(
-        EventId = 1560,
-        Level = LogLevel.Warning,
-        Message = "{Source} was not asked for the logo of station '{Station}', so the next source is: {Reason}")]
-    public static partial void StationLogoSourceFailed(ILogger logger, string source, string station, string reason);
-
     [LoggerMessage(
         EventId = 1600,
         Level = LogLevel.Debug,

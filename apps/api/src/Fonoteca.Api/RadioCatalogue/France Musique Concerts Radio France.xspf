@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>France Musique Concerts Radio France</title>
+  <trackList>
+    <track>
+      <location>https://icecast.radiofrance.fr/francemusiqueconcertsradiofrance-hifi.aac</location>
+      <title>France Musique Concerts Radio France</title>
+      <info>https://www.francemusique.fr/webradio-concerts-radio-france/</info>
+      <meta rel="urn:fonoteca:radio:country">FR</meta>
+      <meta rel="urn:fonoteca:radio:language">fr</meta>
+      <meta rel="urn:fonoteca:radio:genre">classical</meta>
+    </track>
+  </trackList>
+</playlist>

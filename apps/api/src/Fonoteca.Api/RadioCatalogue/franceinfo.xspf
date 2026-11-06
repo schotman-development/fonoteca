@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+  <title>franceinfo</title>
+  <trackList>
+    <track>
+      <location>https://icecast.radiofrance.fr/franceinfo-hifi.aac</location>
+      <title>franceinfo</title>
+      <info>https://www.radiofrance.fr/franceinfo</info>
+      <meta rel="urn:fonoteca:radio:country">FR</meta>
+      <meta rel="urn:fonoteca:radio:language">fr</meta>
+      <meta rel="urn:fonoteca:radio:genre">news</meta>
+    </track>
+  </trackList>
+</playlist>
