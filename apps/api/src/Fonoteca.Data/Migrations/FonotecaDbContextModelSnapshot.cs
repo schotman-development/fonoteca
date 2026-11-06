@@ -1391,6 +1391,10 @@ namespace Fonoteca.Data.Migrations
                     b.Property<DateTimeOffset?>("ShopGenresLookupUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("TagFolder")
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -1401,6 +1405,10 @@ namespace Fonoteca.Data.Migrations
                     b.HasIndex("Mbid")
                         .IsUnique()
                         .HasFilter("\"Mbid\" IS NOT NULL");
+
+                    b.HasIndex("TagFolder")
+                        .IsUnique()
+                        .HasFilter("\"TagFolder\" IS NOT NULL");
 
                     b.HasIndex("Title");
 

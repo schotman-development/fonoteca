@@ -912,4 +912,16 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "'{Path}' ran past its estimated {Length} bytes as {Format}; the rest was not sent.")]
     public static partial void TranscodeOverran(ILogger logger, string path, string format, long length);
+
+    [LoggerMessage(
+        EventId = 1710,
+        Level = LogLevel.Warning,
+        Message = "{Folder} was given no album from its tags: '{Path}' could not be read ({Reason}).")]
+    public static partial void TagAlbumNotRead(ILogger logger, string folder, string path, string reason);
+
+    [LoggerMessage(
+        EventId = 1711,
+        Level = LogLevel.Information,
+        Message = "Albums from tags: {Folders} folders made or rebuilt, {Files} files on them.")]
+    public static partial void TagAlbumsFiled(ILogger logger, int folders, int files);
 }

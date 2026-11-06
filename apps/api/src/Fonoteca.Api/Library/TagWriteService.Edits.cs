@@ -60,7 +60,13 @@ public sealed partial class TagWriteService
             var placed = await db.MediaFiles
                 .AsNoTracking()
                 .Where(file => file.Path.StartsWith(prefix))
-                .Select(file => new { file.Id, file.ReleaseGroupId, file.TagEditsJson })
+                .Select(file => new
+                {
+                    file.Id,
+                    file.ReleaseGroupId,
+                    file.TagEditsJson,
+                    FromTags = file.ReleaseGroup != null && file.ReleaseGroup.TagFolder != null,
+                })
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
@@ -68,7 +74,10 @@ public sealed partial class TagWriteService
                     .ConfigureAwait(false))
                 .ToDictionary(file => file.Id);
 
-            var albumWide = placed.Select(file => file.ReleaseGroupId).Distinct().ToList() is [{ }];
+            // An album made from the files' tags is corrected in the files, so
+            // the next run rebuilds it from what a person typed.
+            var albumWide = placed.Select(file => file.ReleaseGroupId).Distinct().ToList() is [{ }]
+                && !placed.Any(file => file.FromTags);
             var readings = new Dictionary<MediaFileId, TagSnapshot?>();
 
             foreach (var row in rows)
@@ -201,7 +210,7 @@ public sealed partial class TagWriteService
             var files = await db.MediaFiles.Where(file => ids.Contains(file.Id)).ToListAsync(token).ConfigureAwait(false);
 
             var album = files.Select(file => file.ReleaseGroupId).Distinct().ToList() is [{ } group]
-                ? await db.ReleaseGroups.FirstOrDefaultAsync(candidate => candidate.Id == group, token).ConfigureAwait(false)
+                ? await db.ReleaseGroups.FirstOrDefaultAsync(candidate => candidate.Id == group && candidate.TagFolder == null, token).ConfigureAwait(false)
                 : null;
 
             var problems = changes.Select(change => Invalid(change, files, album)).OfType<string>().ToList();

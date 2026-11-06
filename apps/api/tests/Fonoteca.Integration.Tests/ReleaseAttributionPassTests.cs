@@ -32,7 +32,7 @@ namespace Fonoteca.Integration.Tests;
 /// in one test, because the pass must not read the folder's name.
 /// </remarks>
 [Collection(nameof(PostgresCollection))]
-public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsyncLifetime
+public sealed partial class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly Mbid AlbumId = Mb("11111111-1111-4111-8111-111111111111");
     private static readonly Mbid RemasterId = Mb("22222222-2222-4222-8222-222222222222");
@@ -1309,6 +1309,7 @@ public sealed class ReleaseAttributionPassTests(PostgresFixture postgres) : IAsy
         services.AddSingleton<IAudioFileStore>(new FileSystemAudioFileStore(_root));
         services.AddSingleton<TagReader>();
         services.AddSingleton<LibraryWorkGate>();
+        services.AddSingleton<TagAlbumFiling>();
         services.AddSingleton<ReleaseAttributionService>();
         services.AddSingleton<IHostApplicationLifetime, NeverStops>();
         services.AddSingleton<IOptions<FonotecaOptions>>(

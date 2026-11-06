@@ -144,7 +144,9 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.GenresSource).HasMaxLength(50);
             e.Property(x => x.EditsJson).HasColumnType("jsonb");
             e.Property(x => x.AppleClassicalAlbumId).HasMaxLength(50);
+            e.Property(x => x.TagFolder).HasMaxLength(4096);
             e.HasIndex(x => x.Mbid).IsUnique().HasFilter("\"Mbid\" IS NOT NULL");
+            e.HasIndex(x => x.TagFolder).IsUnique().HasFilter("\"TagFolder\" IS NOT NULL");
             e.HasIndex(x => x.Title).HasMethod("gin").HasOperators("gin_trgm_ops");
         });
 

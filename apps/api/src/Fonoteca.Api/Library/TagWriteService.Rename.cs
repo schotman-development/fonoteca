@@ -71,8 +71,11 @@ public sealed partial class TagWriteService
         {
             var db = dbScope.ServiceProvider.GetRequiredService<FonotecaDbContext>();
 
-            // Named by the answered: a file there for its ReplayGain and DR alone names nothing.
+            // Named by the answered: a file there for its ReplayGain and DR alone
+            // names nothing, and nor does one on an album made from its own tags,
+            // whose names are the files' owner's.
             var paths = await Answered(await NarrowAsync(db, scope, cancellationToken).ConfigureAwait(false))
+                .Where(file => file.ReleaseGroupId == null || file.ReleaseGroup!.TagFolder == null)
                 .Select(file => file.Path)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);

@@ -331,6 +331,17 @@ public sealed class ReleaseGroup
     /// <summary>Apple's id for the record the last answer came from, or null where none was found — the provenance.</summary>
     public string? AppleClassicalAlbumId { get; set; }
 
+    /// <summary>
+    /// The album folder whose files' own tags this album was made from, or null
+    /// for every album a provider or a person named.
+    /// </summary>
+    /// <remarks>
+    /// The provenance and the key: one album per folder (<see cref="TagAlbums"/>),
+    /// found again by it and rebuilt from the tags on every attribution run, so
+    /// it follows the files. Any other filing of a file takes it out.
+    /// </remarks>
+    public string? TagFolder { get; set; }
+
     public ICollection<Release> Releases { get; init; } = [];
     public ICollection<ArtistCredit> Credits { get; init; } = [];
 

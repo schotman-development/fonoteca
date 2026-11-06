@@ -179,14 +179,22 @@ public sealed partial class TagWriteService(
     /// <remarks>
     /// A recording and a proven pressing's track, or a recording and an album
     /// with no pressing, for the reason in the class remarks — a file filed under
-    /// a pressing whose track it has lost is neither, and waits.
+    /// a pressing whose track it has lost is neither, and waits. A file on an
+    /// album made from its own tags (<see cref="TagAlbumFiling"/>) is not
+    /// answered: that answer is the file's, and writing it back would only lose
+    /// each file's own album tag to the folder's name.
     /// </remarks>
     public static IQueryable<MediaFile> Answered(IQueryable<MediaFile> files) =>
         files.Where(file =>
             file.TagEditsJson != null
             || (file.RecordingId != null
+                && (file.ReleaseGroupId == null || file.ReleaseGroup!.TagFolder == null)
                 && ((file.ReleaseId != null && file.TrackId != null)
                     || (file.ReleaseId == null && file.ReleaseGroupId != null))));
+
+    /// <summary>Files whose catalogue answer is theirs to carry: <see cref="Answered"/> for a reason other than a person's corrections alone.</summary>
+    private static IQueryable<MediaFile> CatalogueAnswered(IQueryable<MediaFile> files) =>
+        Answered(files).Where(file => file.ReleaseGroupId == null || file.ReleaseGroup!.TagFolder == null);
 
     /// <summary>
     /// The files a run considers: the answered, and every analysed file, whose
@@ -572,7 +580,7 @@ public sealed partial class TagWriteService(
         IQueryable<MediaFile> files,
         CancellationToken cancellationToken)
     {
-        var answered = Answered(db.MediaFiles.AsNoTracking());
+        var answered = CatalogueAnswered(db.MediaFiles.AsNoTracking());
 
         // A pressing's facts where one is filed, the album's where not: its
         // title and first-release year here, its billing line below.

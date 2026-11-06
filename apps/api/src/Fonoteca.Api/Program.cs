@@ -168,6 +168,7 @@ builder.Services.AddScoped<TagWriter>();
 builder.Services.AddSingleton<LibraryWorkGate>();
 builder.Services.AddSingleton<IdentificationService>();
 builder.Services.AddSingleton<EnrichmentService>();
+builder.Services.AddSingleton<TagAlbumFiling>();
 builder.Services.AddSingleton<ReleaseAttributionService>();
 builder.Services.AddSingleton<ProbeService>();
 builder.Services.AddSingleton<AnalysisService>();

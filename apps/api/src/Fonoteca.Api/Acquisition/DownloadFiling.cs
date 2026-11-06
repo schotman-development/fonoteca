@@ -31,9 +31,8 @@ namespace Fonoteca.Api.Acquisition;
 /// slots by disc and position. An album with no barcode is minted afresh each
 /// time, which is the honest failure.
 ///
-/// <b>An artist is linked only on a unique name match</b> — the owner's
-/// choice: this library holds two Sonny Boy Williamsons — else minted with no
-/// MBID. Only the four roles the catalogue keeps are written; see
+/// <b>An artist is linked only on a unique name match</b>
+/// (<see cref="ArtistsByName"/>), else minted with no MBID. Only the four roles the catalogue keeps are written; see
 /// <see cref="ProviderCredits"/>.
 ///
 /// <b>The download is the scan for the files it wrote</b>, so the row records
@@ -234,7 +233,7 @@ public sealed class DownloadFiling(
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        var artists = await ArtistsAsync(db, cancellationToken).ConfigureAwait(false);
+        var artists = await ArtistsByName.LoadAsync(db, cancellationToken).ConfigureAwait(false);
 
         if (minted)
         {
@@ -356,7 +355,7 @@ public sealed class DownloadFiling(
     }
 
     /// <summary>A recording's billing line and its conductor, ensemble and writers.</summary>
-    private static void Credit(FonotecaDbContext db, Artists artists, Recording recording, IReadOnlyList<ProviderCredit> credits)
+    private static void Credit(FonotecaDbContext db, ArtistsByName artists, Recording recording, IReadOnlyList<ProviderCredit> credits)
     {
         foreach (var credit in credits)
         {
@@ -392,91 +391,6 @@ public sealed class DownloadFiling(
                 RecordingId = recording.Id,
             });
         }
-    }
-
-    /// <summary>
-    /// Every artist by normalised name and by MusicBrainz alias, so a credit is
-    /// linked only where exactly one answers to it.
-    /// </summary>
-    private static async Task<Artists> ArtistsAsync(FonotecaDbContext db, CancellationToken cancellationToken)
-    {
-        var known = (await db.Artists
-                .AsNoTracking()
-                .Select(artist => new { artist.Id, artist.Name, artist.LatinName, artist.Type, artist.Mbid, artist.AliasesJson })
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false))
-            .Select(artist => (
-                Artist: new Artist { Id = artist.Id, Name = artist.Name, Type = artist.Type },
-                Identified: artist.Mbid is not null,
-                Names: new[] { artist.Name, artist.LatinName }.OfType<string>(),
-                Aliases: ArtistAliases.Read(artist.AliasesJson).Where(alias => alias.IsName).Select(alias => alias.Name)))
-            .ToList();
-
-        var identified = known.Where(artist => artist.Identified).ToList();
-
-        return new Artists(
-            db,
-            [
-                ByName(identified.Select(artist => (artist.Artist, artist.Names))),
-                ByName(identified.Select(artist => (artist.Artist, artist.Aliases))),
-                ByName(known.Where(artist => !artist.Identified).Select(artist => (artist.Artist, artist.Names))),
-            ]);
-    }
-
-    private static Dictionary<string, List<Artist>> ByName(IEnumerable<(Artist Artist, IEnumerable<string> Names)> artists) =>
-        artists
-            .SelectMany(artist => artist.Names
-                .Select(ArtistNameMatch.Normalise)
-                .Where(name => name.Length > 0)
-                .Distinct(StringComparer.Ordinal)
-                .Select(name => (Name: name, artist.Artist)))
-            .GroupBy(pair => pair.Name, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Select(pair => pair.Artist).ToList(), StringComparer.Ordinal);
-
-    /// <summary>
-    /// The run's artists: linked on a unique name, else minted once and reused
-    /// for the album.
-    /// </summary>
-    /// <remarks>
-    /// The first of <paramref name="tiers"/> anyone answers in decides:
-    /// MusicBrainz's artists by name, then by alias, then one an earlier
-    /// download minted. MusicBrainz before a minted row, or the "Royal
-    /// Concertgebouw Orchestra" one download minted would go on taking every
-    /// later download's credits from Koninklijk Concertgebouworkest.
-    /// </remarks>
-    private sealed class Artists(FonotecaDbContext db, IReadOnlyList<Dictionary<string, List<Artist>>> tiers)
-    {
-        private readonly Dictionary<string, Artist> _minted = new(StringComparer.Ordinal);
-
-        public Artist For(ProviderCredit credit)
-        {
-            var name = ArtistNameMatch.Normalise(credit.Name);
-
-            if (_minted.TryGetValue(name, out var mine)) return mine;
-
-            if (name.Length > 0
-                && tiers.Select(tier => tier.GetValueOrDefault(name)).FirstOrDefault(found => found is not null) is [var only])
-            {
-                return only;
-            }
-
-            var artist = new Artist
-            {
-                Id = ArtistId.New(),
-                Name = credit.Name,
-                Type = credit.Role == CreditRole.Ensemble ? EnsembleType(credit.Name) : null,
-            };
-
-            db.Artists.Add(artist);
-            _minted[name] = artist;
-
-            return artist;
-        }
-
-        private static string EnsembleType(string name) =>
-            name.Contains("choir", StringComparison.OrdinalIgnoreCase) || name.Contains("chor", StringComparison.OrdinalIgnoreCase)
-                ? "Choir"
-                : "Orchestra";
     }
 
     private sealed record FiledPayload(string Qobuz, string? Barcode, Guid? MusicBrainz, IReadOnlyList<Guid> Files, int Kept);

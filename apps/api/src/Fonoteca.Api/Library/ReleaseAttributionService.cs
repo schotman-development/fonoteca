@@ -70,6 +70,7 @@ public sealed class ReleaseAttributionService(
     IMusicBrainzCatalogue musicBrainz,
     IAcoustIdLookup acoustId,
     Fonoteca.Tagging.TagReader tagReader,
+    TagAlbumFiling tagAlbums,
     IHubContext<JobsHub, IJobsClient> hub,
     IHostApplicationLifetime lifetime,
     IOptions<FonotecaOptions> options,
@@ -119,6 +120,10 @@ public sealed class ReleaseAttributionService(
 
     /// <summary>Identified files that have never been asked about an album.</summary>
     /// <remarks>
+    /// The seed's own filter: a recording with no MBID (an album from tags, a
+    /// shop's) is nothing MusicBrainz can be asked about, and counted it would
+    /// never leave.
+    ///
     /// A person's answer takes a file off the worklist, with one exception: an
     /// album named by hand (<see cref="ReleaseAttributionOutcome.AlbumByPerson"/>
     /// and its agent twin) is theirs, while which pressing of it the files are is
@@ -138,7 +143,8 @@ public sealed class ReleaseAttributionService(
                     && f.ReleaseLookupUtc == null
                     && (f.ReleaseDecidedUtc == null
                         || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByPerson
-                        || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByAgent))
+                        || f.AttributionOutcome == ReleaseAttributionOutcome.AlbumByAgent)
+                    && f.Recording!.Mbid != null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -271,6 +277,20 @@ public sealed class ReleaseAttributionService(
         catch (OperationCanceledException)
         {
             // Cancelled between components, which is where cancellation is checked.
+        }
+
+        // Last, so a folder this run filed under MusicBrainz's album is not
+        // first given one from its tags.
+        try
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await tagAlbums.FileAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled between folders; each folder commits on its own.
         }
 
         var summary = new AttributionSummary(
