@@ -45,6 +45,17 @@ public static class Barcodes
             : digits;
     }
 
+    /// <summary>The comparable form with its check digit, or null where there is no barcode in it.</summary>
+    /// <remarks>
+    /// What a search is given beside the shop's own digits, because a search
+    /// compares what was entered and not what <see cref="Normalise"/> makes of
+    /// it: MusicBrainz holds Shostakovich's <i>The Symphonies</i> under
+    /// <c>028944443028</c>, and Qobuz's <c>0002894444302</c> finds it only
+    /// once the check digit is back.
+    /// </remarks>
+    public static string? Whole(string? value) =>
+        Normalise(value) is { } code ? code + (char)('0' + CheckDigit(code)) : null;
+
     /// <summary>GS1's check digit: weights 3 and 1 alternating leftwards from the last digit.</summary>
     private static int CheckDigit(ReadOnlySpan<char> digits)
     {

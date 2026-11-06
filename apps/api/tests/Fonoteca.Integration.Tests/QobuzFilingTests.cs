@@ -69,6 +69,9 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
     /// <summary>Set to have the shop list a picture for Rumours, served from its image host as <see cref="_sleeve"/>.</summary>
     private bool _sleeved;
 
+    /// <summary>Set to have the shop list Rumours without its barcode's check digit, as Qobuz lists Universal's.</summary>
+    private bool _checkDigitDropped;
+
     /// <summary>What the shop's image host answers, or null for an outage.</summary>
     private byte[]? _sleeve = [0xFF, 0xD8, 0xFF, 0xE0, 1];
     private readonly List<WebApplicationFactory<Program>> _factories = [];
@@ -93,6 +96,7 @@ public sealed partial class QobuzFilingTests(PostgresFixture postgres) : IAsyncL
                 request.Uri.AbsolutePath.Contains("getFileUrl", StringComparison.Ordinal) ? FileUrl
                     : request.Uri.Query.Contains("album_id=2", StringComparison.Ordinal) ? Tusk
                     : request.Uri.Query.Contains("album_id=3", StringComparison.Ordinal) ? Rosetta
+                    : _checkDigitDropped ? Album.Replace("\"0603497941032\"", "\"0060349794103\"", StringComparison.Ordinal)
                     : _sleeved ? Album.Replace("\"upc\"", "\"image\":{\"large\":\"https://static.qobuz.com/images/covers/32/10/0603497941032_600.jpg\"},\"upc\"", StringComparison.Ordinal)
                     : Album));
     }

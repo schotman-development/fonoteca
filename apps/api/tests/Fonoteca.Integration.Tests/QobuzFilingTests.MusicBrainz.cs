@@ -50,6 +50,22 @@ public sealed partial class QobuzFilingTests
         Assert.Equal(2, (await scope.ServiceProvider.GetRequiredService<EnrichmentService>().CountPendingAsync(Token)).Files);
     }
 
+    /// <summary>MusicBrainz holds the barcode whole, as it was entered: the shop's alone finds nothing.</summary>
+    [Fact]
+    public async Task ABarcodeTheShopListsWithoutItsCheckDigitFindsItsRelease()
+    {
+        Assert.SkipUnless(Corpus.IsAvailable, "ffmpeg is not on PATH; source ~/.local/opt/env.sh.");
+
+        _checkDigitDropped = true;
+
+        var musicBrainz = new StubMusicBrainz { Releases = { Rumours() with { Barcode = "603497941032" } } };
+        var body = await DownloadAsync(Factory(mutation: false, musicBrainz));
+        Assert.Equal(2, body.Filing!.Filed);
+
+        await using var db = PostgresFixture.CreateContext(_connectionString);
+        Assert.Equal(RumoursRelease, (await db.Releases.SingleAsync(Token)).Mbid);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -63,11 +63,15 @@ public sealed class MusicBrainzCatchUp(
 
         if (Barcodes.Normalise(barcode) is not { } wanted || slots.Count == 0) return null;
 
-        // The shop's digits, and without their leading zeros: MusicBrainz holds
-        // a barcode as it was entered, and both are entered.
+        // The shop's digits, without their leading zeros, and whole: MusicBrainz
+        // holds a barcode as it was entered, both shapes are entered, and Qobuz
+        // lists Universal's without the check digit.
         var digits = new string([.. barcode!.Where(char.IsAsciiDigit)]);
-        var bare = digits.TrimStart('0');
-        var query = bare.Length > 0 && bare != digits ? $"barcode:{digits} OR barcode:{bare}" : $"barcode:{digits}";
+        var query = string.Join(
+            " OR ",
+            new[] { digits, digits.TrimStart('0'), Barcodes.Whole(barcode)! }
+                .Distinct(StringComparer.Ordinal)
+                .Select(term => $"barcode:{term}"));
 
         var matches = await musicBrainz.SearchReleasesAsync(query, 25, cancellationToken).ConfigureAwait(false);
         var releases = new List<MusicBrainzRelease>();
