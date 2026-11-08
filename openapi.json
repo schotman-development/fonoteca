@@ -283,6 +283,88 @@
         }
       }
     },
+    "/api/account/listenbrainz": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "The signed-in account's ListenBrainz connection and its plays.",
+        "operationId": "GetListenBrainz",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenBrainzResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Send this account's plays to ListenBrainz with this user token, and count the listens it holds.",
+        "operationId": "ConnectListenBrainz",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListenBrainzRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenBrainzResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Stop sending this account's plays to ListenBrainz; the plays stay.",
+        "operationId": "DisconnectListenBrainz",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/api/accounts": {
       "get": {
         "tags": [
@@ -9912,6 +9994,52 @@
             "format": "int32"
           },
           "unreadableDirectories": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ListenBrainzRequest": {
+        "required": [
+          "token"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ListenBrainzResponse": {
+        "required": [
+          "user",
+          "seededUtc",
+          "plays",
+          "unsent"
+        ],
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "seededUtc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "plays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unsent": {
             "type": "integer",
             "format": "int32"
           }

@@ -4,6 +4,7 @@ using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
+using Fonoteca.Api.Listening;
 using Fonoteca.Api.Mcp;
 using Fonoteca.Api.Realtime;
 using Fonoteca.Api.Startup;
@@ -268,6 +269,13 @@ builder.Services.AddAppleMusic(options =>
 // Lyrics, from LRCLIB, read by an enrichment stage and written into the files
 // by the tag write. No credential; the contact is MusicBrainz's. ADR 0016.
 builder.Services.AddLrclib(options => options.Contact = fonoteca.MusicBrainzContact);
+
+// Listeners' plays, sent on to ListenBrainz with each account's own token and
+// counted from its listens once (client issue #67). The contact is
+// MusicBrainz's, the other MetaBrainz service's.
+builder.Services.AddListenBrainz(options => options.Contact = fonoteca.MusicBrainzContact);
+builder.Services.AddSingleton<ListenBrainzService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ListenBrainzService>());
 
 // Manual acquisition. Registered unconditionally like the other two, so an
 // unconfigured instance answers "not configured" from the endpoint rather than

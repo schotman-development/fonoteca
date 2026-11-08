@@ -924,4 +924,34 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Albums from tags: {Folders} folders made or rebuilt, {Files} files on them.")]
     public static partial void TagAlbumsFiled(ILogger logger, int folders, int files);
+
+    [LoggerMessage(
+        EventId = 1800,
+        Level = LogLevel.Warning,
+        Message = "ListenBrainz: account {Account}'s plays were not counted or sent; they go at its next play.")]
+    public static partial void ListenBrainzFailed(ILogger logger, Guid account, Exception error);
+
+    [LoggerMessage(
+        EventId = 1801,
+        Level = LogLevel.Information,
+        Message = "ListenBrainz: account {Account}'s listens as {User} counted, {Plays} plays of songs held here.")]
+    public static partial void ListenBrainzSeeded(ILogger logger, Guid account, string user, int plays);
+
+    [LoggerMessage(
+        EventId = 1802,
+        Level = LogLevel.Warning,
+        Message = "ListenBrainz refused a token; its account's plays wait until it is connected again.")]
+    public static partial void ListenBrainzTokenRefused(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1803,
+        Level = LogLevel.Warning,
+        Message = "ListenBrainz refused {Count} listens, which are not sent again: {Reason}")]
+    public static partial void ListensRefused(ILogger logger, int count, string reason);
+
+    [LoggerMessage(
+        EventId = 1804,
+        Level = LogLevel.Information,
+        Message = "Play {Play} is not sent to ListenBrainz: its file is gone or names no artist.")]
+    public static partial void PlayNotSent(ILogger logger, Guid play);
 }

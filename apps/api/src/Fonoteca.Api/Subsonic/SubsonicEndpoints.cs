@@ -395,7 +395,7 @@ public static partial class SubsonicEndpoints
     /// piece's <c>composed</c> (<c>from</c>, <c>to</c>), each date an ItemDate.
     /// <c>fonotecaCompositions</c> is <c>getComposers</c> and
     /// <c>getCompositions</c>: who wrote the classical pieces held, and each
-    /// piece with its songs. <c>playlistFolders</c> is each account's own tree
+    /// piece with its songs; from version 2 each one's <c>playCount</c>. <c>playlistFolders</c> is each account's own tree
     /// of the playlists, as the spec's pull request 255 proposes it at
     /// <c>eeb7b9e</c>. <c>fonotecaTags</c> is each account's own tags on songs,
     /// nested at any depth: <c>getTags</c>, <c>getTag</c>, <c>createTag</c>,
@@ -411,24 +411,12 @@ public static partial class SubsonicEndpoints
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1, 2]), ("fonotecaRadioCatalogue", [1, 2]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1, 2]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1, 2]), ("fonotecaRadioCatalogue", [1, 2]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);
                 writer.Numbers("versions", extension.Versions);
             });
-
-    /// <summary>
-    /// A play, acknowledged and stored nowhere.
-    /// </summary>
-    /// <remarks>
-    /// Within the protocol: the endpoint exists so a client can tell a server
-    /// about a play, and a server may do nothing with it. Refusing instead makes
-    /// well-behaved clients log an error on every track, and there is no listen
-    /// table to write to — play counts are a schema change and a decision of
-    /// their own.
-    /// </remarks>
-    private static IResult Scrobble() => SubsonicResult.Ok();
 
     private static async Task<IResult> GetScanStatus(
         LibraryScanService scans,

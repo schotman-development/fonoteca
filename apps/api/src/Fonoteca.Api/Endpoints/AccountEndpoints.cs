@@ -32,7 +32,7 @@ namespace Fonoteca.Api.Endpoints;
 /// copy beside it for Subsonic's token check in the same save
 /// (<see cref="Account.SubsonicPassword"/>).
 /// </remarks>
-public static class AccountEndpoints
+public static partial class AccountEndpoints
 {
     /// <summary>Data Protection's purpose for the Subsonic copy of a password.</summary>
     private const string PasswordPurpose = "Fonoteca.Accounts.SubsonicPassword";
@@ -97,6 +97,8 @@ public static class AccountEndpoints
             .WithName("RevokeApiKey")
             .WithSummary("Revoke one of the signed-in account's API keys.")
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        MapListenBrainz(mine);
 
         var everyone = app.MapGroup("/api/accounts").WithTags("Accounts").RequireRole(AccountRoles.Admin);
 

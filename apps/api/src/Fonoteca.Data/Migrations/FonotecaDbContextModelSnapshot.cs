@@ -47,6 +47,17 @@ namespace Fonoteca.Data.Migrations
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTimeOffset?>("ListenBrainzSeededUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ListenBrainzToken")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("ListenBrainzUser")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("boolean");
 
@@ -132,6 +143,48 @@ namespace Fonoteca.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("ApiKeys");
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.Play", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ForwardedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("MediaFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("PlayedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReleaseGroupId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId")
+                        .HasDatabaseName("IX_Plays_AccountId_Unforwarded")
+                        .HasFilter("\"ForwardedUtc\" IS NULL");
+
+                    b.HasIndex("MediaFileId");
+
+                    b.HasIndex("RecordingId");
+
+                    b.HasIndex("ReleaseGroupId");
+
+                    b.HasIndex("AccountId", "PlayedUtc")
+                        .IsUnique();
+
+                    b.ToTable("Plays");
                 });
 
             modelBuilder.Entity("Fonoteca.Data.PlayQueue", b =>
@@ -1699,6 +1752,32 @@ namespace Fonoteca.Data.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Fonoteca.Data.Play", b =>
+                {
+                    b.HasOne("Fonoteca.Data.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.MediaFile", "MediaFile")
+                        .WithMany()
+                        .HasForeignKey("MediaFileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.Recording", null)
+                        .WithMany()
+                        .HasForeignKey("RecordingId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Fonoteca.Domain.Catalogue.ReleaseGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ReleaseGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MediaFile");
                 });
 
             modelBuilder.Entity("Fonoteca.Data.PlayQueue", b =>

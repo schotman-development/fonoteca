@@ -1,5 +1,6 @@
 using System.Globalization;
 using Fonoteca.Api.Endpoints;
+using Fonoteca.Api.Listening;
 using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
@@ -35,6 +36,11 @@ namespace Fonoteca.Api.Subsonic;
 /// its words and its parts' — <b>and two are computed</b>: the period
 /// (<see cref="ClassicalWorks.Period"/>), and the duration, the longest album
 /// folder's recordings of it summed, so an excerpt is not taken for the whole.
+///
+/// <b>Version 2 adds <c>playCount</c></b> on each composition and composer,
+/// for the signed-in listener: the plays of every recording of the piece, and
+/// of every piece by the composer. A play counts once however many copies of
+/// its recording are held, as a song's <c>playCount</c> does.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
@@ -51,6 +57,11 @@ public static partial class SubsonicEndpoints
             .SelectMany(piece => piece.Composers)
             .CountBy(composer => composer.Id)
             .ToDictionary();
+
+        var played = pieces
+            .SelectMany(piece => piece.Composers.Select(composer => (composer.Id, piece.PlayCount)))
+            .GroupBy(composer => composer.Id)
+            .ToDictionary(composer => composer.Key, composer => composer.Sum(piece => piece.PlayCount));
 
         var indexed = pieces
             .SelectMany(piece => piece.Composers)
@@ -72,6 +83,7 @@ public static partial class SubsonicEndpoints
                 writer.Attr("musicBrainzId", composer.Mbid.Value.ToString());
                 writer.Attr("coverArt", composer.Pictured ? SubsonicIds.Artist(composer.Id) : null);
                 writer.Attr("compositionCount", counts[composer.Id]);
+                writer.Attr("playCount", played[composer.Id]);
                 writer.Attr("starred", loved.TryGetValue(composer.Id, out var starred) ? starred : null);
             });
         }));
@@ -142,6 +154,7 @@ public static partial class SubsonicEndpoints
         writer.Attr("movementCount", piece.MovementCount);
         writer.Attr("duration", piece.Duration);
         writer.Attr("starred", piece.Starred);
+        writer.Attr("playCount", piece.PlayCount);
         writer.Children("composers", piece.Composers, static (composers, composer) =>
         {
             composers.Attr("id", SubsonicIds.Artist(composer.Id));
@@ -175,6 +188,7 @@ public static partial class SubsonicEndpoints
             .Where(recording => recording.WorkId != null && recording.Files.Any())
             .Select(recording => new
             {
+                recording.Id,
                 Work = recording.WorkId!.Value,
                 recording.Genres,
                 recording.Duration,
@@ -268,6 +282,8 @@ public static partial class SubsonicEndpoints
         var loved = await LovedAsync(db.Loves.Where(love => love.WorkId != null), love => love.WorkId!.Value, cancellationToken)
             .ConfigureAwait(false);
 
+        var plays = await PlayCounts.OfRecordingsAsync(db, cancellationToken).ConfigureAwait(false);
+
         return classical
             .Select(piece =>
             {
@@ -346,7 +362,8 @@ public static partial class SubsonicEndpoints
                                 : new Writer(null, credit.Name)),
                     ],
                     [.. writers.SelectMany(work => FileGenres.Split(works[work].Languages)).Where(code => code != "zxx").Distinct(StringComparer.Ordinal)],
-                    loved.TryGetValue(piece.Key, out var starred) ? starred : null);
+                    loved.TryGetValue(piece.Key, out var starred) ? starred : null,
+                    piece.Sum(recording => plays.GetValueOrDefault(recording.Id)));
             })
             .OrderBy(piece => piece.Piece.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(piece => piece.Id.Value)
@@ -356,6 +373,7 @@ public static partial class SubsonicEndpoints
     /// <param name="Performed">The piece and each part of it a held recording performs.</param>
     /// <param name="Cover">The album holding the most of its recordings.</param>
     /// <param name="Duration">Seconds, its longest album folder's recordings of it summed.</param>
+    /// <param name="PlayCount">The listener's plays of its recordings.</param>
     private sealed record Composition(
         WorkId Id,
         SongPiece Piece,
@@ -371,7 +389,8 @@ public static partial class SubsonicEndpoints
         int? Duration,
         IReadOnlyList<Writer> Lyricists,
         IReadOnlyList<string> Languages,
-        DateTimeOffset? Starred);
+        DateTimeOffset? Starred,
+        int PlayCount);
 
     private sealed record Composer(ArtistId Id, string Name, string? SortName, Mbid Mbid, bool Pictured, int? Born);
 

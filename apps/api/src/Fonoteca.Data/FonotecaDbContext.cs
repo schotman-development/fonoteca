@@ -25,7 +25,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     /// Set by the Subsonic guard for the account it signed in. Every query of
     /// <see cref="Loves"/>, <see cref="Tags"/>, <see cref="SongTags"/>,
     /// <see cref="PlaylistFolders"/>, <see cref="PlaylistPlacements"/> and
-    /// <see cref="PlayQueues"/> is filtered by it, so a handler cannot show one person another's by
+    /// <see cref="PlayQueues"/> and <see cref="Plays"/> are filtered by it, so a handler cannot show one person another's by
     /// forgetting a <c>Where</c>; code that moves them for everybody
     /// (<c>CatalogueWriter</c>, a playlist's rename) says
     /// <c>IgnoreQueryFilters</c>.
@@ -48,6 +48,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
     public DbSet<PlaylistFolder> PlaylistFolders => Set<PlaylistFolder>();
     public DbSet<PlaylistPlacement> PlaylistPlacements => Set<PlaylistPlacement>();
     public DbSet<PlayQueue> PlayQueues => Set<PlayQueue>();
+    public DbSet<Play> Plays => Set<Play>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<Contribution> Contributions => Set<Contribution>();
     public DbSet<RecordingSession> RecordingSessions => Set<RecordingSession>();
@@ -508,6 +509,18 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.HasQueryFilter(x => x.AccountId == AccountId);
         });
 
+        builder.Entity<Play>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.MediaFile).WithMany().HasForeignKey(x => x.MediaFileId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<Recording>().WithMany().HasForeignKey(x => x.RecordingId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<ReleaseGroup>().WithMany().HasForeignKey(x => x.ReleaseGroupId).OnDelete(DeleteBehavior.SetNull);
+            e.HasQueryFilter(x => x.AccountId == AccountId);
+            e.HasIndex(x => new { x.AccountId, x.PlayedUtc }).IsUnique();
+            e.HasIndex(x => x.AccountId).HasFilter("\"ForwardedUtc\" IS NULL").HasDatabaseName("IX_Plays_AccountId_Unforwarded");
+        });
+
         builder.Entity<ArtistCredit>(e =>
         {
             e.HasKey(x => x.Id);
@@ -734,7 +747,12 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
         base.OnModelCreating(builder);
 
         // After the base call, which is where Identity configures its own.
-        builder.Entity<Account>(e => e.Property(x => x.SubsonicPassword).HasMaxLength(2000));
+        builder.Entity<Account>(e =>
+        {
+            e.Property(x => x.SubsonicPassword).HasMaxLength(2000);
+            e.Property(x => x.ListenBrainzToken).HasMaxLength(2000);
+            e.Property(x => x.ListenBrainzUser).HasMaxLength(200);
+        });
 
         builder.Entity<ApiKey>(e =>
         {

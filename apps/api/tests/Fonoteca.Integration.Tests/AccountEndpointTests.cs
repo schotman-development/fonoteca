@@ -533,7 +533,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         Assert.True(mine.GetProperty("adminRole").GetBoolean());
         Assert.True(mine.GetProperty("coverArtRole").GetBoolean());
         Assert.False(mine.GetProperty("jukeboxRole").GetBoolean());
-        Assert.False(mine.GetProperty("scrobblingEnabled").GetBoolean());
+        Assert.True(mine.GetProperty("scrobblingEnabled").GetBoolean());
         Assert.Equal(0, Assert.Single(mine.GetProperty("folder").EnumerateArray()).GetInt32());
 
         Assert.Equal(10, ErrorCode(await SubsonicAsync(client, $"createUser.view?{asMe}&username=you&password=a-test-passphrase")));
@@ -601,6 +601,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
         string[] expected =
         [
             "DELETE /api/account/keys/{id:guid} Admin|Settings",
+            "DELETE /api/account/listenbrainz Admin|Settings",
             "DELETE /api/accounts/{id:guid} Admin",
             "DELETE /api/catalogue/artists/{id:guid}/banner CoverArt",
             "DELETE /api/catalogue/artists/{id:guid}/portrait CoverArt",
@@ -613,6 +614,7 @@ public sealed class AccountEndpointTests(PostgresFixture postgres) : IAsyncLifet
             "DELETE /api/library/probe Admin",
             "DELETE /api/library/tags Admin",
             "POST /api/account/keys Admin|Settings",
+            "POST /api/account/listenbrainz Admin|Settings",
             "POST /api/account/login -",
             "POST /api/account/logout -",
             "POST /api/account/password Admin|Settings",

@@ -142,14 +142,15 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
-    /// A heart on a song, and a listener's tag on it, go with its files to the
-    /// recording row that now holds them, wherever the old row is about to go:
-    /// a merge, and the rows a download minted that MusicBrainz names. Saved by
-    /// the caller.
+    /// A heart on a song, a listener's tag on it and their plays of it go with
+    /// its files to the recording row that now holds them, wherever the old
+    /// row is about to go: a merge, and the rows a download minted that
+    /// MusicBrainz names. Saved by the caller.
     /// </summary>
     /// <remarks>
     /// Once per account, and once per tag: where the new row has it already,
-    /// the old row's cascades away with it. The change tracker is asked as
+    /// the old row's cascades away with it. Every play goes, since each is its
+    /// own second. The change tracker is asked as
     /// well as the database, because two of an album's rows can fold into one
     /// before the save. Every account's, so past the query filters.
     /// </remarks>
@@ -173,6 +174,11 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         foreach (var tag in await db.SongTags.IgnoreQueryFilters().Where(tag => tag.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
         {
             if (tagged.Add(tag.TagId)) tag.RecordingId = to;
+        }
+
+        foreach (var play in await db.Plays.IgnoreQueryFilters().Where(play => play.RecordingId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        {
+            play.RecordingId = to;
         }
     }
 
@@ -222,9 +228,9 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
     }
 
     /// <summary>
-    /// An album's heart goes with its files from a release group a download
-    /// minted to the one they are filed under now, as a song's does. Saved by
-    /// the caller.
+    /// An album's heart and its plays go with its files from a release group a
+    /// download minted to the one they are filed under now, as a song's do.
+    /// Saved by the caller.
     /// </summary>
     internal static async Task CarryAlbumLovesAsync(FonotecaDbContext db, ReleaseGroupId from, ReleaseGroupId to, CancellationToken cancellationToken)
     {
@@ -239,6 +245,11 @@ internal sealed class CatalogueWriter(FonotecaDbContext db, ICollection<Mbid> ar
         foreach (var love in await db.Loves.IgnoreQueryFilters().Where(love => love.ReleaseGroupId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
         {
             if (taken.Add(love.AccountId)) love.ReleaseGroupId = to;
+        }
+
+        foreach (var play in await db.Plays.IgnoreQueryFilters().Where(play => play.ReleaseGroupId == from).ToListAsync(cancellationToken).ConfigureAwait(false))
+        {
+            play.ReleaseGroupId = to;
         }
     }
 

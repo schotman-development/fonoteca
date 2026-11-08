@@ -125,6 +125,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/listenbrainz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in account's ListenBrainz connection and its plays. */
+        get: operations["GetListenBrainz"];
+        put?: never;
+        /** Send this account's plays to ListenBrainz with this user token, and count the listens it holds. */
+        post: operations["ConnectListenBrainz"];
+        /** Stop sending this account's plays to ListenBrainz; the plays stay. */
+        delete: operations["DisconnectListenBrainz"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts": {
         parameters: {
             query?: never;
@@ -3077,6 +3096,18 @@ export interface components {
             /** Format: int32 */
             unreadableDirectories: number;
         };
+        ListenBrainzRequest: {
+            token: null | string;
+        };
+        ListenBrainzResponse: {
+            user: null | string;
+            /** Format: date-time */
+            seededUtc: null | string;
+            /** Format: int32 */
+            plays: number;
+            /** Format: int32 */
+            unsent: number;
+        };
         MatchingQueueResponse: {
             /** Format: int32 */
             total: number;
@@ -4135,6 +4166,86 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
+            };
+        };
+    };
+    GetListenBrainz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListenBrainzResponse"];
+                };
+            };
+        };
+    };
+    ConnectListenBrainz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListenBrainzRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListenBrainzResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DisconnectListenBrainz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -11,7 +11,7 @@ namespace Fonoteca.Data;
 /// are one shared thing, and an account may do what its <see cref="Roles"/>
 /// say. What an account owns is what a person owns — their hearts
 /// (<c>Love.AccountId</c>), their tags, their playlist folders, their play
-/// queue and their API keys. Playlists stay everyone's.
+/// queue, their plays and their API keys. Playlists stay everyone's.
 ///
 /// ASP.NET Core Identity's own user, so the password hash, the lockout and the
 /// security stamp that signs a person out everywhere on a reset are the
@@ -41,6 +41,26 @@ public sealed class Account : IdentityUser<Guid>
 
     /// <summary>OpenSubsonic's <c>maxBitRate</c>, kept and reported; nothing transcodes, so nothing applies it.</summary>
     public int? MaxBitRate { get; set; }
+
+    /// <summary>
+    /// The account's ListenBrainz user token, protected as
+    /// <see cref="SubsonicPassword"/> is, which its plays are sent with.
+    /// </summary>
+    /// <remarks>
+    /// The listener's own, pasted on the accounts page: ListenBrainz offers no
+    /// other way for a server to send listens as somebody (the owner's choice,
+    /// client issue #67).
+    /// </remarks>
+    public string? ListenBrainzToken { get; set; }
+
+    /// <summary>The ListenBrainz user the token signs in as, as ListenBrainz answered it.</summary>
+    public string? ListenBrainzUser { get; set; }
+
+    /// <summary>
+    /// When the plays ListenBrainz held for <see cref="ListenBrainzUser"/> were
+    /// counted here; null until they have been, once.
+    /// </summary>
+    public DateTimeOffset? ListenBrainzSeededUtc { get; set; }
 
     /// <summary>A new account's roles where nobody named any: OpenSubsonic's <c>createUser</c> defaults.</summary>
     public const AccountRoles DefaultRoles = AccountRoles.Settings | AccountRoles.Stream;

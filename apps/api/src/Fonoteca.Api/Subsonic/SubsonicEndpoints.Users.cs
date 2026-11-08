@@ -18,7 +18,8 @@ namespace Fonoteca.Api.Subsonic;
 /// words both. A password comes clear or as <c>enc:</c> hex, like <c>p</c>.
 /// One music folder, so <c>musicFolderId</c> is read by nothing; no LDAP, so
 /// <c>ldapAuthenticated</c> is not either; and <c>scrobblingEnabled</c> is
-/// false, since nothing here scrobbles.
+/// true, since every account's plays are counted here, and sent on to
+/// ListenBrainz where it is connected.
 /// </remarks>
 public static partial class SubsonicEndpoints
 {
@@ -164,7 +165,7 @@ public static partial class SubsonicEndpoints
     {
         user.Attr("username", account.Name);
         user.Attr("email", account.Email);
-        user.Attr("scrobblingEnabled", false);
+        user.Attr("scrobblingEnabled", true);
         user.Attr("maxBitRate", account.MaxBitRate);
 
         foreach (var role in Enum.GetValues<AccountRoles>().Where(role => role != AccountRoles.None))

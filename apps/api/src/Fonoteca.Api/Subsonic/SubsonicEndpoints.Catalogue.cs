@@ -1,6 +1,7 @@
 using System.Globalization;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
+using Fonoteca.Api.Listening;
 using Fonoteca.Data;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
@@ -178,6 +179,8 @@ public static partial class SubsonicEndpoints
         var loved = await LovedAsync(db.Loves.Where(love => love.ReleaseGroupId != null), love => love.ReleaseGroupId!.Value, cancellationToken)
             .ConfigureAwait(false);
 
+        var played = await PlayCounts.OfAlbumsAsync(db, cancellationToken).ConfigureAwait(false);
+
         var various = await db.Artists
             .AsNoTracking()
             .Where(row => row.Mbid == CatalogueTags.VariousArtists)
@@ -196,6 +199,7 @@ public static partial class SubsonicEndpoints
                     : row.Credits.Select(credit => (credit.ArtistId, credit.CreditedAs, credit.Name, credit.JoinPhrase)).ToList();
 
                 var line = CatalogueEndpoints.CreditLine(billed.Select(credit => (credit.CreditedAs ?? credit.Name, credit.JoinPhrase)));
+                var heard = played.GetValueOrDefault(row.Id);
 
                 return new Album(
                     row.Id,
@@ -215,7 +219,9 @@ public static partial class SubsonicEndpoints
                     // Spelt as the files' RELEASETYPE is, and a compilation
                     // as their COMPILATION is: billed to Various Artists.
                     [.. CatalogueTags.ReleaseTypesOf(row.PrimaryType, row.SecondaryTypes).Select(type => type.ToLowerInvariant())],
-                    various is { } compilers && billed.Any(credit => credit.ArtistId == compilers));
+                    various is { } compilers && billed.Any(credit => credit.ArtistId == compilers),
+                    heard.Plays,
+                    heard.Plays > 0 ? heard.Last : null);
             })
             .ToList();
 
@@ -400,6 +406,8 @@ public static partial class SubsonicEndpoints
 
         var tags = await SongTagsAsync(db, recordings, ids, cancellationToken).ConfigureAwait(false);
 
+        var played = await PlayCounts.OfSongsAsync(db, recordings, ids, cancellationToken).ConfigureAwait(false);
+
         // The album folder first: two rips of one album are one album here, and
         // interleaving them would play every track twice in a row.
         return rows
@@ -416,9 +424,20 @@ public static partial class SubsonicEndpoints
                 row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default,
                 row.Recording is { } song && lovedSongs.TryGetValue(song, out var loved) ? loved
                     : lovedFiles.TryGetValue(row.Id, out var own) ? own : null,
-                [.. (row.Recording is { } tagged ? tags.Songs[tagged] : tags.Files[row.Id]).Order().Select(SubsonicIds.Tag)]))
+                [.. (row.Recording is { } tagged ? tags.Songs[tagged] : tags.Files[row.Id]).Order().Select(SubsonicIds.Tag)],
+                row.Recording is { } heard
+                    ? played.Recordings.GetValueOrDefault(heard)
+                    : played.Files.GetValueOrDefault(row.Id)))
             .ToList();
     }
+
+    /// <summary>These files as songs, by file, as a client is shown them.</summary>
+    internal static async Task<Dictionary<MediaFileId, Song>> SongsOfAsync(
+        FonotecaDbContext db,
+        IReadOnlyCollection<MediaFileId> files,
+        CancellationToken cancellationToken) =>
+        (await SongsAsync(db, db.MediaFiles.AsNoTracking().Where(file => files.Contains(file.Id)), cancellationToken).ConfigureAwait(false))
+            .ToDictionary(song => SubsonicIds.AsSong(song.Id)!.Value);
 
     /// <summary>
     /// When each of these songs was first loved: on its recording, or on any
@@ -714,7 +733,8 @@ public static partial class SubsonicEndpoints
         SongWork? work,
         (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded) performance,
         DateTimeOffset? starred,
-        IReadOnlyList<string> tagIds)
+        IReadOnlyList<string> tagIds,
+        PlayCounts.Count played)
     {
         var edits = PersonEdits.Combine(row.AlbumEdits, row.PressingEdits);
 
@@ -776,7 +796,9 @@ public static partial class SubsonicEndpoints
             performance.Contributors ?? [],
             performance.Recorded,
             starred,
-            tagIds);
+            tagIds,
+            played.Plays,
+            played.Plays > 0 ? played.Last : null);
     }
 
     /// <summary>One media file and everything around it a song element needs.</summary>

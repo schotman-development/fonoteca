@@ -459,6 +459,9 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
             seed.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = tag.Id, RecordingId = old.Id });
             if (survivorLoved) seed.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = tag.Id, RecordingId = survivor.Id });
 
+            // A play whose file is gone counts on the recording it held, so it moves too.
+            seed.Plays.Add(new Play { Id = Guid.CreateVersion7(), AccountId = other, PlayedUtc = decided, RecordingId = old.Id });
+
             var release = new Release { Id = ReleaseId.New(), Title = "Symphonies", Mbid = Mb("a0000000-0000-4000-8000-000000000001") };
             seed.Releases.Add(release);
 
@@ -584,6 +587,7 @@ public sealed partial class EnrichmentPassTests(PostgresFixture postgres) : IAsy
         Assert.Equal(survivorLoved ? decided.AddDays(1) : decided, loves.Single(love => love.AccountId == null).LovedUtc);
         Assert.Equal(decided, loves.Single(love => love.AccountId == other).LovedUtc);
         Assert.Equal(survivorRow, Assert.Single(await db.SongTags.IgnoreQueryFilters().AsNoTracking().ToListAsync(Token)).RecordingId);
+        Assert.Equal(survivorRow, Assert.Single(await db.Plays.IgnoreQueryFilters().AsNoTracking().ToListAsync(Token)).RecordingId);
     }
 
     /// <summary>

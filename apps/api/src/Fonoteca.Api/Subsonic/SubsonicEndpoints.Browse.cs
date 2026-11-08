@@ -229,11 +229,9 @@ public static partial class SubsonicEndpoints
     /// A shelf of albums.
     /// </summary>
     /// <remarks>
-    /// <b>Two of the protocol's list types come back empty on purpose.</b>
-    /// <c>frequent</c> and <c>recent</c> are questions about listening, and
-    /// nothing here records a play — so an album list is the wrong answer to
-    /// both. Empty says "nothing"; a list of albums would say "these are your
-    /// most played", which would be an invention. <c>starred</c> is the loved
+    /// <c>frequent</c> and <c>recent</c> are the signed-in listener's albums
+    /// played, most played and last played first (<see cref="Listening.PlayCounts"/>);
+    /// an album never played is on neither. <c>starred</c> is the loved
     /// albums, newest love first.
     /// </remarks>
     private static async Task<IResult> GetAlbumList2(
@@ -244,13 +242,6 @@ public static partial class SubsonicEndpoints
         var type = Text(http, "type") ?? "alphabeticalByName";
         var size = Number(http, "size", DefaultListSize, MaxListSize);
         var offset = Number(http, "offset", 0, int.MaxValue);
-
-        if (type is "frequent" or "recent")
-        {
-            return SubsonicResult.Ok(
-                "albumList2",
-                list => list.Children("album", Array.Empty<Album>(), WriteAlbum));
-        }
 
         var albums = await AlbumsAsync(db, artist: null, cancellationToken).ConfigureAwait(false);
 
@@ -276,6 +267,13 @@ public static partial class SubsonicEndpoints
             "random" => albums.OrderBy(_ => Random.Shared.Next()),
 
             "starred" => albums.Where(album => album.Starred is not null).OrderByDescending(album => album.Starred),
+
+            "frequent" => albums
+                .Where(album => album.PlayCount > 0)
+                .OrderByDescending(album => album.PlayCount)
+                .ThenByDescending(album => album.Played),
+
+            "recent" => albums.Where(album => album.Played is not null).OrderByDescending(album => album.Played),
 
             _ => albums.OrderBy(album => album.Name, StringComparer.OrdinalIgnoreCase),
         };
@@ -571,6 +569,8 @@ public static partial class SubsonicEndpoints
         writer.Attr("duration", album.Duration);
         writer.Attr("created", album.Created);
         writer.Attr("starred", album.Starred);
+        writer.Attr("playCount", album.PlayCount);
+        writer.Attr("played", album.Played);
         writer.Attr("year", album.Year);
         writer.Attr("genre", album.Genres.Count > 0 ? album.Genres[0] : null);
         writer.Attr("musicBrainzId", album.Mbid?.Value.ToString());
@@ -626,6 +626,8 @@ public static partial class SubsonicEndpoints
         writer.Attr("artistId", song.ArtistId is { } billed ? SubsonicIds.Artist(billed) : null);
         writer.Attr("created", song.Created);
         writer.Attr("starred", song.Starred);
+        writer.Attr("playCount", song.PlayCount);
+        writer.Attr("played", song.Played);
         writer.Attr("type", "music");
         writer.Attr("isVideo", false);
         writer.Attr("genre", song.Genres.Count > 0 ? song.Genres[0] : null);
@@ -763,7 +765,9 @@ internal sealed record Album(
     DateTimeOffset? Starred,
     IReadOnlyList<(ArtistId Id, string Name)> Artists,
     IReadOnlyList<string> ReleaseTypes,
-    bool IsCompilation);
+    bool IsCompilation,
+    int PlayCount,
+    DateTimeOffset? Played);
 
 /// <summary>A media file, as a song.</summary>
 /// <param name="Id">Already in its wire form: a catalogued file is <c>tr-</c>, anything else <c>fo-</c>.</param>
@@ -795,7 +799,9 @@ internal sealed record Song(
     IReadOnlyList<SongContributor> Contributors,
     SongRecorded? Recorded,
     DateTimeOffset? Starred,
-    IReadOnlyList<string> TagIds);
+    IReadOnlyList<string> TagIds,
+    int PlayCount,
+    DateTimeOffset? Played);
 
 /// <summary>One credit, by the tag write's role; an artist the catalogue has no row for has no id.</summary>
 internal sealed record SongContributor(string Role, string? SubRole, ArtistId? ArtistId, string Name, Mbid? Mbid);
