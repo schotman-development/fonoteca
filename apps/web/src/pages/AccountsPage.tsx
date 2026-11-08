@@ -72,8 +72,8 @@ export function AccountsPage() {
         <Text tone="secondary" block>
           An account signs in here and in Subsonic apps with the same name and password, and may do
           what its roles say, there as here. The library and its playlists are everyone's; what is
-          an account's own is its hearts and its API keys. An admin adds, changes and removes
-          accounts.
+          an account's own is its hearts, its plays and its API keys. An admin adds, changes and
+          removes accounts.
         </Text>
       </Stack>
 
@@ -105,6 +105,8 @@ export function AccountsPage() {
       {admin ? <Everyone me={me} /> : null}
 
       {settings ? <ApiKeys /> : null}
+
+      {settings ? <ListenBrainz /> : null}
     </Stack>
   )
 }
@@ -644,6 +646,110 @@ function ApiKeys() {
             </Field>
             <Button type="submit" variant="secondary" disabled={busy || name.trim() === ''}>
               Make key
+            </Button>
+          </Stack>
+        </form>
+
+        {error != null ? (
+          <Text size="sm" tone="danger" role="alert" block>
+            {error}
+          </Text>
+        ) : null}
+      </Stack>
+    </section>
+  )
+}
+
+/**
+ * The signed-in account's ListenBrainz connection: every play an app reports
+ * here is sent on with this token, and the listens ListenBrainz already holds
+ * are counted here once, when it is first connected.
+ */
+function ListenBrainz() {
+  const [version, setVersion] = useState(0)
+  const connection = useApiQuery(() => api.get('/api/account/listenbrainz'), [version])
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await action()
+      setToken('')
+      setVersion((n) => n + 1)
+    } catch (cause) {
+      setError(describeError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const state = connection.status === 'ready' ? connection.data : null
+
+  return (
+    <section aria-labelledby="listenbrainz-heading">
+      <Stack direction="column" gap={12}>
+        <Stack direction="column" gap={4}>
+          <h2 id="listenbrainz-heading" className={styles.title}>
+            <Text weight="semibold">ListenBrainz</Text>
+          </h2>
+          <Text size="sm" tone="secondary" block>
+            Plays an app reports here are counted for you and sent on to your ListenBrainz account.
+            On first connecting, the listens it already holds of songs in this library are counted
+            too. The token is on your ListenBrainz settings page.
+          </Text>
+        </Stack>
+
+        {state != null ? (
+          <Stack gap={8} align="center" wrap>
+            <Text size="sm">
+              {state.user != null ? (
+                <>
+                  Sending to <Text weight="semibold">{state.user}</Text>.{' '}
+                </>
+              ) : (
+                'Not connected. '
+              )}
+              {`${state.plays} plays counted`}
+              {state.unsent > 0 ? `, ${state.unsent} not sent yet` : ''}
+              {state.user != null && state.seededUtc == null ? '; counting your listens…' : '.'}
+            </Text>
+            {state.user != null ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void run(() => api.delete('/api/account/listenbrainz'))}
+              >
+                Disconnect
+              </Button>
+            ) : null}
+          </Stack>
+        ) : null}
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run(() => api.post('/api/account/listenbrainz', { json: { token: token.trim() } }))
+          }}
+        >
+          <Stack gap={8} align="end" wrap>
+            <Field label="User token" hint="Pasted once; kept protected, never shown again.">
+              {(control) => (
+                <Input
+                  {...control}
+                  type="password"
+                  autoComplete="off"
+                  value={token}
+                  maxLength={200}
+                  onChange={(event) => setToken(event.target.value)}
+                />
+              )}
+            </Field>
+            <Button type="submit" variant="secondary" disabled={busy || token.trim() === ''}>
+              {state?.user != null ? 'Change token' : 'Connect'}
             </Button>
           </Stack>
         </form>
