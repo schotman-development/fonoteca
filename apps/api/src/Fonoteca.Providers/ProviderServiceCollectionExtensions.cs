@@ -6,6 +6,7 @@ using Fonoteca.Providers.AppleMusic;
 using Fonoteca.Providers.AudioDb;
 using Fonoteca.Providers.CoverArt;
 using Fonoteca.Providers.Genres;
+using Fonoteca.Providers.ListenBrainz;
 using Fonoteca.Providers.Lrclib;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Providers.Qobuz;
@@ -504,6 +505,43 @@ public static class ProviderServiceCollectionExtensions
         });
 
         services.AddSingleton<ISongLyrics, LrclibLyrics>();
+
+        return services;
+    }
+
+    /// <summary>Registers ListenBrainz and the HTTP client behind it.</summary>
+    /// <remarks>
+    /// Each request carries its listener's token itself, so the client holds
+    /// none. A rate limit is a 429, which the pipeline backs off from under
+    /// the gate like any other provider's.
+    /// </remarks>
+    public static IServiceCollection AddListenBrainz(
+        this IServiceCollection services,
+        Action<ListenBrainzOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.AddKeyedSingleton(ListenBrainzOptions.HttpClientName, (provider, _) =>
+            new RequestGate(Options<ListenBrainzOptions>(provider).MinimumRequestInterval));
+
+        var client = services.AddHttpClient(ListenBrainzOptions.HttpClientName, (provider, http) =>
+        {
+            http.BaseAddress = ListenBrainzOptions.Server;
+            http.DefaultRequestHeaders.Add("User-Agent", $"Fonoteca/0.1 ( {Options<ListenBrainzOptions>(provider).Contact} )");
+            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
+        client.ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        });
+
+        AddResilienceThenGate(client, ListenBrainzOptions.HttpClientName);
+
+        services.AddSingleton<IListenBrainz, ListenBrainzClient>();
 
         return services;
     }
