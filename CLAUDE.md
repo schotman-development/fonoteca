@@ -213,6 +213,7 @@ A capability is a pure rule in `Domain`, an adapter, a service, an endpoint and
 | monitoring | `Domain/Catalogue/ReleaseTitleMatch.cs` | `Providers/Qobuz/QobuzReleaseDiscovery.cs` |
 | playlists | `Domain/Catalogue/PlaylistFile.cs`, `SmartRules.cs` (and its TS twin `smartRules.ts`) | `Api/Library/PlaylistFiles.cs`, `Api/Library/SmartQuery.cs`, `Api/Endpoints/CatalogueEndpoints.Playlists.cs` |
 | radio | `Domain/Catalogue/RadioStationFile.cs` | `Api/Subsonic/SubsonicEndpoints.Radio.cs` |
+| plays & ListenBrainz | `Domain/Catalogue/ListenMatch.cs` | `Api/Subsonic/SubsonicEndpoints.Scrobble.cs`, `Api/Listening/{ListenBrainzService,PlayCounts}.cs`, `Providers/ListenBrainz/` |
 | duplicates | `Domain/Catalogue/Duplicates.cs` | `Api/Endpoints/CatalogueEndpoints.Duplicates.cs`, trashed through `FileManagerService` |
 | MCP | — | `Api/Mcp/LibraryTools.cs` |
 
@@ -1050,7 +1051,7 @@ row stops being a gap the moment the catalogue gains the album. *What is cached
 is answers, never rankings*, applied to the one place that was storing a verdict.
 
 **`Artist.Followed`, `ReleaseGroup.Monitored`, `DiscoveredRecord.Monitored` and
-a listener's `Loves` are the only facts in the catalogue nothing can recompute** — everything else
+a listener's `Loves` and `Plays` are the only facts in the catalogue nothing can recompute** — everything else
 derives from audio, a provider or a person's answer; these are standing intent,
 and a rescan must never touch them. Monitoring is a filter, not an instruction: a
 *first* browse is the baseline and writes everything unmonitored, later browses
@@ -1138,7 +1139,7 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 ## Accounts
 
 ADR 0018. **The library has no owner; an account owns only its hearts, its
-tags, its playlist folders, its play queue and its API keys**, and its roles
+tags, its playlist folders, its play queue, its plays and its API keys**, and its roles
 say what it may do. Never scope a catalogue fact, a file or a playlist by
 account.
 
@@ -1172,6 +1173,22 @@ account.
   lost is left out when read.
 - **The journal names the account** (`AccountCallerContext`); work with no
   request behind it is `system`, `/mcp` is `agent`.
+- **Plays** (client issue #67, the owner's choice, as Navidrome does): a
+  Subsonic `scrobble` is stored as a `Play`, one per account per second, and
+  `ListenBrainzService` sends it on with the account's own ListenBrainz token
+  (kept under Data Protection like the Subsonic password, set on the
+  accounts page) at the second it began, so a play reported late is a listen
+  at its own time; `submission=false` goes as playing now and is kept
+  nowhere. Connecting first counts the listens ListenBrainz holds of songs
+  held here, once (`ListenMatch`: recording MBID, then folded title and
+  artist, refusing a name two recordings share). Woken by a scrobble, a
+  connection and once per connected account at start — never swept, so a
+  failed send waits for the next of those. A song's `playCount` is its
+  recording's (every copy agrees), an album's the plays of its files; both
+  read through the file to what it holds now, and fall back on what it held
+  when played where the file is gone. Plays are carried with hearts in
+  `CarryLovesAsync`/`CarryAlbumLovesAsync`, and served on songs, albums,
+  `getAlbumList2` `frequent`/`recent` and `fonotecaCompositions` v2.
 
 ## Frontend
 
