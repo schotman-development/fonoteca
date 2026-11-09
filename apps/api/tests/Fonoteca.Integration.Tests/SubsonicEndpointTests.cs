@@ -758,8 +758,9 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
 
     /// <summary>
     /// A classical song names its piece and its movement, a whole piece names
-    /// only itself, and a song names neither; each says who composed it. A
-    /// movement whose recording's own title names another has no number.
+    /// only itself, and a song names neither, nor does a song in a show on a
+    /// classical album; each says who composed it. A movement whose
+    /// recording's own title names another has no number.
     /// </summary>
     [Fact]
     public async Task AClassicalSongNamesItsPieceAndMovement()
@@ -789,7 +790,9 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         };
         var overture = new Work { Id = WorkId.New(), Title = "Egmont, Op. 84: Overture", Mbid = new Mbid(Guid.CreateVersion7()) };
         var song = new Work { Id = WorkId.New(), Title = "Adelaide", Type = "Song" };
-        var works = new[] { movement, overture, song };
+        var show = new Work { Id = WorkId.New(), Title = "Chaplin", Mbid = new Mbid(Guid.CreateVersion7()), Type = "Soundtrack", PartCount = 13 };
+        var smile = new Work { Id = WorkId.New(), Title = "Smile", Type = "Song", ParentId = show.Id, Position = 13 };
+        var works = new[] { movement, overture, song, smile };
         var recordings = works
             .Select(work => new Recording { Id = RecordingId.New(), Title = work.Title, WorkId = work.Id })
             .ToList();
@@ -824,7 +827,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             db.ReleaseGroups.Add(album);
             db.Releases.Add(pressing);
             db.Artists.Add(beethoven);
-            db.Works.AddRange(symphony, movement, overture, song);
+            db.Works.AddRange(symphony, movement, overture, song, show, smile);
             db.Recordings.AddRange(recordings);
             db.MediaFiles.AddRange(files);
 
@@ -832,7 +835,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             // catalogue's; the overture's, with no artist row at all.
             db.Contributions.AddRange(
                 Composer(movement.Id, beethoven.Mbid, "Beethoven"),
-                Composer(overture.Id, null, "L. van Beethoven"));
+                Composer(overture.Id, null, "L. van Beethoven"),
+                Composer(smile.Id, null, "Charlie Chaplin"));
             await db.SaveChangesAsync(Token);
         }
 
@@ -870,11 +874,16 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             Assert.Empty(lied.GetProperty("works").EnumerateArray());
             Assert.Empty(lied.GetProperty("movements").EnumerateArray());
             Assert.False(lied.TryGetProperty("displayComposer", out _));
+
+            var chaplin = songs[smile.Title];
+            Assert.Empty(chaplin.GetProperty("works").EnumerateArray());
+            Assert.Empty(chaplin.GetProperty("movements").EnumerateArray());
+            Assert.Equal("Charlie Chaplin", chaplin.GetProperty("displayComposer").GetString());
         }
         finally
         {
             await using var db = PostgresFixture.CreateContext(_connectionString);
-            var workIds = new[] { symphony.Id, movement.Id, overture.Id, song.Id };
+            var workIds = new[] { symphony.Id, movement.Id, overture.Id, song.Id, show.Id, smile.Id };
             db.Contributions.RemoveRange(await db.Contributions.Where(row => row.WorkId != null && workIds.Contains(row.WorkId.Value)).ToListAsync(Token));
             db.MediaFiles.RemoveRange(await db.MediaFiles.Where(file => file.ReleaseGroupId == album.Id).ToListAsync(Token));
             var ids = recordings.Select(recording => recording.Id).ToList();
@@ -1142,7 +1151,8 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
     /// Whoever composed a held classical piece is listed with how many they
     /// wrote; the pieces are listed by name, all or one composer's, and one
     /// opens with its movements in order and every song of it on every album.
-    /// A song, a movement, nobody and a composer with no row are none of these.
+    /// A song, a song in a show, a movement, nobody and a composer with no row
+    /// are none of these.
     /// Each carries its form, key, period, movements, longest performance,
     /// lyricists and languages; a film score's suite stays with its form.
     /// </summary>
@@ -1189,9 +1199,13 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         // Typed on the whole, recorded by its movement: kept, as its form.
         var suite = new Work { Id = WorkId.New(), Title = "The Empire Strikes Back: Suite", Type = "Soundtrack", ComposedBegin = "1980" };
         var throne = new Work { Id = WorkId.New(), Title = "The Empire Strikes Back: Suite: The Imperial March", ParentId = suite.Id, Position = 1 };
+
+        // A song in a musical, on an album tagged classical.
+        var nanette = new Work { Id = WorkId.New(), Title = "No, No, Nanette", Type = "Musical" };
+        var teaForTwo = new Work { Id = WorkId.New(), Title = "Tea for Two", Type = "Song", ParentId = nanette.Id, Position = 1 };
         var played = new (Work Work, ReleaseGroup Album)[]
         {
-            (second, studio), (first, studio), (first, live), (freischutz, studio), (lied, studio), (ouverture, studio), (festival, live), (adelaide, studio), (throne, studio),
+            (second, studio), (first, studio), (first, live), (freischutz, studio), (lied, studio), (ouverture, studio), (festival, live), (adelaide, studio), (throne, studio), (teaForTwo, live),
         };
 
         // The studio's two movements together outlast the live one, and one
@@ -1227,7 +1241,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         {
             db.ReleaseGroups.AddRange(studio, live);
             db.Artists.AddRange(beethoven, brahms, weber, traditional, goethe);
-            db.Works.AddRange(symphony, second, first, freischutz, festival, egmont, lied, ouverture, adelaide, suite, throne);
+            db.Works.AddRange(symphony, second, first, freischutz, festival, egmont, lied, ouverture, adelaide, suite, throne, nanette, teaForTwo);
             db.Recordings.AddRange(recordings);
             db.MediaFiles.AddRange(files);
 
@@ -1242,6 +1256,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
                 Composer(egmont.Id, beethoven.Mbid!.Value, "Beethoven"),
                 Composer(ouverture.Id, new Mbid(Guid.CreateVersion7()), "L. van Beethoven"),
                 Composer(adelaide.Id, beethoven.Mbid!.Value, "Beethoven"),
+                Composer(teaForTwo.Id, weber.Mbid!.Value, "Weber"),
 
                 // Goethe twice, once on the piece; a writer with no row; nobody.
                 Composer(lied.Id, goethe.Mbid!.Value, "Goethe", "lyricist"),

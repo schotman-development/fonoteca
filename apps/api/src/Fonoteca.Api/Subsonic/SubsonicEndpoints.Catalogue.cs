@@ -623,6 +623,7 @@ public static partial class SubsonicEndpoints
 
         var classical = performances
             .GroupBy(performance => performance.Work)
+            .Where(work => !ClassicalWorks.SongOfAShow(works[work.Key].Type, works[pieces[work.Key]].Type))
             .Where(work => ClassicalWorks.Is(
                     pieces[work.Key] == work.Key ? works[work.Key].Type : null,
                     work.SelectMany(performance => performance.Albums.Prepend(performance.Genres)))

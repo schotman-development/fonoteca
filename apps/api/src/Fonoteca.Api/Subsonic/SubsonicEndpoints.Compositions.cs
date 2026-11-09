@@ -216,8 +216,11 @@ public static partial class SubsonicEndpoints
             .ConfigureAwait(false);
 
         // SongWorksAsync's piece, so a cycle in the chain ends where it does there.
+        WorkId TopOf(WorkId work) => parents.TryGetValue(work, out var parent) ? WorkTree.Top(parent, parents) : work;
+
         var classical = held
-            .GroupBy(recording => parents.TryGetValue(recording.Work, out var parent) ? WorkTree.Top(parent, parents) : recording.Work)
+            .Where(recording => !ClassicalWorks.SongOfAShow(works[recording.Work].Type, works[TopOf(recording.Work)].Type))
+            .GroupBy(recording => TopOf(recording.Work))
             .Where(piece => ClassicalWorks.Is(
                     piece.Any(recording => recording.Work == piece.Key) ? works[piece.Key].Type : null,
                     piece.SelectMany(recording => recording.Files.Select(file => file.Genres).Prepend(recording.Genres)))

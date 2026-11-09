@@ -28,6 +28,22 @@ public static class ClassicalWorks
         return type is not ("Song" or "Soundtrack") && genres.Select(FileGenres.Split).Any(Classical);
     }
 
+    /// <summary>Whether a held work is a song in a show, which no genre makes classical.</summary>
+    /// <remarks>
+    /// <b>A <c>Song</c> part of a piece typed <c>Soundtrack</c> or
+    /// <c>Musical</c></b>: "Smile" is part 13 of <i>Chaplin</i>, "Tea for Two"
+    /// a song in <i>No, No, Nanette</i>. A movement's own type is otherwise
+    /// never asked, since a song cycle's parts are typed <c>Song</c> too, so
+    /// one held recording tagged classical (a Nat King Cole box) made every
+    /// jazz singer's "Smile" a movement of <i>Chaplin</i> (client issue #72,
+    /// the owner's choice). A song cycle is typed <c>Song-cycle</c> and keeps
+    /// its songs.
+    /// </remarks>
+    /// <param name="part">The held work's MusicBrainz type.</param>
+    /// <param name="piece">The type of the whole piece it is a part of.</param>
+    public static bool SongOfAShow(string? part, string? piece) =>
+        part == "Song" && piece is "Soundtrack" or "Musical";
+
     /// <summary>Whether a piece is classical by the albums it is on, where those albums have no genres of their own.</summary>
     /// <remarks>
     /// <b>An album nobody voted on shows its tracks' commonest genres</b>

@@ -69,6 +69,19 @@ public sealed class ClassicalWorksTests
         Assert.True(ClassicalWorks.Is(null, ["classical, pop", "classical"]));
     }
 
+    /// <summary>"Smile" in <i>Chaplin</i>, "Tea for Two" in <i>No, No, Nanette</i>; a song cycle's songs and a suite stay.</summary>
+    [Fact]
+    public void ASongInAShowIsASongOfAShow()
+    {
+        Assert.True(ClassicalWorks.SongOfAShow("Song", "Soundtrack"));
+        Assert.True(ClassicalWorks.SongOfAShow("Song", "Musical"));
+        Assert.False(ClassicalWorks.SongOfAShow("Song", "Song-cycle"));
+        Assert.False(ClassicalWorks.SongOfAShow(null, "Soundtrack"));
+        Assert.False(ClassicalWorks.SongOfAShow("Suite", "Soundtrack"));
+        Assert.False(ClassicalWorks.SongOfAShow("Aria", "Opera"));
+        Assert.False(ClassicalWorks.SongOfAShow("Song", null));
+    }
+
     /// <summary>A symphony nobody tagged, on a box its other tracks make classical.</summary>
     [Fact]
     public void APieceOfAFormIsClassicalByTheVotesItsAlbumBorrows()

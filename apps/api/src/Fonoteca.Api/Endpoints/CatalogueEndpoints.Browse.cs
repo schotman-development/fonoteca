@@ -538,6 +538,7 @@ public static partial class CatalogueEndpoints
 
         var works = performances
             .GroupBy(performance => performance.Work)
+            .Where(work => !ClassicalWorks.SongOfAShow(work.First().Type, forms.GetValueOrDefault(WorkTree.Top(work.Key, parents))))
             .Where(work => ClassicalWorks.Is(
                     work.First().Type,
                     work.SelectMany(performance => performance.Albums.Prepend(performance.Genres)))
