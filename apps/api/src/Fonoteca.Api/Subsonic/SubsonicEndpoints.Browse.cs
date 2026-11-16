@@ -638,6 +638,22 @@ public static partial class SubsonicEndpoints
         // stays a plain list. An attribute, so before the first child.
         writer.Attr("displayComposer", song.Work?.Composer);
 
+        // fonotecaAnalysis, and OpenSubsonic's own `bpm`: what the analyse
+        // pass measured, each reading omitted where nothing measured it.
+        if (song.Analysis is { } analysis)
+        {
+            writer.Attr("dynamicRange", analysis.DynamicRange);
+            writer.Attr("albumDynamicRange", analysis.AlbumDynamicRange);
+            writer.Attr("loudness", analysis.Loudness);
+            writer.Attr("loudnessRange", analysis.LoudnessRange);
+            writer.Attr("truePeak", analysis.TruePeak);
+            writer.Attr("clipped", analysis.Clipped);
+            writer.Attr("leadingSilence", analysis.LeadingSilence);
+            writer.Attr("trailingSilence", analysis.TrailingSilence);
+            writer.Attr("bpm", analysis.Bpm);
+            writer.Attr("key", analysis.Key);
+        }
+
         // OpenSubsonic's: each artist the artist line bills, once, in its
         // order, with the fields the spec requires and no more. Named as
         // getArtist names them, not as the sleeve prints them.
@@ -795,6 +811,7 @@ internal sealed record Song(
     DateTimeOffset? Created,
     IReadOnlyList<string> Genres,
     SongReplayGain? ReplayGain,
+    SongAnalysis? Analysis,
     SongWork? Work,
     IReadOnlyList<SongContributor> Contributors,
     SongRecorded? Recorded,
@@ -811,6 +828,31 @@ internal sealed record SongRecorded(DateSpan? Span, IReadOnlyList<string> Places
 
 /// <summary>ReplayGain 2.0, dB and linear peaks; the album values cover the song's album folder.</summary>
 internal sealed record SongReplayGain(double? TrackGain, double? TrackPeak, double? AlbumGain, double? AlbumPeak);
+
+/// <summary>
+/// What the analyse pass heard in the file, each reading apart so a song with some of them states those.
+/// </summary>
+/// <param name="DynamicRange">The DR meter's figure, whole dB.</param>
+/// <param name="AlbumDynamicRange">The album folder's DR, whole dB, only where every track has one.</param>
+/// <param name="Loudness">EBU R128 integrated loudness, LUFS.</param>
+/// <param name="LoudnessRange">EBU R128 loudness range, LU.</param>
+/// <param name="TruePeak">Highest inter-sample peak, dBTP.</param>
+/// <param name="Clipped">Whether the audio clips by <see cref="AudioAnalysis.Clipped"/>'s rule.</param>
+/// <param name="LeadingSilence">Seconds before the first sound.</param>
+/// <param name="TrailingSilence">Seconds after the last sound.</param>
+/// <param name="Bpm">Tempo, whole beats per minute, only where Essentia was sure enough to tag it.</param>
+/// <param name="Key">Musical key in ID3's notation ("C", "F#m"), where Essentia heard one.</param>
+internal sealed record SongAnalysis(
+    int? DynamicRange,
+    int? AlbumDynamicRange,
+    double? Loudness,
+    double? LoudnessRange,
+    double? TruePeak,
+    bool? Clipped,
+    double? LeadingSilence,
+    double? TrailingSilence,
+    int? Bpm,
+    string? Key);
 
 /// <summary>Who composed the work a song performs, and the piece and movement it is of a classical one.</summary>
 internal sealed record SongWork(string? Composer, SongPiece? Piece, SongMovement? Movement);

@@ -1725,7 +1725,7 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
             .EnumerateArray()
             .Select(extension => extension.GetProperty("name").GetString());
 
-        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaArtistBanner", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres", "fonotecaRadioCatalogue"], extensions);
+        Assert.Equal(["songLyrics", "formPost", "apiKeyAuthentication", "fonotecaAlbumMotion", "fonotecaWaveform", "transcodeOffset", "fonotecaArtistBanner", "fonotecaPerformance", "fonotecaCompositions", "playlistFolders", "fonotecaTags", "fonotecaGenres", "fonotecaRadioCatalogue", "fonotecaAnalysis"], extensions);
     }
 
     /// <summary>
@@ -3287,6 +3287,50 @@ public sealed class SubsonicEndpointTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal(-6, gain.GetProperty("trackGain").GetDouble());
         Assert.Equal(-6, gain.GetProperty("albumGain").GetDouble());
         Assert.Equal(0.891251, gain.GetProperty("trackPeak").GetDouble());
+    }
+
+    /// <summary>
+    /// A song carries what the analyse pass measured under <c>fonotecaAnalysis</c>,
+    /// the tempo only where Essentia was sure, and states nothing it has no reading for.
+    /// </summary>
+    [Fact]
+    public async Task ASongCarriesItsAnalysis()
+    {
+        await using (var db = PostgresFixture.CreateContext(_connectionString))
+        {
+            var filed = await db.MediaFiles.SingleAsync(f => f.Id == _filed, Token);
+            filed.Measurement = new AudioMeasurement
+            {
+                DynamicRange = 13.4,
+                LoudnessRangeLu = 7.123,
+                IntegratedLufs = -12,
+                TruePeakDbtp = -0.456,
+                SamplePeakDbfs = -1,
+                LeadingSilenceSeconds = 0.5,
+                TrailingSilenceSeconds = 3.25,
+            };
+            filed.TempoAndKey = new TempoAndKey { Bpm = 120.4, BpmConfidence = 0.5, Key = "F#", Scale = "minor", KeyStrength = 0.8 };
+
+            await db.SaveChangesAsync(Token);
+        }
+
+        using var client = _factory!.CreateClient();
+
+        var song = (await JsonAsync(client, $"/rest/getSong.view?id=tr-{_filed.Value:N}"))
+            .GetProperty("subsonic-response")
+            .GetProperty("song");
+
+        Assert.Equal(13, song.GetProperty("dynamicRange").GetInt32());
+        Assert.Equal(-12, song.GetProperty("loudness").GetDouble());
+        Assert.Equal(7.12, song.GetProperty("loudnessRange").GetDouble());
+        Assert.Equal(-0.46, song.GetProperty("truePeak").GetDouble());
+        Assert.False(song.GetProperty("clipped").GetBoolean());
+        Assert.Equal(0.5, song.GetProperty("leadingSilence").GetDouble());
+        Assert.Equal(3.25, song.GetProperty("trailingSilence").GetDouble());
+        Assert.Equal("F#m", song.GetProperty("key").GetString());
+
+        // Below Essentia's confidence line a tempo is a guess, and is left out.
+        Assert.False(song.TryGetProperty("bpm", out _));
     }
 
     private static List<JsonElement> SongsByGenre(JsonElement json) =>

@@ -406,12 +406,18 @@ public static partial class SubsonicEndpoints
     /// <c>fonotecaRadioCatalogue</c> is <c>getRadioCatalogue</c>: the stations
     /// the server offers to save, each with its logo, and from version 2 every
     /// station's <c>countryCode</c>, <c>languageCodes</c> and <c>genres</c>,
-    /// saved ones included.
+    /// saved ones included. <c>fonotecaAnalysis</c> is what the analyse pass
+    /// measured, on every song that has it: <c>dynamicRange</c> (the DR meter,
+    /// whole dB), <c>albumDynamicRange</c> (the album folder's, only where every
+    /// track has one), <c>loudness</c> (LUFS), <c>loudnessRange</c> (LU),
+    /// <c>truePeak</c> (dBTP), <c>clipped</c>, <c>leadingSilence</c> and
+    /// <c>trailingSilence</c> (seconds), and the standard <c>bpm</c> and a
+    /// <c>key</c> ("C", "F#m"), where Essentia was sure enough to tag them.
     /// </remarks>
     private static IResult GetOpenSubsonicExtensions() =>
         SubsonicResult.OkList(
             "openSubsonicExtensions",
-            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1, 2]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1, 2]), ("fonotecaRadioCatalogue", [1, 2]) },
+            new (string Name, int[] Versions)[] { ("songLyrics", [1]), ("formPost", [1]), ("apiKeyAuthentication", [1]), ("fonotecaAlbumMotion", [1]), ("fonotecaWaveform", [1]), ("transcodeOffset", [1]), ("fonotecaArtistBanner", [1]), ("fonotecaPerformance", [1]), ("fonotecaCompositions", [1, 2]), ("playlistFolders", [1]), ("fonotecaTags", [1]), ("fonotecaGenres", [1, 2]), ("fonotecaRadioCatalogue", [1, 2]), ("fonotecaAnalysis", [1]) },
             (writer, extension) =>
             {
                 writer.Attr("name", extension.Name);

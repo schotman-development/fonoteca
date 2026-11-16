@@ -355,6 +355,7 @@ public static partial class SubsonicEndpoints
                 file.ReleaseGroup != null ? file.ReleaseGroup.Genres : null,
                 file.Recording != null ? file.Recording.Genres : null,
                 file.Measurement,
+                file.TempoAndKey,
                 file.RecordingId,
                 file.Recording != null ? file.Recording.WorkId : null,
                 // No ternary on the navigation: a null one yields an empty
@@ -420,6 +421,7 @@ public static partial class SubsonicEndpoints
             .Select(row => Describe(
                 row,
                 albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.ReplayGain,
+                albums.GetValueOrDefault(AlbumFolder.Of(row.Path))?.DynamicRange,
                 row.Work is { } work ? AsPerformed(works.GetValueOrDefault(work), row.RecordingTitle) : null,
                 row.Recording is { } recording ? performances.GetValueOrDefault(recording) : default,
                 row.Recording is { } song && lovedSongs.TryGetValue(song, out var loved) ? loved
@@ -731,6 +733,7 @@ public static partial class SubsonicEndpoints
     private static Song Describe(
         SongRow row,
         (double Gain, double Peak)? album,
+        int? albumDynamicRange,
         SongWork? work,
         (IReadOnlyList<SongContributor> Contributors, SongRecorded? Recorded) performance,
         DateTimeOffset? starred,
@@ -793,6 +796,7 @@ public static partial class SubsonicEndpoints
                     AudioAnalysis.TrackPeak(row.Measurement),
                     album?.Gain,
                     album?.Peak),
+            Analysed(row.Measurement, row.TempoAndKey, albumDynamicRange),
             work,
             performance.Contributors ?? [],
             performance.Recorded,
@@ -801,6 +805,26 @@ public static partial class SubsonicEndpoints
             played.Plays,
             played.Plays > 0 ? played.Last : null);
     }
+
+    /// <summary>The readings of the analyse pass a song states, or null where nothing was measured.</summary>
+    private static SongAnalysis? Analysed(AudioMeasurement? measurement, TempoAndKey? tempoAndKey, int? albumDynamicRange)
+    {
+        if (measurement is null && tempoAndKey is null) return null;
+
+        return new SongAnalysis(
+            AudioAnalysis.DynamicRange(measurement),
+            albumDynamicRange,
+            Rounded(measurement?.IntegratedLufs),
+            Rounded(measurement?.LoudnessRangeLu),
+            Rounded(measurement?.TruePeakDbtp),
+            measurement is null ? null : AudioAnalysis.Clipped(measurement),
+            Rounded(measurement?.LeadingSilenceSeconds),
+            Rounded(measurement?.TrailingSilenceSeconds),
+            TempoAndKey.TagBpm(tempoAndKey),
+            TempoAndKey.TagKey(tempoAndKey));
+    }
+
+    private static double? Rounded(double? reading) => reading is { } value ? Math.Round(value, 2) : null;
 
     /// <summary>One media file and everything around it a song element needs.</summary>
     private sealed record SongRow(
@@ -828,6 +852,7 @@ public static partial class SubsonicEndpoints
         string? AlbumGenres,
         string? RecordingGenres,
         AudioMeasurement? Measurement,
+        TempoAndKey? TempoAndKey,
         RecordingId? Recording,
         WorkId? Work,
         List<CreditRow> AlbumCredits,
