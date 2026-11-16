@@ -26,6 +26,13 @@ mostly SQL, so grep it with `-o short-iso` for
 `Tag write (started|finished)|Analysis started|Enrichment (started|finished)`
 to see which runs wrote what, and when.
 
+Also check `enrich.pending` in `library_status` (lyrics, covers, booklets) and,
+for a new classical album, that its recordings have work links (`get_album`
+shows `workTitle`/`partOf` null when unlinked; the link-recordings-to-works
+skill fixes it). Run enrich (`start_pass`), link works, then ask for a fresh
+Write tags run, and sync only after its finish line (2026-11-16: skipping
+this would have linked 17 files that the next write replaced).
+
 ## Before touching anything
 
 1. `python3 -I plan.py <out>.json` (beside this file) walks both trees by
