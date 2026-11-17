@@ -23,7 +23,7 @@ namespace Fonoteca.Api.Library;
 ///
 /// A file no recording is known for is not a song and is never in one.
 /// </remarks>
-internal static class SmartQuery
+internal static partial class SmartQuery
 {
     private static readonly string[] Composers = ["composer"];
     private static readonly string[] Lyricists = ["lyricist", "librettist"];
@@ -44,12 +44,13 @@ internal static class SmartQuery
         Guid? owner,
         CancellationToken cancellationToken)
     {
+        var owned = Owning(db, owner);
         var stated = await CatalogueEndpoints.StatedGenresAsync(db, cancellationToken).ConfigureAwait(false);
 
         var files = await db.MediaFiles
             .AsNoTracking()
             .Where(file => file.RecordingId != null)
-            .Where(Predicate(criteria.Rules, now, stated, Owning(db, owner)))
+            .Where(Predicate(criteria.Rules, now, stated, owned))
             .Select(file => new
             {
                 file.Id,
@@ -93,14 +94,15 @@ internal static class SmartQuery
                     row.Year,
                     best.Quality?.Duration ?? row.Duration,
                     group.Select(file => file.Id.Value.ToString("N")).Max(StringComparer.Ordinal)!);
-            });
+            })
+            .ToList();
 
         var culture = CultureInfo.InvariantCulture.CompareInfo;
         var reverse = criteria.Reverse;
         var text = Known<string>((left, right) => culture.Compare(left, right, CompareOptions.IgnoreCase), reverse);
         var plain = Known<string>((left, right) => culture.Compare(left, right, CompareOptions.IgnoreCase), false);
 
-        IOrderedEnumerable<SmartSong> ordered = criteria.Sort switch
+        IOrderedEnumerable<SmartSong> ordered = Legacy(criteria) switch
         {
             SmartSort.Title => songs.OrderBy(song => song.Title, text).ThenBy(song => song.Artist, plain),
             SmartSort.Artist => songs.OrderBy(song => song.Artist, text).ThenBy(song => song.Album, plain),
@@ -109,9 +111,10 @@ internal static class SmartQuery
                 .ThenBy(song => song.Album, plain),
             SmartSort.Length => songs.OrderBy(song => song.Duration, Known<TimeSpan?>((left, right) => left!.Value.CompareTo(right!.Value), reverse)),
             SmartSort.Random => songs.OrderBy(song => Deal(seed, song.RecordingId), Comparer<byte[]>.Create(Bytes)),
-            _ => reverse
+            SmartSort.Added => reverse
                 ? songs.OrderBy(song => song.Added, StringComparer.Ordinal)
                 : songs.OrderByDescending(song => song.Added, StringComparer.Ordinal),
+            _ => await ByFieldAsync(db, songs, criteria.SortField!.Value, reverse, owned, cancellationToken).ConfigureAwait(false),
         };
 
         var all = ordered.ThenBy(song => song.Copy.Path, StringComparer.Ordinal);
@@ -414,75 +417,87 @@ internal static class SmartQuery
 
     private static Expression<Func<MediaFile, bool>> Number(SmartField field, SmartOperator op, double? value, double? to, Owned owned)
     {
-        return field switch
+        switch (field)
         {
-            SmartField.Year => Compare(
-                file => file.ReleaseGroup == null
-                    ? null
-                    : file.ReleaseGroup.FirstReleaseYear
-                        ?? file.ReleaseGroup.Releases.Where(release => release.Status == "Official").Min(release => release.ReleasedYear)
-                        ?? file.ReleaseGroup.Releases.Min(release => release.ReleasedYear),
-                op, Whole(value), Whole(to)),
-            SmartField.PressingYear => Compare(file => file.Release!.ReleasedYear, op, Whole(value), Whole(to)),
-            SmartField.Length => Compare(
-                file => file.Quality!.Duration ?? file.Recording!.Duration,
-                op,
-                value is { } seconds ? TimeSpan.FromSeconds(seconds) : null,
-                to is { } most ? TimeSpan.FromSeconds(most) : null),
-            SmartField.BitDepth => Compare(
-                file => file.Quality!.IsLossless && file.Measurement!.EffectiveBitDepth > 0 && file.Measurement.EffectiveBitDepth < file.Quality.BitDepth
-                    ? file.Measurement.EffectiveBitDepth
-                    : file.Quality!.BitDepth,
-                op, Whole(value), Whole(to)),
-            SmartField.SampleRate => Compare(file => (int?)file.Quality!.SampleRateHz, op, Whole(value * 1000), Whole(to * 1000)),
-            SmartField.Bitrate => Compare(
-                file => (long?)file.Quality!.BitrateBps,
-                op,
-                value is { } kbps ? (long)Math.Round(kbps * 1000) : null,
-                to is { } most ? (long)Math.Round(most * 1000) : null),
-            SmartField.Channels => Compare(file => (int?)file.Quality!.Channels, op, Whole(value), Whole(to)),
-            SmartField.DynamicRange => Compare(file => file.Measurement!.DynamicRange, op, value, to),
-            SmartField.Loudness => Compare(file => file.Measurement!.IntegratedLufs, op, value, to),
-            SmartField.LoudnessRange => Compare(file => file.Measurement!.LoudnessRangeLu, op, value, to),
-            SmartField.TruePeak => Compare(file => file.Measurement!.TruePeakDbtp, op, value, to),
-            SmartField.SamplePeak => Compare(file => file.Measurement!.SamplePeakDbfs, op, value, to),
-            SmartField.LeadingSilence => Compare(file => (double?)file.Measurement!.LeadingSilenceSeconds, op, value, to),
-            SmartField.TrailingSilence => Compare(file => (double?)file.Measurement!.TrailingSilenceSeconds, op, value, to),
-            SmartField.Bpm => Compare(
-                file => file.TempoAndKey != null && file.TempoAndKey.BpmConfidence >= TempoAndKey.MinimumBpmConfidence
-                    ? (double?)file.TempoAndKey.Bpm
-                    : null,
-                op, value, to),
-            SmartField.FileSize => Compare(
-                file => (long?)file.SizeBytes,
-                op,
-                value is { } megabytes ? (long)Math.Round(megabytes * 1_000_000) : null,
-                to is { } most ? (long)Math.Round(most * 1_000_000) : null),
-            SmartField.DiscNumber => Compare(file => (int?)file.Track!.DiscNumber, op, Whole(value), Whole(to)),
-            SmartField.TrackNumber => Compare(file => (int?)file.Track!.Position, op, Whole(value), Whole(to)),
-            SmartField.TrackCount => Compare(file => file.Release!.TrackCount, op, Whole(value), Whole(to)),
-            SmartField.DiscCount => Compare(file => file.Release!.DiscCount, op, Whole(value), Whole(to)),
-            SmartField.PressingMonth => Compare(file => file.Release!.ReleasedMonth, op, Whole(value), Whole(to)),
-            SmartField.PressingDay => Compare(file => file.Release!.ReleasedDay, op, Whole(value), Whole(to)),
-            SmartField.FileDiscNumber => Compare(file => file.TagDiscNumber, op, Whole(value), Whole(to)),
-            SmartField.FileTrackNumber => Compare(file => file.TagTrackNumber, op, Whole(value), Whole(to)),
-            SmartField.ArtistBeganYear => CompareAny(
-                file => file.Recording!.Credits.Select(credit => credit.Artist!.BeganYear)
-                    .Concat(file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.BeganYear)),
-                op, Whole(value), Whole(to)),
-            SmartField.ArtistEndedYear => CompareAny(
-                file => file.Recording!.Credits.Select(credit => credit.Artist!.EndedYear)
-                    .Concat(file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.EndedYear)),
-                op, Whole(value), Whole(to)),
-            SmartField.Plays => Compare(
-                file => (int?)owned.Plays.Count(play => file.RecordingId != null
-                    && (play.MediaFile != null ? play.MediaFile.RecordingId : play.RecordingId) == file.RecordingId),
-                op, Whole(value), Whole(to)),
-            _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a number field."),
-        };
+            case SmartField.Length:
+                return Compare(
+                    file => file.Quality!.Duration ?? file.Recording!.Duration,
+                    op,
+                    value is { } seconds ? TimeSpan.FromSeconds(seconds) : null,
+                    to is { } most ? TimeSpan.FromSeconds(most) : null);
+            case SmartField.ArtistBeganYear or SmartField.ArtistEndedYear:
+                return CompareAny(ArtistYears(field), op, Whole(value), Whole(to));
+        }
+
+        var column = Column(field, owned);
+
+        return Compare(column.Value, op, column.Scale(value), column.Scale(to));
 
         static int? Whole(double? number) => number is { } n ? (int)Math.Round(n) : null;
     }
+
+    /// <summary>A number field's column read as a double, and the units a typed number is in.</summary>
+    /// <param name="Unit">How many of the column's units one of the typed number's is: kHz against Hz.</param>
+    /// <param name="Whole">The column counts whole units, so a typed number is rounded to one.</param>
+    private sealed record NumberColumn(Expression<Func<MediaFile, double?>> Value, double Unit = 1, bool Whole = false)
+    {
+        internal double? Scale(double? typed) => typed is { } number
+            ? Whole ? Math.Round(number * Unit) : number * Unit
+            : null;
+    }
+
+    /// <remarks>Not <see cref="SmartField.Length"/> or the artists' years, which are not one column.</remarks>
+    private static NumberColumn Column(SmartField field, Owned owned) => field switch
+    {
+        SmartField.Year => new(
+            file => (double?)(file.ReleaseGroup == null
+                ? null
+                : file.ReleaseGroup.FirstReleaseYear
+                    ?? file.ReleaseGroup.Releases.Where(release => release.Status == "Official").Min(release => release.ReleasedYear)
+                    ?? file.ReleaseGroup.Releases.Min(release => release.ReleasedYear)),
+            Whole: true),
+        SmartField.PressingYear => new(file => (double?)file.Release!.ReleasedYear, Whole: true),
+        SmartField.BitDepth => new(
+            file => (double?)(file.Quality!.IsLossless && file.Measurement!.EffectiveBitDepth > 0 && file.Measurement.EffectiveBitDepth < file.Quality.BitDepth
+                ? file.Measurement.EffectiveBitDepth
+                : file.Quality!.BitDepth),
+            Whole: true),
+        SmartField.SampleRate => new(file => (double?)file.Quality!.SampleRateHz, 1000, Whole: true),
+        SmartField.Bitrate => new(file => (double?)file.Quality!.BitrateBps, 1000, Whole: true),
+        SmartField.Channels => new(file => (double?)file.Quality!.Channels, Whole: true),
+        SmartField.DynamicRange => new(file => (double?)file.Measurement!.DynamicRange),
+        SmartField.Loudness => new(file => (double?)file.Measurement!.IntegratedLufs),
+        SmartField.LoudnessRange => new(file => (double?)file.Measurement!.LoudnessRangeLu),
+        SmartField.TruePeak => new(file => (double?)file.Measurement!.TruePeakDbtp),
+        SmartField.SamplePeak => new(file => (double?)file.Measurement!.SamplePeakDbfs),
+        SmartField.LeadingSilence => new(file => (double?)file.Measurement!.LeadingSilenceSeconds),
+        SmartField.TrailingSilence => new(file => (double?)file.Measurement!.TrailingSilenceSeconds),
+        SmartField.Bpm => new(file => file.TempoAndKey != null && file.TempoAndKey.BpmConfidence >= TempoAndKey.MinimumBpmConfidence
+            ? (double?)file.TempoAndKey.Bpm
+            : null),
+        SmartField.FileSize => new(file => (double?)file.SizeBytes, 1_000_000, Whole: true),
+        SmartField.DiscNumber => new(file => (double?)file.Track!.DiscNumber, Whole: true),
+        SmartField.TrackNumber => new(file => (double?)file.Track!.Position, Whole: true),
+        SmartField.TrackCount => new(file => (double?)file.Release!.TrackCount, Whole: true),
+        SmartField.DiscCount => new(file => (double?)file.Release!.DiscCount, Whole: true),
+        SmartField.PressingMonth => new(file => (double?)file.Release!.ReleasedMonth, Whole: true),
+        SmartField.PressingDay => new(file => (double?)file.Release!.ReleasedDay, Whole: true),
+        SmartField.FileDiscNumber => new(file => (double?)file.TagDiscNumber, Whole: true),
+        SmartField.FileTrackNumber => new(file => (double?)file.TagTrackNumber, Whole: true),
+        SmartField.Plays => new(
+            file => (double?)owned.Plays.Count(play => file.RecordingId != null
+                && (play.MediaFile != null ? play.MediaFile.RecordingId : play.RecordingId) == file.RecordingId),
+            Whole: true),
+        _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a number column."),
+    };
+
+    /// <summary>Every year an artist billed on the song or its album began or ended in.</summary>
+    private static Expression<Func<MediaFile, IEnumerable<int?>>> ArtistYears(SmartField field) =>
+        field == SmartField.ArtistBeganYear
+            ? file => file.Recording!.Credits.Select(credit => credit.Artist!.BeganYear)
+                .Concat(file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.BeganYear))
+            : file => file.Recording!.Credits.Select(credit => credit.Artist!.EndedYear)
+                .Concat(file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.EndedYear));
 
     /// <summary>A comparison of a nullable column; a missing value matches nothing but "is not" and "is unknown".</summary>
     private static Expression<Func<MediaFile, bool>> Compare<T>(

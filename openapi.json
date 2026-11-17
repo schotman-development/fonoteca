@@ -12075,6 +12075,16 @@
               "integer"
             ],
             "format": "int32"
+          },
+          "sortField": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartField"
+              }
+            ]
           }
         }
       },

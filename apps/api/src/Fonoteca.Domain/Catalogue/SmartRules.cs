@@ -198,7 +198,14 @@ public static class SmartRules
 /// numbers. Ignored for <see cref="SmartSort.Random"/>.
 /// </param>
 /// <param name="Limit">The first this many songs in that order; null for every song that matches.</param>
-public sealed record SmartCriteria(SmartRule Rules, SmartSort Sort, bool Reverse, int? Limit);
+/// <param name="SortField">
+/// Orders by any <see cref="SmartField"/>, and then <paramref name="Sort"/> is
+/// ignored. Dates run newest first, everything else lowest or A to Z first
+/// (a flag: no before yes), and a song with no value comes last either way
+/// round. Null keeps <paramref name="Sort"/>, which is all a playlist saved
+/// before this had.
+/// </param>
+public sealed record SmartCriteria(SmartRule Rules, SmartSort Sort, bool Reverse, int? Limit, SmartField? SortField = null);
 
 /// <summary>
 /// A group of rules, or one condition: a group where <paramref name="Rules"/>

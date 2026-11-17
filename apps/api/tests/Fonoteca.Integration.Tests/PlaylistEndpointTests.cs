@@ -540,6 +540,36 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         }
     }
 
+    /// <summary>Every field orders a playlist: EF refuses an expression only when the query runs.</summary>
+    [Fact]
+    public async Task EveryFieldSorts()
+    {
+        using var client = _factory!.CreateClient();
+
+        foreach (var field in Enum.GetValues<SmartField>())
+        {
+            foreach (var reverse in new[] { false, true })
+            {
+                var preview = await PreviewAsync(client, Criteria(Group("All"), reverse: reverse, sortField: field.ToString()));
+
+                Assert.NotEmpty(preview.Entries);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task APlaylistSortsByAFieldsText()
+    {
+        using var client = _factory!.CreateClient();
+
+        var byPath = await PreviewAsync(client, Criteria(Group("All"), sortField: "Path"));
+        var reversed = await PreviewAsync(client, Criteria(Group("All"), reverse: true, sortField: "Path"));
+
+        Assert.Equal(
+            byPath.Entries.Select(entry => entry.FileId).Reverse(),
+            reversed.Entries.Select(entry => entry.FileId));
+    }
+
     [Theory]
     [InlineData("Genre", "Is", "soft rock", null, 2)]
     [InlineData("Genre", "Is", "soft", null, 0)]
@@ -1059,8 +1089,8 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     private static async Task<PlaylistResponse> GetAsync(HttpClient client, string file) =>
         (await client.GetFromJsonAsync<PlaylistResponse>(new Uri($"/api/catalogue/playlists/{Uri.EscapeDataString(file)}", UriKind.Relative), Token))!;
 
-    private static object Criteria(object rules, string sort = "Added", bool reverse = false, int? limit = null) =>
-        new { rules, sort, reverse, limit };
+    private static object Criteria(object rules, string sort = "Added", bool reverse = false, int? limit = null, string? sortField = null) =>
+        new { rules, sort, reverse, limit, sortField };
 
     private static object Group(string match, params object[] rules) => new { match, rules };
 

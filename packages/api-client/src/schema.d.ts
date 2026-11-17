@@ -3592,6 +3592,7 @@ export interface components {
             reverse: boolean;
             /** Format: int32 */
             limit: null | number;
+            sortField?: null | components["schemas"]["SmartField"];
         };
         /** @enum {unknown} */
         SmartField: "Title" | "Artist" | "AlbumArtist" | "Album" | "Work" | "Genre" | "Composer" | "Lyricist" | "Conductor" | "Performer" | "Arranger" | "Producer" | "Engineer" | "Credited" | "Isrc" | "Lyrics" | "TimedLyrics" | "Composed" | "WorkKey" | "WorkType" | "WorkLanguage" | "AlbumType" | "Label" | "ReleaseCountry" | "MediumFormat" | "Barcode" | "CatalogNumber" | "ReleaseStatus" | "Edition" | "PressingMonth" | "PressingDay" | "ArtistCountry" | "ArtistType" | "ArtistGender" | "ArtistBeganYear" | "ArtistEndedYear" | "ArtistSortName" | "ArtistDisambiguation" | "ArtistEnded" | "Path" | "Codec" | "Year" | "PressingYear" | "Length" | "BitDepth" | "SampleRate" | "Bitrate" | "Channels" | "DynamicRange" | "Loudness" | "LoudnessRange" | "TruePeak" | "SamplePeak" | "Clipped" | "LeadingSilence" | "TrailingSilence" | "Bpm" | "Key" | "FileSize" | "FileDiscNumber" | "FileTrackNumber" | "Lossless" | "HiRes" | "Followed" | "Damaged" | "Instrumental" | "Monitored" | "DiscNumber" | "TrackNumber" | "TrackCount" | "DiscCount" | "Loved" | "AlbumLoved" | "ArtistLoved" | "WorkLoved" | "LovedWhen" | "Plays" | "Played" | "Tag" | "Added" | "Modified" | null;
