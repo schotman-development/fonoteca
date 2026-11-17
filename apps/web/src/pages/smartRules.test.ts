@@ -5,12 +5,16 @@ import {
   condition,
   FIELDS,
   group,
+  newCriteria,
   OPERATORS,
+  SORTS,
+  sortChoice,
   valuesFor,
   withAppended,
   withChild,
   withField,
   withOperator,
+  withSort,
 } from './smartRules.ts'
 
 test('a new condition asks its kind first question', () => {
@@ -61,4 +65,12 @@ test('rules are complete once every condition has what its question needs', () =
   assert.equal(complete(group('All', [{ ...range, to: 'soon' }])), false)
   assert.equal(complete(group('All', [{ ...range, to: '1965' }])), true)
   assert.equal(complete(group('All', [])), true)
+})
+
+test('every field can order a playlist, and a playlist saved before that still reads', () => {
+  assert.equal(SORTS.length, Object.keys(FIELDS).length + 1)
+  assert.equal(sortChoice({ ...newCriteria(), sort: 'Title' }), 'Title')
+  assert.equal(sortChoice({ ...newCriteria(), sort: 'Random' }), 'Random')
+  assert.equal(sortChoice(withSort(newCriteria(), 'Bpm')), 'Bpm')
+  assert.equal(sortChoice(withSort(withSort(newCriteria(), 'Bpm'), 'Random')), 'Random')
 })

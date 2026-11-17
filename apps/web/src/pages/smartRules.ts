@@ -12,7 +12,6 @@ import type { components } from '@fonoteca/api-client'
 export type SmartField = NonNullable<components['schemas']['SmartField']>
 export type SmartOperator = NonNullable<components['schemas']['SmartOperator']>
 export type SmartMatch = NonNullable<components['schemas']['SmartMatch']>
-export type SmartSort = components['schemas']['SmartSort']
 export type SmartRule = components['schemas']['SmartRule']
 export type SmartCriteria = components['schemas']['SmartCriteria']
 
@@ -144,15 +143,29 @@ export const OPERATORS: Record<FieldKind, ReadonlyArray<readonly [SmartOperator,
   ],
 }
 
-export const SORTS: ReadonlyArray<readonly [SmartSort, string]> = [
-  ['Added', 'Recently added'],
-  ['Title', 'Title'],
-  ['Artist', 'Artist'],
-  ['Album', 'Album'],
-  ['Year', 'Year'],
-  ['Length', 'Length'],
-  ['Random', 'Shuffled'],
+/** Shuffled is the one order that is no field's; every field orders the list. */
+export const SHUFFLED = 'Random'
+
+export type SortChoice = SmartField | typeof SHUFFLED
+
+export const SORTS: ReadonlyArray<readonly [SortChoice, string]> = [
+  [SHUFFLED, 'Shuffled'],
+  ...(Object.entries(FIELDS) as ReadonlyArray<readonly [SmartField, FieldInfo]>).map(
+    ([field, info]) => [field, info.label] as const,
+  ),
 ]
+
+/** What the order select shows: a playlist saved before every field could order has only `sort`. */
+export function sortChoice(criteria: SmartCriteria): SortChoice {
+  if (criteria.sortField != null) return criteria.sortField
+  return criteria.sort === 'Random' ? SHUFFLED : criteria.sort
+}
+
+export function withSort(criteria: SmartCriteria, choice: SortChoice): SmartCriteria {
+  return choice === SHUFFLED
+    ? { ...criteria, sort: 'Random', sortField: null }
+    : { ...criteria, sort: 'Added', sortField: choice }
+}
 
 /** How many values an operator takes: none, one, or a range's two. */
 export function valuesFor(op: SmartOperator): 0 | 1 | 2 {
@@ -184,7 +197,7 @@ export function group(match: SmartMatch = 'All', rules: SmartRule[] = [condition
 }
 
 export function newCriteria(): SmartCriteria {
-  return { rules: group(), sort: 'Added', reverse: false, limit: null }
+  return { rules: group(), sort: 'Added', sortField: null, reverse: false, limit: null }
 }
 
 /** The condition on another field; its question kept where the new field's kind can ask it. */

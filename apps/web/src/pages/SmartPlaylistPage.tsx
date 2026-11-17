@@ -36,12 +36,15 @@ import {
   type SmartMatch,
   type SmartOperator,
   type SmartRule,
+  SHUFFLED,
   SORTS,
+  sortChoice,
   valuesFor,
   withAppended,
   withChild,
   withField,
   withOperator,
+  withSort,
 } from './smartRules.ts'
 import { TrackCells } from './TracksPage.tsx'
 
@@ -185,15 +188,15 @@ function Editor({ saved }: { readonly saved: PlaylistResponse | null }) {
       <Stack gap={16} align="end" wrap>
         <SortSelect
           label="Order"
-          value={criteria.sort}
+          value={sortChoice(criteria)}
           options={SORTS}
-          onChange={(sort) => setCriteria({ ...criteria, sort })}
+          onChange={(choice) => setCriteria(withSort(criteria, choice))}
         />
         <label className={own.check}>
           <input
             type="checkbox"
             checked={criteria.reverse}
-            disabled={criteria.sort === 'Random'}
+            disabled={sortChoice(criteria) === SHUFFLED}
             onChange={(event) => setCriteria({ ...criteria, reverse: event.currentTarget.checked })}
           />
           <Text size="sm">Reversed</Text>
