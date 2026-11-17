@@ -742,6 +742,7 @@ public sealed class FonotecaDbContext(DbContextOptions<FonotecaDbContext> option
             e.Property(x => x.Path).HasMaxLength(1000).IsRequired();
             e.HasIndex(x => x.Path).IsUnique();
             e.Property(x => x.CriteriaJson).HasColumnType("jsonb").IsRequired();
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.SetNull);
         });
 
         base.OnModelCreating(builder);

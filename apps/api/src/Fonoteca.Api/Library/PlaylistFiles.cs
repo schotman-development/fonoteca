@@ -156,7 +156,7 @@ public sealed class PlaylistFiles(
                 }
 
                 var songs = await SmartQuery
-                    .SongsAsync(db, criteria, Seed(playlist), now, cancellationToken)
+                    .SongsAsync(db, criteria, Seed(playlist), now, playlist.OwnerId, cancellationToken)
                     .ConfigureAwait(false);
 
                 var lines = await LinesAsync(db, songs, cancellationToken).ConfigureAwait(false);

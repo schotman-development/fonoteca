@@ -101,7 +101,7 @@ function Editor({ saved }: { readonly saved: PlaylistResponse | null }) {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const preview = usePreview(criteria)
+  const preview = usePreview(criteria, saved?.id ?? null)
 
   const ready = name.trim() !== '' && complete(criteria.rules)
 
@@ -152,7 +152,8 @@ function Editor({ saved }: { readonly saved: PlaylistResponse | null }) {
         <Text tone="secondary" block>
           Rules rather than songs. Fonoteca writes the songs they hold to an m3u in the Playlists
           folder, and writes it again whenever the library changes, so other players see a plain
-          playlist. An edit made to that file elsewhere is overwritten.
+          playlist. An edit made to that file elsewhere is overwritten. Hearts, plays and tags are
+          read as {saved?.owner != null ? saved.owner : 'the account that saves it'} has them.
         </Text>
       </Stack>
 
@@ -448,7 +449,7 @@ type PreviewState =
  * What the rules hold, asked again a moment after the last change: typing a
  * year should not send one request per digit.
  */
-function usePreview(criteria: SmartCriteria): PreviewState {
+function usePreview(criteria: SmartCriteria, playlist: string | null): PreviewState {
   const [state, setState] = useState<PreviewState>({ status: 'incomplete' })
 
   useEffect(() => {
@@ -467,7 +468,7 @@ function usePreview(criteria: SmartCriteria): PreviewState {
 
       api
         .post('/api/catalogue/smart-playlists/preview', {
-          json: { criteria },
+          json: { criteria, playlist },
           signal: aborter.signal,
         })
         .then((data) => setState({ status: 'ready', data }))
@@ -480,7 +481,7 @@ function usePreview(criteria: SmartCriteria): PreviewState {
       clearTimeout(timer)
       aborter.abort()
     }
-  }, [criteria])
+  }, [criteria, playlist])
 
   return state
 }

@@ -17,9 +17,9 @@ namespace Fonoteca.Domain.Catalogue;
 ///
 /// <b>Conditions are about a file and what the catalogue says of it</b>; a
 /// song is in the playlist once, as the best of its copies that matched. The
-/// catalogue holds no plays, stars or ratings, so there is nothing to ask about
-/// listening. Text matches without regard to case. A value the catalogue does
-/// not hold matches no comparison, but does match "is not" and "does not
+/// catalogue's hearts, plays and tags belong to an account, so those rules read
+/// the playlist's owner (<c>SmartPlaylist.OwnerId</c>). Text matches without
+/// regard to case. A value the catalogue does not hold matches no comparison, but does match "is not" and "does not
 /// contain", of a number as of text, since a song with no genre is not jazz;
 /// <see cref="SmartOperator.IsEmpty"/> asks for it outright.
 ///
@@ -50,9 +50,15 @@ public static class SmartRules
     {
         SmartField.Year or SmartField.PressingYear or SmartField.Length or SmartField.BitDepth
             or SmartField.SampleRate or SmartField.Bitrate or SmartField.Channels or SmartField.DynamicRange
-            or SmartField.Loudness => SmartFieldKind.Number,
-        SmartField.Lossless or SmartField.HiRes or SmartField.Followed or SmartField.Damaged => SmartFieldKind.Flag,
-        SmartField.Added => SmartFieldKind.Date,
+            or SmartField.Loudness or SmartField.LoudnessRange or SmartField.TruePeak or SmartField.SamplePeak
+            or SmartField.LeadingSilence or SmartField.TrailingSilence or SmartField.Bpm or SmartField.FileSize
+            or SmartField.DiscNumber or SmartField.TrackNumber or SmartField.TrackCount or SmartField.DiscCount
+            or SmartField.PressingMonth or SmartField.PressingDay or SmartField.FileDiscNumber or SmartField.FileTrackNumber
+            or SmartField.ArtistBeganYear or SmartField.ArtistEndedYear or SmartField.Plays => SmartFieldKind.Number,
+        SmartField.Lossless or SmartField.HiRes or SmartField.Followed or SmartField.Damaged or SmartField.Clipped
+            or SmartField.Instrumental or SmartField.Monitored or SmartField.ArtistEnded or SmartField.Loved
+            or SmartField.AlbumLoved or SmartField.ArtistLoved or SmartField.WorkLoved => SmartFieldKind.Flag,
+        SmartField.Added or SmartField.Modified or SmartField.LovedWhen or SmartField.Played => SmartFieldKind.Date,
         _ => SmartFieldKind.Text,
     };
 
@@ -248,16 +254,54 @@ public enum SmartField
 
     Isrc,
 
+    /// <summary>The words as LRCLIB has them, untimed.</summary>
+    Lyrics,
+
+    /// <summary>LRCLIB's timed lyrics, each line with its time.</summary>
+    TimedLyrics,
+
+    /// <summary>When the work was composed, as MusicBrainz dates it: "1805", "1805-03".</summary>
+    Composed,
+
+    /// <summary>The work's key as MusicBrainz states it ("C minor"), or its parent's.</summary>
+    WorkKey,
+
+    /// <summary>MusicBrainz's work type — Symphony, Opera, Song — of the work or its parent.</summary>
+    WorkType,
+
+    /// <summary>ISO 639-3 codes of the language the work's words are in.</summary>
+    WorkLanguage,
+
     /// <summary>MusicBrainz's primary type or any secondary one: Album, Single, EP, Live, Compilation, Soundtrack.</summary>
     AlbumType,
 
     Label,
     ReleaseCountry,
     MediumFormat,
+    Barcode,
+    CatalogNumber,
+
+    /// <summary>Official, Promotion, Bootleg, Pseudo-Release.</summary>
+    ReleaseStatus,
+
+    /// <summary>What sets the pressing apart from others of the album: "remastered", "Japanese edition".</summary>
+    Edition,
+    PressingMonth,
+    PressingDay,
+
     ArtistCountry,
 
     /// <summary>Person, Group, Orchestra, Choir, Character, Other.</summary>
     ArtistType,
+
+    ArtistGender,
+    ArtistBeganYear,
+    ArtistEndedYear,
+    ArtistSortName,
+    ArtistDisambiguation,
+
+    /// <summary>An artist billed on the song or its album has ended: died or disbanded.</summary>
+    ArtistEnded,
 
     Path,
     Codec,
@@ -282,6 +326,39 @@ public enum SmartField
     /// <summary>Integrated loudness, in LUFS.</summary>
     Loudness,
 
+    /// <summary>In LU.</summary>
+    LoudnessRange,
+
+    /// <summary>In dBTP.</summary>
+    TruePeak,
+
+    /// <summary>In dBFS.</summary>
+    SamplePeak,
+
+    /// <summary>Samples at full scale or past it, as <see cref="AudioAnalysis.Clipped"/> reads them.</summary>
+    Clipped,
+
+    /// <summary>In seconds.</summary>
+    LeadingSilence,
+
+    /// <summary>In seconds.</summary>
+    TrailingSilence,
+
+    /// <summary>Beats per minute, only where the reading is confident enough to tag (<see cref="TempoAndKey.TagBpm"/>).</summary>
+    Bpm,
+
+    /// <summary>Essentia's reading ("F# minor" or just "F#"), however sure it was.</summary>
+    Key,
+
+    /// <summary>In MB.</summary>
+    FileSize,
+
+    /// <summary>The disc number the file's own tag states, as the scan read it.</summary>
+    FileDiscNumber,
+
+    /// <summary>The track number the file's own tag states, as the scan read it.</summary>
+    FileTrackNumber,
+
     Lossless,
 
     /// <summary>Lossless, and more than 16 real bits or more than 48 kHz.</summary>
@@ -293,8 +370,53 @@ public enum SmartField
     /// <summary>The probe found the file corrupt, truncated or unreadable.</summary>
     Damaged,
 
+    /// <summary>LRCLIB says it has no words.</summary>
+    Instrumental,
+
+    /// <summary>The album is monitored for new editions.</summary>
+    Monitored,
+
+    /// <summary>The disc the track is on, in the pressing the file is filed under.</summary>
+    DiscNumber,
+
+    /// <summary>The track's place on its disc in that pressing.</summary>
+    TrackNumber,
+
+    /// <summary>Tracks on the pressing.</summary>
+    TrackCount,
+
+    /// <summary>Discs in the pressing.</summary>
+    DiscCount,
+
+    /// <summary>The owner has hearted the song.</summary>
+    Loved,
+
+    /// <summary>The owner has hearted the album.</summary>
+    AlbumLoved,
+
+    /// <summary>The owner has hearted an artist billed on the song or its album.</summary>
+    ArtistLoved,
+
+    /// <summary>The owner has hearted the whole work the song is a movement of.</summary>
+    WorkLoved,
+
+    /// <summary>When the owner hearted the song.</summary>
+    LovedWhen,
+
+    /// <summary>How often the owner has played the song, whichever copy.</summary>
+    Plays,
+
+    /// <summary>When the owner last played the song.</summary>
+    Played,
+
+    /// <summary>A tag the owner has put on the song.</summary>
+    Tag,
+
     /// <summary>When the scan first saw the file.</summary>
     Added,
+
+    /// <summary>When the file's bytes last changed on disk.</summary>
+    Modified,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<SmartOperator>))]

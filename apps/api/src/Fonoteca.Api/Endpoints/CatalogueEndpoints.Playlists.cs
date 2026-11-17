@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Library;
@@ -7,6 +8,7 @@ using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -386,8 +388,13 @@ public static partial class CatalogueEndpoints
         return TypedResults.NoContent();
     }
 
+    private static Guid? AccountOf(UserManager<Account> users, ClaimsPrincipal user) =>
+        Guid.TryParse(users.GetUserId(user), out var id) ? id : null;
+
     internal static async Task<Results<Ok<PlaylistResponse>, ProblemHttpResult>> CreateSmartPlaylist(
         SmartPlaylistRequest request,
+        ClaimsPrincipal user,
+        UserManager<Account> users,
         FonotecaDbContext db,
         PlaylistFiles files,
         IClock clock,
@@ -406,6 +413,7 @@ public static partial class CatalogueEndpoints
             Name = name,
             Path = path,
             CriteriaJson = SmartRules.Serialize(request.Criteria!),
+            OwnerId = AccountOf(users, user),
             CreatedUtc = now,
             ChangedUtc = now,
         };
@@ -431,14 +439,26 @@ public static partial class CatalogueEndpoints
 
     internal static async Task<Results<Ok<SmartPreviewResponse>, ProblemHttpResult>> PreviewSmartPlaylist(
         SmartPreviewRequest request,
+        ClaimsPrincipal user,
+        UserManager<Account> users,
         FonotecaDbContext db,
         IClock clock,
         CancellationToken cancellationToken)
     {
         if (RulesProblem(request?.Criteria) is { } wrong) return wrong;
 
+        // A saved playlist is previewed as its owner sees it, whoever is looking.
+        var saved = request!.Playlist is { } playlistId
+            ? await db.SmartPlaylists
+                .AsNoTracking()
+                .Where(row => row.Id == new PlaylistId(playlistId))
+                .Select(row => row.OwnerId)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
         var songs = await SmartQuery
-            .SongsAsync(db, request!.Criteria!, "preview", clock.UtcNow, cancellationToken)
+            .SongsAsync(db, request.Criteria!, "preview", clock.UtcNow, saved ?? AccountOf(users, user), cancellationToken)
             .ConfigureAwait(false);
 
         var shown = songs
@@ -486,12 +506,19 @@ public static partial class CatalogueEndpoints
             Editable = false,
             ChangedUtc = playlist.ChangedUtc,
             Criteria = SmartRules.Parse(playlist.CriteriaJson),
+            Owner = await db.Users
+                .Where(account => account.Id == playlist.OwnerId)
+                .Select(account => account.UserName)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false),
         });
     }
 
     internal static async Task<Results<Ok<PlaylistResponse>, ProblemHttpResult>> UpdateSmartPlaylist(
         Guid id,
         SmartPlaylistRequest request,
+        ClaimsPrincipal user,
+        UserManager<Account> users,
         FonotecaDbContext db,
         PlaylistFiles files,
         IClock clock,
@@ -533,6 +560,7 @@ public static partial class CatalogueEndpoints
 
                     if (request?.Criteria is { } criteria) playlist.CriteriaJson = SmartRules.Serialize(criteria);
 
+                    playlist.OwnerId ??= AccountOf(users, user);
                     playlist.ChangedUtc = clock.UtcNow;
                     await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                     return null;
@@ -1018,6 +1046,7 @@ public sealed record PlaylistSummary(
 /// <param name="Editable">Whether entries can be changed here: a static playlist whose file is UTF-8.</param>
 /// <param name="Duration">Of the held entries.</param>
 /// <param name="Criteria">A smart playlist's rules.</param>
+/// <param name="Owner">A smart playlist's owner, whose hearts, plays and tags its rules read.</param>
 public sealed record PlaylistResponse(
     string Id,
     PlaylistKind Kind,
@@ -1028,7 +1057,8 @@ public sealed record PlaylistResponse(
     string? Duration,
     DateTimeOffset ChangedUtc,
     SmartCriteria? Criteria,
-    IReadOnlyList<PlaylistEntryRow> Entries);
+    IReadOnlyList<PlaylistEntryRow> Entries,
+    string? Owner = null);
 
 /// <param name="Index">The entry's place in the file, from 0: what reordering and removing name.</param>
 /// <param name="Title">The song's title, or what the file calls the entry.</param>
@@ -1054,7 +1084,8 @@ public sealed record AddPlaylistSongsRequest(IReadOnlyList<Guid>? RecordingIds, 
 /// <param name="Criteria">Required to create; omitted keeps the old rules.</param>
 public sealed record SmartPlaylistRequest(string? Name, SmartCriteria? Criteria);
 
-public sealed record SmartPreviewRequest(SmartCriteria? Criteria);
+/// <param name="Playlist">A saved smart playlist the rules are for, whose owner's hearts, plays and tags they read; the signed-in account's where left out.</param>
+public sealed record SmartPreviewRequest(SmartCriteria? Criteria, Guid? Playlist = null);
 
 /// <param name="Songs">Every song the rules hold.</param>
 /// <param name="Duration">Of every song.</param>

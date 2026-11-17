@@ -3224,6 +3224,7 @@ export interface components {
             changedUtc: string;
             criteria: null | components["schemas"]["SmartCriteria"];
             entries: components["schemas"]["PlaylistEntryRow"][];
+            owner?: null | string;
         };
         PlaylistSummary: {
             id: string;
@@ -3593,7 +3594,7 @@ export interface components {
             limit: null | number;
         };
         /** @enum {unknown} */
-        SmartField: "Title" | "Artist" | "AlbumArtist" | "Album" | "Work" | "Genre" | "Composer" | "Lyricist" | "Conductor" | "Performer" | "Arranger" | "Producer" | "Engineer" | "Credited" | "Isrc" | "AlbumType" | "Label" | "ReleaseCountry" | "MediumFormat" | "ArtistCountry" | "ArtistType" | "Path" | "Codec" | "Year" | "PressingYear" | "Length" | "BitDepth" | "SampleRate" | "Bitrate" | "Channels" | "DynamicRange" | "Loudness" | "Lossless" | "HiRes" | "Followed" | "Damaged" | "Added" | null;
+        SmartField: "Title" | "Artist" | "AlbumArtist" | "Album" | "Work" | "Genre" | "Composer" | "Lyricist" | "Conductor" | "Performer" | "Arranger" | "Producer" | "Engineer" | "Credited" | "Isrc" | "Lyrics" | "TimedLyrics" | "Composed" | "WorkKey" | "WorkType" | "WorkLanguage" | "AlbumType" | "Label" | "ReleaseCountry" | "MediumFormat" | "Barcode" | "CatalogNumber" | "ReleaseStatus" | "Edition" | "PressingMonth" | "PressingDay" | "ArtistCountry" | "ArtistType" | "ArtistGender" | "ArtistBeganYear" | "ArtistEndedYear" | "ArtistSortName" | "ArtistDisambiguation" | "ArtistEnded" | "Path" | "Codec" | "Year" | "PressingYear" | "Length" | "BitDepth" | "SampleRate" | "Bitrate" | "Channels" | "DynamicRange" | "Loudness" | "LoudnessRange" | "TruePeak" | "SamplePeak" | "Clipped" | "LeadingSilence" | "TrailingSilence" | "Bpm" | "Key" | "FileSize" | "FileDiscNumber" | "FileTrackNumber" | "Lossless" | "HiRes" | "Followed" | "Damaged" | "Instrumental" | "Monitored" | "DiscNumber" | "TrackNumber" | "TrackCount" | "DiscCount" | "Loved" | "AlbumLoved" | "ArtistLoved" | "WorkLoved" | "LovedWhen" | "Plays" | "Played" | "Tag" | "Added" | "Modified" | null;
         /** @enum {unknown} */
         SmartMatch: "All" | "Any" | null;
         /** @enum {unknown} */
@@ -3604,6 +3605,8 @@ export interface components {
         };
         SmartPreviewRequest: {
             criteria: null | components["schemas"]["SmartCriteria"];
+            /** Format: uuid */
+            playlist?: null | string;
         };
         SmartPreviewResponse: {
             /** Format: int32 */

@@ -35,11 +35,13 @@ internal static class SmartQuery
 
     /// <summary>The songs the rules come to, in their order and cut to their limit, each with the copy that plays it.</summary>
     /// <param name="seed">What deals <see cref="SmartSort.Random"/>: the same seed, the same order.</param>
+    /// <param name="owner">Whose hearts, plays and tags the rules read; null reads nobody's.</param>
     internal static async Task<List<SmartSong>> SongsAsync(
         FonotecaDbContext db,
         SmartCriteria criteria,
         string seed,
         DateTimeOffset now,
+        Guid? owner,
         CancellationToken cancellationToken)
     {
         var stated = await CatalogueEndpoints.StatedGenresAsync(db, cancellationToken).ConfigureAwait(false);
@@ -47,7 +49,7 @@ internal static class SmartQuery
         var files = await db.MediaFiles
             .AsNoTracking()
             .Where(file => file.RecordingId != null)
-            .Where(Predicate(criteria.Rules, now, stated))
+            .Where(Predicate(criteria.Rules, now, stated, Owning(db, owner)))
             .Select(file => new
             {
                 file.Id,
@@ -117,13 +119,27 @@ internal static class SmartQuery
         return [.. criteria.Limit is { } limit ? all.Take(limit) : all];
     }
 
+    /// <summary>One account's hearts, plays and tags, past the context's own filter: the playlist's owner, not whoever is asking.</summary>
+    internal sealed record Owned(IQueryable<Love> Loves, IQueryable<Play> Plays, IQueryable<SongTag> SongTags);
+
+    /// <remarks>An owner of nobody is the empty id, which no account has.</remarks>
+    internal static Owned Owning(FonotecaDbContext db, Guid? owner)
+    {
+        var account = owner ?? Guid.Empty;
+
+        return new Owned(
+            db.Loves.IgnoreQueryFilters().Where(love => love.AccountId == account),
+            db.Plays.IgnoreQueryFilters().Where(play => play.AccountId == account),
+            db.SongTags.IgnoreQueryFilters().Where(songTag => songTag.Tag!.AccountId == account));
+    }
+
     /// <summary>A condition, or a group folded from its rules; an empty group matches every file.</summary>
     /// <param name="stated">The genre names the library states, which a genre condition is asked of (<see cref="Genre"/>).</param>
-    internal static Expression<Func<MediaFile, bool>> Predicate(SmartRule rule, DateTimeOffset now, IReadOnlyCollection<string> stated)
+    internal static Expression<Func<MediaFile, bool>> Predicate(SmartRule rule, DateTimeOffset now, IReadOnlyCollection<string> stated, Owned owned)
     {
         if (rule.Rules is { } children)
         {
-            var parts = children.Select(child => Predicate(child, now, stated)).ToList();
+            var parts = children.Select(child => Predicate(child, now, stated, owned)).ToList();
 
             if (parts.Count == 0) return file => true;
 
@@ -137,10 +153,10 @@ internal static class SmartQuery
         {
             SmartFieldKind.Text when field == SmartField.Genre && op is not (SmartOperator.IsEmpty or SmartOperator.IsNotEmpty) =>
                 Genre(op, rule.Value?.Trim() ?? string.Empty, stated),
-            SmartFieldKind.Text => Text(Sources(field), op, rule.Value?.Trim() ?? string.Empty),
-            SmartFieldKind.Number => Number(field, op, SmartRules.Number(rule.Value), SmartRules.Number(rule.To)),
-            SmartFieldKind.Flag => op == SmartOperator.IsTrue ? Flag(field, true) : Flag(field, false),
-            _ => Added(op, (int)SmartRules.Number(rule.Value)!.Value, now),
+            SmartFieldKind.Text => Text(Sources(field, owned), op, rule.Value?.Trim() ?? string.Empty),
+            SmartFieldKind.Number => Number(field, op, SmartRules.Number(rule.Value), SmartRules.Number(rule.To), owned),
+            SmartFieldKind.Flag => Flag(field, op == SmartOperator.IsTrue, owned),
+            _ => Since(field, op, (int)SmartRules.Number(rule.Value)!.Value, now, owned),
         };
     }
 
@@ -154,7 +170,7 @@ internal static class SmartQuery
 
     private static Source Many(Expression<Func<MediaFile, IEnumerable<string?>>> values) => new(values, true);
 
-    private static IReadOnlyList<Source> Sources(SmartField field) => field switch
+    private static IReadOnlyList<Source> Sources(SmartField field, Owned owned) => field switch
     {
         SmartField.Title => [One(file => file.Recording!.Title)],
         SmartField.Artist =>
@@ -191,10 +207,36 @@ internal static class SmartQuery
             Many(file => file.Recording!.Credits.Select(credit => credit.Artist!.Name)),
         ],
         SmartField.Isrc => [One(file => file.Recording!.Isrcs, ", "), One(file => file.Recording!.Isrc)],
+        SmartField.Lyrics => [One(file => file.Recording!.Lyrics!.Plain)],
+        SmartField.TimedLyrics => [One(file => file.Recording!.Lyrics!.Synced)],
+        SmartField.Composed =>
+        [
+            One(file => file.Recording!.Work!.ComposedBegin),
+            One(file => file.Recording!.Work!.ComposedEnd),
+            One(file => file.Recording!.Work!.Parent!.ComposedBegin),
+            One(file => file.Recording!.Work!.Parent!.ComposedEnd),
+        ],
+        SmartField.Tag =>
+        [
+            Many(file => owned.SongTags
+                .Where(songTag => (file.RecordingId != null && songTag.RecordingId == file.RecordingId) || songTag.MediaFileId == file.Id)
+                .Select(songTag => songTag.Tag!.Name)),
+        ],
+        SmartField.WorkKey => [One(file => file.Recording!.Work!.Key), One(file => file.Recording!.Work!.Parent!.Key)],
+        SmartField.WorkType => [One(file => file.Recording!.Work!.Type), One(file => file.Recording!.Work!.Parent!.Type)],
+        SmartField.WorkLanguage =>
+        [
+            One(file => file.Recording!.Work!.Languages, ", "),
+            One(file => file.Recording!.Work!.Parent!.Languages, ", "),
+        ],
         SmartField.AlbumType => [One(file => file.ReleaseGroup!.PrimaryType), One(file => file.ReleaseGroup!.SecondaryTypes, ", ")],
         SmartField.Label => [One(file => file.Release!.Label)],
         SmartField.ReleaseCountry => [One(file => file.Release!.Country)],
         SmartField.MediumFormat => [One(file => file.Release!.MediumFormats, "+")],
+        SmartField.Barcode => [One(file => file.Release!.Barcode)],
+        SmartField.CatalogNumber => [One(file => file.Release!.CatalogNumber)],
+        SmartField.ReleaseStatus => [One(file => file.Release!.Status)],
+        SmartField.Edition => [One(file => file.Release!.Disambiguation)],
         SmartField.ArtistCountry =>
         [
             Many(file => file.Recording!.Credits.Select(credit => credit.Artist!.Country)),
@@ -205,6 +247,22 @@ internal static class SmartQuery
             Many(file => file.Recording!.Credits.Select(credit => credit.Artist!.Type)),
             Many(file => file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.Type)),
         ],
+        SmartField.ArtistGender =>
+        [
+            Many(file => file.Recording!.Credits.Select(credit => credit.Artist!.Gender)),
+            Many(file => file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.Gender)),
+        ],
+        SmartField.ArtistSortName =>
+        [
+            Many(file => file.Recording!.Credits.Select(credit => credit.Artist!.SortName)),
+            Many(file => file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.SortName)),
+        ],
+        SmartField.ArtistDisambiguation =>
+        [
+            Many(file => file.Recording!.Credits.Select(credit => credit.Artist!.Disambiguation)),
+            Many(file => file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.Disambiguation)),
+        ],
+        SmartField.Key => [One(file => file.TempoAndKey!.Key), One(file => file.TempoAndKey!.Key + " " + file.TempoAndKey.Scale)],
         SmartField.Path => [One(file => file.Path)],
         SmartField.Codec => [One(file => file.Quality!.Codec)],
         _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a text field."),
@@ -354,7 +412,7 @@ internal static class SmartQuery
         });
     }
 
-    private static Expression<Func<MediaFile, bool>> Number(SmartField field, SmartOperator op, double? value, double? to)
+    private static Expression<Func<MediaFile, bool>> Number(SmartField field, SmartOperator op, double? value, double? to, Owned owned)
     {
         return field switch
         {
@@ -385,6 +443,41 @@ internal static class SmartQuery
             SmartField.Channels => Compare(file => (int?)file.Quality!.Channels, op, Whole(value), Whole(to)),
             SmartField.DynamicRange => Compare(file => file.Measurement!.DynamicRange, op, value, to),
             SmartField.Loudness => Compare(file => file.Measurement!.IntegratedLufs, op, value, to),
+            SmartField.LoudnessRange => Compare(file => file.Measurement!.LoudnessRangeLu, op, value, to),
+            SmartField.TruePeak => Compare(file => file.Measurement!.TruePeakDbtp, op, value, to),
+            SmartField.SamplePeak => Compare(file => file.Measurement!.SamplePeakDbfs, op, value, to),
+            SmartField.LeadingSilence => Compare(file => (double?)file.Measurement!.LeadingSilenceSeconds, op, value, to),
+            SmartField.TrailingSilence => Compare(file => (double?)file.Measurement!.TrailingSilenceSeconds, op, value, to),
+            SmartField.Bpm => Compare(
+                file => file.TempoAndKey != null && file.TempoAndKey.BpmConfidence >= TempoAndKey.MinimumBpmConfidence
+                    ? (double?)file.TempoAndKey.Bpm
+                    : null,
+                op, value, to),
+            SmartField.FileSize => Compare(
+                file => (long?)file.SizeBytes,
+                op,
+                value is { } megabytes ? (long)Math.Round(megabytes * 1_000_000) : null,
+                to is { } most ? (long)Math.Round(most * 1_000_000) : null),
+            SmartField.DiscNumber => Compare(file => (int?)file.Track!.DiscNumber, op, Whole(value), Whole(to)),
+            SmartField.TrackNumber => Compare(file => (int?)file.Track!.Position, op, Whole(value), Whole(to)),
+            SmartField.TrackCount => Compare(file => file.Release!.TrackCount, op, Whole(value), Whole(to)),
+            SmartField.DiscCount => Compare(file => file.Release!.DiscCount, op, Whole(value), Whole(to)),
+            SmartField.PressingMonth => Compare(file => file.Release!.ReleasedMonth, op, Whole(value), Whole(to)),
+            SmartField.PressingDay => Compare(file => file.Release!.ReleasedDay, op, Whole(value), Whole(to)),
+            SmartField.FileDiscNumber => Compare(file => file.TagDiscNumber, op, Whole(value), Whole(to)),
+            SmartField.FileTrackNumber => Compare(file => file.TagTrackNumber, op, Whole(value), Whole(to)),
+            SmartField.ArtistBeganYear => CompareAny(
+                file => file.Recording!.Credits.Select(credit => credit.Artist!.BeganYear)
+                    .Concat(file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.BeganYear)),
+                op, Whole(value), Whole(to)),
+            SmartField.ArtistEndedYear => CompareAny(
+                file => file.Recording!.Credits.Select(credit => credit.Artist!.EndedYear)
+                    .Concat(file.ReleaseGroup!.Credits.Select(credit => credit.Artist!.EndedYear)),
+                op, Whole(value), Whole(to)),
+            SmartField.Plays => Compare(
+                file => (int?)owned.Plays.Count(play => file.RecordingId != null
+                    && (play.MediaFile != null ? play.MediaFile.RecordingId : play.RecordingId) == file.RecordingId),
+                op, Whole(value), Whole(to)),
             _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a number field."),
         };
 
@@ -399,11 +492,30 @@ internal static class SmartQuery
         T? to)
         where T : struct
     {
-        var file = column.Parameters[0];
-        var body = column.Body;
+        return Expression.Lambda<Func<MediaFile, bool>>(Test(column.Body, op, value, to), column.Parameters[0]);
+    }
+
+    /// <summary>A comparison of every value a file has, such as its billed artists': true where any one answers.</summary>
+    private static Expression<Func<MediaFile, bool>> CompareAny<T>(
+        Expression<Func<MediaFile, IEnumerable<T?>>> values,
+        SmartOperator op,
+        T? value,
+        T? to)
+        where T : struct
+    {
+        var each = Expression.Parameter(typeof(T?), "each");
+        var predicate = Expression.Lambda<Func<T?, bool>>(Test(each, op, value, to), each);
+        var any = Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), [typeof(T?)], values.Body, predicate);
+
+        return Expression.Lambda<Func<MediaFile, bool>>(any, values.Parameters[0]);
+    }
+
+    private static BinaryExpression Test<T>(Expression body, SmartOperator op, T? value, T? to)
+        where T : struct
+    {
         var low = Expression.Constant(value, typeof(T?));
 
-        Expression test = op switch
+        return op switch
         {
             SmartOperator.IsEmpty => Expression.Equal(body, Expression.Constant(null, typeof(T?))),
             SmartOperator.IsNotEmpty => Expression.NotEqual(body, Expression.Constant(null, typeof(T?))),
@@ -416,14 +528,12 @@ internal static class SmartQuery
                 Expression.LessThanOrEqual(body, Expression.Constant(Max(value, to), typeof(T?)))),
         };
 
-        return Expression.Lambda<Func<MediaFile, bool>>(test, file);
-
         static T? Min(T? left, T? right) => Comparer<T?>.Default.Compare(left, right) <= 0 ? left : right;
 
         static T? Max(T? left, T? right) => Comparer<T?>.Default.Compare(left, right) <= 0 ? right : left;
     }
 
-    private static Expression<Func<MediaFile, bool>> Flag(SmartField field, bool wanted)
+    private static Expression<Func<MediaFile, bool>> Flag(SmartField field, bool wanted, Owned owned)
     {
         Expression<Func<MediaFile, bool>> test = field switch
         {
@@ -438,16 +548,59 @@ internal static class SmartQuery
                     || file.Quality.SampleRateHz > 48_000),
             SmartField.Followed => file => file.Recording!.Credits.Any(credit => credit.Artist!.Followed)
                 || file.ReleaseGroup!.Credits.Any(credit => credit.Artist!.Followed),
+            SmartField.Clipped => wanted
+                ? file => file.Measurement != null && file.Measurement.SamplePeakDbfs != null
+                    && (file.Measurement.SamplePeakDbfs > 0.01
+                        || (file.Measurement.SamplePeakDbfs >= -0.01 && file.Measurement.PeakCount >= 8))
+                : file => file.Measurement != null && file.Measurement.SamplePeakDbfs != null
+                    && !(file.Measurement.SamplePeakDbfs > 0.01
+                        || (file.Measurement.SamplePeakDbfs >= -0.01 && file.Measurement.PeakCount >= 8)),
+            SmartField.Loved => file => owned.Loves.Any(love =>
+                (file.RecordingId != null && love.RecordingId == file.RecordingId) || love.MediaFileId == file.Id),
+            SmartField.AlbumLoved => file => file.ReleaseGroupId != null
+                && owned.Loves.Any(love => love.ReleaseGroupId == file.ReleaseGroupId),
+            SmartField.ArtistLoved => file => owned.Loves.Any(love =>
+                file.Recording!.Credits.Any(credit => credit.ArtistId == love.ArtistId)
+                || file.ReleaseGroup!.Credits.Any(credit => credit.ArtistId == love.ArtistId)),
+            SmartField.WorkLoved => file => file.Recording!.WorkId != null
+                && owned.Loves.Any(love => love.WorkId == file.Recording.WorkId
+                    || (file.Recording.Work!.ParentId != null && love.WorkId == file.Recording.Work.ParentId)),
+            SmartField.Instrumental => file => file.Recording!.Lyrics != null && file.Recording.Lyrics.Instrumental,
+            SmartField.Monitored => file => file.ReleaseGroup != null && file.ReleaseGroup.Monitored,
+            SmartField.ArtistEnded => file => file.Recording!.Credits.Any(credit => credit.Artist!.Ended)
+                || file.ReleaseGroup!.Credits.Any(credit => credit.Artist!.Ended),
             SmartField.Damaged => file => file.Integrity == IntegrityState.Corrupt
                 || file.Integrity == IntegrityState.Truncated
                 || file.Integrity == IntegrityState.Unreadable,
             _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a flag."),
         };
 
-        // Lossless answers both ways itself, since an unprobed file is neither.
-        return wanted || field == SmartField.Lossless
+        // These answer both ways themselves, since an unprobed or unmeasured file is neither.
+        return wanted || field is SmartField.Lossless or SmartField.Clipped
             ? test
             : Expression.Lambda<Func<MediaFile, bool>>(Expression.Not(test.Body), test.Parameters);
+    }
+
+    private static Expression<Func<MediaFile, bool>> Since(SmartField field, SmartOperator op, int days, DateTimeOffset now, Owned owned)
+    {
+        if (field == SmartField.Added) return Added(op, days, now);
+
+        var since = now.AddDays(-days);
+
+        Expression<Func<MediaFile, bool>> within = field switch
+        {
+            SmartField.Modified => file => file.LastModifiedUtc >= since,
+            SmartField.LovedWhen => file => owned.Loves.Any(love => love.LovedUtc >= since
+                && ((file.RecordingId != null && love.RecordingId == file.RecordingId) || love.MediaFileId == file.Id)),
+            SmartField.Played => file => owned.Plays.Any(play => play.PlayedUtc >= since
+                && file.RecordingId != null
+                && (play.MediaFile != null ? play.MediaFile.RecordingId : play.RecordingId) == file.RecordingId),
+            _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a date field."),
+        };
+
+        return op == SmartOperator.InTheLast
+            ? within
+            : Expression.Lambda<Func<MediaFile, bool>>(Expression.Not(within.Body), within.Parameters);
     }
 
     /// <remarks>

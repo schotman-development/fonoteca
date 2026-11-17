@@ -1491,12 +1491,17 @@ namespace Fonoteca.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<Guid?>("OwnerId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OwnerId");
 
                     b.HasIndex("Path")
                         .IsUnique();
@@ -2060,6 +2065,14 @@ namespace Fonoteca.Data.Migrations
                         .HasForeignKey("Fonoteca.Domain.Catalogue.ReleaseCover", "ReleaseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Fonoteca.Domain.Catalogue.SmartPlaylist", b =>
+                {
+                    b.HasOne("Fonoteca.Data.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Fonoteca.Domain.Catalogue.Track", b =>

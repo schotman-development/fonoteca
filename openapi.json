@@ -10529,6 +10529,12 @@
             "items": {
               "$ref": "#/components/schemas/PlaylistEntryRow"
             }
+          },
+          "owner": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -12089,12 +12095,30 @@
           "Engineer",
           "Credited",
           "Isrc",
+          "Lyrics",
+          "TimedLyrics",
+          "Composed",
+          "WorkKey",
+          "WorkType",
+          "WorkLanguage",
           "AlbumType",
           "Label",
           "ReleaseCountry",
           "MediumFormat",
+          "Barcode",
+          "CatalogNumber",
+          "ReleaseStatus",
+          "Edition",
+          "PressingMonth",
+          "PressingDay",
           "ArtistCountry",
           "ArtistType",
+          "ArtistGender",
+          "ArtistBeganYear",
+          "ArtistEndedYear",
+          "ArtistSortName",
+          "ArtistDisambiguation",
+          "ArtistEnded",
           "Path",
           "Codec",
           "Year",
@@ -12106,11 +12130,37 @@
           "Channels",
           "DynamicRange",
           "Loudness",
+          "LoudnessRange",
+          "TruePeak",
+          "SamplePeak",
+          "Clipped",
+          "LeadingSilence",
+          "TrailingSilence",
+          "Bpm",
+          "Key",
+          "FileSize",
+          "FileDiscNumber",
+          "FileTrackNumber",
           "Lossless",
           "HiRes",
           "Followed",
           "Damaged",
+          "Instrumental",
+          "Monitored",
+          "DiscNumber",
+          "TrackNumber",
+          "TrackCount",
+          "DiscCount",
+          "Loved",
+          "AlbumLoved",
+          "ArtistLoved",
+          "WorkLoved",
+          "LovedWhen",
+          "Plays",
+          "Played",
+          "Tag",
           "Added",
+          "Modified",
           null
         ]
       },
@@ -12181,6 +12231,13 @@
                 "$ref": "#/components/schemas/SmartCriteria"
               }
             ]
+          },
+          "playlist": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
           }
         }
       },

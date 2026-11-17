@@ -2220,6 +2220,17 @@ public sealed class SmartPlaylist
     /// <summary>The <see cref="SmartCriteria"/>, as <see cref="SmartRules.Serialize"/> writes them.</summary>
     public required string CriteriaJson { get; set; }
 
+    /// <summary>
+    /// The account whose hearts, plays and tags the rules read; null for a
+    /// playlist made before it had one, which the next account to save it takes.
+    /// </summary>
+    /// <remarks>
+    /// The m3u is one file for everybody, so those three need one person to
+    /// belong to (the owner's choice). An account that is removed leaves the
+    /// playlist asking of nobody, which none of those rules match.
+    /// </remarks>
+    public Guid? OwnerId { get; set; }
+
     public required DateTimeOffset CreatedUtc { get; init; }
 
     /// <summary>When the name or the rules last changed; part of what deals a random order.</summary>

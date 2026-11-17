@@ -67,7 +67,7 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
 
         await using var db = PostgresFixture.CreateContext(_connectionString);
 
-        var band = new Artist { Id = ArtistId.New(), Name = "Fleetwood Mac", Type = "Group", Country = "GB" };
+        var band = new Artist { Id = ArtistId.New(), Name = "Fleetwood Mac", Type = "Group", Country = "GB", BeganYear = 1967 };
         var rumours = new ReleaseGroup
         {
             Id = ReleaseGroupId.New(),
@@ -111,13 +111,50 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
             Duration = TimeSpan.FromSeconds(257),
         });
 
+        lossless.TagTrackNumber = 3;
         lossless.ReleaseGroupId = rumours.Id;
         dreamsFile.ReleaseGroupId = rumours.Id;
+
+        lossless.Measurement = new AudioMeasurement
+        {
+            SamplePeakDbfs = 0,
+            PeakCount = 20,
+            LoudnessRangeLu = 7,
+            LeadingSilenceSeconds = 2,
+        };
+        dreamsFile.Measurement = new AudioMeasurement { SamplePeakDbfs = -3, PeakCount = 1 };
+        dreamsFile.TempoAndKey = new TempoAndKey { Bpm = 120, BpmConfidence = 2, Key = "F#", Scale = "minor", KeyStrength = 0.8 };
+        dreams.Lyrics = new RecordingLyrics
+        {
+            RecordingId = dreams.Id,
+            Plain = "Thunder only happens when it's raining",
+            Synced = "[00:01.00]Thunder only happens when it's raining",
+            SavedUtc = DateTimeOffset.UtcNow,
+        };
 
         var nameless = File(NamelessPath, null, null);
 
         (_chain, _dreams) = (chain.Id, dreams.Id);
         (_lossless, _lossy, _dreamsFile, _nameless) = (lossless.Id, lossy.Id, dreamsFile.Id, nameless.Id);
+
+        // The account every request of the host acts as, whose playlists these are, and another whose hearts must not count.
+        var me = new Account { Id = TestSignIn.AccountId, UserName = "tester", NormalizedUserName = "TESTER", CreatedUtc = DateTimeOffset.UtcNow };
+        var other = new Account { Id = Guid.CreateVersion7(), UserName = "other", NormalizedUserName = "OTHER", CreatedUtc = DateTimeOffset.UtcNow };
+        var workout = new Tag { Id = Guid.CreateVersion7(), AccountId = me.Id, Name = "Workout" };
+        var played = DateTimeOffset.UtcNow.AddHours(-2);
+
+        db.Users.AddRange(me, other);
+        db.Tags.Add(workout);
+        db.SongTags.Add(new SongTag { Id = Guid.CreateVersion7(), TagId = workout.Id, RecordingId = dreams.Id });
+        db.Loves.AddRange(
+            new Love { Id = Guid.CreateVersion7(), AccountId = me.Id, RecordingId = dreams.Id, LovedUtc = DateTimeOffset.UtcNow },
+            new Love { Id = Guid.CreateVersion7(), AccountId = me.Id, ReleaseGroupId = rumours.Id, LovedUtc = DateTimeOffset.UtcNow },
+            new Love { Id = Guid.CreateVersion7(), AccountId = me.Id, ArtistId = band.Id, LovedUtc = DateTimeOffset.UtcNow },
+            new Love { Id = Guid.CreateVersion7(), AccountId = other.Id, RecordingId = chain.Id, LovedUtc = DateTimeOffset.UtcNow });
+        db.Plays.AddRange(
+            new Play { Id = Guid.CreateVersion7(), AccountId = me.Id, PlayedUtc = played, MediaFileId = lossless.Id },
+            new Play { Id = Guid.CreateVersion7(), AccountId = me.Id, PlayedUtc = played.AddMinutes(-5), MediaFileId = lossy.Id },
+            new Play { Id = Guid.CreateVersion7(), AccountId = other.Id, PlayedUtc = played, MediaFileId = dreamsFile.Id });
 
         db.Artists.Add(band);
         db.ReleaseGroups.Add(rumours);
@@ -528,6 +565,36 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("Added", "InTheLast", "1", null, 2)]
     [InlineData("Added", "NotInTheLast", "1", null, 0)]
     [InlineData("Path", "EndsWith", ".mp3", null, 1)]
+    // Hearts, plays and tags are the owner's, never another account's.
+    [InlineData("Loved", "IsTrue", null, null, 1)]
+    [InlineData("Loved", "IsFalse", null, null, 1)]
+    [InlineData("AlbumLoved", "IsTrue", null, null, 2)]
+    [InlineData("ArtistLoved", "IsTrue", null, null, 2)]
+    [InlineData("WorkLoved", "IsTrue", null, null, 0)]
+    [InlineData("LovedWhen", "InTheLast", "1", null, 1)]
+    [InlineData("LovedWhen", "NotInTheLast", "1", null, 1)]
+    [InlineData("Plays", "AtLeast", "2", null, 1)]
+    [InlineData("Plays", "Is", "0", null, 1)]
+    [InlineData("Played", "InTheLast", "1", null, 1)]
+    [InlineData("Played", "NotInTheLast", "1", null, 1)]
+    [InlineData("Tag", "Is", "workout", null, 1)]
+    [InlineData("Tag", "IsEmpty", null, null, 1)]
+    [InlineData("ArtistBeganYear", "Is", "1967", null, 2)]
+    [InlineData("ArtistBeganYear", "Between", "1900", "1950", 0)]
+    [InlineData("TimedLyrics", "IsNotEmpty", null, null, 1)]
+    [InlineData("FileTrackNumber", "Is", "3", null, 1)]
+    [InlineData("Clipped", "IsTrue", null, null, 1)]
+    [InlineData("Clipped", "IsFalse", null, null, 1)]
+    [InlineData("LoudnessRange", "AtLeast", "5", null, 1)]
+    [InlineData("LeadingSilence", "AtLeast", "1", null, 1)]
+    [InlineData("SamplePeak", "AtMost", "-1", null, 1)]
+    [InlineData("Bpm", "Between", "100", "130", 1)]
+    [InlineData("Key", "Is", "F# minor", null, 1)]
+    [InlineData("Lyrics", "Contains", "THUNDER", null, 1)]
+    [InlineData("Instrumental", "IsTrue", null, null, 0)]
+    [InlineData("FileSize", "AtLeast", "1", null, 0)]
+    [InlineData("Modified", "NotInTheLast", "30", null, 2)]
+    [InlineData("Modified", "InTheLast", "30", null, 0)]
     [InlineData("Composer", "IsNot", "Lindsey Buckingham", null, 1)]
     public async Task EachRuleAnswersWhatItSays(string field, string op, string? value, string? to, int songs)
     {
@@ -536,6 +603,21 @@ public sealed class PlaylistEndpointTests(PostgresFixture postgres) : IAsyncLife
         var preview = await PreviewAsync(client, Criteria(Group("All", Condition(field, op, value, to))));
 
         Assert.Equal(songs, preview.Songs);
+    }
+
+    /// <summary>The m3u is everybody's, so its hearts are one person's: the account that made the playlist.</summary>
+    [Fact]
+    public async Task ASmartPlaylistReadsTheHeartsOfItsOwner()
+    {
+        using var client = _factory!.CreateClient();
+
+        var playlist = await CreateSmartAsync(client, "Hearted", Criteria(Group("All", Condition("Loved", "IsTrue"))));
+
+        Assert.Equal("tester", playlist.Owner);
+
+        var text = ReadPlaylist("Hearted");
+        Assert.Contains("Dreams", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("The Chain", text, StringComparison.Ordinal);
     }
 
     /// <summary>Anything that took the gate may have changed the answer, so its release writes the file again.</summary>
