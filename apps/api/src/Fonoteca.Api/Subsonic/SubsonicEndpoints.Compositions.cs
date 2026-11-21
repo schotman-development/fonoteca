@@ -219,7 +219,7 @@ public static partial class SubsonicEndpoints
         WorkId TopOf(WorkId work) => parents.TryGetValue(work, out var parent) ? WorkTree.Top(parent, parents) : work;
 
         var classical = held
-            .Where(recording => !ClassicalWorks.SongOfAShow(works[recording.Work].Type, works[TopOf(recording.Work)].Type))
+            .Where(recording => !ClassicalWorks.IsStandaloneSong(works[recording.Work].Type, works[TopOf(recording.Work)].Type))
             .GroupBy(recording => TopOf(recording.Work))
             .Where(piece => ClassicalWorks.Is(
                     piece.Any(recording => recording.Work == piece.Key) ? works[piece.Key].Type : null,

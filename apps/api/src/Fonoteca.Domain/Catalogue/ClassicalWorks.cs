@@ -28,21 +28,21 @@ public static class ClassicalWorks
         return type is not ("Song" or "Soundtrack") && genres.Select(FileGenres.Split).Any(Classical);
     }
 
-    /// <summary>Whether a held work is a song in a show, which no genre makes classical.</summary>
+    /// <summary>Whether a held work is a song standing on its own, which no genre makes a work or a movement.</summary>
     /// <remarks>
-    /// <b>A <c>Song</c> part of a piece typed <c>Soundtrack</c> or
-    /// <c>Musical</c></b>: "Smile" is part 13 of <i>Chaplin</i>, "Tea for Two"
-    /// a song in <i>No, No, Nanette</i>. A movement's own type is otherwise
-    /// never asked, since a song cycle's parts are typed <c>Song</c> too, so
-    /// one held recording tagged classical (a Nat King Cole box) made every
-    /// jazz singer's "Smile" a movement of <i>Chaplin</i> (client issue #72,
-    /// the owner's choice). A song cycle is typed <c>Song-cycle</c> and keeps
-    /// its songs.
+    /// <b>A <c>Song</c>-typed part is standalone unless its piece is a
+    /// <c>Song-cycle</c></b>. MusicBrainz lists "Smile" as part 13 of
+    /// <i>Chaplin</i> and "Tea for Two" in <i>No, No, Nanette</i>, but they are
+    /// songs, not movements, and one held recording tagged classical (a Nat
+    /// King Cole box) made every singer's "Smile" a movement of <i>Chaplin</i>
+    /// (client issue #72, the owner's choice). A movement's own type is
+    /// otherwise never asked, and a song cycle's songs are typed <c>Song</c>
+    /// too, so those keep their piece.
     /// </remarks>
     /// <param name="part">The held work's MusicBrainz type.</param>
-    /// <param name="piece">The type of the whole piece it is a part of.</param>
-    public static bool SongOfAShow(string? part, string? piece) =>
-        part == "Song" && piece is "Soundtrack" or "Musical";
+    /// <param name="piece">The type of the whole piece it is a part of; the work's own where it is no part.</param>
+    public static bool IsStandaloneSong(string? part, string? piece) =>
+        part == "Song" && piece != "Song-cycle";
 
     /// <summary>Whether a piece is classical by the albums it is on, where those albums have no genres of their own.</summary>
     /// <remarks>
