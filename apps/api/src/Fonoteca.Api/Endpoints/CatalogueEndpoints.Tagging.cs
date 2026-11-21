@@ -229,7 +229,7 @@ public static partial class CatalogueEndpoints
     /// <summary>Without a trailing slash; untrimmed otherwise, since a folder name may end in a space.</summary>
     private static string Unslashed(string folder) => folder.EndsWith('/') ? folder[..^1] : folder;
 
-    private static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
         WriteAlbumTags(
             Guid id,
             FonotecaDbContext db,
@@ -257,7 +257,7 @@ public static partial class CatalogueEndpoints
             tags, TagWriteScope.ForAlbum(groupId, title), caller, cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
+    internal static async Task<Results<Accepted<TagWriteStartedResponse>, ProblemHttpResult>>
         WriteArtistTags(
             Guid id,
             FonotecaDbContext db,

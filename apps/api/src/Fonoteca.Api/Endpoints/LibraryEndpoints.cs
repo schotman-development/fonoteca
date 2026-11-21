@@ -198,6 +198,27 @@ public static class LibraryEndpoints
             .WithSummary("Ask the running tag write to stop after the file it is on.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/flow", StartFlow)
+            .RequireRole(AccountRoles.Admin)
+            .WithName("StartLibraryFlow")
+            .WithSummary("Run scan, identify, enrich, attribute, probe, analyse and the tag write in order.")
+            .WithDescription(
+                "Returns immediately; poll GET /api/library/flow. Each step is the pass its own button "
+                + "starts, so the gate and every refusal are theirs. The first step that cannot start or "
+                + "records an error ends the flow and is named in the status. `writeTags` false leaves out "
+                + "the last step. With Fonoteca:AllowFileMutation off the tag write is a dry run.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/flow", GetFlowStatus)
+            .WithName("GetLibraryFlowStatus")
+            .WithSummary("Which step the flow is on, which are done, and why it stopped.");
+
+        group.MapDelete("/flow", CancelFlow)
+            .RequireRole(AccountRoles.Admin)
+            .WithName("CancelLibraryFlow")
+            .WithSummary("Stop the flow after the pass it is on; no later step starts.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         return app;
     }
 
@@ -240,7 +261,29 @@ public static class LibraryEndpoints
             LastCompleted: tags.LastCompleted));
     }
 
-    private static Results<Accepted, ProblemHttpResult> CancelTagWrite(TagWriteService tags) =>
+    internal static Results<Accepted<LibraryFlowStatus>, ProblemHttpResult> StartFlow(
+        LibraryFlowService flow,
+        ICallerContext caller,
+        bool writeTags = true) =>
+        flow.Start(writeTags, caller.ActorId) is { } started
+            ? TypedResults.Accepted("/api/library/flow", started)
+            : TypedResults.Problem(
+                title: "A flow is already running",
+                detail: "Poll GET /api/library/flow.",
+                statusCode: StatusCodes.Status409Conflict);
+
+    internal static Ok<LibraryFlowStatus?> GetFlowStatus(LibraryFlowService flow) =>
+        TypedResults.Ok<LibraryFlowStatus?>(flow.Status);
+
+    internal static Results<Accepted, ProblemHttpResult> CancelFlow(LibraryFlowService flow) =>
+        flow.Cancel()
+            ? TypedResults.Accepted("/api/library/flow")
+            : TypedResults.Problem(
+                title: "Nothing to cancel",
+                detail: "No flow is running.",
+                statusCode: StatusCodes.Status409Conflict);
+
+    internal static Results<Accepted, ProblemHttpResult> CancelTagWrite(TagWriteService tags) =>
         tags.Cancel()
             ? TypedResults.Accepted("/api/library/tags")
             : TypedResults.Problem(

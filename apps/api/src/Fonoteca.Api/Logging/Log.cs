@@ -721,6 +721,12 @@ internal static partial class Log
     public static partial void TagsUndone(ILogger logger, string folder, string edit, int restored, int moved, int problems);
 
     [LoggerMessage(
+        EventId = 1805,
+        Level = LogLevel.Error,
+        Message = "The library flow stopped on an unexpected error")]
+    public static partial void LibraryFlowAborted(ILogger logger, Exception cause);
+
+    [LoggerMessage(
         EventId = 1303,
         Level = LogLevel.Warning,
         Message = "Tag write stopped early: {Reason}")]

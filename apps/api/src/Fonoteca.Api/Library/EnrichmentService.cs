@@ -129,6 +129,11 @@ public sealed class EnrichmentService(
     private volatile EnrichmentProgress? _progress;
     private volatile EnrichmentSummary? _lastCompleted;
 
+    private volatile string? _lastError;
+
+    /// <summary>Why the last run stopped early; null when it did not.</summary>
+    public string? LastError => _lastError;
+
     public bool IsRunning => _progress is not null;
 
     /// <summary>Where the running pass has got to, or null when nothing is running.</summary>
@@ -273,6 +278,8 @@ public sealed class EnrichmentService(
 
         _progress = new EnrichmentProgress(jobId, 0, 0, null);
 
+        _lastError = null;
+
         _ = Task.Run(
             async () =>
             {
@@ -284,6 +291,7 @@ public sealed class EnrichmentService(
                 catch (Exception cause)
 #pragma warning restore CA1031
                 {
+                    _lastError = cause.Message;
                     Log.EnrichmentAborted(logger, cause.Message);
                 }
                 finally

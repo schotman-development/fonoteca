@@ -178,6 +178,7 @@ builder.Services.AddSingleton<AnalysisService>();
 // its own — see TagWriteService. It is here because it is a pass; it is reached
 // only from a button because of what it does.
 builder.Services.AddSingleton<TagWriteService>();
+builder.Services.AddSingleton<LibraryFlowService>();
 builder.Services.AddScoped<AlbumReplacementService>();
 builder.Services.AddScoped<DownloadFiling>();
 builder.Services.AddScoped<Acquiring>();

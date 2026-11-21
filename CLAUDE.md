@@ -30,9 +30,10 @@ Six are a `POST`/`GET`/`DELETE` trio under `/api/library` taking
 `LibraryWorkGate`. **The scan is neither**: it cannot be cancelled, and it
 guards itself with a private interlocked flag rather than the gate — so a scan
 can arrive in the middle of anything. Nothing chains one pass into another
-except `Fonoteca:IdentifyAfterScan`. The tag write is the only one nobody may
-automate — but a download writes its own album folder (ADR 0011, the owner's
-choice).
+except `Fonoteca:IdentifyAfterScan`. The tag write is the last step of the library flow
+(`POST /api/library/flow`, ADR 0021), which chains every pass in order and is
+reachable over `/mcp`; a download writes its own album folder (ADR 0011, the
+owner's choice).
 
 **Dedupe is a list, not a pass** (`Duplicates`, the Duplicates screen): an
 album held in more than one album folder, and a song held twice in one beyond
@@ -1114,14 +1115,17 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Twenty-seven tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Thirty-eight tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
 `list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
 `release_slots`, `start_pass`, `cancel_pass`, `decide_recording`,
 `decide_component`, `file_under_release`, `mark_folder_unreleased`,
 `reopen_folder`, `set_folder_album`, `undo_folder_edit`, `folder_tags`,
-`edit_tags`, `set_album_genres`, `set_recording_work`.
+`edit_tags`, `set_album_genres`, `set_recording_work`, `start_flow`, `write_tags`,
+`list_playlists`, `get_playlist`, `create_playlist`, `add_playlist_songs`,
+`update_playlist`, `delete_playlist`, `preview_smart_playlist`,
+`create_smart_playlist`, `update_smart_playlist`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every
@@ -1129,8 +1133,9 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
   this file keeps warning about.
 - **An agent's decision is not the owner's** (rule 4). **Adding a by-a-person
   outcome means adding its twin to `ByCaller`**, or the agent path throws.
-- **Not offered:** the tag write at any scope, trash/move/upload, Qobuz. Undo
-  and the tag editor are, recorded as the agent's (the owner's choice).
+- **Not offered:** trash/move/upload, Qobuz. The tag write at any scope, the
+  whole flow, undo and the tag editor are, recorded as the agent's (the
+  owner's choice, ADR 0021).
 - **`Fonoteca:McpToken` empty is a 404, read per request.** `Guard` is middleware
   rather than a filter so it sits in front of whatever `MapMcp` maps. It locks
   `/mcp` and nothing else; `/api` takes a signed-in account (Accounts, below).

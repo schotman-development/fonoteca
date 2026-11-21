@@ -1149,6 +1149,89 @@
         }
       }
     },
+    "/api/library/flow": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Run scan, identify, enrich, attribute, probe, analyse and the tag write in order.",
+        "description": "Returns immediately; poll GET /api/library/flow. Each step is the pass its own button starts, so the gate and every refusal are theirs. The first step that cannot start or records an error ends the flow and is named in the status. `writeTags` false leaves out the last step. With Fonoteca:AllowFileMutation off the tag write is a dry run.",
+        "operationId": "StartLibraryFlow",
+        "parameters": [
+          {
+            "name": "writeTags",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFlowStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Which step the flow is on, which are done, and why it stopped.",
+        "operationId": "GetLibraryFlowStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFlowStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Stop the flow after the pass it is on; no later step starts.",
+        "operationId": "CancelLibraryFlow",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/files": {
       "get": {
         "tags": [
@@ -9858,6 +9941,57 @@
             "format": "int32"
           },
           "formats": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "LibraryFlowState": {
+        "enum": [
+          "Running",
+          "Completed",
+          "Failed",
+          "Cancelled"
+        ]
+      },
+      "LibraryFlowStatus": {
+        "required": [
+          "jobId",
+          "state",
+          "current",
+          "steps",
+          "done",
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/LibraryFlowState"
+          },
+          "current": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "done": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error": {
             "type": [
               "null",
               "string"

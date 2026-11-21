@@ -97,6 +97,11 @@ public sealed class IdentificationService(
     private volatile IdentificationProgress? _progress;
     private volatile IdentificationSummary? _lastCompleted;
 
+    private volatile string? _lastError;
+
+    /// <summary>Why the last run stopped early; null when it did not.</summary>
+    public string? LastError => _lastError;
+
     public bool IsRunning => _progress is not null;
 
     /// <summary>Where the running pass has got to, or null when nothing is running.</summary>
@@ -160,6 +165,8 @@ public sealed class IdentificationService(
 
         _progress = new IdentificationProgress(jobId, 0, 0, null);
 
+        _lastError = null;
+
         _ = Task.Run(
             async () =>
             {
@@ -171,6 +178,7 @@ public sealed class IdentificationService(
                 catch (Exception cause)
 #pragma warning restore CA1031
                 {
+                    _lastError = cause.Message;
                     Log.IdentificationAborted(logger, cause.Message);
                 }
                 finally

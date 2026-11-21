@@ -112,6 +112,11 @@ public sealed class ReleaseAttributionService(
     private volatile AttributionProgress? _progress;
     private volatile AttributionSummary? _lastCompleted;
 
+    private volatile string? _lastError;
+
+    /// <summary>Why the last run stopped early; null when it did not.</summary>
+    public string? LastError => _lastError;
+
     public bool IsRunning => _progress is not null;
 
     public AttributionProgress? Progress => _progress;
@@ -164,6 +169,8 @@ public sealed class ReleaseAttributionService(
         _cancellation = cancellation;
         _progress = new AttributionProgress(jobId, 0, 0, null);
 
+        _lastError = null;
+
         _ = Task.Run(
             async () =>
             {
@@ -175,6 +182,7 @@ public sealed class ReleaseAttributionService(
                 catch (Exception cause)
 #pragma warning restore CA1031
                 {
+                    _lastError = cause.Message;
                     Log.AttributionAborted(logger, cause.Message);
                 }
                 finally

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,11 +8,13 @@ using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
 using Fonoteca.Data;
 using Fonoteca.Domain.Abstractions;
+using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Events;
 using Fonoteca.Providers.MusicBrainz;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
@@ -33,12 +36,12 @@ namespace Fonoteca.Api.Mcp;
 /// endpoints write the agent twin of each by-a-person outcome for that caller and
 /// the event log records the actor, so the catalogue can tell the two apart.
 ///
-/// <b>What is deliberately missing.</b> The tag write, at any scope, which is the
-/// one step nobody may automate and stays three buttons with no fourth route.
-/// Trash, move and upload, which act on the disk. Qobuz. <c>decide_recording</c>
-/// does write one AcoustID into one file, subject to
-/// <c>Fonoteca:AllowFileMutation</c>, exactly as the button on the same question
-/// does.
+/// <b>What is deliberately missing.</b> Trash, move and upload, which act on
+/// the disk, and Qobuz. The tag write and the flow that ends in it are here
+/// (ADR 0021, the owner's choice), still behind
+/// <c>Fonoteca:AllowFileMutation</c>, journalled as the agent and undone with
+/// <c>undo_folder_edit</c>. <c>decide_recording</c> writes one AcoustID into
+/// one file under the same flag, as the button on the same question does.
 ///
 /// <b>Instance methods, so the SDK builds one per call from that request's
 /// services.</b> A decision's database context and the event log it journals into
@@ -56,7 +59,9 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
 
     private static readonly string[] Startable = ["scan", "identify", "enrich", "probe", "analyse", "attribute"];
 
-    private static readonly string[] Cancellable = ["identify", "enrich", "probe", "analyse", "attribute"];
+    private static readonly string[] Cancellable = ["identify", "enrich", "probe", "analyse", "attribute", "tags", "flow"];
+
+    private static readonly string[] TagScopes = ["library", "album", "artist"];
 
     /// <summary>
     /// The token check, as middleware in front of <see cref="Route"/>.
@@ -95,8 +100,7 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
     [McpServerTool(Name = "library_status", ReadOnly = true)]
     [Description(
         "Whether each pass is running, how far it has got, what is pending and how its last run went: "
-        + "scan, identify, enrich, probe, analyse, attribute, and the tag write — which is reported here but "
-        + "has no tool that starts it.")]
+        + "scan, identify, enrich, probe, analyse, attribute, the tag write, and the flow that chains them.")]
     public async Task<string> LibraryStatus(CancellationToken cancellationToken = default) =>
         Json(new
         {
@@ -119,6 +123,7 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
             Tags = (await LibraryEndpoints
                 .GetTagWriteStatus(Get<TagWriteService>(), cancellationToken)
                 .ConfigureAwait(false)).Value,
+            Flow = LibraryEndpoints.GetFlowStatus(Get<LibraryFlowService>()).Value,
         });
 
     [McpServerTool(Name = "musicbrainz_health", ReadOnly = true)]
@@ -326,7 +331,7 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
 
     [McpServerTool(Name = "cancel_pass")]
     [Description("Ask a running pass to stop after the item it is on. A scan cannot be cancelled.")]
-    public string CancelPass([Description("identify, enrich, probe, analyse or attribute")] string kind) =>
+    public string CancelPass([Description("identify, enrich, probe, analyse, attribute, tags or flow")] string kind) =>
         Answer(kind switch
         {
             "identify" => (IResult)LibraryEndpoints.CancelIdentification(Get<IdentificationService>()),
@@ -334,8 +339,209 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
             "probe" => LibraryEndpoints.CancelProbe(Get<ProbeService>()),
             "analyse" => LibraryEndpoints.CancelAnalysis(Get<AnalysisService>()),
             "attribute" => LibraryEndpoints.CancelAttribution(Get<ReleaseAttributionService>()),
+            "tags" => LibraryEndpoints.CancelTagWrite(Get<TagWriteService>()),
+            "flow" => LibraryEndpoints.CancelFlow(Get<LibraryFlowService>()),
             _ => throw Unknown(kind, Cancellable),
         });
+
+    [McpServerTool(Name = "start_flow")]
+    [Description(
+        "Run the whole chain on the server: scan, identify, enrich, attribute, probe, analyse and then "
+        + "the tag write over the library, each when the one before has finished. The first step that "
+        + "cannot start or records an error ends it and is named in library_status under `flow`. "
+        + "`writeTags` false stops after analyse and leaves the files alone. With file writing off the "
+        + "tag write is a dry run. Refused where a flow is already running.")]
+    public string StartFlow(bool writeTags = true) =>
+        Answer(LibraryEndpoints.StartFlow(Get<LibraryFlowService>(), Agent, writeTags));
+
+    [McpServerTool(Name = "write_tags")]
+    [Description(
+        "Write what the catalogue knows into the files: the whole library, one album (`id` is its "
+        + "release group) or one artist. Journalled as the agent and undone per folder with "
+        + "undo_folder_edit. One runs at a time; poll library_status. Does nothing to the disk while "
+        + "file writing is off, and the answer says so.")]
+    public async Task<string> WriteTags(
+        [Description("library, album or artist")] string scope,
+        [Description("The album's or artist's id; omitted for the library")] Guid? id = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (scope != "library" && id is null) throw new McpException($"`id` is required for scope `{scope}`.");
+
+        return Answer(scope switch
+        {
+            "library" => (IResult)await CatalogueEndpoints
+                .StartAsync(Get<TagWriteService>(), TagWriteScope.Library, Agent, cancellationToken)
+                .ConfigureAwait(false),
+            "album" => await CatalogueEndpoints
+                .WriteAlbumTags(id!.Value, Get<FonotecaDbContext>(), Get<TagWriteService>(), Agent, cancellationToken)
+                .ConfigureAwait(false),
+            "artist" => await CatalogueEndpoints
+                .WriteArtistTags(id!.Value, Get<FonotecaDbContext>(), Get<TagWriteService>(), Agent, cancellationToken)
+                .ConfigureAwait(false),
+            _ => throw Unknown(scope, TagScopes),
+        });
+    }
+
+    [McpServerTool(Name = "list_playlists", ReadOnly = true)]
+    [Description("Every playlist, static and smart, with its id, name, song count and first albums.")]
+    public async Task<string> ListPlaylists(CancellationToken cancellationToken = default) =>
+        Json((await CatalogueEndpoints
+            .GetPlaylists(Get<FonotecaDbContext>(), Get<PlaylistFiles>(), cancellationToken)
+            .ConfigureAwait(false)).Value);
+
+    [McpServerTool(Name = "get_playlist", ReadOnly = true)]
+    [Description(
+        "One playlist's entries in order, with the `version` update_playlist needs. `id` is a static "
+        + "playlist's file name, or a smart playlist's guid.")]
+    public async Task<string> GetPlaylist(string id, CancellationToken cancellationToken = default) =>
+        Answer(Guid.TryParse(id, out var smart)
+            ? await CatalogueEndpoints
+                .GetSmartPlaylist(smart, Get<FonotecaDbContext>(), Get<PlaylistFiles>(), cancellationToken)
+                .ConfigureAwait(false)
+            : await CatalogueEndpoints
+                .GetPlaylist(id, Get<FonotecaDbContext>(), Get<PlaylistFiles>(), cancellationToken)
+                .ConfigureAwait(false));
+
+    [McpServerTool(Name = "create_playlist")]
+    [Description(
+        "A new static playlist as `Playlists/<name>.m3u8`, optionally with songs. `recordingIds` are "
+        + "songs (each written as its best copy), `fileIds` are files, written after the songs.")]
+    public async Task<string> CreatePlaylist(
+        string name,
+        Guid[]? recordingIds = null,
+        Guid[]? fileIds = null,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .CreatePlaylist(
+                new CreatePlaylistRequest(name, recordingIds, fileIds),
+                Get<FonotecaDbContext>(),
+                Get<PlaylistFiles>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "add_playlist_songs")]
+    [Description("Add songs (`recordingIds`) or files (`fileIds`) to the end of a static playlist.")]
+    public async Task<string> AddPlaylistSongs(
+        string id,
+        Guid[]? recordingIds = null,
+        Guid[]? fileIds = null,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .AddPlaylistSongs(
+                id,
+                new AddPlaylistSongsRequest(recordingIds, fileIds),
+                Get<FonotecaDbContext>(),
+                Get<PlaylistFiles>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "update_playlist")]
+    [Description(
+        "Rename a static playlist, and/or set the order of its entries: `entries` is the new order as "
+        + "indexes into get_playlist's entries, an index left out is removed, and it needs the `version` "
+        + "get_playlist returned. Refused when the file has changed since.")]
+    public async Task<string> UpdatePlaylist(
+        string id,
+        string? name = null,
+        int[]? entries = null,
+        string? version = null,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .UpdatePlaylist(
+                id,
+                new UpdatePlaylistRequest(name, entries, version),
+                Get<FonotecaDbContext>(),
+                Get<PlaylistFiles>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "delete_playlist", Destructive = true)]
+    [Description("Delete a playlist, static or smart (by its guid): its file moves to the trash.")]
+    public async Task<string> DeletePlaylist(string id, CancellationToken cancellationToken = default) =>
+        Answer(Guid.TryParse(id, out var smart)
+            ? await CatalogueEndpoints
+                .DeleteSmartPlaylist(
+                    smart,
+                    Get<FonotecaDbContext>(),
+                    Get<PlaylistFiles>(),
+                    Get<IOptions<FonotecaOptions>>(),
+                    Get<IClock>(),
+                    Get<ILogger<PlaylistFiles>>(),
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await CatalogueEndpoints
+                .DeletePlaylist(
+                    id,
+                    Get<FonotecaDbContext>(),
+                    Get<PlaylistFiles>(),
+                    Get<IOptions<FonotecaOptions>>(),
+                    Get<IClock>(),
+                    Get<ILogger<PlaylistFiles>>(),
+                    cancellationToken)
+                .ConfigureAwait(false));
+
+    [McpServerTool(Name = "preview_smart_playlist", ReadOnly = true)]
+    [Description(
+        "What smart-playlist rules would hold, saving nothing: the number of songs, their duration and the first 200. "
+        + SmartCriteriaShape)]
+    public async Task<string> PreviewSmartPlaylist(string criteria, CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .PreviewSmartPlaylist(
+                new SmartPreviewRequest(CriteriaOf(criteria)),
+                new ClaimsPrincipal(),
+                Get<UserManager<Account>>(),
+                Get<FonotecaDbContext>(),
+                Get<IClock>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "create_smart_playlist")]
+    [Description(
+        "A new smart playlist: rules the library keeps an m3u of, written again after every pass. It has "
+        + "no owner, so rules about hearts, plays and tags match nothing. " + SmartCriteriaShape)]
+    public async Task<string> CreateSmartPlaylist(
+        string name,
+        string criteria,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .CreateSmartPlaylist(
+                new SmartPlaylistRequest(name, CriteriaOf(criteria)),
+                new ClaimsPrincipal(),
+                Get<UserManager<Account>>(),
+                Get<FonotecaDbContext>(),
+                Get<PlaylistFiles>(),
+                Get<IClock>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "update_smart_playlist")]
+    [Description("Rename a smart playlist or change its rules; omitted keeps the old. " + SmartCriteriaShape)]
+    public async Task<string> UpdateSmartPlaylist(
+        Guid id,
+        string? name = null,
+        string? criteria = null,
+        CancellationToken cancellationToken = default) =>
+        Answer(await CatalogueEndpoints
+            .UpdateSmartPlaylist(
+                id,
+                new SmartPlaylistRequest(name, criteria is null ? null : CriteriaOf(criteria)),
+                new ClaimsPrincipal(),
+                Get<UserManager<Account>>(),
+                Get<FonotecaDbContext>(),
+                Get<PlaylistFiles>(),
+                Get<IClock>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    private const string SmartCriteriaShape =
+        "`criteria` is JSON: {\"rules\": <rule>, \"sort\": \"Added\", \"reverse\": false, \"limit\": null, \"sortField\": null}. "
+        + "A rule is a group {\"match\": \"All\"|\"Any\", \"rules\": [<rule>…]} or a condition "
+        + "{\"field\": \"Genre\", \"operator\": \"Is\", \"value\": \"Jazz\", \"to\": null}. "
+        + "Fields and operators are the names in the OpenAPI document (SmartField, SmartOperator).";
+
+    private static SmartCriteria CriteriaOf(string criteria) =>
+        SmartRules.Parse(criteria)
+        ?? throw new McpException("`criteria` is not smart-playlist rules; see the tool description for the shape.");
 
     [McpServerTool(Name = "decide_recording")]
     [Description(

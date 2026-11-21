@@ -31,14 +31,18 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 
     /// <summary>
     /// Every tool, and by omission every one that must not exist: nothing that
-    /// writes tags in bulk, moves or trashes files, or buys anything.
+    /// moves, trashes or uploads files, or buys anything.
     /// </summary>
     private static readonly string[] Tools =
     [
+        "add_playlist_songs",
         "cancel_pass",
         "component_candidates",
+        "create_playlist",
+        "create_smart_playlist",
         "decide_component",
         "decide_recording",
+        "delete_playlist",
         "edit_tags",
         "file_under_release",
         "folder_contents",
@@ -46,13 +50,16 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         "get_album",
         "get_artist",
         "get_file",
+        "get_playlist",
         "library_status",
         "list_albums",
         "list_artists",
         "list_folder",
+        "list_playlists",
         "mark_folder_unreleased",
         "musicbrainz_health",
         "open_questions",
+        "preview_smart_playlist",
         "recording_candidates",
         "release_slots",
         "reopen_folder",
@@ -60,8 +67,12 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         "set_album_genres",
         "set_folder_album",
         "set_recording_work",
+        "start_flow",
         "start_pass",
         "undo_folder_edit",
+        "update_playlist",
+        "update_smart_playlist",
+        "write_tags",
     ];
 
     private string _connectionString = string.Empty;
@@ -128,6 +139,49 @@ public sealed class McpEndpointTests(PostgresFixture postgres) : IAsyncLifetime
         var tools = await mcp.ListToolsAsync(cancellationToken: Cancel);
 
         Assert.Equal(Tools, tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>The flow chains every pass and ends completed; the playlists a tool makes are files the list finds.</summary>
+    [Fact]
+    public async Task AFlowRunsEveryStepAndAPlaylistIsMadeAndListed()
+    {
+        await using var mcp = await ConnectAsync();
+
+        var started = await mcp.CallToolAsync(
+            "start_flow",
+            new Dictionary<string, object?> { ["writeTags"] = true },
+            cancellationToken: Cancel);
+
+        Assert.True(started.IsError is not true, Text(started));
+
+        var state = string.Empty;
+
+        for (var attempt = 0; attempt < 120 && state is not ("Completed" or "Failed" or "Cancelled"); attempt++)
+        {
+            await Task.Delay(500, Cancel);
+
+            using var status = System.Text.Json.JsonDocument.Parse(Text(
+                await mcp.CallToolAsync("library_status", cancellationToken: Cancel)));
+
+            state = status.RootElement.GetProperty("flow").GetProperty("state").GetString() ?? string.Empty;
+        }
+
+        Assert.Equal("Completed", state);
+
+        var made = await mcp.CallToolAsync(
+            "create_smart_playlist",
+            new Dictionary<string, object?>
+            {
+                ["name"] = "Everything",
+                ["criteria"] = """{"rules":{"match":"All","rules":[]},"sort":"Added","reverse":false,"limit":null}""",
+            },
+            cancellationToken: Cancel);
+
+        Assert.True(made.IsError is not true, Text(made));
+
+        var listed = await mcp.CallToolAsync("list_playlists", cancellationToken: Cancel);
+
+        Assert.Contains("Everything", Text(listed));
     }
 
     /// <summary>

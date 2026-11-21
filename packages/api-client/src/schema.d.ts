@@ -384,6 +384,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which step the flow is on, which are done, and why it stopped. */
+        get: operations["GetLibraryFlowStatus"];
+        put?: never;
+        /**
+         * Run scan, identify, enrich, attribute, probe, analyse and the tag write in order.
+         * @description Returns immediately; poll GET /api/library/flow. Each step is the pass its own button starts, so the gate and every refusal are theirs. The first step that cannot start or records an error ends the flow and is named in the status. `writeTags` false leaves out the last step. With Fonoteca:AllowFileMutation off the tag write is a dry run.
+         */
+        post: operations["StartLibraryFlow"];
+        /** Stop the flow after the pass it is on; no later step starts. */
+        delete: operations["CancelLibraryFlow"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files": {
         parameters: {
             query?: never;
@@ -3056,6 +3078,16 @@ export interface components {
             trackCount: number;
             formats: null | string;
         };
+        /** @enum {unknown} */
+        LibraryFlowState: "Running" | "Completed" | "Failed" | "Cancelled";
+        LibraryFlowStatus: {
+            jobId: string;
+            state: components["schemas"]["LibraryFlowState"];
+            current: null | string;
+            steps: string[];
+            done: string[];
+            error: null | string;
+        };
         LibraryOverviewResponse: {
             /** Format: int32 */
             songs: number;
@@ -4976,6 +5008,84 @@ export interface operations {
         };
     };
     CancelLibraryTagWrite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetLibraryFlowStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryFlowStatus"];
+                };
+            };
+        };
+    };
+    StartLibraryFlow: {
+        parameters: {
+            query?: {
+                writeTags?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryFlowStatus"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    CancelLibraryFlow: {
         parameters: {
             query?: never;
             header?: never;
