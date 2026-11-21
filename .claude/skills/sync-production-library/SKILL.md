@@ -147,3 +147,10 @@ refuses a trash folder that already exists, and a link that changed.
 Re-run the inventory. Both trees must have zero differences by path and inode,
 the same folder list and the same symlinks, with no broken links
 (`find -xtype l`).
+
+## Notes from 2026-11-11
+
+- The library tag write has no MCP tool and `/api` needs a signed-in admin, so ask the user to press Write tags, then watch the log for `Tag write finished (<jobId>)`.
+- Pair renamed tracks by title when a folder's track numbers shifted, then compare decoded MD5s. Old ids are `sha1(old relative path)`; check them against `GET /api/tracks` saved before the sync.
+- Before a re-link, scan every aria.db table and column read-only for the old track and album ids (`podman unshare python3`, `?mode=ro`). Only the rows found need moving; this time `addedAt`, track and album `enrich_cache`, and one matched `match_decisions` row.
+- A match decision for a different track set (e.g. `no-candidates`) is deleted, not moved. Aria re-decides it.

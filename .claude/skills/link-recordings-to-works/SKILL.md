@@ -69,3 +69,11 @@ then `../<library-relative path>`. The credit line is `ArtistCredits` ordered by
 `Position`, each `CreditedAs ?? LatinName ?? Name` followed by its `JoinPhrase`. Write
 through a temp file and `os.replace`. Keep the file's newline and final newline.
 Copy the old file to the scratchpad first.
+
+Filling a playlist by theme (2026-11-18, Opra/Soprano/Crooner): pick files by folder and
+track-number prefix (`<folder>/<NN> - `), asserting exactly one hit each, and build all
+entries in one script. `MediaFiles.Path` is already library-relative. Quality columns are
+`Quality_IsLossless`, `Quality_BitDepth`, `Quality_SampleRateHz`, `Quality_BitrateBps`.
+`Contributions.Type = 'vocal'` is incomplete (73 of 293 Sinatra/Cole files) and wrong in
+places (an instrumental "Caravan" carries it), so it narrows a list but never proves a song
+is sung.
