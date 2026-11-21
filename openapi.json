@@ -5275,6 +5275,57 @@
           }
         }
       }
+    },
+    "/api/qobuz/albums/{albumId}/tracks/{trackId}/download": {
+      "post": {
+        "tags": [
+          "Qobuz"
+        ],
+        "summary": "Fetch one track of an album into its Artist/Album folder.",
+        "description": "Nothing is filed or tagged: the track lands under the name a whole-album download would give it, so downloading the album again afterwards finds it and files the lot.",
+        "operationId": "DownloadQobuzTrack",
+        "parameters": [
+          {
+            "name": "albumId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumDownload"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

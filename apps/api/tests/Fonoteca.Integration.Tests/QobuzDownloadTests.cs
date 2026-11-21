@@ -151,6 +151,26 @@ public sealed class QobuzDownloadTests : IDisposable
     }
 
     [Fact]
+    public async Task OneTrackLandsAloneAndAnUnknownTrackIsRefused()
+    {
+        var (downloads, _) = Build(Answer([1, 2, 3, 4]));
+        var album = new QobuzAlbum(
+            "1", "Rumours", "Fleetwood Mac", null, 2, 1, false, null, null, true, null,
+            [
+                new QobuzTrack(54, "Second Hand News", 1, 1, null, null, Streamable: true),
+                new QobuzTrack(55, "The Chain", 1, 8, null, null, Streamable: true),
+            ]);
+
+        var result = await downloads.DownloadTrackAsync(album, 55, Token);
+
+        Assert.Equal("Fleetwood Mac/Rumours/08 The Chain.flac", Assert.Single(result.Tracks).Path);
+        Assert.Single(Directory.GetFiles(_library, "*", SearchOption.AllDirectories));
+
+        await Assert.ThrowsAsync<ProviderRejectedException>(
+            () => downloads.DownloadTrackAsync(album, 999, Token));
+    }
+
+    [Fact]
     public async Task AnAlbumFetchedToReplaceAnotherLandsInTheHiddenArea()
     {
         // The folder it would otherwise land in holds the copy it replaces,

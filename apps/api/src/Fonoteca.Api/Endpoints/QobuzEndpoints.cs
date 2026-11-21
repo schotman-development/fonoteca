@@ -84,6 +84,16 @@ public static class QobuzEndpoints
                 + "Fonoteca:AllowFileReplacement.")
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/albums/{albumId}/tracks/{trackId}/download", DownloadTrack)
+            .RequireRole(AccountRoles.Admin)
+            .WithName("DownloadQobuzTrack")
+            .WithSummary("Fetch one track of an album into its Artist/Album folder.")
+            .WithDescription(
+                "Nothing is filed or tagged: the track lands under the name a whole-album "
+                + "download would give it, so downloading the album again afterwards finds it "
+                + "and files the lot.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         return app;
     }
 
@@ -919,7 +929,7 @@ public static class QobuzEndpoints
         int? Year,
         string Query);
 
-    private static async Task<Results<Ok<QobuzAlbumSummary[]>, ProblemHttpResult>> SearchAlbums(
+    internal static async Task<Results<Ok<QobuzAlbumSummary[]>, ProblemHttpResult>> SearchAlbums(
         [FromQuery] string query,
         QobuzClient qobuz,
         CancellationToken cancellationToken,
@@ -945,7 +955,7 @@ public static class QobuzEndpoints
         }
     }
 
-    private static async Task<Results<Ok<QobuzAlbumResponse>, NotFound, ProblemHttpResult>> GetAlbum(
+    internal static async Task<Results<Ok<QobuzAlbumResponse>, NotFound, ProblemHttpResult>> GetAlbum(
         string albumId,
         QobuzClient qobuz,
         CancellationToken cancellationToken)
@@ -1002,7 +1012,7 @@ public static class QobuzEndpoints
     /// </remarks>
     /// <param name="confirmed">A person has said to replace the held folder though its files cannot be shown to be this album.</param>
     /// <param name="separate">A person has said this is not the album held, to be downloaded as one of its own.</param>
-    private static Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> DownloadAlbum(
+    internal static Task<Results<Ok<AlbumUpgrade>, ProblemHttpResult>> DownloadAlbum(
         string albumId,
         bool? confirmed,
         bool? separate,
@@ -1182,6 +1192,54 @@ public static class QobuzEndpoints
             // folder are both ordinary and both used to be a 500 with a stack
             // trace — on the one endpoint whose whole job is to put bytes on
             // that disk.
+            return TypedResults.Problem(
+                cause.Message,
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "The download could not be written to disk");
+        }
+    }
+
+    internal static async Task<Results<Ok<AlbumDownload>, ProblemHttpResult>> DownloadTrack(
+        string albumId,
+        long trackId,
+        QobuzClient qobuz,
+        QobuzDownloadService downloads,
+        Acquiring acquiring,
+        CancellationToken cancellationToken)
+    {
+        if (!acquiring.Gate.TryEnter(Acquiring.Kind, out var lease))
+        {
+            return TypedResults.Problem(
+                "A library pass is running. Download the track again once it has finished. Nothing was downloaded.",
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The library is busy");
+        }
+
+        using var leased = lease;
+
+        try
+        {
+            var album = await qobuz.GetAlbumAsync(albumId, cancellationToken).ConfigureAwait(false)
+                ?? throw new ProviderRejectedException(
+                    QobuzClient.ProviderName, $"Qobuz has no album {albumId}.");
+
+            return TypedResults.Ok(await downloads
+                .DownloadTrackAsync(album, trackId, cancellationToken)
+                .ConfigureAwait(false));
+        }
+        catch (DownloadInProgressException cause)
+        {
+            return TypedResults.Problem(
+                cause.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                title: "A download is already running");
+        }
+        catch (ProviderException cause)
+        {
+            return Refused(cause);
+        }
+        catch (Exception cause) when (cause is IOException or UnauthorizedAccessException)
+        {
             return TypedResults.Problem(
                 cause.Message,
                 statusCode: StatusCodes.Status500InternalServerError,

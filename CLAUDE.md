@@ -1115,7 +1115,7 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 
 ## MCP
 
-`/mcp` is streamable HTTP, stateless. Thirty-eight tools: `library_status`,
+`/mcp` is streamable HTTP, stateless. Forty-two tools: `library_status`,
 `musicbrainz_health`, `open_questions`, `list_artists`, `get_artist`,
 `list_albums`, `get_album`, `get_file`, `list_folder`, `folder_contents`,
 `recording_candidates`, `component_candidates`, `search_releases`,
@@ -1125,7 +1125,7 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
 `edit_tags`, `set_album_genres`, `set_recording_work`, `start_flow`, `write_tags`,
 `list_playlists`, `get_playlist`, `create_playlist`, `add_playlist_songs`,
 `update_playlist`, `delete_playlist`, `preview_smart_playlist`,
-`create_smart_playlist`, `update_smart_playlist`.
+`create_smart_playlist`, `update_smart_playlist`, `search_qobuz_albums`, `get_qobuz_album`, `download_qobuz_album`, `download_qobuz_track`.
 
 - **Every tool is an existing endpoint handler, called directly** — `internal`
   rather than `private` for that reason — so validation, the gate and every
@@ -1133,7 +1133,7 @@ stdin; `accept-terms` and `set-token` exist so they fail loudly instead.
   this file keeps warning about.
 - **An agent's decision is not the owner's** (rule 4). **Adding a by-a-person
   outcome means adding its twin to `ByCaller`**, or the agent path throws.
-- **Not offered:** trash/move/upload, Qobuz. The tag write at any scope, the
+- **Not offered:** trash/move/upload. Qobuz is: search, album, download and single-track download (the owner's choice, 2026-11-21); a single track is neither filed nor tagged, the album download after it files the folder. The tag write at any scope, the
   whole flow, undo and the tag editor are, recorded as the agent's (the
   owner's choice, ADR 0021).
 - **`Fonoteca:McpToken` empty is a 404, read per request.** `Guard` is middleware

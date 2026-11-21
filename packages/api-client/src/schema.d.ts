@@ -1855,6 +1855,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/qobuz/albums/{albumId}/tracks/{trackId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch one track of an album into its Artist/Album folder.
+         * @description Nothing is filed or tagged: the track lands under the name a whole-album download would give it, so downloading the album again afterwards finds it and files the lot.
+         */
+        post: operations["DownloadQobuzTrack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8101,6 +8121,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AlbumUpgrade"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DownloadQobuzTrack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                albumId: string;
+                trackId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumDownload"];
                 };
             };
             /** @description Conflict */

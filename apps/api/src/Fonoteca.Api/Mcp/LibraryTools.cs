@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Fonoteca.Api.Acquisition;
 using Fonoteca.Api.Configuration;
 using Fonoteca.Api.Endpoints;
 using Fonoteca.Api.Library;
@@ -11,6 +12,7 @@ using Fonoteca.Domain.Abstractions;
 using Fonoteca.Domain.Catalogue;
 using Fonoteca.Domain.Events;
 using Fonoteca.Providers.MusicBrainz;
+using Fonoteca.Providers.Qobuz;
 using Fonoteca.Tagging;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Json;
@@ -37,7 +39,8 @@ namespace Fonoteca.Api.Mcp;
 /// the event log records the actor, so the catalogue can tell the two apart.
 ///
 /// <b>What is deliberately missing.</b> Trash, move and upload, which act on
-/// the disk, and Qobuz. The tag write and the flow that ends in it are here
+/// the disk. Qobuz is here too (search, album, whole-album and single-track
+/// download, the owner's choice, 2026-11-21). The tag write and the flow that ends in it are here
 /// (ADR 0021, the owner's choice), still behind
 /// <c>Fonoteca:AllowFileMutation</c>, journalled as the agent and undone with
 /// <c>undo_folder_edit</c>. <c>decide_recording</c> writes one AcoustID into
@@ -764,6 +767,65 @@ public sealed class LibraryTools(IServiceProvider services, IOptions<JsonOptions
                 Get<LibraryWorkGate>(),
                 Agent,
                 Get<IClock>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "search_qobuz_albums", ReadOnly = true)]
+    [Description("Search the Qobuz catalogue for albums. Returns Qobuz album ids for the other Qobuz tools.")]
+    public async Task<string> SearchQobuzAlbums(
+        string query,
+        int limit = 10,
+        CancellationToken cancellationToken = default) =>
+        Answer(await QobuzEndpoints
+            .SearchAlbums(query, Get<QobuzClient>(), cancellationToken, limit)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "get_qobuz_album", ReadOnly = true)]
+    [Description("One Qobuz album with its track list and each track's Qobuz id.")]
+    public async Task<string> GetQobuzAlbum(string albumId, CancellationToken cancellationToken = default) =>
+        Answer(await QobuzEndpoints.GetAlbum(albumId, Get<QobuzClient>(), cancellationToken).ConfigureAwait(false));
+
+    [McpServerTool(Name = "download_qobuz_album")]
+    [Description(
+        "Download a Qobuz album into the library, spending the owner's Qobuz subscription. Asking again for an "
+        + "album whose download was interrupted fetches only the missing tracks, then files and tags the "
+        + "whole folder. An album already held is replaced only where Qobuz's is better or has more tracks, "
+        + "and only with file replacement on. Refused while a library pass runs. Show the owner the album "
+        + "before calling this.")]
+    public async Task<string> DownloadQobuzAlbum(
+        string albumId,
+        [Description("The owner has said to replace the held folder though its files cannot be shown to be this album.")] bool confirmed = false,
+        [Description("The owner has said this is not the album held, to be downloaded as one of its own.")] bool separate = false,
+        CancellationToken cancellationToken = default) =>
+        Answer(await QobuzEndpoints
+            .DownloadAlbum(
+                albumId,
+                confirmed,
+                separate,
+                Get<QobuzClient>(),
+                Get<IOptions<QobuzOptions>>(),
+                Get<QobuzDownloadService>(),
+                Get<AlbumReplacementService>(),
+                Get<Acquiring>(),
+                cancellationToken)
+            .ConfigureAwait(false));
+
+    [McpServerTool(Name = "download_qobuz_track")]
+    [Description(
+        "Download one track of a Qobuz album into its Artist/Album folder, named as a whole-album download "
+        + "names it. Nothing is filed or tagged; download_qobuz_album afterwards finds the track and files "
+        + "the folder. A track already on disk is skipped. Track ids come from get_qobuz_album.")]
+    public async Task<string> DownloadQobuzTrack(
+        string albumId,
+        long trackId,
+        CancellationToken cancellationToken = default) =>
+        Answer(await QobuzEndpoints
+            .DownloadTrack(
+                albumId,
+                trackId,
+                Get<QobuzClient>(),
+                Get<QobuzDownloadService>(),
+                Get<Acquiring>(),
                 cancellationToken)
             .ConfigureAwait(false));
 

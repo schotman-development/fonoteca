@@ -113,10 +113,26 @@ public sealed class QobuzDownloadService(
     /// </param>
     /// <exception cref="ProviderRejectedException">Nothing is configured, or Qobuz refused.</exception>
     /// <exception cref="DownloadInProgressException">Another download is already running.</exception>
-    public async Task<AlbumDownload> DownloadAlbumAsync(
+    public Task<AlbumDownload> DownloadAlbumAsync(
         QobuzAlbum album,
         bool replacing,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        FetchAsync(album, replacing, onlyTrackId: null, cancellationToken);
+
+    /// <summary>Fetches one track of an album into its <c>Artist/Album</c> folder.</summary>
+    /// <exception cref="ProviderRejectedException">Nothing is configured, Qobuz refused, or the album has no such track.</exception>
+    /// <exception cref="DownloadInProgressException">Another download is already running.</exception>
+    public Task<AlbumDownload> DownloadTrackAsync(
+        QobuzAlbum album,
+        long trackId,
+        CancellationToken cancellationToken = default) =>
+        FetchAsync(album, replacing: false, trackId, cancellationToken);
+
+    private async Task<AlbumDownload> FetchAsync(
+        QobuzAlbum album,
+        bool replacing,
+        long? onlyTrackId,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(album);
 
@@ -144,7 +160,17 @@ public sealed class QobuzDownloadService(
             var downloaded = 0;
             var first = true;
 
-            foreach (var track in album.Tracks)
+            var wanted = onlyTrackId is { } only
+                ? album.Tracks.Where(track => track.Id == only).ToList()
+                : album.Tracks;
+
+            if (wanted.Count == 0)
+            {
+                throw new ProviderRejectedException(
+                    QobuzClient.ProviderName, $"Album {album.Id} has no track {onlyTrackId}.");
+            }
+
+            foreach (var track in wanted)
             {
                 if (!track.Streamable)
                 {
@@ -168,10 +194,14 @@ public sealed class QobuzDownloadService(
                     results.Add(result);
                     if (result.Outcome == TrackOutcome.Downloaded) downloaded++;
                 }
-                catch (ProviderUnavailableException cause)
+                catch (Exception cause) when (cause is ProviderUnavailableException or HttpIOException)
                 {
                     // One track failing does not fail the album — eleven of
                     // twelve is worth having, and the response says which.
+                    //
+                    // HttpIOException is the CDN closing the connection part-way
+                    // through a body. It is an IOException, so left alone the
+                    // endpoint reports it as a disk write failure (500).
                     //
                     // Only the transient kind. A track the subscription does not
                     // cover never reaches here at all: it comes back as an
